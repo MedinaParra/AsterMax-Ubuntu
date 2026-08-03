@@ -19,6 +19,7 @@ internal sealed partial class MechanicalForm
         _loadCount = 0;
         _supportCount = 0;
         _resultCount = 0;
+        ResetCadState();
         BuildProjectTree();
         _details.Rows.Clear();
         _worksheet.Rows.Clear();
@@ -30,7 +31,7 @@ internal sealed partial class MechanicalForm
         _viewport.SupportVisible = false;
         _viewport.ForceVisible = false;
         _viewport.Invalidate();
-        Text = "AsterMax Mechanical 0.3 beta";
+        Text = ProductTitle;
         Log("New project created.");
         SelectNode("Project");
     }
@@ -58,7 +59,7 @@ internal sealed partial class MechanicalForm
             SavedAt = DateTimeOffset.Now
         };
         File.WriteAllText(_projectPath, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
-        Text = $"AsterMax Mechanical 0.3 beta - {snapshot.ProjectName}";
+        Text = $"{ProductTitle} - {snapshot.ProjectName}";
         _statusMain.Text = "Project saved";
         Log($"Project saved: {_projectPath}");
     }
@@ -89,7 +90,7 @@ internal sealed partial class MechanicalForm
             foreach (var node in AllNodes().Where(n => n.Tag is ModelObject { Kind: ObjectKind.Result or ObjectKind.Probe }))
                 SetState(node, _solved ? ObjectState.Solved : ObjectState.NeedsAttention);
             _statusSolver.Text = string.IsNullOrWhiteSpace(_codeAsterLauncher) ? "Solver: not configured" : $"Solver: {Path.GetFileName(_codeAsterLauncher)}";
-            Text = $"AsterMax Mechanical 0.3 beta - {snapshot.ProjectName}";
+            Text = $"{ProductTitle} - {snapshot.ProjectName}";
             RefreshWorkflow();
             Log($"Project opened: {path}");
         }
@@ -107,29 +108,25 @@ internal sealed partial class MechanicalForm
         {
             using var dialog = new OpenFileDialog
             {
-                Title = "Import Geometry",
-                Filter = "CAD geometry (*.step;*.stp;*.iges;*.igs;*.brep)|*.step;*.stp;*.iges;*.igs;*.brep|All files (*.*)|*.*"
+                Title = "Import STEP Geometry",
+                Filter = "STEP geometry (*.step;*.stp)|*.step;*.stp|All files (*.*)|*.*"
             };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             file = dialog.FileName;
         }
-        _geometryPath = file;
-        var geometry = _nodes["Geometry"];
-        geometry.Nodes.Clear();
-        var part = MakeNode(Path.GetFileNameWithoutExtension(file), ObjectKind.Body, ObjectState.UpToDate, "Body");
-        ((ModelObject)part.Tag).Properties["Material"] = "Structural Steel";
-        ((ModelObject)part.Tag).Properties["Body Type"] = "Solid";
-        part.Nodes.Add(MakeNode("Solid Body 1", ObjectKind.Body, ObjectState.UpToDate, "Solid Body"));
-        geometry.Nodes.Add(part);
-        geometry.Expand();
-        SetState(geometry, ObjectState.UpToDate);
-        SetState(_nodes["Model"], ObjectState.Ready);
-        _meshGenerated = false;
-        _solved = false;
-        SetState(_nodes["Mesh"], ObjectState.NeedsAttention);
-        MarkSolutionDirty();
-        Log($"Geometry imported: {file}");
-        SelectNode("Geometry");
+
+        var extension = Path.GetExtension(file).ToLowerInvariant();
+        if (extension is ".step" or ".stp")
+        {
+            _ = ImportCadStepAsync(file);
+            return;
+        }
+
+        MessageBox.Show(this,
+            "The functional native CAD route currently accepts STEP/STP. IGES and BREP remain on the roadmap and are no longer represented by fictitious geometry.",
+            "Geometry format not implemented",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private void ImportMesh() => ImportMesh(null);
@@ -253,24 +250,27 @@ internal sealed partial class MechanicalForm
 
     private void GenerateMesh()
     {
+        if (_cadStepPath is not null && _cadEnvelope is not null && !_cadEnvelope.IsSupportedPrism)
+        {
+            _ = GenerateCadMeshAsync();
+            return;
+        }
+        if (_simpleSolid is not null)
+        {
+            GenerateSimpleMesh();
+            return;
+        }
         if (_nodes["Geometry"].Nodes.Count == 0)
         {
-            MessageBox.Show(this, "Import geometry before generating the mesh.", "AsterMax", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, "Import STEP geometry before generating the mesh.", "AsterMax", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             SelectNode("Geometry");
             return;
         }
-        _meshGenerated = true;
-        SetState(_nodes["Mesh"], ObjectState.UpToDate);
-        _viewport.MeshVisible = true;
-        _viewport.ResultVisible = false;
-        _viewport.Caption = "Mesh";
-        _viewport.SubCaption = "Generated quadratic tetrahedral mesh";
-        _viewport.Invalidate();
-        MarkSolutionDirty();
-        _statusMain.Text = "Mesh up-to-date";
-        Log("Mesh generated: 12,486 nodes; 7,214 tetrahedral elements.");
-        RefreshWorkflow();
-        SelectNode("Mesh");
+        MessageBox.Show(this,
+            "The selected tree body was created by a legacy demonstration route and has no geometric topology. Re-import the STEP with this version.",
+            "Geometry must be re-imported",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
     }
 
     private void ClearMesh()
@@ -330,6 +330,20 @@ internal sealed partial class MechanicalForm
 
     private async Task SolveAsync()
     {
+        if (_cadVolumeMesh is not null)
+        {
+            MessageBox.Show(this,
+                "The real Gmsh mesh is ready, but arbitrary-face scoping and assembly into the general 3-D solver are not implemented yet. No fictitious solution will be generated.",
+                "General STEP solver pending",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+        if (_simpleSolid is not null)
+        {
+            await SolveSimpleStaticAsync();
+            return;
+        }
         if (_busy) return;
         var issues = ValidateModel();
         if (issues.Count > 0)
@@ -705,7 +719,7 @@ internal sealed partial class MechanicalForm
     {
         using var dialog = new SaveFileDialog { Filter = "Code_Aster command (*.comm)|*.comm", FileName = "astermax_model.comm" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        var text = "DEBUT();\n\n# AsterMax Mechanical 0.3 generated input\n# The model layer will emit geometry, material, mesh, loads and supports here.\n\nFIN();\n";
+        var text = "DEBUT();\n\n# AsterMax Mechanical 0.7 generated input\n# The model layer will emit geometry, material, mesh, loads and supports here.\n\nFIN();\n";
         File.WriteAllText(dialog.FileName, text, new UTF8Encoding(false));
         Log($"Code_Aster input exported: {dialog.FileName}");
     }
