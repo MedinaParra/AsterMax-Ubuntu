@@ -6,17 +6,17 @@ namespace AsterMax.MechanicalGui;
 
 internal sealed partial class MechanicalForm : Form
 {
-    internal static readonly Color Bg = Color.FromArgb(27, 30, 35);
-    internal static readonly Color Panel = Color.FromArgb(39, 43, 50);
-    internal static readonly Color Panel2 = Color.FromArgb(49, 54, 63);
-    internal static readonly Color Field = Color.FromArgb(24, 27, 32);
-    internal static readonly Color Border = Color.FromArgb(72, 79, 90);
-    internal static readonly Color TextMain = Color.FromArgb(235, 238, 242);
-    internal static readonly Color TextMuted = Color.FromArgb(164, 174, 187);
-    internal static readonly Color Accent = Color.FromArgb(38, 143, 255);
-    internal static readonly Color Green = Color.FromArgb(74, 200, 126);
-    internal static readonly Color Yellow = Color.FromArgb(245, 187, 70);
-    internal static readonly Color Red = Color.FromArgb(235, 86, 86);
+    internal static readonly Color Bg = Color.FromArgb(242, 245, 249);
+    internal static readonly Color Panel = Color.FromArgb(255, 255, 255);
+    internal static readonly Color Panel2 = Color.FromArgb(235, 240, 246);
+    internal static readonly Color Field = Color.FromArgb(252, 253, 255);
+    internal static readonly Color Border = Color.FromArgb(188, 198, 210);
+    internal static readonly Color TextMain = Color.FromArgb(33, 42, 52);
+    internal static readonly Color TextMuted = Color.FromArgb(86, 99, 114);
+    internal static readonly Color Accent = Color.FromArgb(0, 114, 198);
+    internal static readonly Color Green = Color.FromArgb(34, 139, 85);
+    internal static readonly Color Yellow = Color.FromArgb(190, 112, 0);
+    internal static readonly Color Red = Color.FromArgb(195, 48, 48);
 
     private readonly MenuStrip _menu = new();
     private readonly TabControl _ribbon = new();
@@ -51,7 +51,7 @@ internal sealed partial class MechanicalForm : Form
 
     public MechanicalForm()
     {
-        Text = "AsterMax Mechanical 0.3.1 beta";
+        Text = "AsterMax Mechanical 0.4 beta";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1024, 680);
         Size = new Size(1520, 920);
@@ -61,15 +61,15 @@ internal sealed partial class MechanicalForm : Form
         KeyPreview = true;
         AllowDrop = true;
 
-        // Do not assign SplitterDistance before WinForms has calculated the real client size.
-        // The previous 0.3 build could throw here and close before displaying a window.
         BuildSafeLayout();
         BuildMenus();
         BuildRibbon();
         BuildProjectTree();
+        InitializePresentation();
         WireEvents();
         SelectNode("Project");
-        Log("AsterMax Mechanical 0.3.1 beta initialized.");
-        Log("Workflow loaded from the Mechanical training methodology: Preliminary Decisions -> Preprocessing -> Solution -> Postprocessing.");
+        Log("AsterMax Mechanical 0.4 beta initialized.");
+        Log("Light CAD theme, original SVG command icons and guided Mechanical workflow enabled.");
+        Log("Workflow: Preliminary Decisions -> Preprocessing -> Solution -> Postprocessing.");
     }
 }
