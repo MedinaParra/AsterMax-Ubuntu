@@ -14,6 +14,10 @@ internal static class Program
         if (args.Any(arg => string.Equals(arg, "--solver-smoke", StringComparison.OrdinalIgnoreCase)))
             return RunSolverSmokeTest();
 
+        var gmshSmokeIndex = Array.FindIndex(args, arg => string.Equals(arg, "--gmsh-smoke", StringComparison.OrdinalIgnoreCase));
+        if (gmshSmokeIndex >= 0)
+            return RunGmshSmokeTest(args.Skip(gmshSmokeIndex + 1).ToArray());
+
         _smokeTest = args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase));
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, eventArgs) => HandleFatal(eventArgs.Exception, "UI thread");
@@ -104,7 +108,7 @@ internal static class Program
                 $"Thermal energy balance error is {thermal.EnergyBalanceError:E3}.");
 
             Console.WriteLine(
-                $"AsterMax 0.6 smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
+                $"AsterMax 0.7 tutorial smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
                 $"Umax={result.MaxDisplacementMm:G8} mm, VM={result.MaxVonMisesMpa:G8} MPa | " +
                 $"modal f1={modal[0].FrequencyHz:G8} Hz ({modal[0].DifferencePercent:G4}% error) | " +
                 $"thermal Q={thermal.HeatFlowW:G8} W, balance={thermal.EnergyBalanceError:E3}");
@@ -114,6 +118,34 @@ internal static class Program
         {
             Console.Error.WriteLine(exception);
             return 2;
+        }
+    }
+
+    private static int RunGmshSmokeTest(string[] args)
+    {
+        try
+        {
+            Require(args.Length >= 2, "Usage: --gmsh-smoke <gmsh.exe> <complex.step>");
+            var gmsh = Path.GetFullPath(args[0]);
+            var step = Path.GetFullPath(args[1]);
+            Require(File.Exists(gmsh), "Gmsh executable was not found.");
+            Require(File.Exists(step), "Complex STEP smoke geometry was not found.");
+
+            var envelope = SimpleStepReader.ReadPrismaticSolid(step);
+            Require(!envelope.IsSupportedPrism, "The Gmsh smoke geometry must exercise curved or holed topology.");
+            var longest = Math.Max(envelope.LengthX, Math.Max(envelope.LengthY, envelope.LengthZ));
+            var target = Math.Max(longest / 10.0, 0.1);
+            var surface = GmshCliMesher.GenerateAsync(gmsh, step, target, 2, CancellationToken.None).GetAwaiter().GetResult();
+            var volume = GmshCliMesher.GenerateAsync(gmsh, step, target, 3, CancellationToken.None).GetAwaiter().GetResult();
+            Require(surface.Nodes.Count > 0 && surface.SurfaceTriangles.Count > 0, "Surface preview mesh is empty.");
+            Require(volume.Nodes.Count > 0 && volume.SurfaceTriangles.Count > 0 && volume.Tetrahedra.Count > 0, "Volume tetrahedral mesh is empty.");
+            Console.WriteLine($"Gmsh STEP smoke passed | surface: {surface.Nodes.Count} nodes, {surface.SurfaceTriangles.Count} triangles | volume: {volume.Nodes.Count} nodes, {volume.Tetrahedra.Count} TET4");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            return 3;
         }
     }
 
@@ -130,7 +162,7 @@ internal static class Program
             Directory.CreateDirectory(CrashDirectory);
             crashFile = Path.Combine(CrashDirectory, $"astermax-crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(crashFile,
-                $"AsterMax Mechanical 0.6 beta{Environment.NewLine}" +
+                $"AsterMax Mechanical 0.7 beta{Environment.NewLine}" +
                 $"Stage: {stage}{Environment.NewLine}" +
                 $"Windows: {Environment.OSVersion}{Environment.NewLine}" +
                 $"64-bit process: {Environment.Is64BitProcess}{Environment.NewLine}" +
