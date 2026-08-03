@@ -96,8 +96,8 @@ CI executes all of the following before publishing:
 - modal first frequency: 407.69041 Hz with approximately 1.31e-5 percent analytical difference;
 - thermal heat flow: 14.4 W with approximately 2.84e-14 energy-balance error;
 - complex OpenCASCADE STEP containing two cylindrical through-holes;
-- real surface preview generation;
-- real unstructured volume TET4 generation;
+- complex surface preview: 430 nodes and 864 boundary triangles;
+- complex volume mesh: 500 nodes and 1,620 TET4 elements;
 - self-contained Windows publication;
 - automated GUI startup.
 
