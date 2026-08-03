@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>AsterMax-Mechanical</AssemblyName>
+    <RootNamespace>AsterMax.MechanicalGui</RootNamespace>
+    <Version>0.3.0-beta</Version>
+    <Authors>Exequiel Medina</Authors>
+    <Company>AsterMax</Company>
+    <Product>AsterMax Mechanical</Product>
+    <Description>Mechanical-style finite-element workflow GUI for AsterMax and Code_Aster.</Description>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+</Project>
