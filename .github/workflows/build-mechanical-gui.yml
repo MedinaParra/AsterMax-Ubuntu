@@ -1,0 +1,61 @@
+name: Build AsterMax Mechanical GUI
+
+on:
+  push:
+    branches:
+      - agent/mechanical-gui-pdf-workflow
+  pull_request:
+    paths:
+      - "windows/AsterMax.MechanicalGui/**"
+      - ".github/workflows/build-mechanical-gui.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+
+      - name: Build validation
+        run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Publish Windows executable
+        run: >-
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/win-x64
+
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.3.0-beta.exe
+          Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.3.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.3.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.3.0-beta.exe.sha256 -Encoding ascii
+          Get-ChildItem artifact | Format-Table Name, Length
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-0.3.0-beta-win-x64
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 30
