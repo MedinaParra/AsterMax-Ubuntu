@@ -7,11 +7,11 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AsterMax-Mechanical</AssemblyName>
     <RootNamespace>AsterMax.MechanicalGui</RootNamespace>
-    <Version>0.6.0-beta</Version>
+    <Version>0.7.0-beta</Version>
     <Authors>Exequiel Medina</Authors>
     <Company>AsterMax</Company>
     <Product>AsterMax Mechanical</Product>
-    <Description>Mechanical-style finite-element workflow with functional static, convergence, parametric, modal and thermal tutorials.</Description>
+    <Description>Mechanical-style finite-element workflow with real STEP preview, Gmsh/OpenCASCADE tetrahedral meshing and verified tutorial solvers.</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
