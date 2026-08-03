@@ -77,14 +77,14 @@ jobs:
           BooleanDifference(10) = { Volume{1}; Delete; }{ Volume{2,3}; Delete; };
           Save "complex-flange.step";
           '@ | Set-Content smoke-cad/complex.geo -Encoding ascii
-          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
-          Push-Location smoke-cad
-          & $gmsh complex.geo -0 -nopopup -v 2
-          $code = $LASTEXITCODE
-          Pop-Location
-          if ($code -ne 0 -or -not (Test-Path smoke-cad/complex-flange.step)) {
-            throw "Unable to generate the complex STEP smoke geometry. Gmsh exit code: $code"
+          $gmsh = (Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe).Path
+          $working = (Resolve-Path smoke-cad).Path
+          $process = Start-Process -FilePath $gmsh -ArgumentList @("complex.geo", "-0", "-nopopup", "-v", "3") -WorkingDirectory $working -PassThru -Wait
+          $step = Join-Path $working "complex-flange.step"
+          if (-not (Test-Path $step)) {
+            throw "Unable to generate the complex STEP smoke geometry. Gmsh exit code: $($process.ExitCode)"
           }
+          Write-Host "Complex STEP generated: $step; Gmsh exit code $($process.ExitCode)"
 
       - name: Gmsh STEP preview and TET4 smoke test
         shell: pwsh
