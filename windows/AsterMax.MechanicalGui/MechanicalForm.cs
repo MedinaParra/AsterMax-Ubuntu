@@ -51,9 +51,9 @@ internal sealed partial class MechanicalForm : Form
 
     public MechanicalForm()
     {
-        Text = "AsterMax Mechanical 0.3 beta";
+        Text = "AsterMax Mechanical 0.3.1 beta";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1180, 760);
+        MinimumSize = new Size(1024, 680);
         Size = new Size(1520, 920);
         BackColor = Bg;
         ForeColor = TextMain;
@@ -61,13 +61,15 @@ internal sealed partial class MechanicalForm : Form
         KeyPreview = true;
         AllowDrop = true;
 
-        BuildLayout();
+        // Do not assign SplitterDistance before WinForms has calculated the real client size.
+        // The previous 0.3 build could throw here and close before displaying a window.
+        BuildSafeLayout();
         BuildMenus();
         BuildRibbon();
         BuildProjectTree();
         WireEvents();
         SelectNode("Project");
-        Log("AsterMax Mechanical 0.3 beta initialized.");
+        Log("AsterMax Mechanical 0.3.1 beta initialized.");
         Log("Workflow loaded from the Mechanical training methodology: Preliminary Decisions -> Preprocessing -> Solution -> Postprocessing.");
     }
 }
