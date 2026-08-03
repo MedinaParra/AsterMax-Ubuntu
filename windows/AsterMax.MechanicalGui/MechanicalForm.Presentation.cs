@@ -16,12 +16,7 @@ internal sealed partial class MechanicalForm
         ConfigureTreeIcons();
         ApplyTheme(false);
         RefreshWorkflowChecklist(true);
-
-        _presentationTimer.Tick += (_, _) =>
-        {
-            AssignTreeIcons();
-            RefreshWorkflowChecklist();
-        };
+        _presentationTimer.Tick += (_, _) => { AssignTreeIcons(); RefreshWorkflowChecklist(); };
         _presentationTimer.Start();
         FormClosed += (_, _) => _presentationTimer.Dispose();
     }
@@ -29,21 +24,10 @@ internal sealed partial class MechanicalForm
     private void BuildWorkflowRibbon()
     {
         var page = RibbonPage("Workflow",
-            Group("Guided Workflow",
-                RButton("Next Required Step", () => _ = RunNextWorkflowStepAsync(), true),
-                RButton("Validate Model", ShowWorkflowChecklist)),
-            Group("Preprocessing",
-                RButton("Import Geometry", ImportGeometry),
-                RButton("Assign Material", AssignMaterial),
-                RButton("Generate Mesh", GenerateMesh)),
-            Group("Environment",
-                RButton("Fixed Support", () => AddSupport("Fixed Support")),
-                RButton("Force", () => AddLoad("Force")),
-                RButton("Analysis Settings", () => SelectNode("Analysis Settings"))),
-            Group("Solution",
-                RButton("Equivalent Stress", () => AddResult("Equivalent Stress")),
-                RButton("Solve", () => _ = SolveAsync(), true),
-                RButton("Evaluate All", EvaluateResults)));
+            Group("Guided Workflow", RButton("Next Required Step", () => _ = RunNextWorkflowStepAsync(), true), RButton("Validate Model", ShowWorkflowChecklist)),
+            Group("Preprocessing", RButton("Import Geometry", ImportGeometry), RButton("Assign Material", AssignMaterial), RButton("Generate Mesh", GenerateMesh)),
+            Group("Environment", RButton("Fixed Support", () => AddSupport("Fixed Support")), RButton("Force", () => AddLoad("Force")), RButton("Analysis Settings", () => SelectNode("Analysis Settings"))),
+            Group("Solution", RButton("Equivalent Stress", () => AddResult("Equivalent Stress")), RButton("Solve", () => _ = SolveAsync(), true), RButton("Evaluate All", EvaluateResults)));
         _ribbon.TabPages.Insert(0, page);
         _ribbon.SelectedTab = page;
     }
@@ -58,7 +42,7 @@ internal sealed partial class MechanicalForm
         _workflowChecklist.Columns.Add(new DataGridViewTextBoxColumn { Name = "Object", FillWeight = 30 });
         _workflowChecklist.Columns.Add(new DataGridViewTextBoxColumn { Name = "Status", FillWeight = 18 });
         _workflowChecklist.Columns.Add(new DataGridViewTextBoxColumn { Name = "NextAction", HeaderText = "Next action", FillWeight = 30 });
-        _workflowChecklist.CellDoubleClick += (_, eventArgs) => ExecuteChecklistRow(eventArgs.RowIndex);
+        _workflowChecklist.CellDoubleClick += (_, e) => ExecuteChecklistRow(e.RowIndex);
         tab.Controls.Add(_workflowChecklist);
         _lowerTabs.TabPages.Insert(1, tab);
     }
@@ -67,7 +51,6 @@ internal sealed partial class MechanicalForm
     {
         var view = _menu.Items.OfType<ToolStripMenuItem>().FirstOrDefault(item => item.Text == "View");
         if (view is null) return;
-
         view.DropDownItems.Add(new ToolStripSeparator());
         var appearance = new ToolStripMenuItem("Appearance");
         var light = new ToolStripMenuItem("Light CAD theme") { Checked = true, CheckOnClick = true };
@@ -93,11 +76,7 @@ internal sealed partial class MechanicalForm
     {
         _treeIcons.Images.Clear();
         var palette = CurrentPalette;
-        foreach (var icon in new[]
-                 {
-                     "project", "geometry", "material", "settings", "contact", "selection", "mesh", "mesh-control",
-                     "analysis", "support", "load", "solution", "result", "probe", "chart", "warning", "check"
-                 })
+        foreach (var icon in new[] { "project", "geometry", "material", "settings", "contact", "selection", "mesh", "mesh-control", "analysis", "support", "load", "solution", "result", "probe", "chart", "warning", "check" })
             _treeIcons.Images.Add(icon, SvgIconRenderer.Render(icon, 18, palette.Text, palette.Accent));
         AssignTreeIcons();
     }
@@ -107,31 +86,28 @@ internal sealed partial class MechanicalForm
         foreach (var node in AllNodes())
         {
             if (node.Tag is not ModelObject model) continue;
-            var key = IconForKind(model.Kind);
-            node.ImageKey = key;
-            node.SelectedImageKey = key;
+            var key = model.Kind switch
+            {
+                ObjectKind.Project or ObjectKind.Model => "project",
+                ObjectKind.Geometry or ObjectKind.Body => "geometry",
+                ObjectKind.Materials or ObjectKind.Material => "material",
+                ObjectKind.CoordinateSystems or ObjectKind.CoordinateSystem or ObjectKind.AnalysisSettings => "settings",
+                ObjectKind.Connections or ObjectKind.Contact => "contact",
+                ObjectKind.NamedSelections or ObjectKind.NamedSelection => "selection",
+                ObjectKind.Mesh => "mesh",
+                ObjectKind.MeshControl => "mesh-control",
+                ObjectKind.Analysis => "analysis",
+                ObjectKind.Support => "support",
+                ObjectKind.Load => "load",
+                ObjectKind.Solution or ObjectKind.SolutionInformation => "solution",
+                ObjectKind.Result => "result",
+                ObjectKind.Probe => "probe",
+                ObjectKind.Chart => "chart",
+                _ => "project"
+            };
+            node.ImageKey = node.SelectedImageKey = key;
         }
     }
-
-    private static string IconForKind(ObjectKind kind) => kind switch
-    {
-        ObjectKind.Project or ObjectKind.Model => "project",
-        ObjectKind.Geometry or ObjectKind.Body => "geometry",
-        ObjectKind.Materials or ObjectKind.Material => "material",
-        ObjectKind.CoordinateSystems or ObjectKind.CoordinateSystem or ObjectKind.AnalysisSettings => "settings",
-        ObjectKind.Connections or ObjectKind.Contact => "contact",
-        ObjectKind.NamedSelections or ObjectKind.NamedSelection => "selection",
-        ObjectKind.Mesh => "mesh",
-        ObjectKind.MeshControl => "mesh-control",
-        ObjectKind.Analysis => "analysis",
-        ObjectKind.Support => "support",
-        ObjectKind.Load => "load",
-        ObjectKind.Solution or ObjectKind.SolutionInformation => "solution",
-        ObjectKind.Result => "result",
-        ObjectKind.Probe => "probe",
-        ObjectKind.Chart => "chart",
-        _ => "project"
-    };
 
     private void ApplyCommandIcons()
     {
@@ -146,17 +122,13 @@ internal sealed partial class MechanicalForm
     {
         foreach (Control control in parent.Controls)
         {
-            if (control is Button button)
+            if (control is Button button && ResolveCommandIcon(button.Text) is { } icon)
             {
-                var icon = ResolveCommandIcon(button.Text);
-                if (icon is not null)
-                {
-                    button.Image?.Dispose();
-                    button.Image = SvgIconRenderer.Render(icon, button.Height >= 50 ? 25 : 18, palette.Text, palette.Accent);
-                    button.TextImageRelation = button.Height >= 50 ? TextImageRelation.ImageAboveText : TextImageRelation.ImageBeforeText;
-                    button.ImageAlign = ContentAlignment.MiddleCenter;
-                    button.Padding = button.Height >= 50 ? new Padding(2, 3, 2, 1) : new Padding(4, 0, 4, 0);
-                }
+                button.Image?.Dispose();
+                button.Image = SvgIconRenderer.Render(icon, button.Height >= 50 ? 25 : 18, palette.Text, palette.Accent);
+                button.TextImageRelation = button.Height >= 50 ? TextImageRelation.ImageAboveText : TextImageRelation.ImageBeforeText;
+                button.ImageAlign = ContentAlignment.MiddleCenter;
+                button.Padding = button.Height >= 50 ? new Padding(2, 3, 2, 1) : new Padding(4, 0, 4, 0);
             }
             if (control.HasChildren) ApplyButtonIcons(control, palette);
         }
@@ -166,8 +138,7 @@ internal sealed partial class MechanicalForm
     {
         foreach (ToolStripItem item in items)
         {
-            var icon = ResolveCommandIcon(item.Text);
-            if (icon is not null)
+            if (ResolveCommandIcon(item.Text) is { } icon)
             {
                 item.Image?.Dispose();
                 item.Image = SvgIconRenderer.Render(icon, size, palette.Text, palette.Accent);
@@ -177,10 +148,10 @@ internal sealed partial class MechanicalForm
         }
     }
 
-    private static string? ResolveCommandIcon(string? rawText)
+    private static string? ResolveCommandIcon(string? value)
     {
-        if (string.IsNullOrWhiteSpace(rawText)) return null;
-        var text = rawText.Replace("&", string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Replace("&", string.Empty).Trim().ToLowerInvariant();
         if (text.Contains("new")) return "new";
         if (text.Contains("open")) return "open";
         if (text.Contains("save")) return "save";
@@ -215,10 +186,10 @@ internal sealed partial class MechanicalForm
         _menu.Renderer = new ThemeRenderer(palette);
         _graphicsTools.Renderer = new ThemeRenderer(palette);
         _viewport.DarkTheme = dark;
-        _viewport.Invalidate();
         SvgIconRenderer.ClearCache();
         ApplyCommandIcons();
         ResumeLayout(true);
+        _viewport.Invalidate();
         Invalidate(true);
         RefreshWorkflowChecklist(true);
         _statusMain.Text = dark ? "Dark theme enabled" : "Light CAD theme enabled";
@@ -228,71 +199,31 @@ internal sealed partial class MechanicalForm
     {
         switch (control)
         {
-            case MechanicalViewport:
-                break;
-            case Form:
-                control.BackColor = palette.Background;
-                control.ForeColor = palette.Text;
-                break;
-            case SplitContainer split:
-                split.BackColor = palette.Border;
-                split.Panel1.BackColor = palette.Panel;
-                split.Panel2.BackColor = palette.Panel;
-                break;
-            case MenuStrip menu:
-                menu.BackColor = palette.Chrome;
-                menu.ForeColor = palette.Text;
-                break;
-            case StatusStrip status:
-                status.BackColor = palette.Chrome;
-                status.ForeColor = palette.Muted;
-                break;
-            case ToolStrip strip:
-                strip.BackColor = palette.SecondaryPanel;
-                strip.ForeColor = palette.Text;
-                break;
-            case TabPage:
-                control.BackColor = palette.Panel;
-                control.ForeColor = palette.Text;
-                break;
-            case TreeView tree:
-                tree.BackColor = palette.Panel;
-                tree.ForeColor = palette.Text;
-                tree.LineColor = palette.Border;
-                break;
+            case MechanicalViewport: break;
+            case Form: control.BackColor = palette.Background; control.ForeColor = palette.Text; break;
+            case SplitContainer split: split.BackColor = palette.Border; split.Panel1.BackColor = palette.Panel; split.Panel2.BackColor = palette.Panel; break;
+            case MenuStrip menu: menu.BackColor = palette.Chrome; menu.ForeColor = palette.Text; break;
+            case StatusStrip status: status.BackColor = palette.Chrome; status.ForeColor = palette.Muted; break;
+            case ToolStrip strip: strip.BackColor = palette.SecondaryPanel; strip.ForeColor = palette.Text; break;
+            case TabPage: control.BackColor = palette.Panel; control.ForeColor = palette.Text; break;
+            case TreeView tree: tree.BackColor = palette.Panel; tree.ForeColor = palette.Text; tree.LineColor = palette.Border; break;
             case DataGridView grid:
-                grid.BackgroundColor = palette.Field;
-                grid.GridColor = palette.Border;
-                grid.DefaultCellStyle.BackColor = palette.Field;
-                grid.DefaultCellStyle.ForeColor = palette.Text;
-                grid.DefaultCellStyle.SelectionBackColor = palette.Selection;
-                grid.DefaultCellStyle.SelectionForeColor = Color.Black;
-                grid.ColumnHeadersDefaultCellStyle.BackColor = palette.SecondaryPanel;
-                grid.ColumnHeadersDefaultCellStyle.ForeColor = palette.Text;
+                grid.BackgroundColor = palette.Field; grid.GridColor = palette.Border;
+                grid.DefaultCellStyle.BackColor = palette.Field; grid.DefaultCellStyle.ForeColor = palette.Text;
+                grid.DefaultCellStyle.SelectionBackColor = palette.Selection; grid.DefaultCellStyle.SelectionForeColor = Color.Black;
+                grid.ColumnHeadersDefaultCellStyle.BackColor = palette.SecondaryPanel; grid.ColumnHeadersDefaultCellStyle.ForeColor = palette.Text;
                 break;
-            case TextBoxBase textBox:
-                textBox.BackColor = palette.Field;
-                textBox.ForeColor = palette.Text;
-                break;
+            case TextBoxBase textBox: textBox.BackColor = palette.Field; textBox.ForeColor = palette.Text; break;
             case Button button:
-                var primary = button.Text.Contains("Solve", StringComparison.OrdinalIgnoreCase) ||
-                              button.Text.Contains("Next Required", StringComparison.OrdinalIgnoreCase) ||
-                              button.Text.Contains("Evaluate All", StringComparison.OrdinalIgnoreCase);
-                button.BackColor = primary ? palette.Accent : palette.Button;
-                button.ForeColor = primary ? Color.White : palette.Text;
+                var primary = button.Text.Contains("Solve", StringComparison.OrdinalIgnoreCase) || button.Text.Contains("Next Required", StringComparison.OrdinalIgnoreCase) || button.Text.Contains("Evaluate All", StringComparison.OrdinalIgnoreCase);
+                button.BackColor = primary ? palette.Accent : palette.Button; button.ForeColor = primary ? Color.White : palette.Text;
                 button.FlatAppearance.BorderColor = primary ? palette.AccentBorder : palette.Border;
                 break;
-            case Label label:
-                label.ForeColor = label.Font.Bold ? palette.Text : palette.Muted;
-                break;
-            case System.Windows.Forms.Panel:
-            case FlowLayoutPanel:
-            case TableLayoutPanel:
-                control.BackColor = palette.Panel;
-                control.ForeColor = palette.Text;
-                break;
+            case Label label: label.ForeColor = label.Font.Bold ? palette.Text : palette.Muted; break;
+            case FlowLayoutPanel: control.BackColor = palette.Panel; control.ForeColor = palette.Text; break;
+            case TableLayoutPanel: control.BackColor = palette.Panel; control.ForeColor = palette.Text; break;
+            case System.Windows.Forms.Panel: control.BackColor = palette.Panel; control.ForeColor = palette.Text; break;
         }
-
         foreach (Control child in control.Controls) ApplyThemeRecursive(child, palette);
     }
 
@@ -313,7 +244,7 @@ internal sealed partial class MechanicalForm
         foreach (Control child in parent.Controls)
         {
             yield return child;
-            foreach (var descendant in Descendants(child)) yield return descendant;
+            foreach (var nested in Descendants(child)) yield return nested;
         }
     }
 
@@ -357,7 +288,6 @@ internal sealed partial class MechanicalForm
         var supportReady = AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Support, State: not ObjectState.Suppressed });
         var loadReady = AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Load, State: not ObjectState.Suppressed });
         var resultReady = AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Result });
-
         return new[]
         {
             Row("1. Decisions", "Analysis system and units", true, "Ready", "Review Project", "Project"),
@@ -376,8 +306,7 @@ internal sealed partial class MechanicalForm
     private void ExecuteChecklistRow(int rowIndex)
     {
         if (rowIndex < 0 || rowIndex >= _workflowChecklist.Rows.Count) return;
-        var key = _workflowChecklist.Rows[rowIndex].Tag as string;
-        switch (key)
+        switch (_workflowChecklist.Rows[rowIndex].Tag as string)
         {
             case "Geometry": ImportGeometry(); break;
             case "Materials": AssignMaterial(); break;
@@ -386,7 +315,7 @@ internal sealed partial class MechanicalForm
             case "load": AddLoad("Force"); break;
             case "result": AddResult("Equivalent Stress"); break;
             case "Solution": _ = SolveAsync(); break;
-            case not null: SelectNode(key); break;
+            case string key: SelectNode(key); break;
         }
     }
 
@@ -400,11 +329,7 @@ internal sealed partial class MechanicalForm
 
     private sealed class ThemeRenderer(ThemePalette palette) : ToolStripProfessionalRenderer(new ThemeColorTable(palette))
     {
-        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs eventArgs)
-        {
-            eventArgs.TextColor = eventArgs.Item.Enabled ? palette.Text : palette.Muted;
-            base.OnRenderItemText(eventArgs);
-        }
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) { e.TextColor = e.Item.Enabled ? palette.Text : palette.Muted; base.OnRenderItemText(e); }
     }
 
     private sealed class ThemeColorTable(ThemePalette palette) : ProfessionalColorTable
