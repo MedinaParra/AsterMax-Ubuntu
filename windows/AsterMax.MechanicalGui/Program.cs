@@ -67,15 +67,47 @@ internal static class Program
                 LoadFace = SimpleFace.XMax,
                 ForceN = new Vec3(0, 0, -1000)
             };
+
             var mesh = StructuredTetMesher.Generate(solid, setup.ElementSizeMm);
             var result = Tet4LinearStaticSolver.Solve(solid, mesh, material, setup);
-            if (!double.IsFinite(result.MaxDisplacementMm) || result.MaxDisplacementMm <= 0)
-                throw new InvalidOperationException("Solver smoke test returned an invalid displacement.");
-            if (!double.IsFinite(result.MaxVonMisesMpa) || result.MaxVonMisesMpa <= 0)
-                throw new InvalidOperationException("Solver smoke test returned an invalid equivalent stress.");
-            if (!double.IsFinite(result.EquilibriumError) || result.EquilibriumError > 1e-7)
-                throw new InvalidOperationException($"Solver smoke test equilibrium error is {result.EquilibriumError:E3}.");
-            Console.WriteLine($"TET4 smoke passed: nodes={mesh.Nodes.Count}, elements={mesh.Elements.Count}, Umax={result.MaxDisplacementMm:G8} mm, VM={result.MaxVonMisesMpa:G8} MPa, equilibrium={result.EquilibriumError:E3}");
+            Require(double.IsFinite(result.MaxDisplacementMm) && result.MaxDisplacementMm > 0, "Static displacement is invalid.");
+            Require(double.IsFinite(result.MaxVonMisesMpa) && result.MaxVonMisesMpa > 0, "Static equivalent stress is invalid.");
+            Require(double.IsFinite(result.EquilibriumError) && result.EquilibriumError <= 1e-7,
+                $"Static equilibrium error is {result.EquilibriumError:E3}.");
+
+            var convergence = MeshConvergenceStudy.Run(solid, material, setup, new[] { 100.0, 50.0, 25.0 });
+            Require(convergence.Count == 3, "Convergence study did not return three meshes.");
+            Require(convergence.All(point => point.EquilibriumError <= 1e-7), "A convergence solution failed equilibrium.");
+
+            var modal = EulerBernoulliModalSolver.Solve(solid, material, new BeamModalSetup
+            {
+                DensityKgM3 = 7850,
+                BeamElements = 16,
+                RequestedModes = 4
+            });
+            Require(modal.Count == 4, "Modal solver did not return four modes.");
+            Require(modal[0].FrequencyHz > 0 && modal[0].DifferencePercent <= 2.0,
+                $"First modal frequency failed the analytical gate: {modal[0].FrequencyHz:G8} Hz, error {modal[0].DifferencePercent:G5}%.");
+
+            var thermal = Tet4SteadyThermalSolver.Solve(solid, mesh, new ThermalSetup
+            {
+                ConductivityWmK = 45,
+                HotFace = SimpleFace.XMin,
+                ColdFace = SimpleFace.XMax,
+                HotTemperatureC = 100,
+                ColdTemperatureC = 20
+            });
+            Require(double.IsFinite(thermal.HeatFlowW) && thermal.HeatFlowW > 0, "Thermal heat flow is invalid.");
+            Require(thermal.HeatFlowDifferencePercent <= 1e-6,
+                $"Thermal analytical difference is {thermal.HeatFlowDifferencePercent:G5}%.");
+            Require(thermal.EnergyBalanceError <= 1e-8,
+                $"Thermal energy balance error is {thermal.EnergyBalanceError:E3}.");
+
+            Console.WriteLine(
+                $"AsterMax 0.6 smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
+                $"Umax={result.MaxDisplacementMm:G8} mm, VM={result.MaxVonMisesMpa:G8} MPa | " +
+                $"modal f1={modal[0].FrequencyHz:G8} Hz ({modal[0].DifferencePercent:G4}% error) | " +
+                $"thermal Q={thermal.HeatFlowW:G8} W, balance={thermal.EnergyBalanceError:E3}");
             return 0;
         }
         catch (Exception exception)
@@ -83,6 +115,11 @@ internal static class Program
             Console.Error.WriteLine(exception);
             return 2;
         }
+    }
+
+    private static void Require(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
     }
 
     private static void HandleFatal(Exception exception, string stage)
@@ -93,7 +130,7 @@ internal static class Program
             Directory.CreateDirectory(CrashDirectory);
             crashFile = Path.Combine(CrashDirectory, $"astermax-crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(crashFile,
-                $"AsterMax Mechanical 0.5 beta{Environment.NewLine}" +
+                $"AsterMax Mechanical 0.6 beta{Environment.NewLine}" +
                 $"Stage: {stage}{Environment.NewLine}" +
                 $"Windows: {Environment.OSVersion}{Environment.NewLine}" +
                 $"64-bit process: {Environment.Is64BitProcess}{Environment.NewLine}" +
