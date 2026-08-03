@@ -32,13 +32,13 @@ jobs:
       - name: Build validation
         run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
 
-      - name: Real TET4 solver smoke test
+      - name: Engineering tutorial solver smoke tests
         shell: pwsh
         run: |
           $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
           $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
-          if ($process.ExitCode -ne 0) { throw "AsterMax TET4 solver smoke test failed with code $($process.ExitCode)." }
-          Write-Host "AsterMax real TET4 solver smoke test passed."
+          if ($process.ExitCode -ne 0) { throw "AsterMax tutorial solver smoke tests failed with code $($process.ExitCode)." }
+          Write-Host "AsterMax static, convergence, modal and thermal smoke tests passed."
 
       - name: Publish Windows executable
         run: >-
@@ -75,17 +75,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.5.0-beta.exe
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.6.0-beta.exe
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
           Copy-Item windows/AsterMax.MechanicalGui/Icons/AsterMaxIconSet.svg artifact/AsterMaxIconSet.svg
-          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.5.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-0.5.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.5.0-beta.exe.sha256 -Encoding ascii
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.6.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.6.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.6.0-beta.exe.sha256 -Encoding ascii
           Get-ChildItem artifact | Format-Table Name, Length
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-0.5.0-beta-win-x64
+          name: AsterMax-Mechanical-0.6.0-beta-win-x64
           path: artifact/*
           if-no-files-found: error
           retention-days: 30
