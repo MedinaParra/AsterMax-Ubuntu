@@ -17,7 +17,7 @@ internal sealed class ModelObject
 internal sealed class ProjectSnapshot
 {
     public string Product { get; set; } = "AsterMax Mechanical";
-    public string Version { get; set; } = "0.3.0-beta";
+    public string Version { get; set; } = "0.4.0-beta";
     public string ProjectName { get; set; } = "Untitled";
     public string Units { get; set; } = "Metric (mm, kg, N, s)";
     public string? GeometryPath { get; set; }
