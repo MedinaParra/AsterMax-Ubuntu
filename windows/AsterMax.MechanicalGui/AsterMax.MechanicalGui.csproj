@@ -19,6 +19,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="SimpleStaticModel.cs" />
     <EmbeddedResource Include="Icons\AsterMaxIconSet.svg" />
   </ItemGroup>
 </Project>
