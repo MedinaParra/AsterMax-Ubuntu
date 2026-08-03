@@ -6,7 +6,7 @@ Portable Windows x64 GUI implementing the first usable Mechanical-style static s
 
 The **Static Tutorial** tab opens by default and implements this restricted sequence:
 
-1. Import a STEP/STP file representing one rectangular or prismatic solid, or create the included 200 x 40 x 20 mm cantilever example.
+1. Import a STEP/STP file representing one rectangular or prismatic solid, or use **Example STEP** to create a 200 x 40 x 20 mm cantilever file.
 2. Define an isotropic elastic material: Young's modulus, Poisson ratio and reference yield strength.
 3. Select the fixed face and loaded face.
 4. Define the total force components.
