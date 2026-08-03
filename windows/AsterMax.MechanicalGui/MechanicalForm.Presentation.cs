@@ -185,7 +185,7 @@ internal sealed partial class MechanicalForm
         ApplyThemeRecursive(this, palette);
         _menu.Renderer = new ThemeRenderer(palette);
         _graphicsTools.Renderer = new ThemeRenderer(palette);
-        _viewport.DarkTheme = dark;
+        _viewport.SetDarkTheme(dark);
         SvgIconRenderer.ClearCache();
         ApplyCommandIcons();
         ResumeLayout(true);
@@ -229,7 +229,7 @@ internal sealed partial class MechanicalForm
 
     private void ApplyInitialSplitterLayout()
     {
-        var splitters = Descendants(this).OfType<SplitContainer>().ToArray();
+        var splitters = PresentationDescendants(this).OfType<SplitContainer>().ToArray();
         if (splitters.Length < 3) return;
         BeginInvoke(() =>
         {
@@ -239,12 +239,12 @@ internal sealed partial class MechanicalForm
         });
     }
 
-    private static IEnumerable<Control> Descendants(Control parent)
+    private static IEnumerable<Control> PresentationDescendants(Control parent)
     {
         foreach (Control child in parent.Controls)
         {
             yield return child;
-            foreach (var nested in Descendants(child)) yield return nested;
+            foreach (var nested in PresentationDescendants(child)) yield return nested;
         }
     }
 
@@ -301,7 +301,8 @@ internal sealed partial class MechanicalForm
         };
     }
 
-    private static WorkflowRow Row(string stage, string obj, bool complete, string status, string action, string key) => new(stage, obj, complete, status, action, key);
+    private static WorkflowRow Row(string stage, string obj, bool complete, string status, string action, string key) =>
+        new(stage, obj, complete, status, action, key);
 
     private void ExecuteChecklistRow(int rowIndex)
     {
@@ -321,15 +322,44 @@ internal sealed partial class MechanicalForm
 
     private sealed record WorkflowRow(string Stage, string Object, bool Complete, string Status, string Action, string Key);
 
-    private readonly record struct ThemePalette(Color Background, Color Panel, Color SecondaryPanel, Color Field, Color Chrome, Color Border, Color Text, Color Muted, Color Button, Color Selection, Color Accent, Color AccentBorder, Color Green, Color Warning)
+    private readonly record struct ThemePalette(
+        Color Background,
+        Color Panel,
+        Color SecondaryPanel,
+        Color Field,
+        Color Chrome,
+        Color Border,
+        Color Text,
+        Color Muted,
+        Color Button,
+        Color Selection,
+        Color Accent,
+        Color AccentBorder,
+        Color Green,
+        Color Warning)
     {
-        public static ThemePalette Light => new(Color.FromArgb(242,245,249), Color.White, Color.FromArgb(235,240,246), Color.FromArgb(252,253,255), Color.FromArgb(247,249,252), Color.FromArgb(188,198,210), Color.FromArgb(33,42,52), Color.FromArgb(86,99,114), Color.FromArgb(240,244,249), Color.FromArgb(205,228,249), Color.FromArgb(0,114,198), Color.FromArgb(0,87,153), Color.FromArgb(34,139,85), Color.FromArgb(190,112,0));
-        public static ThemePalette Dark => new(Color.FromArgb(27,30,35), Color.FromArgb(39,43,50), Color.FromArgb(49,54,63), Color.FromArgb(24,27,32), Color.FromArgb(20,22,26), Color.FromArgb(72,79,90), Color.FromArgb(235,238,242), Color.FromArgb(164,174,187), Color.FromArgb(49,54,63), Color.FromArgb(58,90,130), Color.FromArgb(38,143,255), Color.FromArgb(75,177,255), Color.FromArgb(74,200,126), Color.FromArgb(245,187,70));
+        public static ThemePalette Light => new(
+            Color.FromArgb(242,245,249), Color.White, Color.FromArgb(235,240,246),
+            Color.FromArgb(252,253,255), Color.FromArgb(247,249,252), Color.FromArgb(188,198,210),
+            Color.FromArgb(33,42,52), Color.FromArgb(86,99,114), Color.FromArgb(240,244,249),
+            Color.FromArgb(205,228,249), Color.FromArgb(0,114,198), Color.FromArgb(0,87,153),
+            Color.FromArgb(34,139,85), Color.FromArgb(190,112,0));
+
+        public static ThemePalette Dark => new(
+            Color.FromArgb(27,30,35), Color.FromArgb(39,43,50), Color.FromArgb(49,54,63),
+            Color.FromArgb(24,27,32), Color.FromArgb(20,22,26), Color.FromArgb(72,79,90),
+            Color.FromArgb(235,238,242), Color.FromArgb(164,174,187), Color.FromArgb(49,54,63),
+            Color.FromArgb(58,90,130), Color.FromArgb(38,143,255), Color.FromArgb(75,177,255),
+            Color.FromArgb(74,200,126), Color.FromArgb(245,187,70));
     }
 
     private sealed class ThemeRenderer(ThemePalette palette) : ToolStripProfessionalRenderer(new ThemeColorTable(palette))
     {
-        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) { e.TextColor = e.Item.Enabled ? palette.Text : palette.Muted; base.OnRenderItemText(e); }
+        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Enabled ? palette.Text : palette.Muted;
+            base.OnRenderItemText(e);
+        }
     }
 
     private sealed class ThemeColorTable(ThemePalette palette) : ProfessionalColorTable
