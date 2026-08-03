@@ -503,7 +503,7 @@ internal sealed partial class MechanicalForm
         Log("Parameter workspace opened.");
     }
 
-    private void OpenObjectGenerator()
+    private void OpenLegacyObjectGenerator()
     {
         using var form = new Form
         {
