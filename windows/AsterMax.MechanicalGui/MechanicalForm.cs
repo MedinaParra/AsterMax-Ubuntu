@@ -51,7 +51,7 @@ internal sealed partial class MechanicalForm : Form
 
     public MechanicalForm()
     {
-        Text = "AsterMax Mechanical 0.4 beta";
+        Text = "AsterMax Mechanical 0.5 beta";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1024, 680);
         Size = new Size(1520, 920);
@@ -66,10 +66,11 @@ internal sealed partial class MechanicalForm : Form
         BuildRibbon();
         BuildProjectTree();
         InitializePresentation();
+        InitializeSimpleStaticWorkflow();
         WireEvents();
         SelectNode("Project");
-        Log("AsterMax Mechanical 0.4 beta initialized.");
-        Log("Light CAD theme, original SVG command icons and guided Mechanical workflow enabled.");
-        Log("Workflow: Preliminary Decisions -> Preprocessing -> Solution -> Postprocessing.");
+        Log("AsterMax Mechanical 0.5 beta initialized.");
+        Log("Tutorial 01 adds a real restricted pipeline: prismatic STEP -> structured TET4 -> linear static solve -> report.");
+        Log("Mechanical workflow: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Results.");
     }
 }
