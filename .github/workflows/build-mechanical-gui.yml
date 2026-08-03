@@ -62,8 +62,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $target | Out-Null
           Copy-Item "$($source.FullName)/*" $target -Recurse -Force
           $gmsh = Resolve-Path "$target/gmsh.exe"
-          & $gmsh -version
-          if ($LASTEXITCODE -ne 0) { throw "Bundled Gmsh failed its version check." }
+          if ((Get-Item $gmsh).Length -lt 1000000) { throw "The bundled Gmsh executable is unexpectedly small." }
+          Write-Host "Bundled Gmsh executable: $gmsh"
 
       - name: Generate complex STEP smoke geometry
         shell: pwsh
@@ -83,7 +83,7 @@ jobs:
           $code = $LASTEXITCODE
           Pop-Location
           if ($code -ne 0 -or -not (Test-Path smoke-cad/complex-flange.step)) {
-            throw "Unable to generate the complex STEP smoke geometry."
+            throw "Unable to generate the complex STEP smoke geometry. Gmsh exit code: $code"
           }
 
       - name: Gmsh STEP preview and TET4 smoke test
@@ -92,8 +92,7 @@ jobs:
           $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
           $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
           $step = Resolve-Path smoke-cad/complex-flange.step
-          $arguments = @("--gmsh-smoke", "`"$gmsh`"", "`"$step`"")
-          $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -Wait -NoNewWindow
+          $process = Start-Process -FilePath $exe -ArgumentList @("--gmsh-smoke", $gmsh.Path, $step.Path) -PassThru -Wait -NoNewWindow
           if ($process.ExitCode -ne 0) { throw "AsterMax Gmsh STEP smoke test failed with code $($process.ExitCode)." }
           Write-Host "AsterMax imported and tetrahedralized a curved STEP with two holes."
 
@@ -127,7 +126,8 @@ jobs:
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
           Copy-Item windows/AsterMax.MechanicalGui/Icons/AsterMaxIconSet.svg artifact/AsterMaxIconSet.svg
           Copy-Item smoke-cad/complex-flange.step artifact/AsterMax_Complex_STEP_Smoke.step
-          '@echo off
+          @'
+          @echo off
           start "" "%~dp0AsterMax-Mechanical-0.7.0-beta.exe"
           '@ | Set-Content artifact/RUN-AsterMax.cmd -Encoding ascii
           $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.7.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
