@@ -51,7 +51,7 @@ internal sealed partial class MechanicalForm : Form
 
     public MechanicalForm()
     {
-        Text = "AsterMax Mechanical 0.5 beta";
+        Text = "AsterMax Mechanical 0.6 beta";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1024, 680);
         Size = new Size(1520, 920);
@@ -67,12 +67,13 @@ internal sealed partial class MechanicalForm : Form
         BuildProjectTree();
         InitializePresentation();
         InitializeSimpleStaticWorkflow();
+        InitializeEngineeringTutorials();
         WireEvents();
         SelectNode("Project");
         _ribbon.SelectedTab = _ribbon.TabPages.Cast<TabPage>()
             .FirstOrDefault(page => page.Text == "Static Tutorial") ?? _ribbon.SelectedTab;
-        Log("AsterMax Mechanical 0.5 beta initialized.");
-        Log("Tutorial 01 adds a real restricted pipeline: prismatic STEP -> structured TET4 -> linear static solve -> report.");
-        Log("Mechanical workflow: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Results.");
+        Log("AsterMax Mechanical 0.6 beta initialized.");
+        Log("Functional tutorials: static TET4, Named Selections, Object Generator, convergence, Design Points, modal beam and steady thermal TET4.");
+        Log("Mechanical workflow: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Verification -> Report.");
     }
 }
