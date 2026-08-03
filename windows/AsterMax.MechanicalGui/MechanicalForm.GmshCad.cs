@@ -13,7 +13,7 @@ internal sealed partial class MechanicalForm
     private async Task ImportCadStepAsync(string path)
     {
         if (_busy) return;
-        HideCadCanvas();
+        ClearSimpleStateForCadImport();
         ResetCadState();
 
         SimpleStepSolid envelope;
@@ -101,6 +101,20 @@ internal sealed partial class MechanicalForm
             _busy = false;
             ToggleUi(true);
         }
+    }
+
+    private void ClearSimpleStateForCadImport()
+    {
+        _simpleSolid = null;
+        _simpleMesh = null;
+        _simpleSolution = null;
+        _simpleSetupDefined = false;
+        foreach (var node in AllNodes().Where(node =>
+                     node.Tag is ModelObject model &&
+                     model.Properties.TryGetValue("Tutorial", out var tutorial) &&
+                     tutorial == "SimpleStatic").ToArray())
+            node.Remove();
+        _viewport.ClearModel();
     }
 
     private async Task GenerateCadMeshAsync()
