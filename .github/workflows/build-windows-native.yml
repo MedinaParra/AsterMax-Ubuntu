@@ -29,6 +29,9 @@ jobs:
       - name: Restore
         run: dotnet restore windows/AsterMax.WindowsNative/AsterMax.WindowsNative.csproj
 
+      - name: Build validation
+        run: dotnet build windows/AsterMax.WindowsNative/AsterMax.WindowsNative.csproj -c Release --no-restore
+
       - name: Publish portable Windows executable
         run: >-
           dotnet publish windows/AsterMax.WindowsNative/AsterMax.WindowsNative.csproj
@@ -52,7 +55,7 @@ jobs:
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Windows-Native-0.1.0-beta-win-x64
+          name: AsterMax-Windows-Native-0.2.0-beta-win-x64
           path: artifact/*
           if-no-files-found: error
           retention-days: 30
