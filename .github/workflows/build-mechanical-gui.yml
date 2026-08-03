@@ -67,16 +67,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.3.1-beta.exe
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.4.0-beta.exe
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
-          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.3.1-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-0.3.1-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.3.1-beta.exe.sha256 -Encoding ascii
+          Copy-Item windows/AsterMax.MechanicalGui/Icons/AsterMaxIconSet.svg artifact/AsterMaxIconSet.svg
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.4.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.4.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.4.0-beta.exe.sha256 -Encoding ascii
           Get-ChildItem artifact | Format-Table Name, Length
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-0.3.1-beta-win-x64
+          name: AsterMax-Mechanical-0.4.0-beta-win-x64
           path: artifact/*
           if-no-files-found: error
           retention-days: 30
