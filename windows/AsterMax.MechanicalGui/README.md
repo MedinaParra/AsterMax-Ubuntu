@@ -1,37 +1,61 @@
-# AsterMax Mechanical 0.3 beta
+# AsterMax Mechanical 0.5 beta
 
-Windows GUI developed from the workflow methodology contained in the uploaded Mechanical training manuals.
+Portable Windows x64 GUI implementing the first usable Mechanical-style static structural tutorial with an original interface and internal TET4 solver.
 
-## Implemented application structure
+## First functional tutorial
 
-- menu and contextual Ribbon;
-- Outline tree with object-state indicators;
-- central Graphics viewport;
-- editable Details view;
-- Graphics, Worksheet, Graph, Tabular Data and Messages tabs;
-- workflow navigator: Preliminary Decisions, Preprocessing, Solution and Postprocessing;
-- context commands that change with the selected Outline object.
+The **Static Tutorial** tab opens by default and implements this restricted sequence:
 
-## Implemented workflow
+1. Import a STEP/STP file representing one rectangular or prismatic solid, or create the included 200 x 40 x 20 mm cantilever example.
+2. Define an isotropic elastic material: Young's modulus, Poisson ratio and reference yield strength.
+3. Select the fixed face and loaded face.
+4. Define the total force components.
+5. Generate a structured first-order tetrahedral TET4 mesh.
+6. Assemble and solve the three-dimensional linear elastic stiffness system.
+7. Review maximum displacement, equivalent von Mises stress, loaded-face displacement, total reactions and force-equilibrium error.
+8. Export a preliminary HTML calculation report together with CSV and JSON result files.
 
-1. Import STEP, IGES or BREP geometry.
-2. Assign materials and coordinate systems.
-3. Create contacts and named selections.
-4. Insert mesh controls and generate a finite-element mesh.
-5. Add Static Structural, Modal, Thermal, Buckling or Submodel environments.
-6. Configure Analysis Settings.
-7. Insert supports and loads.
-8. Validate and solve the model.
-9. Insert deformation, stress, strain, reaction, contact, chart and probe results.
-10. Review Worksheet, Graph, Tabular Data and Messages.
+## Verified reference case
 
-## Code_Aster integration
+The Windows CI solves a 200 x 40 x 20 mm cantilever with structural steel, XMin fixed and a 1000 N force in negative Z on XMax.
 
-The Solver menu can configure a native Windows Code_Aster launcher, validate it with `--help`, execute an external `.export` file and export a starter `.comm` file. The current GUI beta uses a deterministic simulated solve for testing the complete interaction flow while the recovered AsterMax solver/model layer is integrated.
+Reference smoke-test result for the current default mesh:
 
-## Intellectual-property boundary
+- 54 nodes;
+- 96 TET4 elements;
+- maximum displacement: approximately 0.0975446 mm;
+- maximum von Mises stress: approximately 20.7427 MPa;
+- relative force-equilibrium error: approximately 8.14e-13.
 
-The application follows a general finite-element workflow and panel arrangement. It does not redistribute proprietary source code, logos, screenshots, icons or documentation. All visual elements in this beta are original AsterMax controls drawn with WinForms.
+The exact finite-element values depend on the selected mesh size.
+
+## Interface corrections in 0.5
+
+- taller Ribbon with icons above text instead of overlapping labels;
+- functional Static Tutorial selected at startup;
+- empty viewport before geometry import instead of a fictitious demonstration part;
+- actual prism dimensions, mesh, supports, load vector, deformed-shape exaggeration and result legend;
+- clearer Details category rows and wider units selector;
+- light CAD theme by default, with optional dark theme.
+
+## Mandatory limitations
+
+This is a deliberately narrow beta. It accepts only one rectangular/prismatic solid represented by the axis-aligned envelope of the STEP points. It rejects or warns for curved surfaces, holes, fillets and assemblies.
+
+It currently does **not** provide certified treatment of:
+
+- arbitrary BREP topology;
+- automatic face identity from OpenCASCADE;
+- contact or multi-body assemblies;
+- plasticity, large deflection, buckling, dynamics or fatigue;
+- higher-order elements;
+- regulatory or professional sign-off.
+
+The generated report is a preliminary engineering aid. Results must be checked through mesh convergence, analytical comparison and review by a competent engineer before use in a formal calculation memorandum.
+
+## Other GUI areas
+
+The remaining Ribbon tabs preserve the broader Mechanical-style roadmap, including Geometry, Connections, Mesh, Environment, Results and Code_Aster integration. Some of those general commands are still demonstration or deck-preparation functions; the verified path in this build is the **Static Tutorial** tab.
 
 ## Build
 
