@@ -42,20 +42,41 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish/win-x64
 
+      - name: Windows startup smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "AsterMax did not complete the startup smoke test within 20 seconds."
+          }
+          if ($process.ExitCode -ne 0) {
+            $crashDirectory = Join-Path $env:LOCALAPPDATA "AsterMax\crashes"
+            if (Test-Path $crashDirectory) {
+              Get-ChildItem $crashDirectory -Filter *.log | Sort-Object LastWriteTime | ForEach-Object {
+                Write-Host "---- $($_.FullName) ----"
+                Get-Content $_.FullName
+              }
+            }
+            throw "AsterMax startup smoke test exited with code $($process.ExitCode)."
+          }
+          Write-Host "AsterMax startup smoke test passed."
+
       - name: Prepare package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.3.0-beta.exe
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.3.1-beta.exe
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
-          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.3.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-0.3.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.3.0-beta.exe.sha256 -Encoding ascii
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.3.1-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.3.1-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.3.1-beta.exe.sha256 -Encoding ascii
           Get-ChildItem artifact | Format-Table Name, Length
 
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-0.3.0-beta-win-x64
+          name: AsterMax-Mechanical-0.3.1-beta-win-x64
           path: artifact/*
           if-no-files-found: error
           retention-days: 30
