@@ -11,6 +11,9 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Any(arg => string.Equals(arg, "--solver-smoke", StringComparison.OrdinalIgnoreCase)))
+            return RunSolverSmokeTest();
+
         _smokeTest = args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase));
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, eventArgs) => HandleFatal(eventArgs.Exception, "UI thread");
@@ -43,6 +46,45 @@ internal static class Program
         }
     }
 
+    private static int RunSolverSmokeTest()
+    {
+        try
+        {
+            var solid = new SimpleStepSolid
+            {
+                SourcePath = "internal-tutorial-smoke.step",
+                Min = new Vec3(0, 0, 0),
+                Max = new Vec3(200, 40, 20),
+                CartesianPointCount = 8,
+                IsSupportedPrism = true,
+                FidelityMessage = "Internal rectangular-prism test"
+            };
+            var material = new StaticMaterial();
+            var setup = new SimpleStaticSetup
+            {
+                ElementSizeMm = 25,
+                FixedFace = SimpleFace.XMin,
+                LoadFace = SimpleFace.XMax,
+                ForceN = new Vec3(0, 0, -1000)
+            };
+            var mesh = StructuredTetMesher.Generate(solid, setup.ElementSizeMm);
+            var result = Tet4LinearStaticSolver.Solve(solid, mesh, material, setup);
+            if (!double.IsFinite(result.MaxDisplacementMm) || result.MaxDisplacementMm <= 0)
+                throw new InvalidOperationException("Solver smoke test returned an invalid displacement.");
+            if (!double.IsFinite(result.MaxVonMisesMpa) || result.MaxVonMisesMpa <= 0)
+                throw new InvalidOperationException("Solver smoke test returned an invalid equivalent stress.");
+            if (!double.IsFinite(result.EquilibriumError) || result.EquilibriumError > 1e-7)
+                throw new InvalidOperationException($"Solver smoke test equilibrium error is {result.EquilibriumError:E3}.");
+            Console.WriteLine($"TET4 smoke passed: nodes={mesh.Nodes.Count}, elements={mesh.Elements.Count}, Umax={result.MaxDisplacementMm:G8} mm, VM={result.MaxVonMisesMpa:G8} MPa, equilibrium={result.EquilibriumError:E3}");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine(exception);
+            return 2;
+        }
+    }
+
     private static void HandleFatal(Exception exception, string stage)
     {
         string? crashFile = null;
@@ -51,7 +93,7 @@ internal static class Program
             Directory.CreateDirectory(CrashDirectory);
             crashFile = Path.Combine(CrashDirectory, $"astermax-crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(crashFile,
-                $"AsterMax Mechanical 0.3.1 beta{Environment.NewLine}" +
+                $"AsterMax Mechanical 0.5 beta{Environment.NewLine}" +
                 $"Stage: {stage}{Environment.NewLine}" +
                 $"Windows: {Environment.OSVersion}{Environment.NewLine}" +
                 $"64-bit process: {Environment.Is64BitProcess}{Environment.NewLine}" +
