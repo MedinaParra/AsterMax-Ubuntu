@@ -7,15 +7,18 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AsterMax-Mechanical</AssemblyName>
     <RootNamespace>AsterMax.MechanicalGui</RootNamespace>
-    <Version>0.3.1-beta</Version>
+    <Version>0.4.0-beta</Version>
     <Authors>Exequiel Medina</Authors>
     <Company>AsterMax</Company>
     <Product>AsterMax Mechanical</Product>
-    <Description>Mechanical-style finite-element workflow GUI for AsterMax and Code_Aster.</Description>
+    <Description>Mechanical finite-element workflow GUI for AsterMax and native Code_Aster.</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\AsterMaxIconSet.svg" />
+  </ItemGroup>
 </Project>
