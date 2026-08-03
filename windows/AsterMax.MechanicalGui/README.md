@@ -1,103 +1,117 @@
-# AsterMax Mechanical 0.6 beta
+# AsterMax Mechanical 0.7 beta
 
-Portable Windows x64 finite-element learning and preliminary-calculation application with an original Mechanical-style workflow.
+Portable Windows x64 finite-element application with an original Mechanical-style workflow, real STEP visualization through Gmsh/OpenCASCADE and verified tutorial solvers.
 
-## Verified functional scope
+## Starting the portable package
+
+Extract the complete ZIP before running the program. Keep this structure together:
+
+```text
+AsterMax-Mechanical-0.7.0-beta.exe
+RUN-AsterMax.cmd
+tools/gmsh/gmsh.exe
+```
+
+Run `RUN-AsterMax.cmd` or the executable from the extracted root directory. The `tools/gmsh` directory is required for STEP files containing holes, cylinders, fillets, curved faces or other non-prismatic topology.
+
+## Real STEP import and meshing
+
+Use **Home / Geometry → Import Geometry** or **Static Tutorial → Import STEP**.
+
+### Rectangular prism
+
+A single rectangular prism uses the verified internal route:
+
+1. Real dimensions are read from the STEP file.
+2. The prism is displayed in the viewport.
+3. Material, fixed face, loaded face and force are defined.
+4. A structured first-order TET4 mesh is generated.
+5. The internal three-dimensional linear-elastic solver runs.
+6. Results and a preliminary calculation report can be exported.
+
+### General single-solid STEP
+
+A STEP containing curved surfaces, holes or non-prismatic topology uses the Gmsh/OpenCASCADE route:
+
+1. Gmsh imports the STEP topology through OpenCASCADE.
+2. A real triangular surface preview is generated and displayed.
+3. **Generate Mesh** asks for a target element size.
+4. Gmsh creates an unstructured linear tetrahedral volume mesh.
+5. AsterMax displays node, boundary-triangle and TET4 counts.
+
+The general single-solid route currently stops after real volume meshing. Arbitrary-face selection, persistent CAD face identifiers and assembly into the general static solver are the next implementation block. The program deliberately blocks **Solve** for this route instead of returning fictitious stresses.
+
+## Verified functional tutorial scope
 
 ### Tutorial 01 — restricted linear static solid
 
-1. Import a STEP/STP file representing one rectangular prism, or create the 200 x 40 x 20 mm cantilever example.
-2. Define isotropic linear-elastic material properties.
-3. Select fixed and loaded faces.
-4. Define a total force vector.
-5. Generate a structured first-order TET4 mesh.
-6. Assemble and solve the three-dimensional stiffness system.
-7. Review displacement, von Mises stress, loaded-face displacement, reactions and equilibrium.
-8. Export HTML, CSV and JSON calculation files.
+- isotropic linear elasticity and small displacement;
+- fixed and loaded prism faces;
+- total force vector;
+- structured TET4 mesh;
+- displacement, von Mises stress, reactions and equilibrium;
+- HTML, CSV and JSON calculation files.
 
 ### WS02.2–WS02.4 — scoping and Object Generator
 
-- creates persistent Named Selections for XMin, XMax, YMin, YMax, ZMin and ZMax;
-- reports face area, center and scoped mesh-node count;
-- generates a fixed support or force scope from a selected Named Selection;
-- updates the Outline tree and invalidates the previous solution when scoping changes.
+- persistent Named Selections for XMin, XMax, YMin, YMax, ZMin and ZMax;
+- face area, center and mesh-node count;
+- generated fixed support or force scope;
+- Outline integration and solution invalidation after changes.
 
 ### WS04.1 — mesh convergence
 
-- solves the same static case with five progressively refined element sizes;
-- compares maximum displacement and maximum von Mises stress against the finest generated mesh;
-- reports node and element counts, equilibrium error and solve time;
-- provides a convergence table, graph and HTML/CSV export.
+- five progressively refined element sizes;
+- displacement and von Mises comparison against the finest mesh;
+- node count, TET4 count, equilibrium and solve time;
+- table, graph and HTML/CSV export.
 
 ### WS04.2 — Design Points
 
-- performs a user-defined sweep of force magnitude while preserving force direction;
-- solves each point with the same material, boundary conditions and mesh size;
-- reports displacement, von Mises stress, simple safety factor and equilibrium;
-- provides a response graph and HTML/CSV export.
+- configurable force-magnitude sweep;
+- real solution at each point;
+- displacement, von Mises stress, simple safety factor and equilibrium;
+- response graph and HTML/CSV export.
 
 ### WS07.1 — modal cantilever
 
-- solves a slender rectangular cantilever with Euler-Bernoulli beam finite elements;
-- uses a consistent mass matrix and configurable density, element count and requested modes;
-- reports up to six natural frequencies;
-- compares each mode with the closed-form cantilever solution;
-- exports a modal table and report.
+- Euler-Bernoulli beam finite elements;
+- consistent mass matrix;
+- configurable density, elements and modes;
+- analytical cantilever comparison.
 
 ### WS07.2 — steady-state thermal
 
-- solves scalar heat conduction on the structured TET4 mesh;
-- accepts conductivity, hot/cold faces and prescribed temperatures;
-- reports temperature limits, total heat flow, heat flux and energy balance;
-- compares opposite-face conduction with the one-dimensional analytical solution;
-- exports a thermal table and report.
+- scalar heat conduction on structured TET4;
+- constant isotropic conductivity;
+- prescribed hot and cold faces;
+- heat flow, heat flux and energy balance;
+- one-dimensional analytical comparison.
 
 ## Automated Windows verification
 
-The current CI reference model is a 200 x 40 x 20 mm structural-steel cantilever.
+CI executes all of the following before publishing:
 
-- static mesh: 54 nodes and 96 TET4 elements;
-- static maximum displacement: 0.097544606 mm;
-- static maximum von Mises stress: 20.742688 MPa;
-- modal first frequency: 407.69041 Hz;
-- modal analytical difference: approximately 1.31e-5 percent;
-- thermal heat flow: 14.4 W;
-- thermal energy-balance error: approximately 2.84e-14.
+- static reference model: 54 nodes, 96 TET4, maximum displacement 0.097544606 mm and maximum von Mises stress 20.742688 MPa;
+- modal first frequency: 407.69041 Hz with approximately 1.31e-5 percent analytical difference;
+- thermal heat flow: 14.4 W with approximately 2.84e-14 energy-balance error;
+- complex OpenCASCADE STEP containing two cylindrical through-holes;
+- real surface preview generation;
+- real unstructured volume TET4 generation;
+- self-contained Windows publication;
+- automated GUI startup.
 
-CI also runs the mesh-convergence engine, publishes a self-contained single-file Windows executable and opens the GUI in an automated startup test.
+The included `AsterMax_Complex_STEP_Smoke.step` can be used to test the same complex-CAD route locally.
 
-## Recommended workflow for a preliminary memorandum
+## Current limitations
 
-1. Import or create the supported prism.
-2. Define material, support and load.
-3. Solve the base static model.
-4. Run Mesh Convergence and choose an acceptance criterion before interpreting stresses.
-5. Run Design Points when load sensitivity is relevant.
-6. Export the base calculation report and the verification-study reports.
-7. Compare with an independent analytical model.
-8. Have the assumptions and results reviewed by a competent engineer.
-
-## Mandatory limitations
-
-This remains a deliberately restricted beta.
-
-- STEP import uses the axis-aligned Cartesian envelope of STEP points; it is not an OpenCASCADE BREP import.
-- Only one rectangular/prismatic body is supported by the verified 3-D static and thermal paths.
-- Named Selections are limited to the six prism faces.
-- Design Points currently vary only force magnitude.
-- Modal analysis is a one-dimensional Euler-Bernoulli beam model, not a general 3-D TET4 eigenanalysis.
-- Thermal analysis supports prescribed temperatures and constant isotropic conductivity; no convection, radiation or thermal contact.
-- No verified assemblies, contacts, joints, plasticity, large deformation, buckling, fatigue, transient dynamics or submodeling yet.
-- The general Ribbon still contains roadmap and demonstration commands outside the verified tutorial tabs.
+- General CAD currently supports one closed STEP/STP solid; assemblies and multiple bodies are not yet mapped.
+- General CAD can be visualized and tetrahedralized, but arbitrary CAD-face scoping and static solution are not yet enabled.
+- IGES and BREP are not presented as functional formats in this build.
+- The verified static and thermal solution paths remain limited to a rectangular prism.
+- Prism Named Selections are limited to its six faces.
+- Modal analysis is a one-dimensional Euler-Bernoulli model, not a general 3-D eigensolver.
+- Thermal analysis does not yet include convection, radiation or thermal contact.
+- No verified contacts, joints, plasticity, large deformation, buckling, fatigue, transient dynamics or submodeling.
 
 Reports are preliminary engineering aids and do not provide regulatory certification or professional sign-off.
-
-## Build
-
-```powershell
-dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
-  -c Release `
-  -r win-x64 `
-  --self-contained true `
-  -p:PublishSingleFile=true
-```
