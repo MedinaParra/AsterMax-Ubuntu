@@ -1,0 +1,47 @@
+name: AsterMax one-time 0.6 version cleanup
+
+on:
+  push:
+    branches:
+      - agent/mechanical-gui-pdf-workflow
+    paths:
+      - ".github/workflows/astermax-one-time-version-cleanup.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update-version-strings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mechanical-gui-pdf-workflow
+          fetch-depth: 0
+      - name: Replace stale visible beta labels
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('windows/AsterMax.MechanicalGui')
+          changed = []
+          for path in root.glob('*.cs'):
+              text = path.read_text(encoding='utf-8')
+              updated = text.replace('AsterMax Mechanical 0.3 beta', 'AsterMax Mechanical 0.6 beta')
+              updated = updated.replace('AsterMax Mechanical 0.5 beta', 'AsterMax Mechanical 0.6 beta')
+              if updated != text:
+                  path.write_text(updated, encoding='utf-8')
+                  changed.append(str(path))
+          if not changed:
+              raise SystemExit('No stale visible version strings were found.')
+          print('\n'.join(changed))
+          PY
+          git rm .github/workflows/astermax-one-time-version-cleanup.yml
+      - name: Commit cleanup and remove migration workflow
+        shell: bash
+        run: |
+          git config user.name "AsterMax CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add windows/AsterMax.MechanicalGui .github/workflows/astermax-one-time-version-cleanup.yml
+          git commit -m "Update visible AsterMax labels to 0.6 beta"
+          git push origin HEAD:agent/mechanical-gui-pdf-workflow
