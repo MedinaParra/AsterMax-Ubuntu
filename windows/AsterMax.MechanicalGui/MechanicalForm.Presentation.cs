@@ -14,9 +14,8 @@ internal sealed partial class MechanicalForm
         BuildWorkflowChecklistTab();
         InstallAppearanceMenu();
         ConfigureTreeIcons();
-        ApplyTheme(dark: false);
-        ApplyCommandIcons();
-        RefreshWorkflowChecklist(force: true);
+        ApplyTheme(false);
+        RefreshWorkflowChecklist(true);
 
         _presentationTimer.Tick += (_, _) =>
         {
@@ -51,13 +50,8 @@ internal sealed partial class MechanicalForm
 
     private void BuildWorkflowChecklistTab()
     {
-        var tab = new TabPage("Workflow Checklist")
-        {
-            BackColor = Field,
-            ForeColor = TextMain,
-            Padding = new Padding(2)
-        };
-        ConfigureGrid(_workflowChecklist, headers: true);
+        var tab = new TabPage("Workflow Checklist") { BackColor = Field, ForeColor = TextMain, Padding = new Padding(2) };
+        ConfigureGrid(_workflowChecklist, true);
         _workflowChecklist.ReadOnly = true;
         _workflowChecklist.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         _workflowChecklist.Columns.Add(new DataGridViewTextBoxColumn { Name = "Stage", FillWeight = 22 });
@@ -71,31 +65,19 @@ internal sealed partial class MechanicalForm
 
     private void InstallAppearanceMenu()
     {
-        var view = _menu.Items.OfType<ToolStripMenuItem>()
-            .FirstOrDefault(item => item.Text.Equals("View", StringComparison.OrdinalIgnoreCase));
-        if (view is not null)
-        {
-            view.DropDownItems.Add(new ToolStripSeparator());
-            var appearance = new ToolStripMenuItem("Appearance");
-            var light = new ToolStripMenuItem("Light CAD theme") { Checked = true, CheckOnClick = true };
-            var dark = new ToolStripMenuItem("Dark theme") { CheckOnClick = true };
-            light.Click += (_, _) =>
-            {
-                light.Checked = true;
-                dark.Checked = false;
-                ApplyTheme(false);
-            };
-            dark.Click += (_, _) =>
-            {
-                dark.Checked = true;
-                light.Checked = false;
-                ApplyTheme(true);
-            };
-            appearance.DropDownItems.AddRange(new ToolStripItem[] { light, dark });
-            view.DropDownItems.Add(appearance);
-            view.DropDownItems.Add(new ToolStripMenuItem("Workflow Checklist", null, (_, _) => ShowWorkflowChecklist()));
-            view.DropDownItems.Add(new ToolStripMenuItem("Reset Panel Layout", null, (_, _) => ApplyInitialSplitterLayout()));
-        }
+        var view = _menu.Items.OfType<ToolStripMenuItem>().FirstOrDefault(item => item.Text == "View");
+        if (view is null) return;
+
+        view.DropDownItems.Add(new ToolStripSeparator());
+        var appearance = new ToolStripMenuItem("Appearance");
+        var light = new ToolStripMenuItem("Light CAD theme") { Checked = true, CheckOnClick = true };
+        var dark = new ToolStripMenuItem("Dark theme") { CheckOnClick = true };
+        light.Click += (_, _) => { light.Checked = true; dark.Checked = false; ApplyTheme(false); };
+        dark.Click += (_, _) => { dark.Checked = true; light.Checked = false; ApplyTheme(true); };
+        appearance.DropDownItems.AddRange(new ToolStripItem[] { light, dark });
+        view.DropDownItems.Add(appearance);
+        view.DropDownItems.Add(new ToolStripMenuItem("Workflow Checklist", null, (_, _) => ShowWorkflowChecklist()));
+        view.DropDownItems.Add(new ToolStripMenuItem("Reset Panel Layout", null, (_, _) => ApplyInitialSplitterLayout()));
     }
 
     private void ConfigureTreeIcons()
@@ -104,10 +86,10 @@ internal sealed partial class MechanicalForm
         _treeIcons.ImageSize = new Size(18, 18);
         _treeIcons.TransparentColor = Color.Transparent;
         _outline.ImageList = _treeIcons;
-        RebuildTreeIconList();
+        RebuildTreeIcons();
     }
 
-    private void RebuildTreeIconList()
+    private void RebuildTreeIcons()
     {
         _treeIcons.Images.Clear();
         var palette = CurrentPalette;
@@ -157,7 +139,7 @@ internal sealed partial class MechanicalForm
         ApplyButtonIcons(this, palette);
         ApplyToolStripIcons(_menu.Items, palette, 16);
         ApplyToolStripIcons(_graphicsTools.Items, palette, 16);
-        RebuildTreeIconList();
+        RebuildTreeIcons();
     }
 
     private static void ApplyButtonIcons(Control parent, ThemePalette palette)
@@ -171,9 +153,8 @@ internal sealed partial class MechanicalForm
                 {
                     button.Image?.Dispose();
                     button.Image = SvgIconRenderer.Render(icon, button.Height >= 50 ? 25 : 18, palette.Text, palette.Accent);
-                    button.ImageAlign = ContentAlignment.MiddleCenter;
                     button.TextImageRelation = button.Height >= 50 ? TextImageRelation.ImageAboveText : TextImageRelation.ImageBeforeText;
-                    button.ImageIndex = -1;
+                    button.ImageAlign = ContentAlignment.MiddleCenter;
                     button.Padding = button.Height >= 50 ? new Padding(2, 3, 2, 1) : new Padding(4, 0, 4, 0);
                 }
             }
@@ -205,12 +186,12 @@ internal sealed partial class MechanicalForm
         if (text.Contains("save")) return "save";
         if (text.Contains("import")) return "import";
         if (text.Contains("material")) return "material";
-        if (text.Contains("named selection") || text.Contains("selection")) return "selection";
+        if (text.Contains("selection")) return "selection";
         if (text.Contains("mesh") || text is "generate" or "clear") return text.Contains("control") || text.Contains("sizing") || text.Contains("method") || text.Contains("inflation") ? "mesh-control" : "mesh";
         if (text.Contains("solve") || text.Contains("next required")) return "solve";
         if (text.Contains("support") || text.Contains("displacement") || text.Contains("cylindrical")) return "support";
-        if (text.Contains("force") || text.Contains("pressure") || text.Contains("moment") || text.Contains("gravity") || text.Contains("bearing load") || text.Contains("load")) return "load";
-        if (text.Contains("contact") || text.Contains("joint") || text.Contains("spring") || text.Contains("beam") || text.Contains("remote point")) return "contact";
+        if (text.Contains("force") || text.Contains("pressure") || text.Contains("moment") || text.Contains("gravity") || text.Contains("load")) return "load";
+        if (text.Contains("contact") || text.Contains("joint") || text.Contains("spring") || text.Contains("beam")) return "contact";
         if (text.Contains("modal")) return "modal";
         if (text.Contains("thermal")) return "thermal";
         if (text.Contains("static") || text.Contains("analysis")) return "analysis";
@@ -239,6 +220,7 @@ internal sealed partial class MechanicalForm
         ApplyCommandIcons();
         ResumeLayout(true);
         Invalidate(true);
+        RefreshWorkflowChecklist(true);
         _statusMain.Text = dark ? "Dark theme enabled" : "Light CAD theme enabled";
     }
 
@@ -269,10 +251,6 @@ internal sealed partial class MechanicalForm
                 strip.BackColor = palette.SecondaryPanel;
                 strip.ForeColor = palette.Text;
                 break;
-            case TabControl:
-                control.BackColor = palette.Panel;
-                control.ForeColor = palette.Text;
-                break;
             case TabPage:
                 control.BackColor = palette.Panel;
                 control.ForeColor = palette.Text;
@@ -288,7 +266,7 @@ internal sealed partial class MechanicalForm
                 grid.DefaultCellStyle.BackColor = palette.Field;
                 grid.DefaultCellStyle.ForeColor = palette.Text;
                 grid.DefaultCellStyle.SelectionBackColor = palette.Selection;
-                grid.DefaultCellStyle.SelectionForeColor = darkText(palette.Selection) ? Color.Black : Color.White;
+                grid.DefaultCellStyle.SelectionForeColor = Color.Black;
                 grid.ColumnHeadersDefaultCellStyle.BackColor = palette.SecondaryPanel;
                 grid.ColumnHeadersDefaultCellStyle.ForeColor = palette.Text;
                 break;
@@ -305,60 +283,55 @@ internal sealed partial class MechanicalForm
                 button.FlatAppearance.BorderColor = primary ? palette.AccentBorder : palette.Border;
                 break;
             case Label label:
-                label.ForeColor = label.ForeColor == Color.White ? palette.Text : palette.Muted;
-                if (label.Font.Bold) label.ForeColor = palette.Text;
+                label.ForeColor = label.Font.Bold ? palette.Text : palette.Muted;
                 break;
-            case Panel or FlowLayoutPanel or TableLayoutPanel:
+            case System.Windows.Forms.Panel:
+            case FlowLayoutPanel:
+            case TableLayoutPanel:
                 control.BackColor = palette.Panel;
                 control.ForeColor = palette.Text;
                 break;
         }
 
         foreach (Control child in control.Controls) ApplyThemeRecursive(child, palette);
+    }
 
-        static bool darkText(Color color) => color.R * .299 + color.G * .587 + color.B * .114 > 170;
+    private void ApplyInitialSplitterLayout()
+    {
+        var splitters = Descendants(this).OfType<SplitContainer>().ToArray();
+        if (splitters.Length < 3) return;
+        BeginInvoke(() =>
+        {
+            SetSafeSplitter(splitters[0], Math.Min(285, Math.Max(220, splitters[0].ClientSize.Width / 4)));
+            SetSafeSplitter(splitters[1], Math.Max(430, splitters[1].ClientSize.Width - 310));
+            SetSafeSplitter(splitters[2], Math.Max(300, splitters[2].ClientSize.Height - 210));
+        });
+    }
+
+    private static IEnumerable<Control> Descendants(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
     }
 
     private async Task RunNextWorkflowStepAsync()
     {
-        if (_nodes.TryGetValue("Geometry", out var geometry) && geometry.Nodes.Count == 0)
-        {
-            ImportGeometry();
-            return;
-        }
-        if (!_meshGenerated)
-        {
-            GenerateMesh();
-            return;
-        }
-        if (!AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Support, State: not ObjectState.Suppressed }))
-        {
-            AddSupport("Fixed Support");
-            return;
-        }
-        if (!AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Load, State: not ObjectState.Suppressed }))
-        {
-            AddLoad("Force");
-            return;
-        }
-        if (!AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Result }))
-        {
-            AddResult("Equivalent Stress");
-            return;
-        }
-        if (!_solved)
-        {
-            await SolveAsync();
-            return;
-        }
+        if (_nodes.TryGetValue("Geometry", out var geometry) && geometry.Nodes.Count == 0) { ImportGeometry(); return; }
+        if (!_meshGenerated) { GenerateMesh(); return; }
+        if (!AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Support, State: not ObjectState.Suppressed })) { AddSupport("Fixed Support"); return; }
+        if (!AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Load, State: not ObjectState.Suppressed })) { AddLoad("Force"); return; }
+        if (!AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Result })) { AddResult("Equivalent Stress"); return; }
+        if (!_solved) { await SolveAsync(); return; }
         EvaluateResults();
     }
 
     private void ShowWorkflowChecklist()
     {
-        RefreshWorkflowChecklist(force: true);
-        _lowerTabs.SelectedTab = _lowerTabs.TabPages.Cast<TabPage>()
-            .FirstOrDefault(page => page.Text == "Workflow Checklist");
+        RefreshWorkflowChecklist(true);
+        _lowerTabs.SelectedTab = _lowerTabs.TabPages.Cast<TabPage>().FirstOrDefault(page => page.Text == "Workflow Checklist");
     }
 
     private void RefreshWorkflowChecklist(bool force = false)
@@ -380,8 +353,7 @@ internal sealed partial class MechanicalForm
     private IReadOnlyList<WorkflowRow> GetWorkflowRows()
     {
         var geometryReady = _nodes.TryGetValue("Geometry", out var geometry) && geometry.Nodes.Count > 0;
-        var materialReady = geometryReady && geometry!.Nodes.Cast<TreeNode>()
-            .Any(node => node.Tag is ModelObject model && model.Properties.TryGetValue("Material", out var material) && !string.IsNullOrWhiteSpace(material));
+        var materialReady = geometryReady && geometry!.Nodes.Cast<TreeNode>().Any(node => node.Tag is ModelObject model && model.Properties.ContainsKey("Material"));
         var supportReady = AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Support, State: not ObjectState.Suppressed });
         var loadReady = AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Load, State: not ObjectState.Suppressed });
         var resultReady = AllNodes().Any(node => node.Tag is ModelObject { Kind: ObjectKind.Result });
@@ -394,13 +366,12 @@ internal sealed partial class MechanicalForm
             Row("2. Preprocessing", "Finite element mesh", _meshGenerated, _meshGenerated ? "Generated" : "Required", _meshGenerated ? "Review quality" : "Generate Mesh", "Mesh"),
             Row("3. Solution", "Support / constraint", supportReady, supportReady ? "Defined" : "Required", supportReady ? "Review supports" : "Insert Fixed Support", "support"),
             Row("3. Solution", "Load", loadReady, loadReady ? "Defined" : "Required", loadReady ? "Review loads" : "Insert Force", "load"),
-            Row("4. Postprocessing", "Requested result", resultReady, resultReady ? "Defined" : "Recommended", resultReady ? "Review result objects" : "Insert Equivalent Stress", "result"),
+            Row("4. Postprocessing", "Requested result", resultReady, resultReady ? "Defined" : "Recommended", resultReady ? "Review results" : "Insert Equivalent Stress", "result"),
             Row("4. Postprocessing", "Solved state", _solved, _solved ? "Solved" : "Pending", _solved ? "Evaluate and export" : "Solve", "Solution")
         };
     }
 
-    private static WorkflowRow Row(string stage, string obj, bool complete, string status, string action, string key) =>
-        new(stage, obj, complete, status, action, key);
+    private static WorkflowRow Row(string stage, string obj, bool complete, string status, string action, string key) => new(stage, obj, complete, status, action, key);
 
     private void ExecuteChecklistRow(int rowIndex)
     {
@@ -421,53 +392,10 @@ internal sealed partial class MechanicalForm
 
     private sealed record WorkflowRow(string Stage, string Object, bool Complete, string Status, string Action, string Key);
 
-    private readonly record struct ThemePalette(
-        Color Background,
-        Color Panel,
-        Color SecondaryPanel,
-        Color Field,
-        Color Chrome,
-        Color Border,
-        Color Text,
-        Color Muted,
-        Color Button,
-        Color Selection,
-        Color Accent,
-        Color AccentBorder,
-        Color Green,
-        Color Warning)
+    private readonly record struct ThemePalette(Color Background, Color Panel, Color SecondaryPanel, Color Field, Color Chrome, Color Border, Color Text, Color Muted, Color Button, Color Selection, Color Accent, Color AccentBorder, Color Green, Color Warning)
     {
-        public static ThemePalette Light => new(
-            Color.FromArgb(242, 245, 249),
-            Color.FromArgb(255, 255, 255),
-            Color.FromArgb(235, 240, 246),
-            Color.FromArgb(252, 253, 255),
-            Color.FromArgb(247, 249, 252),
-            Color.FromArgb(188, 198, 210),
-            Color.FromArgb(33, 42, 52),
-            Color.FromArgb(86, 99, 114),
-            Color.FromArgb(240, 244, 249),
-            Color.FromArgb(205, 228, 249),
-            Color.FromArgb(0, 114, 198),
-            Color.FromArgb(0, 87, 153),
-            Color.FromArgb(34, 139, 85),
-            Color.FromArgb(190, 112, 0));
-
-        public static ThemePalette Dark => new(
-            Color.FromArgb(27, 30, 35),
-            Color.FromArgb(39, 43, 50),
-            Color.FromArgb(49, 54, 63),
-            Color.FromArgb(24, 27, 32),
-            Color.FromArgb(20, 22, 26),
-            Color.FromArgb(72, 79, 90),
-            Color.FromArgb(235, 238, 242),
-            Color.FromArgb(164, 174, 187),
-            Color.FromArgb(49, 54, 63),
-            Color.FromArgb(58, 90, 130),
-            Color.FromArgb(38, 143, 255),
-            Color.FromArgb(75, 177, 255),
-            Color.FromArgb(74, 200, 126),
-            Color.FromArgb(245, 187, 70));
+        public static ThemePalette Light => new(Color.FromArgb(242,245,249), Color.White, Color.FromArgb(235,240,246), Color.FromArgb(252,253,255), Color.FromArgb(247,249,252), Color.FromArgb(188,198,210), Color.FromArgb(33,42,52), Color.FromArgb(86,99,114), Color.FromArgb(240,244,249), Color.FromArgb(205,228,249), Color.FromArgb(0,114,198), Color.FromArgb(0,87,153), Color.FromArgb(34,139,85), Color.FromArgb(190,112,0));
+        public static ThemePalette Dark => new(Color.FromArgb(27,30,35), Color.FromArgb(39,43,50), Color.FromArgb(49,54,63), Color.FromArgb(24,27,32), Color.FromArgb(20,22,26), Color.FromArgb(72,79,90), Color.FromArgb(235,238,242), Color.FromArgb(164,174,187), Color.FromArgb(49,54,63), Color.FromArgb(58,90,130), Color.FromArgb(38,143,255), Color.FromArgb(75,177,255), Color.FromArgb(74,200,126), Color.FromArgb(245,187,70));
     }
 
     private sealed class ThemeRenderer(ThemePalette palette) : ToolStripProfessionalRenderer(new ThemeColorTable(palette))
