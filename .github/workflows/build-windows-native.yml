@@ -1,0 +1,61 @@
+name: Build AsterMax Windows Native
+
+on:
+  push:
+    branches:
+      - agent/windows-native-mvp
+  pull_request:
+    paths:
+      - "windows/**"
+      - ".github/workflows/build-windows-native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore windows/AsterMax.WindowsNative/AsterMax.WindowsNative.csproj
+
+      - name: Build validation
+        run: dotnet build windows/AsterMax.WindowsNative/AsterMax.WindowsNative.csproj -c Release --no-restore
+
+      - name: Publish portable Windows executable
+        run: >-
+          dotnet publish windows/AsterMax.WindowsNative/AsterMax.WindowsNative.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/win-x64
+
+      - name: Prepare test package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item publish/win-x64/AsterMax-Windows-Native.exe artifact/AsterMax-Windows-Native.exe
+          Copy-Item windows/README-WINDOWS.md artifact/README-WINDOWS.md
+          $hash = (Get-FileHash artifact/AsterMax-Windows-Native.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Windows-Native.exe" | Set-Content artifact/AsterMax-Windows-Native.exe.sha256 -Encoding ascii
+          Get-ChildItem artifact | Format-Table Name, Length
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Windows-Native-0.2.0-beta-win-x64
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 30
