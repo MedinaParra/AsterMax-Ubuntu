@@ -69,6 +69,8 @@ internal sealed partial class MechanicalForm : Form
         InitializeSimpleStaticWorkflow();
         WireEvents();
         SelectNode("Project");
+        _ribbon.SelectedTab = _ribbon.TabPages.Cast<TabPage>()
+            .FirstOrDefault(page => page.Text == "Static Tutorial") ?? _ribbon.SelectedTab;
         Log("AsterMax Mechanical 0.5 beta initialized.");
         Log("Tutorial 01 adds a real restricted pipeline: prismatic STEP -> structured TET4 -> linear static solve -> report.");
         Log("Mechanical workflow: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Results.");
