@@ -13,6 +13,7 @@ internal sealed class MechanicalViewport : Control
     public bool ResultVisible { get; set; }
     public bool SupportVisible { get; set; }
     public bool ForceVisible { get; set; }
+    public bool DarkTheme { get; set; }
     public string Caption { get; set; } = "Geometry";
     public string SubCaption { get; set; } = "Import geometry to begin";
 
@@ -20,10 +21,23 @@ internal sealed class MechanicalViewport : Control
     {
         Dock = DockStyle.Fill;
         DoubleBuffered = true;
-        BackColor = Color.FromArgb(28, 32, 38);
+        BackColor = Color.FromArgb(232, 237, 243);
         MouseWheel += (_, e) => { _zoom = Math.Clamp(_zoom + (e.Delta > 0 ? .1f : -.1f), .45f, 2.4f); Invalidate(); };
-        MouseDown += (_, e) => { if (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Left && ModifierKeys.HasFlag(Keys.Control)) { _dragging = true; _last = e.Location; } };
-        MouseMove += (_, e) => { if (!_dragging) return; _yaw += (e.X - _last.X) * .01f; _last = e.Location; Invalidate(); };
+        MouseDown += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Middle || e.Button == MouseButtons.Left && ModifierKeys.HasFlag(Keys.Control))
+            {
+                _dragging = true;
+                _last = e.Location;
+            }
+        };
+        MouseMove += (_, e) =>
+        {
+            if (!_dragging) return;
+            _yaw += (e.X - _last.X) * .01f;
+            _last = e.Location;
+            Invalidate();
+        };
         MouseUp += (_, _) => _dragging = false;
     }
 
@@ -37,64 +51,73 @@ internal sealed class MechanicalViewport : Control
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        using (var bg = new LinearGradientBrush(ClientRectangle, Color.FromArgb(54, 60, 70), Color.FromArgb(17, 20, 24), 90f))
-            g.FillRectangle(bg, ClientRectangle);
-        DrawFloor(g);
-        DrawPart(g);
-        DrawTriad(g);
-        DrawOverlay(g);
-        if (ResultVisible) DrawLegend(g);
+        var graphics = e.Graphics;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var top = DarkTheme ? Color.FromArgb(54, 60, 70) : Color.FromArgb(252, 253, 255);
+        var bottom = DarkTheme ? Color.FromArgb(17, 20, 24) : Color.FromArgb(218, 226, 235);
+        using (var background = new LinearGradientBrush(ClientRectangle, top, bottom, 90f))
+            graphics.FillRectangle(background, ClientRectangle);
+        DrawFloor(graphics);
+        DrawPart(graphics);
+        DrawTriad(graphics);
+        DrawOverlay(graphics);
+        if (ResultVisible) DrawLegend(graphics);
     }
 
-    private void DrawFloor(Graphics g)
+    private void DrawFloor(Graphics graphics)
     {
-        using var pen = new Pen(Color.FromArgb(28, 230, 235, 240));
-        var h = ClientSize.Height * .72f;
-        for (var i = -11; i <= 11; i++)
+        var color = DarkTheme ? Color.FromArgb(28, 230, 235, 240) : Color.FromArgb(50, 87, 107, 127);
+        using var pen = new Pen(color);
+        var horizon = ClientSize.Height * .72f;
+        for (var index = -11; index <= 11; index++)
         {
-            var x = ClientSize.Width / 2f + i * 42f;
-            g.DrawLine(pen, x, h - 70, x + i * 9, ClientSize.Height);
+            var x = ClientSize.Width / 2f + index * 42f;
+            graphics.DrawLine(pen, x, horizon - 70, x + index * 9, ClientSize.Height);
         }
-        for (var j = 0; j < 8; j++)
+        for (var row = 0; row < 8; row++)
         {
-            var y = h + j * j * 4.5f;
-            g.DrawLine(pen, 0, y, ClientSize.Width, y);
+            var y = horizon + row * row * 4.5f;
+            graphics.DrawLine(pen, 0, y, ClientSize.Width, y);
         }
     }
 
-    private void DrawPart(Graphics g)
+    private void DrawPart(Graphics graphics)
     {
-        var cx = ClientSize.Width * .5f;
-        var cy = ClientSize.Height * .47f;
-        var s = Math.Min(ClientSize.Width, ClientSize.Height) * .30f * _zoom;
-        var length = s * 1.85f;
-        var height = s * .58f;
-        var depth = s * .38f;
-        var c = MathF.Cos(_yaw);
-        var sn = MathF.Sin(_yaw);
+        var centerX = ClientSize.Width * .5f;
+        var centerY = ClientSize.Height * .47f;
+        var scale = Math.Min(ClientSize.Width, ClientSize.Height) * .30f * _zoom;
+        var length = scale * 1.85f;
+        var height = scale * .58f;
+        var depth = scale * .38f;
+        var cosine = MathF.Cos(_yaw);
+        var sine = MathF.Sin(_yaw);
 
-        PointF P(float x, float y, float z)
+        PointF Project(float x, float y, float z)
         {
-            var rx = x * c - z * sn;
-            var rz = x * sn + z * c;
-            return new PointF(cx + rx, cy + y + rz * .38f);
+            var rotatedX = x * cosine - z * sine;
+            var rotatedZ = x * sine + z * cosine;
+            return new PointF(centerX + rotatedX, centerY + y + rotatedZ * .38f);
         }
 
-        var a = P(-length / 2, -height / 2, -depth / 2);
-        var b = P(length / 2, -height / 2, -depth / 2);
-        var c1 = P(length / 2, height / 2, -depth / 2);
-        var d = P(-length / 2, height / 2, -depth / 2);
-        var e = P(-length / 2, -height / 2, depth / 2);
-        var f = P(length / 2, -height / 2, depth / 2);
-        var h = P(length / 2, height / 2, depth / 2);
-        var i = P(-length / 2, height / 2, depth / 2);
+        var a = Project(-length / 2, -height / 2, -depth / 2);
+        var b = Project(length / 2, -height / 2, -depth / 2);
+        var c = Project(length / 2, height / 2, -depth / 2);
+        var d = Project(-length / 2, height / 2, -depth / 2);
+        var e = Project(-length / 2, -height / 2, depth / 2);
+        var f = Project(length / 2, -height / 2, depth / 2);
+        var h = Project(length / 2, height / 2, depth / 2);
+        var i = Project(-length / 2, height / 2, depth / 2);
 
         Color Face(int band, float shade)
         {
             if (!ResultVisible)
-                return Color.FromArgb((int)(76 * shade), (int)(142 * shade), (int)(188 * shade));
+            {
+                var baseColor = DarkTheme ? Color.FromArgb(76, 142, 188) : Color.FromArgb(70, 142, 190);
+                return Color.FromArgb(
+                    Math.Clamp((int)(baseColor.R * shade), 0, 255),
+                    Math.Clamp((int)(baseColor.G * shade), 0, 255),
+                    Math.Clamp((int)(baseColor.B * shade), 0, 255));
+            }
             return band switch
             {
                 0 => Color.FromArgb(30, 90, 220),
@@ -105,107 +128,117 @@ internal sealed class MechanicalViewport : Control
             };
         }
 
-        Fill(g, Face(1, .82f), a, b, c1, d);
-        Fill(g, Face(2, 1f), e, f, h, i);
-        Fill(g, Face(4, 1f), b, f, h, c1);
-        Fill(g, Face(3, 1f), a, e, f, b);
-        Fill(g, Face(0, .72f), a, d, i, e);
-        Fill(g, Face(2, .88f), d, c1, h, i);
+        Fill(graphics, Face(1, .82f), a, b, c, d);
+        Fill(graphics, Face(2, 1f), e, f, h, i);
+        Fill(graphics, Face(4, 1f), b, f, h, c);
+        Fill(graphics, Face(3, 1f), a, e, f, b);
+        Fill(graphics, Face(0, .72f), a, d, i, e);
+        Fill(graphics, Face(2, .88f), d, c, h, i);
 
-        using var edge = new Pen(Color.FromArgb(205, 226, 236), 1.2f);
-        foreach (var pair in new[] { (a,b),(b,c1),(c1,d),(d,a),(e,f),(f,h),(h,i),(i,e),(a,e),(b,f),(c1,h),(d,i) })
-            g.DrawLine(edge, pair.Item1, pair.Item2);
+        using var edge = new Pen(DarkTheme ? Color.FromArgb(205, 226, 236) : Color.FromArgb(49, 67, 82), 1.2f);
+        foreach (var pair in new[] { (a,b),(b,c),(c,d),(d,a),(e,f),(f,h),(h,i),(i,e),(a,e),(b,f),(c,h),(d,i) })
+            graphics.DrawLine(edge, pair.Item1, pair.Item2);
 
-        DrawHoles(g, P, length, height, depth);
-        if (MeshVisible) DrawMesh(g, new[] { a, b, c1, d, e, f, h, i });
-        if (SupportVisible) DrawSupport(g, P(-length * .51f, 0, 0));
-        if (ForceVisible) DrawForce(g, P(length * .52f, 0, 0));
+        DrawHoles(graphics, Project, length, height, depth);
+        if (MeshVisible) DrawMesh(graphics, new[] { a, b, c, d, e, f, h, i });
+        if (SupportVisible) DrawSupport(graphics, Project(-length * .51f, 0, 0));
+        if (ForceVisible) DrawForce(graphics, Project(length * .52f, 0, 0));
     }
 
-    private static void Fill(Graphics g, Color color, params PointF[] points)
+    private static void Fill(Graphics graphics, Color color, params PointF[] points)
     {
         using var brush = new SolidBrush(color);
-        g.FillPolygon(brush, points);
+        graphics.FillPolygon(brush, points);
     }
 
-    private static void DrawHoles(Graphics g, Func<float, float, float, PointF> p, float length, float height, float depth)
+    private void DrawHoles(Graphics graphics, Func<float, float, float, PointF> project, float length, float height, float depth)
     {
-        using var dark = new SolidBrush(Color.FromArgb(18, 22, 28));
-        using var rim = new Pen(Color.FromArgb(220, 230, 238), 1.1f);
+        using var dark = new SolidBrush(DarkTheme ? Color.FromArgb(18, 22, 28) : Color.FromArgb(224, 230, 236));
+        using var rim = new Pen(DarkTheme ? Color.FromArgb(220, 230, 238) : Color.FromArgb(45, 61, 75), 1.1f);
         foreach (var sign in new[] { -1, 1 })
         {
-            var center = p(sign * length * .31f, 0, depth * .51f);
-            var r = Math.Max(11f, height * .16f);
-            var rect = new RectangleF(center.X - r, center.Y - r * .55f, r * 2, r * 1.1f);
-            g.FillEllipse(dark, rect);
-            g.DrawEllipse(rim, rect);
+            var center = project(sign * length * .31f, 0, depth * .51f);
+            var radius = Math.Max(11f, height * .16f);
+            var rectangle = new RectangleF(center.X - radius, center.Y - radius * .55f, radius * 2, radius * 1.1f);
+            graphics.FillEllipse(dark, rectangle);
+            graphics.DrawEllipse(rim, rectangle);
         }
     }
 
-    private static void DrawMesh(Graphics g, PointF[] p)
+    private void DrawMesh(Graphics graphics, PointF[] points)
     {
-        using var pen = new Pen(Color.FromArgb(120, 10, 18, 24), .8f);
-        for (var n = 1; n < 10; n++)
+        using var pen = new Pen(DarkTheme ? Color.FromArgb(120, 10, 18, 24) : Color.FromArgb(125, 30, 48, 62), .8f);
+        for (var index = 1; index < 10; index++)
         {
-            var t = n / 10f;
-            g.DrawLine(pen, Lerp(p[0], p[1], t), Lerp(p[3], p[2], t));
-            g.DrawLine(pen, Lerp(p[4], p[5], t), Lerp(p[7], p[6], t));
-            g.DrawLine(pen, Lerp(p[0], p[3], t), Lerp(p[1], p[2], t));
-            g.DrawLine(pen, Lerp(p[4], p[7], t), Lerp(p[5], p[6], t));
+            var t = index / 10f;
+            graphics.DrawLine(pen, Lerp(points[0], points[1], t), Lerp(points[3], points[2], t));
+            graphics.DrawLine(pen, Lerp(points[4], points[5], t), Lerp(points[7], points[6], t));
+            graphics.DrawLine(pen, Lerp(points[0], points[3], t), Lerp(points[1], points[2], t));
+            graphics.DrawLine(pen, Lerp(points[4], points[7], t), Lerp(points[5], points[6], t));
         }
     }
 
-    private static PointF Lerp(PointF a, PointF b, float t) => new(a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t);
+    private static PointF Lerp(PointF start, PointF end, float t) =>
+        new(start.X + (end.X - start.X) * t, start.Y + (end.Y - start.Y) * t);
 
-    private static void DrawSupport(Graphics g, PointF p)
+    private static void DrawSupport(Graphics graphics, PointF point)
     {
-        using var pen = new Pen(Color.FromArgb(50, 225, 220), 2f);
-        for (var n = -3; n <= 3; n++) g.DrawLine(pen, p.X - 7, p.Y + n * 6, p.X - 28, p.Y + n * 6 + 10);
+        using var pen = new Pen(Color.FromArgb(0, 175, 180), 2f);
+        for (var index = -3; index <= 3; index++)
+            graphics.DrawLine(pen, point.X - 7, point.Y + index * 6, point.X - 28, point.Y + index * 6 + 10);
     }
 
-    private static void DrawForce(Graphics g, PointF p)
+    private static void DrawForce(Graphics graphics, PointF point)
     {
-        using var pen = new Pen(Color.FromArgb(245, 75, 75), 3f) { EndCap = LineCap.ArrowAnchor };
-        g.DrawLine(pen, p.X + 105, p.Y - 55, p.X + 10, p.Y - 5);
+        using var pen = new Pen(Color.FromArgb(220, 45, 55), 3f) { EndCap = LineCap.ArrowAnchor };
+        graphics.DrawLine(pen, point.X + 105, point.Y - 55, point.X + 10, point.Y - 5);
         using var font = new Font("Segoe UI Semibold", 9f);
-        g.DrawString("Force", font, Brushes.LightCoral, p.X + 58, p.Y - 78);
+        using var brush = new SolidBrush(Color.FromArgb(196, 35, 48));
+        graphics.DrawString("Force", font, brush, point.X + 58, point.Y - 78);
     }
 
-    private void DrawTriad(Graphics g)
+    private void DrawTriad(Graphics graphics)
     {
-        var o = new PointF(ClientSize.Width - 75, ClientSize.Height - 58);
+        var origin = new PointF(ClientSize.Width - 75, ClientSize.Height - 58);
         using var x = new Pen(Color.IndianRed, 2f) { EndCap = LineCap.ArrowAnchor };
-        using var y = new Pen(Color.LightGreen, 2f) { EndCap = LineCap.ArrowAnchor };
-        using var z = new Pen(Color.LightBlue, 2f) { EndCap = LineCap.ArrowAnchor };
-        g.DrawLine(x, o, new PointF(o.X + 38, o.Y));
-        g.DrawLine(y, o, new PointF(o.X, o.Y - 38));
-        g.DrawLine(z, o, new PointF(o.X - 25, o.Y + 22));
+        using var y = new Pen(Color.ForestGreen, 2f) { EndCap = LineCap.ArrowAnchor };
+        using var z = new Pen(Color.RoyalBlue, 2f) { EndCap = LineCap.ArrowAnchor };
+        graphics.DrawLine(x, origin, new PointF(origin.X + 38, origin.Y));
+        graphics.DrawLine(y, origin, new PointF(origin.X, origin.Y - 38));
+        graphics.DrawLine(z, origin, new PointF(origin.X - 25, origin.Y + 22));
     }
 
-    private void DrawOverlay(Graphics g)
+    private void DrawOverlay(Graphics graphics)
     {
-        using var panel = new SolidBrush(Color.FromArgb(155, 10, 13, 17));
-        g.FillRectangle(panel, 14, 14, 290, 58);
+        var panelColor = DarkTheme ? Color.FromArgb(155, 10, 13, 17) : Color.FromArgb(215, 255, 255, 255);
+        using var panel = new SolidBrush(panelColor);
+        graphics.FillRectangle(panel, 14, 14, 310, 58);
+        using var border = new Pen(DarkTheme ? Color.FromArgb(75, 100, 115) : Color.FromArgb(177, 188, 200));
+        graphics.DrawRectangle(border, 14, 14, 310, 58);
         using var title = new Font("Segoe UI Semibold", 10f);
         using var text = new Font("Segoe UI", 8.7f);
-        g.DrawString(Caption, title, Brushes.White, 25, 22);
-        g.DrawString(SubCaption, text, Brushes.LightGray, 25, 46);
-        g.DrawString("Ctrl + drag: rotate    Wheel: zoom    F7: fit", text, Brushes.LightGray, 14, ClientSize.Height - 25);
+        using var titleBrush = new SolidBrush(DarkTheme ? Color.White : Color.FromArgb(28, 40, 52));
+        using var textBrush = new SolidBrush(DarkTheme ? Color.LightGray : Color.FromArgb(73, 87, 102));
+        graphics.DrawString(Caption, title, titleBrush, 25, 22);
+        graphics.DrawString(SubCaption, text, textBrush, 25, 46);
+        graphics.DrawString("Ctrl + drag: rotate    Wheel: zoom    F7: fit", text, textBrush, 14, ClientSize.Height - 25);
     }
 
-    private void DrawLegend(Graphics g)
+    private void DrawLegend(Graphics graphics)
     {
-        var rect = new Rectangle(ClientSize.Width - 115, 38, 30, Math.Max(150, ClientSize.Height / 3));
-        using var gradient = new LinearGradientBrush(rect, Color.Red, Color.Blue, 90f);
+        var rectangle = new Rectangle(ClientSize.Width - 115, 38, 30, Math.Max(150, ClientSize.Height / 3));
+        using var gradient = new LinearGradientBrush(rectangle, Color.Red, Color.Blue, 90f);
         gradient.InterpolationColors = new ColorBlend
         {
             Colors = new[] { Color.Red, Color.Orange, Color.Yellow, Color.LimeGreen, Color.Cyan, Color.Blue },
             Positions = new[] { 0f, .2f, .4f, .6f, .8f, 1f }
         };
-        g.FillRectangle(gradient, rect);
-        g.DrawRectangle(Pens.LightGray, rect);
+        graphics.FillRectangle(gradient, rectangle);
+        using var border = new Pen(DarkTheme ? Color.LightGray : Color.FromArgb(55, 65, 75));
+        graphics.DrawRectangle(border, rectangle);
         using var font = new Font("Segoe UI", 8f);
-        g.DrawString("Max", font, Brushes.White, rect.Right + 5, rect.Top - 2);
-        g.DrawString("Min", font, Brushes.White, rect.Right + 5, rect.Bottom - 11);
+        using var brush = new SolidBrush(DarkTheme ? Color.White : Color.FromArgb(35, 45, 55));
+        graphics.DrawString("Max", font, brush, rectangle.Right + 5, rectangle.Top - 2);
+        graphics.DrawString("Min", font, brush, rectangle.Right + 5, rectangle.Bottom - 11);
     }
 }
