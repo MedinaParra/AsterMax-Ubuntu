@@ -50,6 +50,53 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -o publish/win-x64
 
+      - name: Bundle official Gmsh 4.15.2
+        shell: pwsh
+        run: |
+          $uri = "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip"
+          Invoke-WebRequest -Uri $uri -OutFile gmsh-windows.zip
+          Expand-Archive gmsh-windows.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          if (-not $source) { throw "The Gmsh archive did not contain a directory." }
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+          $gmsh = Resolve-Path "$target/gmsh.exe"
+          & $gmsh -version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled Gmsh failed its version check." }
+
+      - name: Generate complex STEP smoke geometry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke-cad | Out-Null
+          @'
+          SetFactory("OpenCASCADE");
+          Box(1) = {0, 0, 0, 80, 50, 20};
+          Cylinder(2) = {20, 25, -5, 0, 0, 30, 6};
+          Cylinder(3) = {60, 25, -5, 0, 0, 30, 6};
+          BooleanDifference(10) = { Volume{1}; Delete; }{ Volume{2,3}; Delete; };
+          Save "complex-flange.step";
+          '@ | Set-Content smoke-cad/complex.geo -Encoding ascii
+          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
+          Push-Location smoke-cad
+          & $gmsh complex.geo -0 -nopopup -v 2
+          $code = $LASTEXITCODE
+          Pop-Location
+          if ($code -ne 0 -or -not (Test-Path smoke-cad/complex-flange.step)) {
+            throw "Unable to generate the complex STEP smoke geometry."
+          }
+
+      - name: Gmsh STEP preview and TET4 smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          $arguments = @("--gmsh-smoke", "`"$gmsh`"", "`"$step`"")
+          $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "AsterMax Gmsh STEP smoke test failed with code $($process.ExitCode)." }
+          Write-Host "AsterMax imported and tetrahedralized a curved STEP with two holes."
+
       - name: Windows startup smoke test
         shell: pwsh
         run: |
@@ -71,21 +118,26 @@ jobs:
           }
           Write-Host "AsterMax startup smoke test passed."
 
-      - name: Prepare package
+      - name: Prepare portable package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.6.0-beta.exe
+          Copy-Item publish/win-x64/tools artifact/tools -Recurse -Force
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.7.0-beta.exe
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
           Copy-Item windows/AsterMax.MechanicalGui/Icons/AsterMaxIconSet.svg artifact/AsterMaxIconSet.svg
-          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.6.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-0.6.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.6.0-beta.exe.sha256 -Encoding ascii
-          Get-ChildItem artifact | Format-Table Name, Length
+          Copy-Item smoke-cad/complex-flange.step artifact/AsterMax_Complex_STEP_Smoke.step
+          '@echo off
+          start "" "%~dp0AsterMax-Mechanical-0.7.0-beta.exe"
+          '@ | Set-Content artifact/RUN-AsterMax.cmd -Encoding ascii
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.7.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.7.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.7.0-beta.exe.sha256 -Encoding ascii
+          Get-ChildItem artifact -Recurse | Select-Object FullName, Length | Format-Table
 
-      - name: Upload executable
+      - name: Upload portable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-0.6.0-beta-win-x64
-          path: artifact/*
+          name: AsterMax-Mechanical-0.7.0-beta-win-x64-with-gmsh
+          path: artifact/**
           if-no-files-found: error
           retention-days: 30
