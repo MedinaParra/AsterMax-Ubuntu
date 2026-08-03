@@ -36,8 +36,9 @@ jobs:
         shell: pwsh
         run: |
           $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
-          & $exe --solver-smoke
-          if ($LASTEXITCODE -ne 0) { throw "AsterMax TET4 solver smoke test failed with code $LASTEXITCODE." }
+          $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "AsterMax TET4 solver smoke test failed with code $($process.ExitCode)." }
+          Write-Host "AsterMax real TET4 solver smoke test passed."
 
       - name: Publish Windows executable
         run: >-
