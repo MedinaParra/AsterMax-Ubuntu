@@ -5,13 +5,14 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <StartupObject>AsterMax.WindowsNative.ProgramV2</StartupObject>
     <AssemblyName>AsterMax-Windows-Native</AssemblyName>
     <RootNamespace>AsterMax.WindowsNative</RootNamespace>
-    <Version>0.1.0-beta</Version>
+    <Version>0.2.0-beta</Version>
     <Authors>Exequiel Medina</Authors>
     <Company>AsterMax</Company>
     <Product>AsterMax Windows Native Bridge</Product>
-    <Description>Native Windows bridge for running Code_Aster export jobs from AsterMax.</Description>
+    <Description>Native Windows validation bridge for running and diagnosing Code_Aster export jobs.</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
