@@ -35,7 +35,7 @@ jobs:
       - name: Real TET4 solver smoke test
         shell: pwsh
         run: |
-          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/AsterMax-Mechanical.exe
+          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
           & $exe --solver-smoke
           if ($LASTEXITCODE -ne 0) { throw "AsterMax TET4 solver smoke test failed with code $LASTEXITCODE." }
 
