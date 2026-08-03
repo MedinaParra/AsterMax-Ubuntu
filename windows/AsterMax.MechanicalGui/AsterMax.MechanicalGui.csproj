@@ -7,11 +7,11 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AsterMax-Mechanical</AssemblyName>
     <RootNamespace>AsterMax.MechanicalGui</RootNamespace>
-    <Version>0.4.0-beta</Version>
+    <Version>0.5.0-beta</Version>
     <Authors>Exequiel Medina</Authors>
     <Company>AsterMax</Company>
     <Product>AsterMax Mechanical</Product>
-    <Description>Mechanical finite-element workflow GUI for AsterMax and native Code_Aster.</Description>
+    <Description>Mechanical-style finite-element workflow with a restricted real STEP/TET4 static tutorial.</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
