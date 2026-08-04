@@ -8,8 +8,8 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 
 | Increment | Scope | Source/design gate | Runtime gate | Status |
 |---|---|---|---|---|
-| 01 | WS01.1 Mechanical Basics | Accepted below | Deferred until 50% | Source-complete |
-| 02 | WS02.1 2D Gear and Rack | Pending | Deferred until 50% | Pending |
+| 01 | WS01.1 Mechanical Basics | Accepted | Deferred until 50% | Source-complete |
+| 02 | WS02.1 2D Gear and Rack | Accepted | Deferred until 50% | Source-complete |
 | 03 | WS02.2 Named Selections | Pending | Deferred until 50% | Pending |
 | 04 | WS02.3 Object Generator | Pending | Deferred until 50% | Pending |
 | 05 | WS02.4 Object Generator with Named Selections | Pending | Deferred until 50% | Pending |
@@ -29,87 +29,23 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 5%.**
+**Current source/design progress: 10%.**
 
-## Increment 01 acceptance contract — WS01.1 Mechanical Basics
+## Increment 01 — WS01.1 Mechanical Basics
 
-### Required workflow states
+Accepted source evidence includes the Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solution objects, versioned project services, a persistent general-CAD TET4 path, authentic displacement/stress/reaction recovery and explicit unsupported-flow failures. Runtime acceptance remains queued for the 50% compile gate.
 
-The application model shall expose these states independently of presentation controls:
+## Increment 02 — WS02.1 2D Gear and Rack
 
-- `Incomplete`
-- `UpToDate`
-- `OutOfDate`
-- `Solving`
-- `Solved`
-- `Error`
-- `Suppressed`
+Accepted source evidence:
 
-A parent becomes `OutOfDate` when any dependency changes. A solve may begin only when all mandatory children are complete. Unsupported objects must fail explicitly rather than being ignored.
-
-### Required project operations
-
-- New project.
-- Open project.
-- Save project.
-- Save As.
-- Reopen without losing object identity or scope.
-- Rename, duplicate, suppress, unsuppress and delete objects.
-- Versioned project schema with forward migration hooks.
-- Dirty-state tracking independent of solver state.
-
-### Required interaction contract
-
-- Ribbon or menu insertion of analysis objects.
-- Outline selection drives Details content.
-- Graphics selection can be committed to the active object's scope.
-- Both `preselect → insert` and `insert → apply scope` sequences are supported.
-- Worksheet and Graph panels can bind to the active object without owning project data.
-- UI labels are presentation-only; persistence uses stable type identifiers.
-
-### Unit contract
-
-Canonical storage uses SI. Display systems must include:
-
-- mm–N–MPa;
-- m–N–Pa;
-- in–lbf–psi.
-
-Every dimensional property stores a quantity type and converts only at the UI or import/export boundary. Unit-system changes must not alter the physical model.
-
-### Persistence contract
-
-The saved project must retain:
-
-- schema version;
-- application version;
-- stable object IDs;
-- parent/child ordering;
-- object type IDs;
-- names and suppression state;
-- geometry references;
-- Named Selection references;
-- material assignments;
-- loads, supports and settings;
-- result requests;
-- solver-run metadata and hashes when available;
-- active unit system and view preferences.
-
-Geometry references must use persistent signatures rather than transient entity indices alone. A signature contains entity type, geometric measure, centroid, bounding box and orientation data with a configurable matching tolerance.
-
-### Source-level verification
-
-The current branch already demonstrates the minimum analysis path needed by this increment:
-
-- a Mechanical-style Ribbon, Outline, Graphics, Details and Worksheet layout;
-- STEP geometry import and CAD-face scoping;
-- material, support, force, mesh and solution objects;
-- a persistent general-CAD TET4 solver path;
-- authentic displacement, stress and reaction recovery;
-- explicit limitations for unsupported workflows.
-
-The remaining runtime acceptance for this increment is intentionally queued for the first compile gate at 50%.
+- `TwoDimensionalAnalysisDomain.cs` defines plane stress, plane strain and axisymmetric formulations.
+- Planar sections retain stable IDs, thickness, origin and analysis-plane orientation.
+- Planar bodies retain geometry, section, material, role and persistent face signature.
+- Gear/rack interaction is represented by stable source/target edge-selection IDs.
+- Validation rejects invalid thickness, normals, identifiers, unknown sections, mixed formulations, missing active bodies and absent edge scope.
+- `docs/validation/ws02-1-2d-gear-rack-contract.md` records the workflow and deferred runtime acceptance.
 
 ## Compile gate
 
-Before 50%, verification is limited to source, schema, state-machine and workflow consistency. At exactly 50%, the branch must be compiled and the first ten increments must be exercised with recorded results before any of them can be promoted from `Source-complete` to `Validated`.
+Before 50%, verification is limited to source, schema, state-machine and workflow consistency. At exactly 50%, the branch must be compiled and the first ten increments exercised with recorded results before any of them can be promoted from `Source-complete` to `Validated`.
