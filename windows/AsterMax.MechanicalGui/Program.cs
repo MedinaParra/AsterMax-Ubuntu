@@ -25,7 +25,12 @@ internal static class Program
 
         var workflowSmokeIndex = Array.FindIndex(args, arg => string.Equals(arg, "--workflow-smoke", StringComparison.OrdinalIgnoreCase));
         if (workflowSmokeIndex >= 0)
-            return StandardWorkflowVerifier.Run(new[] { "--workflow-smoke" }.Concat(args.Skip(workflowSmokeIndex + 1)).ToArray());
+        {
+            var workflowArguments = args.Skip(workflowSmokeIndex + 1).ToArray();
+            var generalSolverResult = GeneralCadSolverSmoke.Run(workflowArguments);
+            if (generalSolverResult != 0) return generalSolverResult;
+            return StandardWorkflowVerifier.Run(new[] { "--workflow-smoke" }.Concat(workflowArguments).ToArray());
+        }
 
         _smokeTest = args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase));
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
