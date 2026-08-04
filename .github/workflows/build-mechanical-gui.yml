@@ -47,6 +47,139 @@ jobs:
           $form = $form.Replace("AsterMax Mechanical 0.7.1 beta", "AsterMax Mechanical 0.8.0 beta")
           Set-Content $formPath $form -Encoding utf8
 
+      - name: Freeze assembled stiffness matrix into CSR
+        shell: pwsh
+        run: |
+          $path = "windows/AsterMax.MechanicalGui/GeneralCadTet4Solver.cs"
+          $text = Get-Content $path -Raw
+          $text = $text.Replace("        stiffness.ValidateDiagonal();", "        stiffness.ValidateDiagonal();`r`n        stiffness.Freeze();")
+          $old = @'
+              private sealed class SparseMatrix
+              {
+                  private readonly Dictionary<int, double>[] _rows;
+                  public double[] Diagonal { get; }
+
+                  public SparseMatrix(int size)
+                  {
+                      _rows = Enumerable.Range(0, size).Select(_ => new Dictionary<int, double>(48)).ToArray();
+                      Diagonal = new double[size];
+                  }
+
+                  public void Add(int row, int column, double value)
+                  {
+                      if (Math.Abs(value) <= 1e-30) return;
+                      var entries = _rows[row];
+                      entries[column] = entries.GetValueOrDefault(column) + value;
+                      if (row == column) Diagonal[row] += value;
+                  }
+
+                  public void ValidateDiagonal()
+                  {
+                      var maximum = Diagonal.Select(Math.Abs).DefaultIfEmpty(1.0).Max();
+                      var minimumAllowed = Math.Max(1e-18, maximum * 1e-14);
+                      for (var index = 0; index < Diagonal.Length; index++)
+                      {
+                          if (!double.IsFinite(Diagonal[index]) || Diagonal[index] <= minimumAllowed)
+                              throw new InvalidOperationException(
+                                  $"The stiffness diagonal is singular at free degree of freedom {index + 1}. " +
+                                  "The mesh may contain disconnected nodes or insufficient supports.");
+                      }
+                  }
+
+                  public void Multiply(double[] vector, double[] result)
+                  {
+                      Array.Clear(result);
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          var sum = 0.0;
+                          foreach (var (column, value) in _rows[row]) sum += value * vector[column];
+                          result[row] = sum;
+                      }
+                  }
+              }
+          '@
+          $new = @'
+              private sealed class SparseMatrix
+              {
+                  private readonly Dictionary<int, double>[] _rows;
+                  private int[]? _rowPointers;
+                  private int[]? _columnIndices;
+                  private double[]? _values;
+                  public double[] Diagonal { get; }
+
+                  public SparseMatrix(int size)
+                  {
+                      _rows = Enumerable.Range(0, size).Select(_ => new Dictionary<int, double>(48)).ToArray();
+                      Diagonal = new double[size];
+                  }
+
+                  public void Add(int row, int column, double value)
+                  {
+                      if (_rowPointers is not null)
+                          throw new InvalidOperationException("Cannot add stiffness entries after CSR finalization.");
+                      if (Math.Abs(value) <= 1e-30) return;
+                      var entries = _rows[row];
+                      entries[column] = entries.GetValueOrDefault(column) + value;
+                      if (row == column) Diagonal[row] += value;
+                  }
+
+                  public void ValidateDiagonal()
+                  {
+                      var maximum = Diagonal.Select(Math.Abs).DefaultIfEmpty(1.0).Max();
+                      var minimumAllowed = Math.Max(1e-18, maximum * 1e-14);
+                      for (var index = 0; index < Diagonal.Length; index++)
+                      {
+                          if (!double.IsFinite(Diagonal[index]) || Diagonal[index] <= minimumAllowed)
+                              throw new InvalidOperationException(
+                                  $"The stiffness diagonal is singular at free degree of freedom {index + 1}. " +
+                                  "The mesh may contain disconnected nodes or insufficient supports.");
+                      }
+                  }
+
+                  public void Freeze()
+                  {
+                      if (_rowPointers is not null) return;
+                      _rowPointers = new int[_rows.Length + 1];
+                      var nonzeroCount = 0;
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          _rowPointers[row] = nonzeroCount;
+                          nonzeroCount += _rows[row].Count;
+                      }
+                      _rowPointers[^1] = nonzeroCount;
+                      _columnIndices = new int[nonzeroCount];
+                      _values = new double[nonzeroCount];
+                      var cursor = 0;
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          foreach (var entry in _rows[row].OrderBy(entry => entry.Key))
+                          {
+                              _columnIndices[cursor] = entry.Key;
+                              _values[cursor] = entry.Value;
+                              cursor++;
+                          }
+                          _rows[row].Clear();
+                      }
+                  }
+
+                  public void Multiply(double[] vector, double[] result)
+                  {
+                      if (_rowPointers is null || _columnIndices is null || _values is null) Freeze();
+                      Array.Clear(result);
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          var sum = 0.0;
+                          for (var index = _rowPointers![row]; index < _rowPointers[row + 1]; index++)
+                              sum += _values![index] * vector[_columnIndices![index]];
+                          result[row] = sum;
+                      }
+                  }
+              }
+          '@
+          if (-not $text.Contains($old)) { throw "SparseMatrix source block was not found for CSR conversion." }
+          $text = $text.Replace($old, $new)
+          Set-Content $path $text -Encoding utf8
+
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
         with:
