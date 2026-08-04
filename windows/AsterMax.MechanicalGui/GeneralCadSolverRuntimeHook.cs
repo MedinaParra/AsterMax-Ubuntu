@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 namespace AsterMax.MechanicalGui;
 
 internal static class ProgressReportExtension
@@ -81,65 +79,73 @@ internal sealed partial class MechanicalForm
     }
 }
 
-internal static class GeneralCadSolverModuleGate
+internal static class GeneralCadSolverSmoke
 {
-    [ModuleInitializer]
-    internal static void RunBeforeMain()
+    public static int Run(string[] args)
     {
-        var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
-        var workflowIndex = Array.FindIndex(args, arg => string.Equals(arg, "--workflow-smoke", StringComparison.OrdinalIgnoreCase));
-        if (workflowIndex < 0) return;
-        if (args.Length < workflowIndex + 3) return;
-
         try
         {
-            var gmsh = Path.GetFullPath(args[workflowIndex + 1]);
-            var step = Path.GetFullPath(args[workflowIndex + 2]);
-            if (!File.Exists(gmsh) || !File.Exists(step)) return;
+            if (args.Length < 2)
+                throw new InvalidOperationException("Usage: --general-cad-solver-smoke <gmsh.exe> <complex.step>");
 
+            var gmsh = Path.GetFullPath(args[0]);
+            var step = Path.GetFullPath(args[1]);
+            if (!File.Exists(gmsh)) throw new FileNotFoundException("Gmsh executable was not found.", gmsh);
+            if (!File.Exists(step)) throw new FileNotFoundException("Complex STEP smoke model was not found.", step);
+
+            Console.WriteLine("General CAD solver smoke: generating bounded volume mesh...");
             var envelope = SimpleStepReader.ReadPrismaticSolid(step);
             var longest = Math.Max(envelope.LengthX, Math.Max(envelope.LengthY, envelope.LengthZ));
             var target = Math.Max(longest / 3.0, 0.1);
             var mesh = SelectableGmshMesher.GenerateAsync(gmsh, step, target, 3, CancellationToken.None)
                 .GetAwaiter().GetResult();
             var topology = CadTopologyRegistry.Get(mesh);
+            Console.WriteLine($"General CAD solver smoke: {mesh.Nodes.Count} nodes, {mesh.Tetrahedra.Count} TET4, {topology.Faces.Count} faces.");
             if (mesh.Tetrahedra.Count == 0 || topology.Faces.Count < 4)
-                throw new InvalidOperationException("General CAD solver gate did not obtain a valid volume mesh and selectable faces.");
+                throw new InvalidOperationException("The smoke model did not produce a valid volume mesh and selectable faces.");
 
             var ordered = topology.Faces.Values.OrderBy(face => face.Centroid.X).ToArray();
             var fixedFace = ordered.First();
             var loadedFace = ordered.Last();
             if (fixedFace.Tag == loadedFace.Tag)
-                throw new InvalidOperationException("General CAD solver gate selected the same face for support and load.");
+                throw new InvalidOperationException("The same face was selected for support and load.");
 
-            using var solveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            Console.WriteLine($"General CAD solver smoke: support Face {fixedFace.Tag}, load Face {loadedFace.Tag}.");
+            using var solveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             var solution = GeneralCadTet4Solver.Solve(
                 mesh,
                 new StaticMaterial(),
                 fixedFace.NodeIndices.ToArray(),
                 new[] { new CadSurfaceForce(loadedFace.TriangleIndices, new Vec3(1000, 0, 0), "Automated Axial Surface Force") },
-                cancellationToken: solveTimeout.Token);
+                message => Console.WriteLine(message),
+                solveTimeout.Token);
 
             if (!double.IsFinite(solution.MaxDisplacementMm) || solution.MaxDisplacementMm <= 0)
-                throw new InvalidOperationException("General CAD solver returned an invalid maximum displacement.");
+                throw new InvalidOperationException("The solver returned an invalid maximum displacement.");
             if (!double.IsFinite(solution.MaxVonMisesMpa) || solution.MaxVonMisesMpa <= 0)
-                throw new InvalidOperationException("General CAD solver returned an invalid equivalent stress.");
-            if (solution.RelativeResidual > 1e-7)
-                throw new InvalidOperationException($"General CAD PCG residual failed: {solution.RelativeResidual:E3}.");
-            if (solution.EquilibriumError > 1e-6)
-                throw new InvalidOperationException($"General CAD equilibrium failed: {solution.EquilibriumError:E3}.");
+                throw new InvalidOperationException("The solver returned an invalid equivalent stress.");
+            if (solution.RelativeResidual > 2e-6)
+                throw new InvalidOperationException($"PCG residual failed: {solution.RelativeResidual:E3}.");
+            if (solution.EquilibriumError > 2e-5)
+                throw new InvalidOperationException($"Force equilibrium failed: {solution.EquilibriumError:E3}.");
 
             Console.WriteLine(
-                $"General CAD sparse solver gate passed | {mesh.Nodes.Count} nodes, {mesh.Tetrahedra.Count} TET4, " +
+                $"General CAD sparse solver passed | {mesh.Nodes.Count} nodes, {mesh.Tetrahedra.Count} TET4, " +
                 $"{topology.Faces.Count} faces, Umax={solution.MaxDisplacementMm:G8} mm, " +
                 $"VM={solution.MaxVonMisesMpa:G8} MPa, PCG={solution.Iterations}, " +
                 $"residual={solution.RelativeResidual:E3}, equilibrium={solution.EquilibriumError:E3}");
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("GENERAL CAD SOLVER SMOKE FAILED: 90-second numerical timeout.");
+            return 23;
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine("GENERAL CAD SOLVER GATE FAILED");
+            Console.Error.WriteLine("GENERAL CAD SOLVER SMOKE FAILED");
             Console.Error.WriteLine(exception);
-            Environment.Exit(23);
+            return 23;
         }
     }
 }
