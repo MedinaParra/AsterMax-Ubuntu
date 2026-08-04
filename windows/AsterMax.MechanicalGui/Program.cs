@@ -18,6 +18,10 @@ internal static class Program
         if (gmshSmokeIndex >= 0)
             return RunGmshSmokeTest(args.Skip(gmshSmokeIndex + 1).ToArray());
 
+        var workflowSmokeIndex = Array.FindIndex(args, arg => string.Equals(arg, "--workflow-smoke", StringComparison.OrdinalIgnoreCase));
+        if (workflowSmokeIndex >= 0)
+            return StandardWorkflowVerifier.Run(new[] { "--workflow-smoke" }.Concat(args.Skip(workflowSmokeIndex + 1)).ToArray());
+
         _smokeTest = args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase));
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         Application.ThreadException += (_, eventArgs) => HandleFatal(eventArgs.Exception, "UI thread");
@@ -108,7 +112,7 @@ internal static class Program
                 $"Thermal energy balance error is {thermal.EnergyBalanceError:E3}.");
 
             Console.WriteLine(
-                $"AsterMax 0.7 tutorial smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
+                $"AsterMax 0.7.1 tutorial capability smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
                 $"Umax={result.MaxDisplacementMm:G8} mm, VM={result.MaxVonMisesMpa:G8} MPa | " +
                 $"modal f1={modal[0].FrequencyHz:G8} Hz ({modal[0].DifferencePercent:G4}% error) | " +
                 $"thermal Q={thermal.HeatFlowW:G8} W, balance={thermal.EnergyBalanceError:E3}");
@@ -135,11 +139,16 @@ internal static class Program
             Require(!envelope.IsSupportedPrism, "The Gmsh smoke geometry must exercise curved or holed topology.");
             var longest = Math.Max(envelope.LengthX, Math.Max(envelope.LengthY, envelope.LengthZ));
             var target = Math.Max(longest / 10.0, 0.1);
-            var surface = GmshCliMesher.GenerateAsync(gmsh, step, target, 2, CancellationToken.None).GetAwaiter().GetResult();
-            var volume = GmshCliMesher.GenerateAsync(gmsh, step, target, 3, CancellationToken.None).GetAwaiter().GetResult();
+            var surface = SelectableGmshMesher.GenerateAsync(gmsh, step, target, 2, CancellationToken.None).GetAwaiter().GetResult();
+            var volume = SelectableGmshMesher.GenerateAsync(gmsh, step, target, 3, CancellationToken.None).GetAwaiter().GetResult();
             Require(surface.Nodes.Count > 0 && surface.SurfaceTriangles.Count > 0, "Surface preview mesh is empty.");
             Require(volume.Nodes.Count > 0 && volume.SurfaceTriangles.Count > 0 && volume.Tetrahedra.Count > 0, "Volume tetrahedral mesh is empty.");
-            Console.WriteLine($"Gmsh STEP smoke passed | surface: {surface.Nodes.Count} nodes, {surface.SurfaceTriangles.Count} triangles | volume: {volume.Nodes.Count} nodes, {volume.Tetrahedra.Count} TET4");
+            var surfaceTopology = CadTopologyRegistry.Get(surface);
+            var volumeTopology = CadTopologyRegistry.Get(volume);
+            Require(surfaceTopology.Faces.Count >= 4, "Surface preview did not preserve selectable CAD faces.");
+            Require(volumeTopology.Faces.Count >= 4, "Volume mesh did not preserve selectable CAD faces.");
+            Require(volumeTopology.Faces.Values.All(face => face.NodeIndices.Count > 0 && face.TriangleIndices.Count > 0), "At least one selectable face has an empty mesh scope.");
+            Console.WriteLine($"Gmsh STEP smoke passed | surface: {surface.Nodes.Count} nodes, {surface.SurfaceTriangles.Count} triangles, {surfaceTopology.Faces.Count} faces | volume: {volume.Nodes.Count} nodes, {volume.Tetrahedra.Count} TET4, {volumeTopology.Faces.Count} faces");
             return 0;
         }
         catch (Exception exception)
@@ -162,7 +171,7 @@ internal static class Program
             Directory.CreateDirectory(CrashDirectory);
             crashFile = Path.Combine(CrashDirectory, $"astermax-crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(crashFile,
-                $"AsterMax Mechanical 0.7 beta{Environment.NewLine}" +
+                $"AsterMax Mechanical 0.7.1 beta{Environment.NewLine}" +
                 $"Stage: {stage}{Environment.NewLine}" +
                 $"Windows: {Environment.OSVersion}{Environment.NewLine}" +
                 $"64-bit process: {Environment.Is64BitProcess}{Environment.NewLine}" +
