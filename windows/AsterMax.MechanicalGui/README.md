@@ -1,4 +1,4 @@
-# AsterMax Mechanical 0.7.1 beta
+# AsterMax Mechanical 0.8.0 beta
 
 Portable Windows x64 finite-element application with a Mechanical-style workflow, real STEP visualization through Gmsh/OpenCASCADE, selectable CAD faces and verified tutorial capabilities.
 
@@ -7,7 +7,7 @@ Portable Windows x64 finite-element application with a Mechanical-style workflow
 Extract the complete ZIP before running the program. Keep this structure together:
 
 ```text
-AsterMax-Mechanical-0.7.1-beta.exe
+AsterMax-Mechanical-0.8.0-beta.exe
 RUN-AsterMax.cmd
 tools/gmsh/gmsh.exe
 ```
@@ -54,7 +54,7 @@ A STEP containing curved surfaces, holes or non-prismatic topology uses Gmsh/Ope
 - real support/load scopes containing the corresponding boundary triangles and mesh nodes;
 - visual markers for selected, supported and loaded faces.
 
-The arbitrary unstructured TET4 static solve is not enabled yet. AsterMax validates the general CAD preprocessing state and blocks **Solve** instead of returning simulated stresses. The next required block is the sparse Code_Aster/general TET4 solve adapter.
+The general CAD route now performs sparse TET4 assembly, CSR matrix-vector products, diagonally preconditioned conjugate-gradient solution, reactions, displacement and von Mises recovery.
 
 ## Existing tutorial capability verification
 
@@ -90,7 +90,7 @@ The included `AsterMax_Complex_STEP_Smoke.step` can be used to reproduce the com
 ## Current limitations
 
 - General CAD currently supports one closed STEP/STP solid; assemblies and multiple bodies are not yet mapped.
-- General CAD face selection and support/load scoping work, but its static solution still awaits the sparse Code_Aster/general TET4 adapter.
+- General CAD static solution is limited to one closed isotropic linear-elastic solid, first-order TET4 elements, fixed supports and total forces applied to selected faces.
 - IGES and BREP are not presented as functional formats in this build.
 - The verified internal static and thermal solution paths remain limited to a rectangular prism.
 - Modal analysis is a one-dimensional Euler-Bernoulli model, not a general 3-D eigensolver.

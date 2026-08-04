@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AsterMax-Mechanical</AssemblyName>
     <RootNamespace>AsterMax.MechanicalGui</RootNamespace>
-    <Version>0.7.1-beta</Version>
+    <Version>0.8.0-beta</Version>
     <Authors>Exequiel Medina</Authors>
     <Company>AsterMax</Company>
     <Product>AsterMax Mechanical</Product>

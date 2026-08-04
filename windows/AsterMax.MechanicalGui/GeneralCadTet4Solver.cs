@@ -106,14 +106,15 @@ internal static class GeneralCadTet4Solver
                 progress?.Invoke($"Stiffness assembly: {elementIndex + 1:N0}/{mesh.Tetrahedra.Count:N0} elements...");
         }
         stiffness.ValidateDiagonal();
+        stiffness.Freeze();
 
         progress?.Invoke($"Solving sparse positive-definite system ({freeToGlobal.Count:N0} unknowns)...");
-        var maximumIterations = Math.Clamp(freeToGlobal.Count * 8, 600, 30000);
+        var maximumIterations = Math.Clamp(freeToGlobal.Count * 3, 300, 8000);
         var (reducedDisplacement, iterations, relativeResidual) = SolvePreconditionedConjugateGradient(
             stiffness,
             reducedLoad,
             maximumIterations,
-            1e-9,
+            1e-6,
             progress,
             cancellationToken);
 
@@ -342,6 +343,9 @@ internal static class GeneralCadTet4Solver
     private sealed class SparseMatrix
     {
         private readonly Dictionary<int, double>[] _rows;
+        private int[]? _rowPointers;
+        private int[]? _columnIndices;
+        private double[]? _values;
         public double[] Diagonal { get; }
 
         public SparseMatrix(int size)
@@ -352,6 +356,8 @@ internal static class GeneralCadTet4Solver
 
         public void Add(int row, int column, double value)
         {
+            if (_rowPointers is not null)
+                throw new InvalidOperationException("Cannot add stiffness entries after CSR finalization.");
             if (Math.Abs(value) <= 1e-30) return;
             var entries = _rows[row];
             entries[column] = entries.GetValueOrDefault(column) + value;
@@ -371,13 +377,41 @@ internal static class GeneralCadTet4Solver
             }
         }
 
+        public void Freeze()
+        {
+            if (_rowPointers is not null) return;
+            _rowPointers = new int[_rows.Length + 1];
+            var nonzeroCount = 0;
+            for (var row = 0; row < _rows.Length; row++)
+            {
+                _rowPointers[row] = nonzeroCount;
+                nonzeroCount += _rows[row].Count;
+            }
+            _rowPointers[^1] = nonzeroCount;
+            _columnIndices = new int[nonzeroCount];
+            _values = new double[nonzeroCount];
+            var cursor = 0;
+            for (var row = 0; row < _rows.Length; row++)
+            {
+                foreach (var entry in _rows[row].OrderBy(entry => entry.Key))
+                {
+                    _columnIndices[cursor] = entry.Key;
+                    _values[cursor] = entry.Value;
+                    cursor++;
+                }
+                _rows[row].Clear();
+            }
+        }
+
         public void Multiply(double[] vector, double[] result)
         {
+            if (_rowPointers is null || _columnIndices is null || _values is null) Freeze();
             Array.Clear(result);
             for (var row = 0; row < _rows.Length; row++)
             {
                 var sum = 0.0;
-                foreach (var (column, value) in _rows[row]) sum += value * vector[column];
+                for (var index = _rowPointers![row]; index < _rowPointers[row + 1]; index++)
+                    sum += _values![index] * vector[_columnIndices![index]];
                 result[row] = sum;
             }
         }

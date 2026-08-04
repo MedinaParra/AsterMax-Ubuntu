@@ -18,7 +18,7 @@ internal sealed partial class MechanicalForm : Form
     internal static readonly Color Yellow = Color.FromArgb(190, 112, 0);
     internal static readonly Color Red = Color.FromArgb(195, 48, 48);
 
-    private const string ProductTitle = "AsterMax Mechanical 0.7.1 beta";
+    private const string ProductTitle = "AsterMax Mechanical 0.8.0 beta";
 
     private readonly MenuStrip _menu = new();
     private readonly TabControl _ribbon = new();
