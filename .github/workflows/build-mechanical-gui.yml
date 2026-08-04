@@ -32,13 +32,13 @@ jobs:
       - name: Build validation
         run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
 
-      - name: Engineering tutorial solver smoke tests
+      - name: Existing tutorial capability smoke tests
         shell: pwsh
         run: |
           $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
           $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
-          if ($process.ExitCode -ne 0) { throw "AsterMax tutorial solver smoke tests failed with code $($process.ExitCode)." }
-          Write-Host "AsterMax static, convergence, modal and thermal smoke tests passed."
+          if ($process.ExitCode -ne 0) { throw "AsterMax tutorial capability smoke tests failed with code $($process.ExitCode)." }
+          Write-Host "Existing static, convergence, modal and thermal capabilities passed."
 
       - name: Publish Windows executable
         run: >-
@@ -86,15 +86,25 @@ jobs:
           }
           Write-Host "Complex STEP generated: $step; Gmsh exit code $($process.ExitCode)"
 
-      - name: Gmsh STEP preview and TET4 smoke test
+      - name: Gmsh STEP, closed skin and selectable-face smoke test
         shell: pwsh
         run: |
           $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
           $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
           $step = Resolve-Path smoke-cad/complex-flange.step
           $process = Start-Process -FilePath $exe -ArgumentList @("--gmsh-smoke", $gmsh.Path, $step.Path) -PassThru -Wait -NoNewWindow
-          if ($process.ExitCode -ne 0) { throw "AsterMax Gmsh STEP smoke test failed with code $($process.ExitCode)." }
-          Write-Host "AsterMax imported and tetrahedralized a curved STEP with two holes."
+          if ($process.ExitCode -ne 0) { throw "AsterMax Gmsh selectable-face smoke test failed with code $($process.ExitCode)." }
+          Write-Host "AsterMax preserved selectable OpenCASCADE faces and tetrahedralized a STEP with two holes."
+
+      - name: Standard workflow smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          $process = Start-Process -FilePath $exe -ArgumentList @("--workflow-smoke", $gmsh.Path, $step.Path) -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "AsterMax standard workflow smoke test failed with code $($process.ExitCode)." }
+          Write-Host "Normal workflow verified: mesh, selectable faces and non-empty support/load scopes; prism solve also passed."
 
       - name: Windows startup smoke test
         shell: pwsh
@@ -122,22 +132,22 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Copy-Item publish/win-x64/tools artifact/tools -Recurse -Force
-          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.7.0-beta.exe
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.7.1-beta.exe
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
           Copy-Item windows/AsterMax.MechanicalGui/Icons/AsterMaxIconSet.svg artifact/AsterMaxIconSet.svg
           Copy-Item smoke-cad/complex-flange.step artifact/AsterMax_Complex_STEP_Smoke.step
           @'
           @echo off
-          start "" "%~dp0AsterMax-Mechanical-0.7.0-beta.exe"
+          start "" "%~dp0AsterMax-Mechanical-0.7.1-beta.exe"
           '@ | Set-Content artifact/RUN-AsterMax.cmd -Encoding ascii
-          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.7.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-0.7.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.7.0-beta.exe.sha256 -Encoding ascii
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.7.1-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.7.1-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.7.1-beta.exe.sha256 -Encoding ascii
           Get-ChildItem artifact -Recurse | Select-Object FullName, Length | Format-Table
 
       - name: Upload portable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-0.7.0-beta-win-x64-with-gmsh
+          name: AsterMax-Mechanical-0.7.1-beta-win-x64-with-gmsh
           path: artifact/**
           if-no-files-found: error
           retention-days: 30
