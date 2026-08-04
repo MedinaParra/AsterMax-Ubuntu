@@ -18,7 +18,7 @@ internal sealed partial class MechanicalForm : Form
     internal static readonly Color Yellow = Color.FromArgb(190, 112, 0);
     internal static readonly Color Red = Color.FromArgb(195, 48, 48);
 
-    private const string ProductTitle = "AsterMax Mechanical 0.7 beta";
+    private const string ProductTitle = "AsterMax Mechanical 0.7.1 beta";
 
     private readonly MenuStrip _menu = new();
     private readonly TabControl _ribbon = new();
@@ -73,10 +73,10 @@ internal sealed partial class MechanicalForm : Form
         WireEvents();
         SelectNode("Project");
         _ribbon.SelectedTab = _ribbon.TabPages.Cast<TabPage>()
-            .FirstOrDefault(page => page.Text == "Static Tutorial") ?? _ribbon.SelectedTab;
+            .FirstOrDefault(page => page.Text == "Workflow") ?? _ribbon.SelectedTab;
         Log(ProductTitle + " initialized.");
-        Log("Functional tutorials: static TET4, Named Selections, Object Generator, convergence, Design Points, modal beam and steady thermal TET4.");
-        Log("CAD pipeline: native STEP preview and unstructured TET4 meshing through Gmsh/OpenCASCADE.");
+        Log("Existing tutorial capabilities verified: static TET4, Named Selections, convergence, Design Points, modal beam and steady thermal TET4.");
+        Log("Standard CAD workflow: STEP -> material -> closed exterior mesh -> face selection -> support/load scoping.");
         Log("Mechanical workflow: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Verification -> Report.");
     }
 }
