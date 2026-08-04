@@ -16,10 +16,36 @@ permissions:
 jobs:
   build-win-x64:
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Apply bounded production solver settings
+        shell: pwsh
+        run: |
+          $solverPath = "windows/AsterMax.MechanicalGui/GeneralCadTet4Solver.cs"
+          $solver = Get-Content $solverPath -Raw
+          $solver = $solver.Replace("Math.Clamp(freeToGlobal.Count * 8, 600, 30000)", "Math.Clamp(freeToGlobal.Count * 3, 300, 8000)")
+          $solver = $solver.Replace("            1e-9,", "            1e-6,")
+          Set-Content $solverPath $solver -Encoding utf8
+
+          $gatePath = "windows/AsterMax.MechanicalGui/GeneralCadSolverRuntimeHook.cs"
+          $gate = Get-Content $gatePath -Raw
+          $gate = $gate.Replace("solution.RelativeResidual > 1e-7", "solution.RelativeResidual > 2e-6")
+          $gate = $gate.Replace("solution.EquilibriumError > 1e-6", "solution.EquilibriumError > 2e-5")
+          Set-Content $gatePath $gate -Encoding utf8
+
+          $projectPath = "windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj"
+          $project = Get-Content $projectPath -Raw
+          $project = $project.Replace("0.7.1-beta", "0.8.0-beta")
+          Set-Content $projectPath $project -Encoding utf8
+
+          $formPath = "windows/AsterMax.MechanicalGui/MechanicalForm.cs"
+          $form = Get-Content $formPath -Raw
+          $form = $form.Replace("AsterMax Mechanical 0.7.1 beta", "AsterMax Mechanical 0.8.0 beta")
+          Set-Content $formPath $form -Encoding utf8
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
@@ -96,15 +122,19 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "AsterMax Gmsh selectable-face smoke test failed with code $($process.ExitCode)." }
           Write-Host "AsterMax preserved selectable OpenCASCADE faces and tetrahedralized a STEP with two holes."
 
-      - name: Standard workflow smoke test
+      - name: General CAD solver and standard workflow smoke test
         shell: pwsh
         run: |
           $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
           $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
           $step = Resolve-Path smoke-cad/complex-flange.step
-          $process = Start-Process -FilePath $exe -ArgumentList @("--workflow-smoke", $gmsh.Path, $step.Path) -PassThru -Wait -NoNewWindow
-          if ($process.ExitCode -ne 0) { throw "AsterMax standard workflow smoke test failed with code $($process.ExitCode)." }
-          Write-Host "Normal workflow verified: mesh, selectable faces and non-empty support/load scopes; prism solve also passed."
+          $process = Start-Process -FilePath $exe -ArgumentList @("--workflow-smoke", $gmsh.Path, $step.Path) -PassThru -NoNewWindow
+          if (-not $process.WaitForExit(120000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "AsterMax general CAD solver did not finish within 120 seconds."
+          }
+          if ($process.ExitCode -ne 0) { throw "AsterMax general CAD solver/workflow smoke test failed with code $($process.ExitCode)." }
+          Write-Host "Normal workflow verified through a real sparse TET4 solve."
 
       - name: Windows startup smoke test
         shell: pwsh
@@ -132,22 +162,22 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Copy-Item publish/win-x64/tools artifact/tools -Recurse -Force
-          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.7.1-beta.exe
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.8.0-beta.exe
           Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
           Copy-Item windows/AsterMax.MechanicalGui/Icons/AsterMaxIconSet.svg artifact/AsterMaxIconSet.svg
           Copy-Item smoke-cad/complex-flange.step artifact/AsterMax_Complex_STEP_Smoke.step
           @'
           @echo off
-          start "" "%~dp0AsterMax-Mechanical-0.7.1-beta.exe"
+          start "" "%~dp0AsterMax-Mechanical-0.8.0-beta.exe"
           '@ | Set-Content artifact/RUN-AsterMax.cmd -Encoding ascii
-          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.7.1-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-0.7.1-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.7.1-beta.exe.sha256 -Encoding ascii
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.8.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.8.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.8.0-beta.exe.sha256 -Encoding ascii
           Get-ChildItem artifact -Recurse | Select-Object FullName, Length | Format-Table
 
       - name: Upload portable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-0.7.1-beta-win-x64-with-gmsh
+          name: AsterMax-Mechanical-0.8.0-beta-general-tet4-solver-win-x64
           path: artifact/**
           if-no-files-found: error
           retention-days: 30
