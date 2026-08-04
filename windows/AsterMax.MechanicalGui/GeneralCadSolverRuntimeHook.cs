@@ -99,7 +99,7 @@ internal static class GeneralCadSolverModuleGate
 
             var envelope = SimpleStepReader.ReadPrismaticSolid(step);
             var longest = Math.Max(envelope.LengthX, Math.Max(envelope.LengthY, envelope.LengthZ));
-            var target = Math.Max(longest / 8.0, 0.1);
+            var target = Math.Max(longest / 3.0, 0.1);
             var mesh = SelectableGmshMesher.GenerateAsync(gmsh, step, target, 3, CancellationToken.None)
                 .GetAwaiter().GetResult();
             var topology = CadTopologyRegistry.Get(mesh);
@@ -112,11 +112,13 @@ internal static class GeneralCadSolverModuleGate
             if (fixedFace.Tag == loadedFace.Tag)
                 throw new InvalidOperationException("General CAD solver gate selected the same face for support and load.");
 
+            using var solveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
             var solution = GeneralCadTet4Solver.Solve(
                 mesh,
                 new StaticMaterial(),
                 fixedFace.NodeIndices.ToArray(),
-                new[] { new CadSurfaceForce(loadedFace.TriangleIndices, new Vec3(0, 0, -1000), "Automated Surface Force") });
+                new[] { new CadSurfaceForce(loadedFace.TriangleIndices, new Vec3(1000, 0, 0), "Automated Axial Surface Force") },
+                cancellationToken: solveTimeout.Token);
 
             if (!double.IsFinite(solution.MaxDisplacementMm) || solution.MaxDisplacementMm <= 0)
                 throw new InvalidOperationException("General CAD solver returned an invalid maximum displacement.");
