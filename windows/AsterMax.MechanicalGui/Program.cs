@@ -14,6 +14,11 @@ internal static class Program
         if (args.Any(arg => string.Equals(arg, "--solver-smoke", StringComparison.OrdinalIgnoreCase)))
             return RunSolverSmokeTest();
 
+        var generalSolverSmokeIndex = Array.FindIndex(args,
+            arg => string.Equals(arg, "--general-cad-solver-smoke", StringComparison.OrdinalIgnoreCase));
+        if (generalSolverSmokeIndex >= 0)
+            return GeneralCadSolverSmoke.Run(args.Skip(generalSolverSmokeIndex + 1).ToArray());
+
         var gmshSmokeIndex = Array.FindIndex(args, arg => string.Equals(arg, "--gmsh-smoke", StringComparison.OrdinalIgnoreCase));
         if (gmshSmokeIndex >= 0)
             return RunGmshSmokeTest(args.Skip(gmshSmokeIndex + 1).ToArray());
@@ -112,7 +117,7 @@ internal static class Program
                 $"Thermal energy balance error is {thermal.EnergyBalanceError:E3}.");
 
             Console.WriteLine(
-                $"AsterMax 0.7.1 tutorial capability smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
+                $"AsterMax 0.8.0 tutorial capability smoke passed | static: {mesh.Nodes.Count} nodes, {mesh.Elements.Count} TET4, " +
                 $"Umax={result.MaxDisplacementMm:G8} mm, VM={result.MaxVonMisesMpa:G8} MPa | " +
                 $"modal f1={modal[0].FrequencyHz:G8} Hz ({modal[0].DifferencePercent:G4}% error) | " +
                 $"thermal Q={thermal.HeatFlowW:G8} W, balance={thermal.EnergyBalanceError:E3}");
@@ -171,7 +176,7 @@ internal static class Program
             Directory.CreateDirectory(CrashDirectory);
             crashFile = Path.Combine(CrashDirectory, $"astermax-crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
             File.WriteAllText(crashFile,
-                $"AsterMax Mechanical 0.7.1 beta{Environment.NewLine}" +
+                $"AsterMax Mechanical 0.8.0 beta{Environment.NewLine}" +
                 $"Stage: {stage}{Environment.NewLine}" +
                 $"Windows: {Environment.OSVersion}{Environment.NewLine}" +
                 $"64-bit process: {Environment.Is64BitProcess}{Environment.NewLine}" +
