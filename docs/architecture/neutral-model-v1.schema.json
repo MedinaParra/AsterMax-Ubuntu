@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astermax.local/schema/neutral-model-v1.json",
+  "title": "AsterMax Neutral Analysis Model v1",
+  "type": "object",
+  "required": ["schemaVersion", "project", "unitSystem", "geometry", "materials", "analyses"],
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "project": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "createdUtc": { "type": "string", "format": "date-time" },
+        "modifiedUtc": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "unitSystem": {
+      "type": "string",
+      "enum": ["MM_N_MPA", "M_N_PA", "IN_LBF_PSI"]
+    },
+    "geometry": {
+      "type": "object",
+      "required": ["source", "parts"],
+      "properties": {
+        "source": { "type": "string" },
+        "sourceHash": { "type": "string" },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "bodies"],
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "bodies": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "name", "dimension", "behavior", "topologySignature"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "dimension": { "type": "integer", "enum": [1, 2, 3] },
+                    "behavior": { "type": "string", "enum": ["FLEXIBLE", "RIGID", "SUPPRESSED"] },
+                    "topologySignature": { "type": "string" },
+                    "materialId": { "type": ["string", "null"] },
+                    "sectionId": { "type": ["string", "null"] }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "elastic"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "elastic": {
+            "type": "object",
+            "required": ["youngModulus", "poissonRatio"],
+            "properties": {
+              "youngModulus": { "type": "number", "exclusiveMinimum": 0 },
+              "poissonRatio": { "type": "number", "exclusiveMinimum": -0.99, "exclusiveMaximum": 0.499 }
+            },
+            "additionalProperties": false
+          },
+          "density": { "type": "number", "exclusiveMinimum": 0 },
+          "thermalConductivity": { "type": "number", "exclusiveMinimum": 0 },
+          "specificHeat": { "type": "number", "exclusiveMinimum": 0 },
+          "thermalExpansion": { "type": "number" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "namedSelections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "entityType", "signatures"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "entityType": { "type": "string", "enum": ["VERTEX", "EDGE", "FACE", "BODY", "NODE", "ELEMENT"] },
+          "signatures": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    },
+    "analyses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type", "loads", "supports", "resultRequests"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["STATIC_STRUCTURAL", "MODAL", "STEADY_THERMAL", "TRANSIENT_THERMAL", "BUCKLING"] },
+          "backend": { "type": "string", "enum": ["ASTERMAX_INTERNAL", "CODE_ASTER"] },
+          "loads": { "type": "array", "items": { "$ref": "#/$defs/scopedObject" } },
+          "supports": { "type": "array", "items": { "$ref": "#/$defs/scopedObject" } },
+          "resultRequests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "type"],
+              "properties": {
+                "id": { "type": "string" },
+                "type": { "type": "string" },
+                "coordinateSystemId": { "type": ["string", "null"] }
+              },
+              "additionalProperties": true
+            }
+          },
+          "solverSettings": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "scopedObject": {
+      "type": "object",
+      "required": ["id", "type", "scope"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "scope": {
+          "type": "object",
+          "required": ["method"],
+          "properties": {
+            "method": { "type": "string", "enum": ["GEOMETRY", "NAMED_SELECTION", "MESH"] },
+            "entityIds": { "type": "array", "items": { "type": "string" } },
+            "namedSelectionId": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "values": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
