@@ -69,14 +69,13 @@ internal sealed partial class MechanicalForm : Form
         BuildProjectTree();
         InitializePresentation();
         InitializeSimpleStaticWorkflow();
-        InitializeEngineeringTutorials();
         WireEvents();
+        InitializeProductionInteractionEnhancements();
         SelectNode("Project");
         _ribbon.SelectedTab = _ribbon.TabPages.Cast<TabPage>()
-            .FirstOrDefault(page => page.Text == "Workflow") ?? _ribbon.SelectedTab;
+            .FirstOrDefault(page => page.Text == "Home") ?? _ribbon.SelectedTab;
         Log(ProductTitle + " initialized.");
-        Log("Existing tutorial capabilities verified: static TET4, Named Selections, convergence, Design Points, modal beam and steady thermal TET4.");
-        Log("Standard CAD workflow: STEP -> material -> closed exterior mesh -> face selection -> support/load scoping.");
-        Log("Mechanical workflow: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Verification -> Report.");
+        Log("Production workflow ready: Geometry -> Material -> Mesh -> Supports/Loads -> Solution -> Verification -> Report.");
+        Log("Engineering capabilities remain integrated into the normal workflow without tutorial-only tabs or menus.");
     }
 }
