@@ -20,6 +20,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="SimpleStaticModel.cs" />
+    <Compile Remove="MeshConvergenceDomain.cs" />
+    <Compile Remove="ProjectWorkflowDomain.cs" />
+    <Compile Remove="ProjectWorkflowModel.cs" />
+    <Compile Remove="WorkflowProjectState.cs" />
     <EmbeddedResource Include="Icons\AsterMaxIconSet.svg" />
   </ItemGroup>
 </Project>
