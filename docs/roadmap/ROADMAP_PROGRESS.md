@@ -10,7 +10,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 |---|---|---|---|---|
 | 01 | WS01.1 Mechanical Basics | Accepted | Deferred until 50% | Source-complete |
 | 02 | WS02.1 2D Gear and Rack | Accepted | Deferred until 50% | Source-complete |
-| 03 | WS02.2 Named Selections | Pending | Deferred until 50% | Pending |
+| 03 | WS02.2 Named Selections | Accepted | Deferred until 50% | Source-complete |
 | 04 | WS02.3 Object Generator | Pending | Deferred until 50% | Pending |
 | 05 | WS02.4 Object Generator with Named Selections | Pending | Deferred until 50% | Pending |
 | 06 | WS03.1 Pump Assembly with Contact | Pending | Deferred until 50% | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 10%.**
+**Current source/design progress: 15%.**
 
 ## Increment 01 — WS01.1 Mechanical Basics
 
@@ -45,6 +45,17 @@ Accepted source evidence:
 - Gear/rack interaction is represented by stable source/target edge-selection IDs.
 - Validation rejects invalid thickness, normals, identifiers, unknown sections, mixed formulations, missing active bodies and absent edge scope.
 - `docs/validation/ws02-1-2d-gear-rack-contract.md` records the workflow and deferred runtime acceptance.
+
+## Increment 03 — WS02.2 Named Selections
+
+Accepted source evidence:
+
+- `NamedSelectionDomain.cs` defines stable manual and worksheet-generated named selections.
+- Entity typing prevents mixed vertex, edge, face, body and mesh-node scopes.
+- Worksheet criteria include explicit comparison and Boolean semantics with finite-value validation.
+- Evaluations retain resolved scope, geometry signature and timestamp.
+- Resolution rejects stale geometry signatures and empty evaluated scopes instead of silently reusing obsolete topology IDs.
+- `docs/validation/ws02-2-named-selections-contract.md` records downstream scoping and deferred runtime acceptance.
 
 ## Compile gate
 
