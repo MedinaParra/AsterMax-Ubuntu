@@ -91,7 +91,7 @@ internal sealed class BeamConnectionDefinition
 
         var referenceScope = selections.Resolve(ReferenceSelectionId, activeGeometrySignature);
         var mobileScope = selections.Resolve(MobileSelectionId, activeGeometrySignature);
-        if (referenceScope.EntityIds.Intersect(mobileScope.EntityIds).Any())
+        if (ScopesOverlap(reference.EntityType, referenceScope, mobile.EntityType, mobileScope))
             throw new InvalidOperationException($"Beam connection '{Name}' has overlapping reference and mobile entities.");
     }
 
@@ -126,6 +126,23 @@ internal sealed class BeamConnectionDefinition
 
     private static bool IsBeamEndScope(NamedSelectionEntityType type) =>
         type is NamedSelectionEntityType.Vertex or NamedSelectionEntityType.Edge;
+
+    private static bool ScopesOverlap(
+        NamedSelectionEntityType referenceType,
+        MechanicalScope referenceScope,
+        NamedSelectionEntityType mobileType,
+        MechanicalScope mobileScope)
+    {
+        if (referenceType != mobileType)
+            return false;
+
+        return referenceType switch
+        {
+            NamedSelectionEntityType.Vertex => referenceScope.VertexIds.Intersect(mobileScope.VertexIds).Any(),
+            NamedSelectionEntityType.Edge => referenceScope.EdgeIds.Intersect(mobileScope.EdgeIds).Any(),
+            _ => false
+        };
+    }
 
     private static IEnumerable<BeamConnectionDegreeOfFreedom> EnumerateDegreesOfFreedom()
     {
