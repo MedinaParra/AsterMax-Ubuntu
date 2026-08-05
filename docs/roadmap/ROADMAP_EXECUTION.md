@@ -19,7 +19,7 @@ Overall progress is measured against 100 weighted points, not the number of visi
 
 ## Current state
 
-- Overall progress: **12%**.
+- Overall progress: **13%**.
 - Current block: **0.8.1 reproducible numerical base**.
 - Compilation gate: disabled until overall progress reaches 50%.
 - Work before 50% is limited to source architecture, schemas, fixtures, acceptance criteria and deterministic implementation design.
@@ -40,7 +40,7 @@ Overall progress is measured against 100 weighted points, not the number of visi
 - [x] Solver output includes residual and equilibrium metrics.
 - [x] Surface force distribution is area weighted.
 - [x] TET4 degeneracy checks are explicit.
-- [ ] Remove build-time source rewriting from production CI.
+- [x] Remove build-time source rewriting from production CI.
 - [ ] Freeze a versioned solver configuration object.
 - [ ] Define axial, bending, patch and reaction benchmarks as data fixtures.
 - [ ] Define deterministic result comparison tolerances.
