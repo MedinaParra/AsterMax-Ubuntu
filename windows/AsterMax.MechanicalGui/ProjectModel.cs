@@ -13,13 +13,6 @@ internal enum ProjectObjectState
     Suppressed
 }
 
-internal enum MechanicalUnitSystem
-{
-    MillimeterNewtonMegapascal,
-    MeterNewtonPascal,
-    InchPoundForcePsi
-}
-
 internal enum AnalysisSystemKind
 {
     StaticStructural,
