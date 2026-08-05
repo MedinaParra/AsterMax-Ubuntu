@@ -12,7 +12,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 02 | WS02.1 2D Gear and Rack | Accepted | Deferred until 50% | Source-complete |
 | 03 | WS02.2 Named Selections | Accepted | Deferred until 50% | Source-complete |
 | 04 | WS02.3 Object Generator | Accepted | Deferred until 50% | Source-complete |
-| 05 | WS02.4 Object Generator with Named Selections | Pending | Deferred until 50% | Pending |
+| 05 | WS02.4 Object Generator with Named Selections | Accepted | Deferred until 50% | Source-complete |
 | 06 | WS03.1 Pump Assembly with Contact | Pending | Deferred until 50% | Pending |
 | 07 | WS03.2 Beam Connections | Pending | Deferred until 50% | Pending |
 | 08 | WS04.1 Mesh Convergence | Pending | Deferred until 50% | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 20%.**
+**Current source/design progress: 25%.**
 
 ## Increment 01 — WS01.1 Mechanical Basics
 
@@ -67,6 +67,17 @@ Accepted source evidence:
 - Duplicate columns, duplicate rows, unknown values and incomplete required fields fail explicitly.
 - Generated object IDs are reproducible from the generator and source row IDs.
 - `docs/validation/ws02-3-object-generator-contract.md` records the workflow and deferred runtime acceptance.
+
+## Increment 05 — WS02.4 Object Generator with Named Selections
+
+Accepted source evidence:
+
+- `NamedSelectionObjectGeneratorDomain.cs` binds every generator row to exactly one stable named-selection identifier.
+- Missing, duplicate and unknown row bindings fail explicitly.
+- Named selections are resolved against the active geometry signature before generated objects are returned.
+- Stale or empty evaluated scopes fail through the named-selection catalog.
+- Generated objects retain the named-selection UUID, resolved entity count and geometry signature for deterministic audit.
+- `docs/validation/ws02-4-object-generator-named-selections-contract.md` records the workflow and deferred runtime acceptance.
 
 ## Compile gate
 
