@@ -1,6 +1,6 @@
 # AsterMax Mechanical roadmap execution ledger
 
-This ledger is the source-level gate for the M01–M08 implementation roadmap. A feature is counted only when its source/design acceptance evidence is present. Compilation and runtime validation remain intentionally deferred until aggregate progress reaches 50%.
+This ledger is the source-level gate for the M01–M08 implementation roadmap. A feature is counted only when its source/design acceptance evidence is present. Compilation and runtime validation remain mandatory after aggregate progress reaches 50%.
 
 ## Progress model
 
@@ -8,17 +8,17 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 
 | Increment | Scope | Source/design gate | Runtime gate | Status |
 |---|---|---|---|---|
-| 01 | WS01.1 Mechanical Basics | Accepted | Validation running at 50% gate | Source-complete |
-| 02 | WS02.1 2D Gear and Rack | Accepted | Validation running at 50% gate | Source-complete |
-| 03 | WS02.2 Named Selections | Accepted | Validation running at 50% gate | Source-complete |
-| 04 | WS02.3 Object Generator | Accepted | Validation running at 50% gate | Source-complete |
-| 05 | WS02.4 Object Generator with Named Selections | Accepted | Validation running at 50% gate | Source-complete |
-| 06 | WS03.1 Pump Assembly with Contact | Accepted | Validation running at 50% gate | Source-complete |
-| 07 | WS03.2 Beam Connections | Accepted | Validation running at 50% gate | Source-complete |
-| 08 | WS04.1 Mesh Convergence | Accepted | Validation running at 50% gate | Source-complete |
-| 09 | WS04.2 Design Points | Accepted | Validation running at 50% gate | Source-complete |
-| 10 | WS05.1 Mesh Creation | Accepted | Validation running at 50% gate | Source-complete |
-| 11 | WS05.2 Mesh Control | Pending | Required | Pending |
+| 01 | WS01.1 Mechanical Basics | Accepted | Passed at 50% gate | Complete |
+| 02 | WS02.1 2D Gear and Rack | Accepted | Passed at 50% gate | Complete |
+| 03 | WS02.2 Named Selections | Accepted | Passed at 50% gate | Complete |
+| 04 | WS02.3 Object Generator | Accepted | Passed at 50% gate | Complete |
+| 05 | WS02.4 Object Generator with Named Selections | Accepted | Passed at 50% gate | Complete |
+| 06 | WS03.1 Pump Assembly with Contact | Accepted | Passed at 50% gate | Complete |
+| 07 | WS03.2 Beam Connections | Accepted | Passed at 50% gate | Complete |
+| 08 | WS04.1 Mesh Convergence | Accepted | Passed at 50% gate | Complete |
+| 09 | WS04.2 Design Points | Accepted | Passed at 50% gate | Complete |
+| 10 | WS05.1 Mesh Creation | Accepted | Passed at 50% gate | Complete |
+| 11 | WS05.2 Mesh Control | Accepted | Validation required | Source-complete |
 | 12 | WS06.1 Contact Offset Control | Pending | Required | Pending |
 | 13 | WS06.2 Joints | Pending | Required | Pending |
 | 14 | WS06.3 Remote Boundary Conditions | Pending | Required | Pending |
@@ -29,13 +29,13 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 50%.**
+**Current source/design progress: 55%.**
 
 ## Certified source evidence
 
 ### Increment 01 — WS01.1 Mechanical Basics
 
-Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solution objects, versioned project services, persistent general-CAD TET4 execution, displacement/stress/reaction recovery and explicit unsupported-flow failures are present. Runtime acceptance is running at the 50% compile gate.
+Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solution objects, versioned project services, persistent general-CAD TET4 execution, displacement/stress/reaction recovery and explicit unsupported-flow failures are present.
 
 ### Increment 02 — WS02.1 2D Gear and Rack
 
@@ -73,6 +73,10 @@ Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solut
 
 `MeshCreationDomain.cs` defines stable analysis-owned meshes, geometry-signature binding, global/minimum sizing, growth rate, body scopes, creation methods, element families and orders, compatibility checks and generated statistics. Evidence: `docs/validation/ws05-1-mesh-creation-contract.md`.
 
+### Increment 11 — WS05.2 Mesh Control
+
+`MeshControlDomain.cs` defines mesh-owned controls for body, face and edge sizing, sphere of influence, inflation and refinement with typed scopes, geometry revision binding, hard/soft behavior and deterministic validation. Evidence: `docs/validation/ws05-2-mesh-control-contract.md`.
+
 ## Compile gate
 
-At 50%, the branch compilation and tutorial smoke validation workflow is mandatory. The push-triggered `build-mechanical-gui.yml` workflow records restore, Release build, solver smoke tests, publish and bundled Gmsh results before runtime promotion.
+The 50% gate passed on Windows x64: restore, Release build, tutorial capability smoke tests, self-contained single-file publish, bundled Gmsh verification and artifact upload completed successfully. Every subsequent increment must preserve this gate.
