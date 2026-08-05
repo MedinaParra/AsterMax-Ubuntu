@@ -14,7 +14,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 04 | WS02.3 Object Generator | Accepted | Deferred until 50% | Source-complete |
 | 05 | WS02.4 Object Generator with Named Selections | Accepted | Deferred until 50% | Source-complete |
 | 06 | WS03.1 Pump Assembly with Contact | Accepted | Deferred until 50% | Source-complete |
-| 07 | WS03.2 Beam Connections | Pending | Deferred until 50% | Pending |
+| 07 | WS03.2 Beam Connections | Accepted | Deferred until 50% | Source-complete |
 | 08 | WS04.1 Mesh Convergence | Pending | Deferred until 50% | Pending |
 | 09 | WS04.2 Design Points | Pending | Deferred until 50% | Pending |
 | 10 | WS05.1 Mesh Creation | Pending | Required at 50% | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 30%.**
+**Current source/design progress: 35%.**
 
 ## Increment 01 — WS01.1 Mechanical Basics
 
@@ -88,6 +88,16 @@ Accepted source evidence:
 - Source and target scopes must resolve as current face-based named selections against the active geometry signature.
 - Validation rejects identical or overlapping faces, invalid penalty or pinball values, stale scopes and inconsistent friction settings.
 - `docs/validation/ws03-1-pump-assembly-contact-contract.md` records the workflow and deferred nonlinear runtime acceptance.
+
+## Increment 07 — WS03.2 Beam Connections
+
+Accepted source evidence:
+
+- `BeamConnectionDomain.cs` defines stable fixed, pinned, translational, rotational and generalized beam connections.
+- Reference and mobile ends resolve through current vertex- or edge-based named selections.
+- Six translational/rotational degrees of freedom support explicit release semantics and generalized elastic stiffness.
+- Validation rejects invalid IDs, names, offsets, stiffness, incompatible release semantics, stale scopes and overlapping ends.
+- `docs/validation/ws03-2-beam-connections-contract.md` records the workflow and deferred beam-runtime acceptance.
 
 ## Compile gate
 
