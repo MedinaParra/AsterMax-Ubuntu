@@ -8,16 +8,16 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 
 | Increment | Scope | Source/design gate | Runtime gate | Status |
 |---|---|---|---|---|
-| 01 | WS01.1 Mechanical Basics | Accepted | Deferred until 50% | Source-complete |
-| 02 | WS02.1 2D Gear and Rack | Accepted | Deferred until 50% | Source-complete |
-| 03 | WS02.2 Named Selections | Accepted | Deferred until 50% | Source-complete |
-| 04 | WS02.3 Object Generator | Accepted | Deferred until 50% | Source-complete |
-| 05 | WS02.4 Object Generator with Named Selections | Accepted | Deferred until 50% | Source-complete |
-| 06 | WS03.1 Pump Assembly with Contact | Accepted | Deferred until 50% | Source-complete |
-| 07 | WS03.2 Beam Connections | Accepted | Deferred until 50% | Source-complete |
-| 08 | WS04.1 Mesh Convergence | Accepted | Deferred until 50% | Source-complete |
-| 09 | WS04.2 Design Points | Accepted | Deferred until 50% | Source-complete |
-| 10 | WS05.1 Mesh Creation | Pending | Required at 50% | Pending |
+| 01 | WS01.1 Mechanical Basics | Accepted | Validation running at 50% gate | Source-complete |
+| 02 | WS02.1 2D Gear and Rack | Accepted | Validation running at 50% gate | Source-complete |
+| 03 | WS02.2 Named Selections | Accepted | Validation running at 50% gate | Source-complete |
+| 04 | WS02.3 Object Generator | Accepted | Validation running at 50% gate | Source-complete |
+| 05 | WS02.4 Object Generator with Named Selections | Accepted | Validation running at 50% gate | Source-complete |
+| 06 | WS03.1 Pump Assembly with Contact | Accepted | Validation running at 50% gate | Source-complete |
+| 07 | WS03.2 Beam Connections | Accepted | Validation running at 50% gate | Source-complete |
+| 08 | WS04.1 Mesh Convergence | Accepted | Validation running at 50% gate | Source-complete |
+| 09 | WS04.2 Design Points | Accepted | Validation running at 50% gate | Source-complete |
+| 10 | WS05.1 Mesh Creation | Accepted | Validation running at 50% gate | Source-complete |
 | 11 | WS05.2 Mesh Control | Pending | Required | Pending |
 | 12 | WS06.1 Contact Offset Control | Pending | Required | Pending |
 | 13 | WS06.2 Joints | Pending | Required | Pending |
@@ -29,13 +29,13 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 45%.**
+**Current source/design progress: 50%.**
 
 ## Certified source evidence
 
 ### Increment 01 — WS01.1 Mechanical Basics
 
-Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solution objects, versioned project services, persistent general-CAD TET4 execution, displacement/stress/reaction recovery and explicit unsupported-flow failures are present. Runtime acceptance remains queued for the 50% compile gate.
+Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solution objects, versioned project services, persistent general-CAD TET4 execution, displacement/stress/reaction recovery and explicit unsupported-flow failures are present. Runtime acceptance is running at the 50% compile gate.
 
 ### Increment 02 — WS02.1 2D Gear and Rack
 
@@ -69,6 +69,10 @@ Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solut
 
 `DesignPointDomain.cs` defines stable input/output parameters, engineering units, ordered design points and study-to-analysis ownership. Validation rejects missing inputs, unknown parameters, duplicate IDs, names or sequences and non-finite values. Evidence: `docs/validation/ws04-2-design-points-contract.md`.
 
+### Increment 10 — WS05.1 Mesh Creation
+
+`MeshCreationDomain.cs` defines stable analysis-owned meshes, geometry-signature binding, global/minimum sizing, growth rate, body scopes, creation methods, element families and orders, compatibility checks and generated statistics. Evidence: `docs/validation/ws05-1-mesh-creation-contract.md`.
+
 ## Compile gate
 
-Before 50%, verification is limited to source, schema, state-machine and workflow consistency. At exactly 50%, the branch must be compiled and the first ten increments exercised with recorded results before any of them can be promoted from `Source-complete` to `Validated`.
+At 50%, the branch compilation and tutorial smoke validation workflow is mandatory. The push-triggered `build-mechanical-gui.yml` workflow records restore, Release build, solver smoke tests, publish and bundled Gmsh results before runtime promotion.
