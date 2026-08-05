@@ -1,0 +1,1 @@
+Trigger Windows self-contained executable build for branch agent/mechanical-gui-pdf-workflow.
