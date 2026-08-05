@@ -15,7 +15,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 05 | WS02.4 Object Generator with Named Selections | Accepted | Deferred until 50% | Source-complete |
 | 06 | WS03.1 Pump Assembly with Contact | Accepted | Deferred until 50% | Source-complete |
 | 07 | WS03.2 Beam Connections | Accepted | Deferred until 50% | Source-complete |
-| 08 | WS04.1 Mesh Convergence | Pending | Deferred until 50% | Pending |
+| 08 | WS04.1 Mesh Convergence | Accepted | Deferred until 50% | Source-complete |
 | 09 | WS04.2 Design Points | Pending | Deferred until 50% | Pending |
 | 10 | WS05.1 Mesh Creation | Pending | Required at 50% | Pending |
 | 11 | WS05.2 Mesh Control | Pending | Required | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 35%.**
+**Current source/design progress: 40%.**
 
 ## Increment 01 — WS01.1 Mechanical Basics
 
@@ -98,6 +98,18 @@ Accepted source evidence:
 - Six translational/rotational degrees of freedom support explicit release semantics and generalized elastic stiffness.
 - Validation rejects invalid IDs, names, offsets, stiffness, incompatible release semantics, stale scopes and overlapping ends.
 - `docs/validation/ws03-2-beam-connections-contract.md` records the workflow and deferred beam-runtime acceptance.
+
+## Increment 08 — WS04.1 Mesh Convergence
+
+Accepted source evidence:
+
+- `MeshConvergenceDomain.cs` defines stable convergence studies for deformation, stress, strain-energy and reaction quantities.
+- Global, scoped and adaptive refinement modes have explicit scope semantics.
+- Scoped studies resolve current edge-, face- or body-based named selections against the active geometry signature.
+- Refinement points retain ordered element size, node count, element count and monitored result values.
+- Validation requires decreasing element size, increasing mesh population, finite results and unique sequence values.
+- Convergence requires an explicit relative tolerance and consecutive-pass count.
+- `docs/validation/ws04-1-mesh-convergence-contract.md` records the workflow and deferred numerical acceptance.
 
 ## Compile gate
 
