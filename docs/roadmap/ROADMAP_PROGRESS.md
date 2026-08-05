@@ -13,7 +13,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 03 | WS02.2 Named Selections | Accepted | Deferred until 50% | Source-complete |
 | 04 | WS02.3 Object Generator | Accepted | Deferred until 50% | Source-complete |
 | 05 | WS02.4 Object Generator with Named Selections | Accepted | Deferred until 50% | Source-complete |
-| 06 | WS03.1 Pump Assembly with Contact | Pending | Deferred until 50% | Pending |
+| 06 | WS03.1 Pump Assembly with Contact | Accepted | Deferred until 50% | Source-complete |
 | 07 | WS03.2 Beam Connections | Pending | Deferred until 50% | Pending |
 | 08 | WS04.1 Mesh Convergence | Pending | Deferred until 50% | Pending |
 | 09 | WS04.2 Design Points | Pending | Deferred until 50% | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 25%.**
+**Current source/design progress: 30%.**
 
 ## Increment 01 — WS01.1 Mechanical Basics
 
@@ -78,6 +78,16 @@ Accepted source evidence:
 - Stale or empty evaluated scopes fail through the named-selection catalog.
 - Generated objects retain the named-selection UUID, resolved entity count and geometry signature for deterministic audit.
 - `docs/validation/ws02-4-object-generator-named-selections-contract.md` records the workflow and deferred runtime acceptance.
+
+## Increment 06 — WS03.1 Pump Assembly with Contact
+
+Accepted source evidence:
+
+- `ContactDomain.cs` defines stable pump-assembly contact regions with explicit source and target named-selection identifiers.
+- Contact formulations include frictionless, frictional, bonded and no-separation behavior with explicit detection and symmetry semantics.
+- Source and target scopes must resolve as current face-based named selections against the active geometry signature.
+- Validation rejects identical or overlapping faces, invalid penalty or pinball values, stale scopes and inconsistent friction settings.
+- `docs/validation/ws03-1-pump-assembly-contact-contract.md` records the workflow and deferred nonlinear runtime acceptance.
 
 ## Compile gate
 
