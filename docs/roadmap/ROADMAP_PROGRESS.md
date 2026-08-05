@@ -11,7 +11,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 01 | WS01.1 Mechanical Basics | Accepted | Deferred until 50% | Source-complete |
 | 02 | WS02.1 2D Gear and Rack | Accepted | Deferred until 50% | Source-complete |
 | 03 | WS02.2 Named Selections | Accepted | Deferred until 50% | Source-complete |
-| 04 | WS02.3 Object Generator | Pending | Deferred until 50% | Pending |
+| 04 | WS02.3 Object Generator | Accepted | Deferred until 50% | Source-complete |
 | 05 | WS02.4 Object Generator with Named Selections | Pending | Deferred until 50% | Pending |
 | 06 | WS03.1 Pump Assembly with Contact | Pending | Deferred until 50% | Pending |
 | 07 | WS03.2 Beam Connections | Pending | Deferred until 50% | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 15%.**
+**Current source/design progress: 20%.**
 
 ## Increment 01 — WS01.1 Mechanical Basics
 
@@ -56,6 +56,17 @@ Accepted source evidence:
 - Evaluations retain resolved scope, geometry signature and timestamp.
 - Resolution rejects stale geometry signatures and empty evaluated scopes instead of silently reusing obsolete topology IDs.
 - `docs/validation/ws02-2-named-selections-contract.md` records downstream scoping and deferred runtime acceptance.
+
+## Increment 04 — WS02.3 Object Generator
+
+Accepted source evidence:
+
+- `ObjectGeneratorDomain.cs` defines stable generator, column, row and generated-object contracts.
+- Mandatory name and scope columns prevent anonymous or unscoped generated objects.
+- Typed text, number, Boolean and identifier values are validated deterministically.
+- Duplicate columns, duplicate rows, unknown values and incomplete required fields fail explicitly.
+- Generated object IDs are reproducible from the generator and source row IDs.
+- `docs/validation/ws02-3-object-generator-contract.md` records the workflow and deferred runtime acceptance.
 
 ## Compile gate
 
