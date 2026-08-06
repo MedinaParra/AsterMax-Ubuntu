@@ -6,26 +6,46 @@ namespace AsterMax.MechanicalGui;
 internal static class MechanicalInterfaceRoadmapIteration
 {
     private static readonly ConditionalWeakTable<AdvancedCadViewport, ViewportCommandBar> Bars = new();
-    private static readonly System.Windows.Forms.Timer Monitor = new() { Interval = 350 };
+    private static System.Windows.Forms.Timer? _monitor;
+    private static bool _installed;
 
     [ModuleInitializer]
     internal static void Install()
     {
-        Monitor.Tick += (_, _) =>
+        if (_installed) return;
+        _installed = true;
+        Application.Idle += StartAfterMessageLoop;
+    }
+
+    private static void StartAfterMessageLoop(object? sender, EventArgs eventArgs)
+    {
+        Application.Idle -= StartAfterMessageLoop;
+        if (_monitor is not null) return;
+
+        _monitor = new System.Windows.Forms.Timer { Interval = 350 };
+        _monitor.Tick += (_, _) =>
         {
-            foreach (Form form in Application.OpenForms.Cast<Form>().ToArray())
+            try
             {
-                form.KeyPreview = true;
-                foreach (var viewport in Descendants(form).OfType<AdvancedCadViewport>().ToArray())
-                    EnsureCommandBar(viewport);
+                foreach (Form form in Application.OpenForms.Cast<Form>().ToArray())
+                {
+                    if (form.IsDisposed || !form.IsHandleCreated) continue;
+                    form.KeyPreview = true;
+                    foreach (var viewport in Descendants(form).OfType<AdvancedCadViewport>().ToArray())
+                        EnsureCommandBar(viewport);
+                }
+            }
+            catch
+            {
+                // Optional viewport productivity controls must never prevent application startup.
             }
         };
-        Monitor.Start();
+        _monitor.Start();
     }
 
     private static void EnsureCommandBar(AdvancedCadViewport viewport)
     {
-        if (viewport.IsDisposed) return;
+        if (viewport.IsDisposed || !viewport.IsHandleCreated) return;
         if (!Bars.TryGetValue(viewport, out var bar))
         {
             bar = new ViewportCommandBar(viewport);
