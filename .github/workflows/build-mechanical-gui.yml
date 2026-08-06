@@ -40,6 +40,17 @@ jobs:
           $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
           if ($process.ExitCode -ne 0) { throw "AsterMax tutorial capability smoke tests failed with code $($process.ExitCode)." }
 
+      - name: Real GUI startup smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
+          if (-not $process.WaitForExit(15000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "AsterMax GUI did not complete its startup smoke test within 15 seconds."
+          }
+          if ($process.ExitCode -ne 0) { throw "AsterMax GUI startup smoke failed with code $($process.ExitCode)." }
+
       - name: Publish Windows executable
         run: >-
           dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
