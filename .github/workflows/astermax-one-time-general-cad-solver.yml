@@ -1,0 +1,204 @@
+name: AsterMax one-time general CAD solver integration
+
+on:
+  push:
+    branches:
+      - agent/mechanical-gui-pdf-workflow
+    paths:
+      - ".github/workflows/astermax-one-time-general-cad-solver.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-general-solver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/mechanical-gui-pdf-workflow
+          fetch-depth: 0
+
+      - name: Patch solver entry points, verification and release metadata
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'Pattern not found in {path}: {old[:160]!r}')
+              p.write_text(text.replace(old, new, count), encoding='utf-8')
+
+          actions = 'windows/AsterMax.MechanicalGui/MechanicalForm.Actions.cs'
+          old_block = '''        if (_cadVolumeMesh is not null)
+          {
+              MessageBox.Show(this,
+                  "The real Gmsh mesh is ready, but arbitrary-face scoping and assembly into the general 3-D solver are not implemented yet. No fictitious solution will be generated.",
+                  "General STEP solver pending",
+                  MessageBoxButtons.OK,
+                  MessageBoxIcon.Information);
+              return;
+          }'''
+          new_block = '''        if (_cadVolumeMesh is not null)
+          {
+              await SolveGeneralCadAsync();
+              return;
+          }'''
+          replace(actions, old_block, new_block)
+          replace(actions,
+              '''    private void EvaluateResults()
+              {
+                  if (!_solved) { _ = SolveAsync(); return; }''',
+              '''    private void EvaluateResults()
+              {
+                  if (_cadStaticSolution is not null)
+                  {
+                      var requested = _outline.SelectedNode?.Text ?? "Equivalent Stress";
+                      ShowGeneralCadResults(requested);
+                      return;
+                  }
+                  if (!_solved) { _ = SolveAsync(); return; }''')
+          replace(actions,
+              '''    private void ClearResults()
+              {
+                  _solved = false;''',
+              '''    private void ClearResults()
+              {
+                  ClearGeneralCadResults();
+                  _solved = false;''')
+          replace(actions,
+              '''    private void MarkSolutionDirty()
+              {
+                  _solved = false;''',
+              '''    private void MarkSolutionDirty()
+              {
+                  InvalidateGeneralCadSolution();
+                  _solved = false;''')
+
+          details = 'windows/AsterMax.MechanicalGui/MechanicalForm.Details.cs'
+          replace(details,
+              '''                Detail("Minimum", _solved ? ResultMinimum(obj.Name) : "Not evaluated", false);
+                  Detail("Maximum", _solved ? ResultMaximum(obj.Name) : "Not evaluated", false);
+                  Detail("Average", _solved ? ResultAverage(obj.Name) : "Not evaluated", false);''',
+              '''                Detail("Minimum", _solved ? ActiveResultMinimum(obj.Name) : "Not evaluated", false);
+                  Detail("Maximum", _solved ? ActiveResultMaximum(obj.Name) : "Not evaluated", false);
+                  Detail("Average", _solved ? ActiveResultAverage(obj.Name) : "Not evaluated", false);''')
+
+          gmsh = 'windows/AsterMax.MechanicalGui/MechanicalForm.GmshCad.cs'
+          replace(gmsh,
+              '''    private void ResetCadState()
+              {
+                  _selectedCadSurfaceTag = null;''',
+              '''    private void ResetCadState()
+              {
+                  InvalidateGeneralCadSolution();
+                  _selectedCadSurfaceTag = null;''')
+
+          integration = 'windows/AsterMax.MechanicalGui/MechanicalForm.GeneralCadSolver.cs'
+          replace(integration, '        var progress = new Progress<string>(message =>', '        IProgress<string> progress = new Progress<string>(message =>')
+          replace(integration,
+              '''        foreach (var name in names)
+                      if (model.Properties.TryGetValue(name, out value!)) return true;
+                  value = string.Empty;''',
+              '''        foreach (var name in names)
+                  {
+                      if (!model.Properties.TryGetValue(name, out var found)) continue;
+                      value = found;
+                      return true;
+                  }
+                  value = string.Empty;''')
+          p = Path(integration)
+          text = p.read_text(encoding='utf-8')
+          marker = '''    private void ClearGeneralCadResults()
+              {'''
+          helpers = '''    private string ActiveResultMinimum(string name)
+              {
+                  if (_cadStaticSolution is null) return ResultMinimum(name);
+                  return name.Contains("Deformation", StringComparison.OrdinalIgnoreCase) ? "0 mm" :
+                      name.Contains("Stress", StringComparison.OrdinalIgnoreCase) ? "0 MPa" : ResultMinimum(name);
+              }
+
+              private string ActiveResultMaximum(string name)
+              {
+                  if (_cadStaticSolution is null) return ResultMaximum(name);
+                  return name.Contains("Deformation", StringComparison.OrdinalIgnoreCase)
+                      ? $"{_cadStaticSolution.MaxDisplacementMm:G8} mm"
+                      : name.Contains("Stress", StringComparison.OrdinalIgnoreCase)
+                          ? $"{_cadStaticSolution.MaxVonMisesMpa:G8} MPa"
+                          : ResultMaximum(name);
+              }
+
+              private string ActiveResultAverage(string name)
+              {
+                  if (_cadStaticSolution is null) return ResultAverage(name);
+                  if (name.Contains("Deformation", StringComparison.OrdinalIgnoreCase))
+                  {
+                      var sum = 0.0;
+                      for (var node = 0; node < _cadStaticSolution.Displacements.Length / 3; node++)
+                          sum += new Vec3(
+                              _cadStaticSolution.Displacements[node * 3],
+                              _cadStaticSolution.Displacements[node * 3 + 1],
+                              _cadStaticSolution.Displacements[node * 3 + 2]).Length;
+                      return $"{sum / Math.Max(_cadStaticSolution.Displacements.Length / 3, 1):G8} mm";
+                  }
+                  if (name.Contains("Stress", StringComparison.OrdinalIgnoreCase))
+                      return $"{_cadStaticSolution.NodalVonMisesMpa.DefaultIfEmpty().Average():G8} MPa";
+                  return ResultAverage(name);
+              }
+
+          '''
+          if marker not in text:
+              raise SystemExit('General result helper insertion marker not found')
+          p.write_text(text.replace(marker, helpers + marker, 1), encoding='utf-8')
+
+          verifier = 'windows/AsterMax.MechanicalGui/MechanicalForm.StandardWorkflow.cs'
+          old_verify = '''                Require(support.Tag != load.Tag, "CAD workflow selected the same surface for support and load.");
+                  Require(support.NodeIndices.Count > 0 && load.NodeIndices.Count > 0, "CAD workflow produced empty face scopes.");
+                  Console.WriteLine($"Standard CAD workflow passed | {cadMesh.Nodes.Count} nodes, {cadMesh.Tetrahedra.Count} TET4, {topology.Faces.Count} selectable faces, support Face {support.Tag}, load Face {load.Tag}");'''
+          new_verify = '''                Require(support.Tag != load.Tag, "CAD workflow selected the same surface for support and load.");
+                  Require(support.NodeIndices.Count > 0 && load.NodeIndices.Count > 0, "CAD workflow produced empty face scopes.");
+                  var cadSolution = GeneralCadTet4Solver.Solve(
+                      cadMesh,
+                      material,
+                      support.NodeIndices.ToArray(),
+                      new[] { new CadSurfaceForce(load.TriangleIndices, new Vec3(0, 0, -1000), "Workflow Smoke Force") });
+                  Require(cadSolution.MaxDisplacementMm > 0 && double.IsFinite(cadSolution.MaxDisplacementMm), "General CAD displacement is invalid.");
+                  Require(cadSolution.MaxVonMisesMpa > 0 && double.IsFinite(cadSolution.MaxVonMisesMpa), "General CAD stress is invalid.");
+                  Require(cadSolution.RelativeResidual <= 1e-7, $"General CAD residual is {cadSolution.RelativeResidual:E3}.");
+                  Require(cadSolution.EquilibriumError <= 1e-6, $"General CAD equilibrium error is {cadSolution.EquilibriumError:E3}.");
+                  Console.WriteLine($"General CAD solve passed | {cadMesh.Nodes.Count} nodes, {cadMesh.Tetrahedra.Count} TET4, {topology.Faces.Count} faces, Umax={cadSolution.MaxDisplacementMm:G8} mm, VM={cadSolution.MaxVonMisesMpa:G8} MPa, PCG={cadSolution.Iterations}, residual={cadSolution.RelativeResidual:E3}, equilibrium={cadSolution.EquilibriumError:E3}");'''
+          replace(verifier, old_verify, new_verify)
+
+          for path in [
+              'windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj',
+              'windows/AsterMax.MechanicalGui/MechanicalForm.cs',
+              'windows/AsterMax.MechanicalGui/Program.cs',
+              '.github/workflows/build-mechanical-gui.yml',
+              'windows/AsterMax.MechanicalGui/README.md']:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              text = text.replace('0.7.1', '0.8.0')
+              p.write_text(text, encoding='utf-8')
+
+          readme = Path('windows/AsterMax.MechanicalGui/README.md')
+          text = readme.read_text(encoding='utf-8')
+          text = text.replace(
+              'The general single-solid route now supports real face selection and persistent face scoping for Fixed Support and Force. The sparse static solver adapter is the next implementation block. The program deliberately blocks Solve for this route instead of returning fictitious stresses.',
+              'The general single-solid route supports real face selection, persistent Fixed Support and Force scoping, sparse TET4 assembly, PCG solution, reactions, displacement and von Mises recovery. Results are displayed on the deformed exterior skin.')
+          text = text.replace(
+              '- General CAD supports real face selection and persistent support/load scoping, but the arbitrary unstructured static solver is not yet enabled.',
+              '- General CAD static solution is limited to one closed linear-elastic isotropic solid, first-order TET4 elements, fixed supports and total forces distributed over selected faces.')
+          readme.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit integrated solver
+        shell: bash
+        run: |
+          git config user.name "AsterMax Build Agent"
+          git config user.email "actions@users.noreply.github.com"
+          git add windows/AsterMax.MechanicalGui .github/workflows/build-mechanical-gui.yml
+          git commit -m "Enable sparse TET4 solution for general CAD workflow"
+          git push origin HEAD:agent/mechanical-gui-pdf-workflow

@@ -1,0 +1,1 @@
+Request a fresh Release build after startup initialization fix and real GUI startup smoke validation.

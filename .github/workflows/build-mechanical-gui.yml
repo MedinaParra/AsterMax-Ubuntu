@@ -1,0 +1,83 @@
+name: Build AsterMax Mechanical GUI
+
+on:
+  push:
+    branches:
+      - agent/mechanical-gui-pdf-workflow
+  pull_request:
+    paths:
+      - "windows/AsterMax.MechanicalGui/**"
+      - ".github/workflows/build-mechanical-gui.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win-x64:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+
+      - name: Build validation
+        run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Tutorial capability smoke tests
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "AsterMax tutorial capability smoke tests failed with code $($process.ExitCode)." }
+
+      - name: Real GUI startup smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
+          if (-not $process.WaitForExit(15000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "AsterMax GUI did not complete its startup smoke test within 15 seconds."
+          }
+          if ($process.ExitCode -ne 0) { throw "AsterMax GUI startup smoke failed with code $($process.ExitCode)." }
+
+      - name: Publish Windows executable
+        run: >-
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish/win-x64
+
+      - name: Bundle official Gmsh 4.15.2
+        shell: pwsh
+        run: |
+          $uri = "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip"
+          Invoke-WebRequest -Uri $uri -OutFile gmsh-windows.zip
+          Expand-Archive gmsh-windows.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          if (-not $source) { throw "The Gmsh archive did not contain a directory." }
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+          $gmsh = Resolve-Path "$target/gmsh.exe"
+          if ((Get-Item $gmsh).Length -lt 1000000) { throw "The bundled Gmsh executable is unexpectedly small." }
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-win-x64
+          path: publish/win-x64
+          if-no-files-found: error

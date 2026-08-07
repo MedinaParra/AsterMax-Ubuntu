@@ -1,0 +1,282 @@
+name: Build AsterMax General CAD Solver Release
+
+on:
+  push:
+    branches:
+      - agent/mechanical-gui-pdf-workflow
+    paths:
+      - ".github/workflows/build-general-cad-solver-release.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply production CSR solver settings
+        shell: pwsh
+        run: |
+          $solverPath = "windows/AsterMax.MechanicalGui/GeneralCadTet4Solver.cs"
+          $text = Get-Content $solverPath -Raw
+          $text = $text.Replace("Math.Clamp(freeToGlobal.Count * 8, 600, 30000)", "Math.Clamp(freeToGlobal.Count * 3, 300, 8000)")
+          $text = $text.Replace("            1e-9,", "            1e-6,")
+          $text = $text.Replace("        stiffness.ValidateDiagonal();", "        stiffness.ValidateDiagonal();`r`n        stiffness.Freeze();")
+          $old = @'
+              private sealed class SparseMatrix
+              {
+                  private readonly Dictionary<int, double>[] _rows;
+                  public double[] Diagonal { get; }
+
+                  public SparseMatrix(int size)
+                  {
+                      _rows = Enumerable.Range(0, size).Select(_ => new Dictionary<int, double>(48)).ToArray();
+                      Diagonal = new double[size];
+                  }
+
+                  public void Add(int row, int column, double value)
+                  {
+                      if (Math.Abs(value) <= 1e-30) return;
+                      var entries = _rows[row];
+                      entries[column] = entries.GetValueOrDefault(column) + value;
+                      if (row == column) Diagonal[row] += value;
+                  }
+
+                  public void ValidateDiagonal()
+                  {
+                      var maximum = Diagonal.Select(Math.Abs).DefaultIfEmpty(1.0).Max();
+                      var minimumAllowed = Math.Max(1e-18, maximum * 1e-14);
+                      for (var index = 0; index < Diagonal.Length; index++)
+                      {
+                          if (!double.IsFinite(Diagonal[index]) || Diagonal[index] <= minimumAllowed)
+                              throw new InvalidOperationException(
+                                  $"The stiffness diagonal is singular at free degree of freedom {index + 1}. " +
+                                  "The mesh may contain disconnected nodes or insufficient supports.");
+                      }
+                  }
+
+                  public void Multiply(double[] vector, double[] result)
+                  {
+                      Array.Clear(result);
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          var sum = 0.0;
+                          foreach (var (column, value) in _rows[row]) sum += value * vector[column];
+                          result[row] = sum;
+                      }
+                  }
+              }
+          '@
+          $new = @'
+              private sealed class SparseMatrix
+              {
+                  private readonly Dictionary<int, double>[] _rows;
+                  private int[]? _rowPointers;
+                  private int[]? _columnIndices;
+                  private double[]? _values;
+                  public double[] Diagonal { get; }
+
+                  public SparseMatrix(int size)
+                  {
+                      _rows = Enumerable.Range(0, size).Select(_ => new Dictionary<int, double>(48)).ToArray();
+                      Diagonal = new double[size];
+                  }
+
+                  public void Add(int row, int column, double value)
+                  {
+                      if (_rowPointers is not null)
+                          throw new InvalidOperationException("Cannot add stiffness entries after CSR finalization.");
+                      if (Math.Abs(value) <= 1e-30) return;
+                      var entries = _rows[row];
+                      entries[column] = entries.GetValueOrDefault(column) + value;
+                      if (row == column) Diagonal[row] += value;
+                  }
+
+                  public void ValidateDiagonal()
+                  {
+                      var maximum = Diagonal.Select(Math.Abs).DefaultIfEmpty(1.0).Max();
+                      var minimumAllowed = Math.Max(1e-18, maximum * 1e-14);
+                      for (var index = 0; index < Diagonal.Length; index++)
+                      {
+                          if (!double.IsFinite(Diagonal[index]) || Diagonal[index] <= minimumAllowed)
+                              throw new InvalidOperationException(
+                                  $"The stiffness diagonal is singular at free degree of freedom {index + 1}. " +
+                                  "The mesh may contain disconnected nodes or insufficient supports.");
+                      }
+                  }
+
+                  public void Freeze()
+                  {
+                      if (_rowPointers is not null) return;
+                      _rowPointers = new int[_rows.Length + 1];
+                      var nonzeroCount = 0;
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          _rowPointers[row] = nonzeroCount;
+                          nonzeroCount += _rows[row].Count;
+                      }
+                      _rowPointers[^1] = nonzeroCount;
+                      _columnIndices = new int[nonzeroCount];
+                      _values = new double[nonzeroCount];
+                      var cursor = 0;
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          foreach (var entry in _rows[row].OrderBy(entry => entry.Key))
+                          {
+                              _columnIndices[cursor] = entry.Key;
+                              _values[cursor] = entry.Value;
+                              cursor++;
+                          }
+                          _rows[row].Clear();
+                      }
+                  }
+
+                  public void Multiply(double[] vector, double[] result)
+                  {
+                      if (_rowPointers is null || _columnIndices is null || _values is null) Freeze();
+                      Array.Clear(result);
+                      for (var row = 0; row < _rows.Length; row++)
+                      {
+                          var sum = 0.0;
+                          for (var index = _rowPointers![row]; index < _rowPointers[row + 1]; index++)
+                              sum += _values![index] * vector[_columnIndices![index]];
+                          result[row] = sum;
+                      }
+                  }
+              }
+          '@
+          if (-not $text.Contains($old)) { throw "SparseMatrix source block was not found for CSR conversion." }
+          $text = $text.Replace($old, $new)
+          Set-Content $solverPath $text -Encoding utf8
+
+          $projectPath = "windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj"
+          $project = Get-Content $projectPath -Raw
+          $project = $project.Replace("0.7.1-beta", "0.8.0-beta")
+          Set-Content $projectPath $project -Encoding utf8
+
+          $formPath = "windows/AsterMax.MechanicalGui/MechanicalForm.cs"
+          $form = Get-Content $formPath -Raw
+          $form = $form.Replace("AsterMax Mechanical 0.7.1 beta", "AsterMax Mechanical 0.8.0 beta")
+          Set-Content $formPath $form -Encoding utf8
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore and build
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Verify existing tutorial engines
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Existing solver engines failed with code $($process.ExitCode)." }
+
+      - name: Publish portable Windows application
+        shell: pwsh
+        run: |
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+
+      - name: Bundle Gmsh and generate complex STEP
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip" -OutFile gmsh.zip
+          Expand-Archive gmsh.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+
+          New-Item -ItemType Directory -Force -Path smoke-cad | Out-Null
+          @'
+          SetFactory("OpenCASCADE");
+          Box(1) = {0, 0, 0, 80, 50, 20};
+          Cylinder(2) = {20, 25, -5, 0, 0, 30, 6};
+          Cylinder(3) = {60, 25, -5, 0, 0, 30, 6};
+          BooleanDifference(10) = { Volume{1}; Delete; }{ Volume{2,3}; Delete; };
+          Save "complex-flange.step";
+          '@ | Set-Content smoke-cad/complex.geo -Encoding ascii
+          $gmsh = (Resolve-Path "$target/gmsh.exe").Path
+          $working = (Resolve-Path smoke-cad).Path
+          $process = Start-Process -FilePath $gmsh -ArgumentList @("complex.geo", "-0", "-nopopup", "-v", "3") -WorkingDirectory $working -PassThru -Wait
+          if (-not (Test-Path "$working/complex-flange.step")) { throw "Complex STEP generation failed." }
+
+      - name: Verify STEP import and topology
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          $process = Start-Process -FilePath $exe -ArgumentList @("--gmsh-smoke", $gmsh.Path, $step.Path) -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "STEP topology verification failed with code $($process.ExitCode)." }
+
+      - name: Verify general CAD sparse TET4 solver
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          $process = Start-Process -FilePath $exe -ArgumentList @("--general-cad-solver-smoke", $gmsh.Path, $step.Path) -PassThru -NoNewWindow
+          if (-not $process.WaitForExit(120000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "General CAD solver exceeded 120 seconds."
+          }
+          if ($process.ExitCode -ne 0) { throw "General CAD solver failed with code $($process.ExitCode)." }
+
+      - name: Verify standard application workflow
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $gmsh = Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          $process = Start-Process -FilePath $exe -ArgumentList @("--workflow-smoke", $gmsh.Path, $step.Path) -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Standard workflow failed with code $($process.ExitCode)." }
+
+      - name: Verify Windows startup
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path publish/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "GUI startup exceeded 20 seconds."
+          }
+          if ($process.ExitCode -ne 0) { throw "GUI startup failed with code $($process.ExitCode)." }
+
+      - name: Package release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item publish/win-x64/tools artifact/tools -Recurse -Force
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.8.0-beta.exe
+          Copy-Item windows/AsterMax.MechanicalGui/README.md artifact/README.md
+          Copy-Item smoke-cad/complex-flange.step artifact/AsterMax_Complex_STEP_Smoke.step
+          @'
+          @echo off
+          start "" "%~dp0AsterMax-Mechanical-0.8.0-beta.exe"
+          '@ | Set-Content artifact/RUN-AsterMax.cmd -Encoding ascii
+          $hash = (Get-FileHash artifact/AsterMax-Mechanical-0.8.0-beta.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-0.8.0-beta.exe" | Set-Content artifact/AsterMax-Mechanical-0.8.0-beta.exe.sha256 -Encoding ascii
+
+      - name: Upload verified release
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-0.8.0-beta-general-cad-solver-win-x64
+          path: artifact/**
+          if-no-files-found: error
+          retention-days: 30
