@@ -9,19 +9,10 @@ internal static class MechanicalInterfaceRoadmapIteration
     private static System.Windows.Forms.Timer? _monitor;
     private static bool _installed;
 
-    [ModuleInitializer]
-    internal static void Install()
+    internal static void Start()
     {
         if (_installed) return;
         _installed = true;
-        Application.Idle += StartAfterMessageLoop;
-    }
-
-    private static void StartAfterMessageLoop(object? sender, EventArgs eventArgs)
-    {
-        Application.Idle -= StartAfterMessageLoop;
-        if (_monitor is not null) return;
-
         _monitor = new System.Windows.Forms.Timer { Interval = 350 };
         _monitor.Tick += (_, _) =>
         {
@@ -65,34 +56,18 @@ internal static class MechanicalInterfaceRoadmapIteration
         var handled = true;
         switch (e.KeyCode)
         {
-            case Keys.F:
-                ApplyView(viewport, ViewCommand.Fit);
-                break;
+            case Keys.F: ApplyView(viewport, ViewCommand.Fit); break;
             case Keys.D0:
-            case Keys.NumPad0:
-                ApplyView(viewport, ViewCommand.Isometric);
-                break;
+            case Keys.NumPad0: ApplyView(viewport, ViewCommand.Isometric); break;
             case Keys.D1:
-            case Keys.NumPad1:
-                ApplyView(viewport, ViewCommand.Front);
-                break;
+            case Keys.NumPad1: ApplyView(viewport, ViewCommand.Front); break;
             case Keys.D2:
-            case Keys.NumPad2:
-                ApplyView(viewport, ViewCommand.Right);
-                break;
+            case Keys.NumPad2: ApplyView(viewport, ViewCommand.Right); break;
             case Keys.D3:
-            case Keys.NumPad3:
-                ApplyView(viewport, ViewCommand.Top);
-                break;
-            case Keys.M:
-                ApplyView(viewport, ViewCommand.ToggleMesh);
-                break;
-            case Keys.Escape:
-                ApplyView(viewport, ViewCommand.ClearSelection);
-                break;
-            default:
-                handled = false;
-                break;
+            case Keys.NumPad3: ApplyView(viewport, ViewCommand.Top); break;
+            case Keys.M: ApplyView(viewport, ViewCommand.ToggleMesh); break;
+            case Keys.Escape: ApplyView(viewport, ViewCommand.ClearSelection); break;
+            default: handled = false; break;
         }
         if (handled) e.Handled = e.SuppressKeyPress = true;
     }
@@ -181,7 +156,6 @@ internal sealed class ViewportCommandBar : Panel
         Width = 414;
         BackColor = Color.FromArgb(238, 250, 252, 254);
         BorderStyle = BorderStyle.FixedSingle;
-
         AddButton("Fit", ViewCommand.Fit, "Ajustar a pantalla (F)");
         AddButton("ISO", ViewCommand.Isometric, "Vista isométrica (0)");
         AddButton("Front", ViewCommand.Front, "Vista frontal (1)");
