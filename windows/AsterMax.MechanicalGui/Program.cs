@@ -42,6 +42,8 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             using var form = new MechanicalForm();
+            CadViewerQualityBootstrap.Start();
+            MechanicalInterfaceRoadmapIteration.Start();
 
             if (_smokeTest)
             {
@@ -190,7 +192,6 @@ internal static class Program
         }
         catch
         {
-            // Last-resort handler must never throw another exception.
         }
 
         if (!_smokeTest)
@@ -206,7 +207,6 @@ internal static class Program
             }
             catch
             {
-                // Nothing else can be shown safely.
             }
         }
 
