@@ -1,0 +1,159 @@
+name: AsterMax Windows 2 Beta - STEP P0 Certification
+
+on:
+  push:
+    branches:
+      - agent/astermax-windows-2-beta-tutorial-certification-step-fix
+    paths:
+      - ".github/workflows/astermax-windows-2-beta-step-certification.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+      - "docs/tutorial-certification/**"
+  pull_request:
+    branches:
+      - agent/mechanical-gui-pdf-workflow
+    paths:
+      - ".github/workflows/astermax-windows-2-beta-step-certification.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+      - "docs/tutorial-certification/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  p0-step-certification:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout certification branch
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+
+      - name: Build Release
+        shell: pwsh
+        run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Core prism solver smoke
+        shell: pwsh
+        run: |
+          dotnet run --project windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release --no-build -- --solver-smoke
+
+      - name: Publish win-x64 self-contained
+        shell: pwsh
+        run: |
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+
+      - name: Bundle Gmsh OpenCASCADE engine
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip" -OutFile gmsh.zip
+          Expand-Archive gmsh.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          if ($null -eq $source) { throw "Gmsh archive did not contain the expected directory." }
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+          if (-not (Test-Path "$target/gmsh.exe")) { throw "tools/gmsh/gmsh.exe was not bundled." }
+          $license = Get-ChildItem $target -Recurse -File | Where-Object { $_.Name -match 'license|copying|copyright' }
+          if (-not $license) { throw "No Gmsh license/copyright file was found in the bundled distribution." }
+
+      - name: Verify Windows startup
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
+          if (-not $process.WaitForExit(20000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "GUI startup exceeded 20 seconds."
+          }
+          if ($process.ExitCode -ne 0) { throw "GUI startup failed with code $($process.ExitCode)." }
+
+      - name: Cylinder STEP import smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          $watch = [System.Diagnostics.Stopwatch]::StartNew()
+          & $exe --step-import-smoke $step --expect-solids 1 --expect-faces 3 *>&1 | Tee-Object evidence/cylinder-step-smoke.log
+          $code = $LASTEXITCODE
+          $watch.Stop()
+          "wall_clock_ms=$($watch.ElapsedMilliseconds)" | Add-Content evidence/cylinder-step-smoke.log
+          if ($code -ne 0) { throw "Cylinder STEP import smoke failed with code $code." }
+          if ($watch.Elapsed.TotalSeconds -gt 10) {
+            Write-Warning "Cylinder end-to-end smoke exceeded the 10 s preview target; actual timing is retained as evidence."
+          }
+
+      - name: Cancel timeout and no-orphan process smoke
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          & $exe --step-import-control-smoke $step *>&1 | Tee-Object evidence/step-process-control-smoke.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { throw "STEP process-control smoke failed with code $code." }
+
+      - name: Persist P0 evidence summary
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $gmsh = (Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $stepHash = (Get-FileHash $step -Algorithm SHA256).Hash.ToLowerInvariant()
+          $gmshVersion = (& $gmsh --version | Select-Object -First 1)
+          @"
+          branch=$env:GITHUB_REF_NAME
+          commit=$env:GITHUB_SHA
+          product=AsterMax Windows 2.0 beta
+          mechanical=0.8.1-beta
+          cylinder_fixture=$step
+          cylinder_fixture_sha256=$stepHash
+          gmsh=$gmsh
+          gmsh_version=$gmshVersion
+          executable_sha256=$exeHash
+          strict_tutorial_certification=0/20
+          strict_tutorial_percent=0
+          "@ | Set-Content evidence/p0-summary.txt -Encoding utf8
+
+      - name: Package portable Windows beta
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item publish/win-x64/* artifact -Recurse -Force
+          Copy-Item windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp artifact/CILINDRO-SIMPLE.stp -Force
+          Copy-Item docs/tutorial-certification artifact/tutorial-certification -Recurse -Force
+          Copy-Item evidence artifact/evidence -Recurse -Force
+          @'
+          @echo off
+          start "" "%~dp0AsterMax-Mechanical.exe"
+          '@ | Set-Content artifact/RUN-AsterMax.cmd -Encoding ascii
+          Compress-Archive -Path artifact/* -DestinationPath AsterMax-Windows-2.0-beta-P0-win-x64.zip -Force
+          $zipHash = (Get-FileHash AsterMax-Windows-2.0-beta-P0-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$zipHash  AsterMax-Windows-2.0-beta-P0-win-x64.zip" | Set-Content AsterMax-Windows-2.0-beta-P0-win-x64.zip.sha256 -Encoding ascii
+          Get-Item AsterMax-Windows-2.0-beta-P0-win-x64.zip | Select-Object Name, Length | Format-Table -AutoSize
+          Get-Content AsterMax-Windows-2.0-beta-P0-win-x64.zip.sha256
+
+      - name: Upload Windows application and P0 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Windows-2.0-beta-P0-win-x64
+          path: |
+            AsterMax-Windows-2.0-beta-P0-win-x64.zip
+            AsterMax-Windows-2.0-beta-P0-win-x64.zip.sha256
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
