@@ -18,7 +18,7 @@ internal sealed partial class MechanicalForm : Form
     internal static readonly Color Yellow = Color.FromArgb(190, 112, 0);
     internal static readonly Color Red = Color.FromArgb(195, 48, 48);
 
-    private const string ProductTitle = "AsterMax Mechanical 0.8.0 beta";
+    private const string ProductTitle = "AsterMax Windows 2.0 beta — Mechanical 0.8.1 beta";
 
     private readonly MenuStrip _menu = new();
     private readonly TabControl _ribbon = new();
@@ -71,6 +71,7 @@ internal sealed partial class MechanicalForm : Form
         InitializeSimpleStaticWorkflow();
         WireEvents();
         InitializeProductionInteractionEnhancements();
+        FormClosing += HandleFormClosingDuringOperation;
         SelectNode("Project");
         _ribbon.SelectedTab = _ribbon.TabPages.Cast<TabPage>()
             .FirstOrDefault(page => page.Text == "Home") ?? _ribbon.SelectedTab;
