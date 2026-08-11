@@ -14,10 +14,6 @@ internal sealed partial class MechanicalForm
 
         _outline.BeforeSelect += (_, e) => RenderDetailsSelection(e.Node, "before-select");
         _outline.AfterSelect += (_, e) => CompleteSelectionContext(e.Node, "after-select");
-
-        // Program.cs has a short historical startup watchdog. Once the expanded real-CAD
-        // regression starts, cancel that watchdog close until the regression itself reaches
-        // a terminal state. A successful smoke closes the form explicitly at the end.
         FormClosing += (_, e) =>
         {
             if (_uiSmokeRunning) e.Cancel = true;
@@ -34,7 +30,6 @@ internal sealed partial class MechanicalForm
     private void RenderDetailsSelection(TreeNode? node, string source)
     {
         if (IsDisposed || node?.Tag is not ModelObject model) return;
-
         if (_details.IsCurrentCellInEditMode)
         {
             try { _details.EndEdit(); } catch { _details.CancelEdit(); }
@@ -44,12 +39,10 @@ internal sealed partial class MechanicalForm
         _statusSelection.Text = $"Selected: {model.Name}";
         _contextTitle.Text = $"{model.Category}\n{model.Name}";
         UpdateDetails(node);
-
         var renderedName = ReadRenderedDetailsName();
         if (!string.Equals(renderedName, model.Name, StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"Details invariant failed: tree='{model.Name}', details='{renderedName ?? "<none>"}', source={source}.");
-
         _details.Invalidate();
         _status.Invalidate();
     }
@@ -57,7 +50,6 @@ internal sealed partial class MechanicalForm
     private void CompleteSelectionContext(TreeNode? node, string source)
     {
         if (_stableSelectionBusy || IsDisposed || node?.Tag is not ModelObject) return;
-
         try
         {
             _stableSelectionBusy = true;
@@ -68,10 +60,8 @@ internal sealed partial class MechanicalForm
             PopulateWorksheet(node);
             HighlightWorkflow(node);
             RefreshProductionSelectionFeedback();
-
             if (_cadCanvas is null || !_cadCanvas.Visible)
                 UpdateViewport(node);
-
             _outline.Invalidate();
         }
         finally
@@ -111,7 +101,6 @@ internal sealed partial class MechanicalForm
             }
             return;
         }
-
         _viewport.Visible = true;
     }
 
@@ -144,7 +133,6 @@ internal sealed partial class MechanicalForm
     {
         if (_productionInteractionsInitialized) return;
         _productionInteractionsInitialized = true;
-
         ConfigureDetailsSelectionExperience();
         KeyDown += HandleNavigationShortcut;
         FormClosed += (_, _) => CloseOperationOverlay();
@@ -153,20 +141,17 @@ internal sealed partial class MechanicalForm
     private void ReconcileGeometryVisualState()
     {
         if (!_nodes.TryGetValue("Model", out var modelNode)) return;
-
         if (!_nodes.TryGetValue("Geometry", out var geometryNode) || geometryNode.TreeView != _outline)
         {
             _nodes.Remove("Geometry");
             geometryNode = MakeNode("Geometry", ObjectKind.Geometry, ObjectState.NeedsAttention, "Geometry");
             modelNode.Nodes.Insert(0, geometryNode);
         }
-
         foreach (var key in _nodes
                      .Where(pair => pair.Value.TreeView != _outline && !ReferenceEquals(pair.Value, geometryNode))
                      .Select(pair => pair.Key)
                      .ToArray())
             _nodes.Remove(key);
-
         if (geometryNode.Nodes.Count == 0 && !string.IsNullOrWhiteSpace(_geometryPath))
             ClearImportedGeometryVisualState(geometryNode);
     }
@@ -181,7 +166,6 @@ internal sealed partial class MechanicalForm
         _simpleMesh = null;
         _simpleSolution = null;
         _simpleSetupDefined = false;
-
         _viewport.ClearModel();
         _viewport.MeshVisible = false;
         _viewport.ResultVisible = false;
@@ -191,7 +175,6 @@ internal sealed partial class MechanicalForm
         _viewport.SubCaption = "No geometry imported";
         _viewport.Visible = true;
         _viewport.Invalidate();
-
         foreach (var scopedNode in AllNodes().Where(node =>
                      node.Tag is ModelObject { Kind: ObjectKind.Support or ObjectKind.Load }).ToArray())
         {
@@ -201,12 +184,10 @@ internal sealed partial class MechanicalForm
                 scoped.Properties["Geometry"] = "Unscoped";
             SetState(scopedNode, ObjectState.NeedsAttention);
         }
-
         SetState(geometryNode, ObjectState.NeedsAttention);
         SetState(_nodes.GetValueOrDefault("Model"), ObjectState.NeedsAttention);
         SetState(_nodes.GetValueOrDefault("Mesh"), ObjectState.NeedsAttention);
         MarkSolutionDirty();
-
         Log("GEOMETRY CLEARED: CAD mesh, preview, solver state and viewport were released together.");
     }
 
@@ -220,9 +201,7 @@ internal sealed partial class MechanicalForm
             if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
             File.AppendAllText(path, $"{DateTimeOffset.Now:O} | {stage}{Environment.NewLine}");
         }
-        catch
-        {
-        }
+        catch { }
     }
 
     private async Task RunStableSelectionSmokeIfRequestedAsync()
@@ -235,7 +214,6 @@ internal sealed partial class MechanicalForm
         try
         {
             SmokeTrace("start");
-
             void SelectThroughRealTreeEvents(TreeNode node, string stage)
             {
                 SmokeTrace("select-begin:" + stage + ":" + node.Text);
@@ -247,7 +225,6 @@ internal sealed partial class MechanicalForm
                 _outline.SelectedNode = node;
                 node.EnsureVisible();
                 Application.DoEvents();
-
                 if (node.Tag is not ModelObject model)
                     throw new InvalidOperationException($"GUI smoke ({stage}): node has no ModelObject.");
                 if (!string.Equals(ReadRenderedDetailsName(), model.Name, StringComparison.Ordinal))
@@ -261,15 +238,11 @@ internal sealed partial class MechanicalForm
 
             var initialSequence = new[]
             {
-                _nodes.GetValueOrDefault("Geometry"),
-                _nodes.GetValueOrDefault("Connections"),
-                FirstAnalysis(),
+                _nodes.GetValueOrDefault("Geometry"), _nodes.GetValueOrDefault("Connections"), FirstAnalysis(),
                 AllNodes().FirstOrDefault(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation }),
                 AllNodes().FirstOrDefault(node => node.Tag is ModelObject { Kind: ObjectKind.Result })
             }.Where(node => node is not null).Cast<TreeNode>().ToArray();
-
-            foreach (var node in initialSequence)
-                SelectThroughRealTreeEvents(node, "before-cad");
+            foreach (var node in initialSequence) SelectThroughRealTreeEvents(node, "before-cad");
             SmokeTrace("empty-tree-sequence-pass");
 
             var cylinder = Environment.GetEnvironmentVariable("ASTERMAX_STARTUP_STEP");
@@ -291,12 +264,16 @@ internal sealed partial class MechanicalForm
 
                 if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
                     throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
+                SmokeTrace("post-cad-geometry-state-pass");
                 if (_cadCanvas is null || !_cadCanvas.Visible)
                     throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
+                SmokeTrace("post-cad-canvas-visible-pass");
                 if (_cadCanvas.Parent == _viewport)
                     throw new InvalidOperationException("GUI smoke: CAD canvas is still nested inside MechanicalViewport.");
+                SmokeTrace("post-cad-sibling-pass");
 
                 var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: analysis missing.");
+                SmokeTrace("post-cad-analysis-found");
                 SelectThroughRealTreeEvents(analysis, "cad-analysis");
                 SmokeTrace("add-support-begin");
                 AddSupport("Fixed Support");
@@ -307,7 +284,6 @@ internal sealed partial class MechanicalForm
                     throw new InvalidOperationException("GUI smoke: Fixed Support insertion did not select the support.");
                 SelectThroughRealTreeEvents(support, "cad-fixed-support");
                 SelectThroughRealTreeEvents(_nodes["Connections"], "cad-connections");
-
                 var solutionInformation = AllNodes().First(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation });
                 SelectThroughRealTreeEvents(solutionInformation, "cad-solution-information");
 
@@ -329,7 +305,6 @@ internal sealed partial class MechanicalForm
                 DeleteSelected();
                 Application.DoEvents();
                 SmokeTrace("delete-doevents-pass");
-
                 if (!string.IsNullOrWhiteSpace(_geometryPath))
                     throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
                 if (_cadCanvas is { Visible: true })
@@ -348,11 +323,15 @@ internal sealed partial class MechanicalForm
             SmokeTrace("complete");
             success = true;
         }
+        catch (Exception exception)
+        {
+            SmokeTrace($"EXCEPTION:{exception.GetType().Name}:{exception.Message}");
+            throw;
+        }
         finally
         {
             _uiSmokeRunning = false;
-            if (success && !IsDisposed)
-                Close();
+            if (success && !IsDisposed) Close();
         }
     }
 }
