@@ -154,7 +154,6 @@ internal static class TutorialCertificationSuite
             foreach (var result in results)
                 Console.WriteLine($"{result.Id} | {result.Status} | {result.Name} | {result.Diagnosis}");
 
-            // Full certification returns 0 only at 20/20. Single-case debug returns 0 only if that selected case really Passed.
             return fullRun ? passed == 20 ? 0 : 20 : results.All(result => result.Status == Passed) ? 0 : 21;
         }
         catch (Exception exception)
@@ -218,7 +217,7 @@ internal static class TutorialCertificationSuite
     private static Dictionary<string, string> BuildFileIndex(string root)
     {
         return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .GroupBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
     }
 
@@ -268,14 +267,14 @@ internal static class TutorialCertificationSuite
         static string H(string? value) => System.Net.WebUtility.HtmlEncode(value ?? string.Empty);
         var rows = string.Join(Environment.NewLine, results.Select(result =>
             $"<tr><td>{H(result.Id)}</td><td>{H(result.Name)}</td><td>{H(result.Status)}</td><td>{result.Inputs.Count(input => input.Present)}/{result.Inputs.Count}</td><td>{H(result.Diagnosis)}</td></tr>"));
-        var html = $"""
+        var html = $$"""
         <!doctype html>
         <html><head><meta charset="utf-8"><title>AsterMax Tutorial Certification</title>
-        <style>body{{font-family:Segoe UI,Arial,sans-serif;margin:28px;color:#202a34}}table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #c5ced8;padding:7px;vertical-align:top}}th{{background:#edf2f7}}code{{background:#eef2f5;padding:2px 4px}}</style></head>
+        <style>body{font-family:Segoe UI,Arial,sans-serif;margin:28px;color:#202a34}table{border-collapse:collapse;width:100%}th,td{border:1px solid #c5ced8;padding:7px;vertical-align:top}th{background:#edf2f7}code{background:#eef2f5;padding:2px 4px}</style></head>
         <body><h1>AsterMax Windows 2.0 beta — Tutorial Certification</h1>
-        <p><strong>Strict certification:</strong> {passed}/20 = {(passed / 20.0 * 100.0):0.0}%</p>
+        <p><strong>Strict certification:</strong> {{passed}}/20 = {{(passed / 20.0 * 100.0):0.0}}%</p>
         <p><code>Passed</code> is never assigned to NotRun, Unavailable, TimedOut or skipped cases.</p>
-        <table><thead><tr><th>ID</th><th>Workshop</th><th>Status</th><th>Inputs</th><th>Diagnosis</th></tr></thead><tbody>{rows}</tbody></table></body></html>
+        <table><thead><tr><th>ID</th><th>Workshop</th><th>Status</th><th>Inputs</th><th>Diagnosis</th></tr></thead><tbody>{{rows}}</tbody></table></body></html>
         """;
         File.WriteAllText(path, html, new UTF8Encoding(false));
     }
