@@ -55,11 +55,12 @@ internal sealed partial class MechanicalForm
             throw new InvalidOperationException(
                 $"Details invariant failed: tree='{model.Name}', details='{renderedName ?? "<none>"}', source={source}.");
 
-        // Refresh() forces the property panel to paint before the slower second phase runs.
-        // This is intentional: the user must never see Geometry properties while another
-        // Outline object is already highlighted.
-        _details.Refresh();
-        _status.Refresh();
+        // Do not call Refresh()/Update() from BeforeSelect: forcing nested native paints
+        // while TreeView is changing selection can create re-entrant WinForms message work.
+        // The second phase is intentionally lightweight when CAD is visible, so normal
+        // Windows painting occurs immediately after this selection event returns.
+        _details.Invalidate();
+        _status.Invalidate();
     }
 
     private void CompleteSelectionContext(TreeNode? node, string source)
@@ -213,8 +214,6 @@ internal sealed partial class MechanicalForm
 
         void SelectThroughRealTreeEvents(TreeNode node, string stage)
         {
-            // Force an actual selection transition. The test is not allowed to call the
-            // controller directly; BeforeSelect/AfterSelect must do the work.
             if (ReferenceEquals(_outline.SelectedNode, node))
             {
                 var alternate = AllNodes().FirstOrDefault(candidate => !ReferenceEquals(candidate, node));
@@ -250,9 +249,15 @@ internal sealed partial class MechanicalForm
         if (string.IsNullOrWhiteSpace(cylinder))
             cylinder = Path.Combine(Environment.CurrentDirectory, "windows", "AsterMax.MechanicalGui", "TestData", "CILINDRO-SIMPLE.stp");
 
-        if (File.Exists(cylinder) && GmshCliMesher.FindExecutable() is not null)
+        if (File.Exists(cylinder) && GmshCliMesher.FindExecutable() is { } gmsh)
         {
-            await ImportCadStepAsync(cylinder);
+            // Import the exact STEP through the same OCC/Gmsh service, but do not open the
+            // production operation overlay. The startup harness has its own close timer;
+            // letting that timer collide with _busy would test modal-close timing instead
+            // of the field bug we need to certify here.
+            using var smokeOperation = new OperationController();
+            var result = await StepImportService.ImportSurfaceAsync(gmsh, cylinder, smokeOperation, PreviewTimeout);
+            CommitGeneralCadImport(cylinder, result);
             Application.DoEvents();
 
             if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
@@ -269,8 +274,7 @@ internal sealed partial class MechanicalForm
                 throw new InvalidOperationException("GUI smoke: Fixed Support insertion did not select the support.");
             SelectThroughRealTreeEvents(support, "cad-fixed-support");
 
-            var connections = _nodes["Connections"];
-            SelectThroughRealTreeEvents(connections, "cad-connections");
+            SelectThroughRealTreeEvents(_nodes["Connections"], "cad-connections");
 
             var solutionInformation = AllNodes().First(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation });
             SelectThroughRealTreeEvents(solutionInformation, "cad-solution-information");
