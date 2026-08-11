@@ -1,75 +1,43 @@
-using System.Runtime.CompilerServices;
-
 namespace AsterMax.MechanicalGui;
 
 internal sealed partial class MechanicalForm
 {
     private bool _uiStateRepairInstalled;
-    private System.Windows.Forms.Timer? _uiStateRepairTimer;
 
+    /// <summary>
+    /// Installs only event-driven UI guards. This deliberately contains no recurring
+    /// timer and never changes splitter distances while the user is working. The previous
+    /// timer-based repair path could re-enter selection/layout during CAD painting and was
+    /// responsible for fragmented panels and repeated viewport paint artifacts.
+    /// </summary>
     internal void InstallUiStateRepair()
     {
         if (_uiStateRepairInstalled) return;
         _uiStateRepairInstalled = true;
 
-        EnsureRootUsesFullWidth();
         ConfigureDetailsMinimumWidths();
 
-        void InitialRepair()
+        // WireEvents already performs the normal selection update synchronously. This
+        // second, deferred pass runs once per actual tree selection and guarantees that a
+        // programmatic insert (Force/Support/etc.) cannot leave Details on the old object.
+        _outline.AfterSelect += (_, e) =>
         {
-            if (IsDisposed || !IsHandleCreated) return;
+            var selectedNode = e.Node;
+            if (selectedNode is null || IsDisposed) return;
             BeginInvoke(() =>
             {
-                RepairResponsiveDetailsLayout(force: true);
-                RepairSelectionDetailsIfNeeded();
-                RunStartupLoadDetailsRegressionIfRequested();
+                if (IsDisposed || !ReferenceEquals(_outline.SelectedNode, selectedNode)) return;
+                SynchronizeSelectionSurfaces(selectedNode);
             });
-        }
-
-        if (Visible && IsHandleCreated)
-            InitialRepair();
-        else
-            Shown += (_, _) => InitialRepair();
-
-        SizeChanged += (_, _) =>
-        {
-            if (!IsHandleCreated || IsDisposed) return;
-            BeginInvoke(() => RepairResponsiveDetailsLayout(force: false));
         };
 
-        _uiStateRepairTimer = new System.Windows.Forms.Timer { Interval = 150 };
-        _uiStateRepairTimer.Tick += (_, _) =>
+        Shown += (_, _) => BeginInvoke(() =>
         {
-            RepairSelectionDetailsIfNeeded();
-            RepairResponsiveDetailsLayout(force: false);
-        };
-        _uiStateRepairTimer.Start();
-
-        FormClosed += (_, _) =>
-        {
-            if (_uiStateRepairTimer is null) return;
-            _uiStateRepairTimer.Stop();
-            _uiStateRepairTimer.Dispose();
-            _uiStateRepairTimer = null;
-        };
-    }
-
-    /// <summary>
-    /// The safe-startup layout originally declared one TableLayoutPanel column without
-    /// assigning it a percent style. On some DPI/window combinations WinForms retained
-    /// the preferred width of the nested splitters and left unused space at the right,
-    /// compressing Details until the Value column effectively disappeared.
-    /// </summary>
-    private void EnsureRootUsesFullWidth()
-    {
-        if (_ribbon.Parent is not TableLayoutPanel root || root.ColumnCount != 1) return;
-        if (root.ColumnStyles.Count == 0)
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        else
-        {
-            root.ColumnStyles[0].SizeType = SizeType.Percent;
-            root.ColumnStyles[0].Width = 100F;
-        }
+            if (IsDisposed) return;
+            if (_outline.SelectedNode is { } selectedNode)
+                SynchronizeSelectionSurfaces(selectedNode);
+            RunStartupLoadDetailsRegressionIfRequested();
+        });
     }
 
     private void ConfigureDetailsMinimumWidths()
@@ -81,138 +49,129 @@ internal sealed partial class MechanicalForm
         _details.Columns[1].FillWeight = 57;
     }
 
-    /// <summary>
-    /// Keeps a usable Details width without continuously overriding a user's splitter
-    /// preference. Reflow is forced once when the form is shown and later only if the
-    /// panel has actually collapsed below a usable size.
-    /// </summary>
-    private void RepairResponsiveDetailsLayout(bool force)
+    private void SynchronizeSelectionSurfaces(TreeNode node)
     {
-        EnsureRootUsesFullWidth();
-        ConfigureDetailsMinimumWidths();
+        if (_busy || _details.IsCurrentCellInEditMode || node.Tag is not ModelObject selected) return;
 
-        var detailsHost = _details.Parent;
-        var splitterPanel = detailsHost?.Parent as SplitterPanel;
-        var splitter = splitterPanel?.Parent as SplitContainer;
-        if (splitter is null || splitter.Orientation != Orientation.Vertical) return;
-
-        var extent = splitter.ClientSize.Width;
-        if (extent <= splitter.SplitterWidth + 240) return;
-
-        // At normal desktop widths reserve about 25% for Details, clamped to a
-        // practical Mechanical-style range. Smaller windows still retain >=240 px.
-        var desiredDetailsWidth = extent >= 900
-            ? Math.Clamp((int)Math.Round(extent * 0.25), 300, 380)
-            : Math.Clamp((int)Math.Round(extent * 0.32), 240, 320);
-
-        var currentlyCollapsed = _details.ClientSize.Width < 240 ||
-                                 (_details.Columns.Count >= 2 && _details.Columns[1].Width < 110);
-        if (!force && !currentlyCollapsed) return;
-
-        var requested = extent - splitter.SplitterWidth - desiredDetailsWidth;
-        SetSafeSplitter(splitter, requested);
-        splitter.PerformLayout();
-        _details.PerformLayout();
-    }
-
-    /// <summary>
-    /// TreeView can visually move selection while a programmatic insertion path misses
-    /// the normal AfterSelect refresh. The authoritative check is the selected node versus
-    /// the Name currently rendered in Details. If they disagree, rebuild every dependent
-    /// selection surface from the actual TreeView.SelectedNode.
-    /// </summary>
-    private void RepairSelectionDetailsIfNeeded()
-    {
-        if (_busy || _details.IsCurrentCellInEditMode || _outline.SelectedNode?.Tag is not ModelObject selected) return;
-
-        string? renderedName = null;
-        foreach (DataGridViewRow row in _details.Rows)
-        {
-            if (!string.Equals(row.Cells[0].Value?.ToString(), "Name", StringComparison.OrdinalIgnoreCase)) continue;
-            renderedName = row.Cells[1].Value?.ToString();
-            break;
-        }
-
-        var contextMatches = _contextTitle.Text.Contains(selected.Name, StringComparison.OrdinalIgnoreCase);
-        if (string.Equals(renderedName, selected.Name, StringComparison.Ordinal) && contextMatches) return;
-
-        var selectedNode = _outline.SelectedNode;
-        OnObjectSelected(selectedNode);
+        OnObjectSelected(node);
         HighlightScopeForSelectedTreeObject();
         RefreshProductionSelectionFeedback();
-        Log($"UI STATE REPAIR: synchronized Details with selected object '{selected.Name}'.");
+
+        // OnObjectSelected may populate several grids and alter viewport flags. A single
+        // invalidation is enough; no recurring reflow/repaint loop is allowed here.
+        _details.Invalidate();
+        _outline.Invalidate();
+        _viewport.Invalidate();
+        Log($"UI SELECTION SYNC: '{selected.Name}'.");
     }
 
     /// <summary>
-    /// The normal Windows startup smoke now contains the exact regression reported from
-    /// the field: the tree points to Force while Details is deliberately left on Geometry.
-    /// A release is rejected if synchronization or the Details value column cannot recover.
+    /// Structural regression for the exact two field failures reported by the user:
+    /// 1) Force visually selected while Details remained on Geometry.
+    /// 2) layout fragmentation / collapsed Details after the repair mechanism ran.
+    /// The smoke test rejects a release if either state can be reproduced.
     /// </summary>
     private void RunStartupLoadDetailsRegressionIfRequested()
     {
         var args = Environment.GetCommandLineArgs();
         if (!args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase))) return;
 
-        var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI load-details smoke: Static Structural analysis is missing.");
+        ValidateStableLayout("initial");
+        var before = CaptureSplitterState();
+
+        var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: Static Structural analysis is missing.");
         _outline.SelectedNode = analysis;
-        OnObjectSelected(analysis);
+        SynchronizeSelectionSurfaces(analysis);
         AddLoad("Force");
         Application.DoEvents();
 
         if (_outline.SelectedNode?.Tag is not ModelObject { Kind: ObjectKind.Load } load)
-            throw new InvalidOperationException("GUI load-details smoke: inserted Force did not become the selected tree object.");
+            throw new InvalidOperationException("GUI smoke: inserted Force did not become the selected tree object.");
 
-        // Reproduce the user's screenshot deterministically: Force remains selected in
-        // the Outline while the right side is stale on Geometry.
+        var loadNode = _outline.SelectedNode;
+
+        // Reproduce the stale panel from the field report, then repair only through the
+        // selected-node synchronization path. No splitter or root-layout mutation occurs.
         UpdateDetails(_nodes["Geometry"]);
         _statusSelection.Text = "Selected: Geometry";
         _contextTitle.Text = "Geometry\nGeometry";
-        RepairSelectionDetailsIfNeeded();
-        RepairResponsiveDetailsLayout(force: true);
+        SynchronizeSelectionSurfaces(loadNode);
         Application.DoEvents();
 
         var properties = _details.Rows.Cast<DataGridViewRow>()
             .Select(row => row.Cells[0].Value?.ToString() ?? string.Empty)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        RequireUi(properties.Contains("Magnitude"), "GUI load-details smoke: Magnitude control disappeared.");
-        RequireUi(properties.Contains("Direction"), "GUI load-details smoke: Direction control disappeared.");
-        RequireUi(properties.Contains("Geometry"), "GUI load-details smoke: Geometry scope control disappeared.");
-        RequireUi(properties.Contains("Define By"), "GUI load-details smoke: Define By control disappeared.");
-        RequireUi(_details.ClientSize.Width >= 240,
-            $"GUI load-details smoke: Details collapsed to {_details.ClientSize.Width}px.");
-        RequireUi(_details.Columns.Count >= 2 && _details.Columns[1].Visible && _details.Columns[1].Width >= 110,
-            $"GUI load-details smoke: Value column is hidden/collapsed (width={(_details.Columns.Count >= 2 ? _details.Columns[1].Width : 0)}px)." );
+        RequireUi(properties.Contains("Magnitude"), "GUI smoke: Magnitude control disappeared.");
+        RequireUi(properties.Contains("Direction"), "GUI smoke: Direction control disappeared.");
+        RequireUi(properties.Contains("Geometry"), "GUI smoke: Geometry scope control disappeared.");
+        RequireUi(properties.Contains("Define By"), "GUI smoke: Define By control disappeared.");
         RequireUi(_statusSelection.Text.Contains(load.Name, StringComparison.OrdinalIgnoreCase) ||
                   _statusSelection.Text.Contains("select a face", StringComparison.OrdinalIgnoreCase),
-            $"GUI load-details smoke: selection feedback stayed stale: '{_statusSelection.Text}'.");
+            $"GUI smoke: selection feedback stayed stale: '{_statusSelection.Text}'.");
 
-        Log($"PASS GUI LoadDetails_RemainsVisibleAfterStepWorkflow: Details={_details.ClientSize.Width}px, Value={_details.Columns[1].Width}px, selected={load.Name}.");
+        ValidateStableLayout("after Force selection");
+
+        // Pump messages repeatedly and ensure the layout does not drift by itself. This
+        // specifically guards against reintroducing timer-based splitter manipulation.
+        for (var i = 0; i < 8; i++) Application.DoEvents();
+        var after = CaptureSplitterState();
+        RequireUi(before.ContentDistance == after.ContentDistance,
+            $"GUI smoke: Outline splitter moved autonomously ({before.ContentDistance} -> {after.ContentDistance}).");
+        RequireUi(before.RightDistance == after.RightDistance,
+            $"GUI smoke: Details splitter moved autonomously ({before.RightDistance} -> {after.RightDistance}).");
+        RequireUi(before.CenterDistance == after.CenterDistance,
+            $"GUI smoke: Graphics splitter moved autonomously ({before.CenterDistance} -> {after.CenterDistance}).");
+
+        Log($"PASS GUI StableLayoutAndLoadDetails: Details={_details.ClientSize.Width}px, Value={_details.Columns[1].Width}px, selected={load.Name}.");
     }
+
+    private void ValidateStableLayout(string stage)
+    {
+        var root = _ribbon.Parent as TableLayoutPanel
+                   ?? throw new InvalidOperationException($"GUI smoke ({stage}): root TableLayoutPanel is missing.");
+        var content = FindOutlineSplitter()
+                      ?? throw new InvalidOperationException($"GUI smoke ({stage}): Outline splitter is missing.");
+        var right = FindDetailsSplitter()
+                    ?? throw new InvalidOperationException($"GUI smoke ({stage}): Details splitter is missing.");
+        var center = FindCenterSplitter()
+                     ?? throw new InvalidOperationException($"GUI smoke ({stage}): Graphics splitter is missing.");
+
+        RequireUi(Math.Abs(root.ClientSize.Width - ClientSize.Width) <= 4,
+            $"GUI smoke ({stage}): root width {root.ClientSize.Width}px does not fill form width {ClientSize.Width}px.");
+        RequireUi(content.Panel1.ClientSize.Width >= 190,
+            $"GUI smoke ({stage}): Outline collapsed to {content.Panel1.ClientSize.Width}px.");
+        RequireUi(right.Panel2.ClientSize.Width >= 230,
+            $"GUI smoke ({stage}): Details host collapsed to {right.Panel2.ClientSize.Width}px.");
+        RequireUi(center.Panel1.ClientSize.Height >= 270,
+            $"GUI smoke ({stage}): Graphics viewport collapsed to {center.Panel1.ClientSize.Height}px high.");
+        RequireUi(center.Panel2.ClientSize.Height >= 130,
+            $"GUI smoke ({stage}): lower tabs collapsed to {center.Panel2.ClientSize.Height}px high.");
+        RequireUi(_details.ClientSize.Width >= 220,
+            $"GUI smoke ({stage}): Details grid collapsed to {_details.ClientSize.Width}px.");
+        RequireUi(_details.Columns.Count >= 2 && _details.Columns[1].Visible && _details.Columns[1].Width >= 110,
+            $"GUI smoke ({stage}): Value column is hidden/collapsed (width={(_details.Columns.Count >= 2 ? _details.Columns[1].Width : 0)}px)." );
+    }
+
+    private (int ContentDistance, int RightDistance, int CenterDistance) CaptureSplitterState()
+    {
+        var content = FindOutlineSplitter() ?? throw new InvalidOperationException("GUI smoke: Outline splitter is missing.");
+        var right = FindDetailsSplitter() ?? throw new InvalidOperationException("GUI smoke: Details splitter is missing.");
+        var center = FindCenterSplitter() ?? throw new InvalidOperationException("GUI smoke: Graphics splitter is missing.");
+        return (content.SplitterDistance, right.SplitterDistance, center.SplitterDistance);
+    }
+
+    private SplitContainer? FindOutlineSplitter() =>
+        (_outline.Parent?.Parent as SplitterPanel)?.Parent as SplitContainer;
+
+    private SplitContainer? FindDetailsSplitter() =>
+        (_details.Parent?.Parent as SplitterPanel)?.Parent as SplitContainer;
+
+    private SplitContainer? FindCenterSplitter() =>
+        (_lowerTabs.Parent as SplitterPanel)?.Parent as SplitContainer;
 
     private static void RequireUi(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
-    }
-}
-
-internal static class MechanicalUiStateRepairBootstrap
-{
-    private static bool _hooked;
-
-    [ModuleInitializer]
-    internal static void Initialize()
-    {
-        if (_hooked) return;
-        _hooked = true;
-        Application.Idle += HandleApplicationIdle;
-    }
-
-    private static void HandleApplicationIdle(object? sender, EventArgs e)
-    {
-        var form = Application.OpenForms.OfType<MechanicalForm>().FirstOrDefault();
-        if (form is null || form.IsDisposed) return;
-        form.InstallUiStateRepair();
-        Application.Idle -= HandleApplicationIdle;
     }
 }
