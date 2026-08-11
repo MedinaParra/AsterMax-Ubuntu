@@ -10,6 +10,13 @@ import json
 import os
 import traceback
 
+# GitHub-hosted Windows and some RDP/VM sessions are reported to Coin3D as indirect
+# displays. Coin normally disables OpenGL >1.0 in that situation even when Qt has loaded
+# its packaged Mesa llvmpipe opengl32sw.dll. Coin itself recommends this switch when the
+# indirect renderer is known-good. It must be present before FreeCADGui/Coin initializes.
+os.environ.setdefault("COIN_FULL_INDIRECT_RENDERING", "1")
+os.environ.setdefault("COIN_DONT_INFORM_INDIRECT_RENDERING", "1")
+
 import FreeCAD as App
 import FreeCADGui as Gui
 import Import
