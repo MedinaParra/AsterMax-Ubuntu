@@ -70,16 +70,37 @@ jobs:
           $license = Get-ChildItem $target -Recurse -File | Where-Object { $_.Name -match 'license|copying|copyright' }
           if (-not $license) { throw "No Gmsh license/copyright file was found in the bundled distribution." }
 
-      - name: Verify Windows startup
+      - name: Verify Windows startup and real CAD Details events
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
           $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          $env:ASTERMAX_STARTUP_STEP = $step
+          $env:ASTERMAX_UI_SMOKE_LOG = (Join-Path (Get-Location) "evidence/ui-smoke.log")
+          Remove-Item $env:ASTERMAX_UI_SMOKE_LOG -Force -ErrorAction SilentlyContinue
           $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
           if (-not $process.WaitForExit(20000)) {
+            Write-Host "--- ui-smoke trace before timeout ---"
+            if (Test-Path $env:ASTERMAX_UI_SMOKE_LOG) { Get-Content $env:ASTERMAX_UI_SMOKE_LOG }
+            $crashRoot = Join-Path $env:LOCALAPPDATA "AsterMax/crashes"
+            if (Test-Path $crashRoot) {
+              Write-Host "--- AsterMax crash logs ---"
+              Get-ChildItem $crashRoot -File | ForEach-Object { Write-Host "FILE: $($_.FullName)"; Get-Content $_.FullName }
+            }
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            throw "GUI startup exceeded 20 seconds."
+            throw "GUI startup/real-CAD selection smoke exceeded 20 seconds."
           }
-          if ($process.ExitCode -ne 0) { throw "GUI startup failed with code $($process.ExitCode)." }
+          if ($process.ExitCode -ne 0) {
+            Write-Host "--- ui-smoke trace after failure ---"
+            if (Test-Path $env:ASTERMAX_UI_SMOKE_LOG) { Get-Content $env:ASTERMAX_UI_SMOKE_LOG }
+            throw "GUI startup failed with code $($process.ExitCode)."
+          }
+          Write-Host "--- ui-smoke trace ---"
+          Get-Content $env:ASTERMAX_UI_SMOKE_LOG
+          if (-not (Select-String -Path $env:ASTERMAX_UI_SMOKE_LOG -Pattern "cad-sequence-pass" -Quiet)) {
+            throw "Real CAD TreeView/Details sequence did not reach PASS."
+          }
 
       - name: Cylinder STEP import smoke
         shell: pwsh
