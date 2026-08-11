@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace AsterMax.MechanicalGui;
 
 internal sealed partial class MechanicalForm
@@ -5,13 +7,7 @@ internal sealed partial class MechanicalForm
     private bool _uiStateRepairInstalled;
     private System.Windows.Forms.Timer? _uiStateRepairTimer;
 
-    protected override void OnHandleCreated(EventArgs e)
-    {
-        base.OnHandleCreated(e);
-        InstallUiStateRepair();
-    }
-
-    private void InstallUiStateRepair()
+    internal void InstallUiStateRepair()
     {
         if (_uiStateRepairInstalled) return;
         _uiStateRepairInstalled = true;
@@ -19,12 +15,21 @@ internal sealed partial class MechanicalForm
         EnsureRootUsesFullWidth();
         ConfigureDetailsMinimumWidths();
 
-        Shown += (_, _) => BeginInvoke(() =>
+        void InitialRepair()
         {
-            RepairResponsiveDetailsLayout(force: true);
-            RepairSelectionDetailsIfNeeded();
-            RunStartupLoadDetailsRegressionIfRequested();
-        });
+            if (IsDisposed || !IsHandleCreated) return;
+            BeginInvoke(() =>
+            {
+                RepairResponsiveDetailsLayout(force: true);
+                RepairSelectionDetailsIfNeeded();
+                RunStartupLoadDetailsRegressionIfRequested();
+            });
+        }
+
+        if (Visible && IsHandleCreated)
+            InitialRepair();
+        else
+            Shown += (_, _) => InitialRepair();
 
         SizeChanged += (_, _) =>
         {
@@ -188,5 +193,26 @@ internal sealed partial class MechanicalForm
     private static void RequireUi(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+}
+
+internal static class MechanicalUiStateRepairBootstrap
+{
+    private static bool _hooked;
+
+    [ModuleInitializer]
+    internal static void Initialize()
+    {
+        if (_hooked) return;
+        _hooked = true;
+        Application.Idle += HandleApplicationIdle;
+    }
+
+    private static void HandleApplicationIdle(object? sender, EventArgs e)
+    {
+        var form = Application.OpenForms.OfType<MechanicalForm>().FirstOrDefault();
+        if (form is null || form.IsDisposed) return;
+        form.InstallUiStateRepair();
+        Application.Idle -= HandleApplicationIdle;
     }
 }
