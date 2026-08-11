@@ -70,12 +70,17 @@ jobs:
           Save "surface-2d.step";
           '@ | Set-Content fixtures/surface.geo -Encoding ascii
           $gmsh = (Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe).Path
-          $work = (Resolve-Path fixtures).Path
-          & $gmsh "$work/multi.geo" -0 -nopopup -v 2
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$work/multi-solid.step")) { throw "multi-solid STEP generation failed." }
-          & $gmsh "$work/surface.geo" -0 -nopopup -v 2
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$work/surface-2d.step")) { throw "surface STEP generation failed." }
-          Remove-Item fixtures/*.geo -Force
+          Push-Location fixtures
+          try {
+            & $gmsh multi.geo -0 -nopopup -v 2
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path "multi-solid.step")) { throw "multi-solid STEP generation failed." }
+            & $gmsh surface.geo -0 -nopopup -v 2
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path "surface-2d.step")) { throw "surface STEP generation failed." }
+            Remove-Item *.geo -Force
+          }
+          finally {
+            Pop-Location
+          }
 
       - name: Run P0.3 batch classifier
         shell: pwsh
