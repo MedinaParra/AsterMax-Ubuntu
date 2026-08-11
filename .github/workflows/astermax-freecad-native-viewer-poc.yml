@@ -1,0 +1,203 @@
+name: AsterMax FreeCAD Native Viewer POC
+
+on:
+  push:
+    branches:
+      - agent/astermax-freecad-native-viewer-poc
+    paths:
+      - ".github/workflows/astermax-freecad-native-viewer-poc.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FREECAD_VERSION: "1.1.3"
+  FREECAD_ASSET: "FreeCAD_1.1.3-Windows-x86_64-py311.7z"
+  FREECAD_SHA256: "9c6959dc9c4dba64dd818a62447e3dfedb4221d776fb044b239d462f150bcec4"
+
+jobs:
+  native-viewer-windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout POC branch
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore and build Release
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Publish AsterMax win-x64
+        shell: pwsh
+        run: |
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+          if (-not (Test-Path publish/win-x64/FreeCAD/astermax_freecad_viewer.py)) {
+            throw "Published AsterMax package is missing the FreeCAD viewer bridge script."
+          }
+
+      - name: Bundle Gmsh OpenCASCADE engine
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip" -OutFile gmsh.zip -UseBasicParsing
+          Expand-Archive gmsh.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          if ($null -eq $source) { throw "Gmsh archive did not contain the expected directory." }
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+          if (-not (Test-Path "$target/gmsh.exe")) { throw "Bundled Gmsh executable is missing." }
+
+      - name: Download official FreeCAD 1.1.3 Windows runtime
+        shell: pwsh
+        run: |
+          $url = "https://github.com/FreeCAD/FreeCAD/releases/download/$env:FREECAD_VERSION/$env:FREECAD_ASSET"
+          $archive = Join-Path $env:RUNNER_TEMP $env:FREECAD_ASSET
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:FREECAD_SHA256) {
+            throw "Official FreeCAD SHA256 mismatch. Expected $env:FREECAD_SHA256, got $hash."
+          }
+          $target = Join-Path (Resolve-Path publish/win-x64).Path "tools/freecad"
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          & 7z x $archive "-o$target" -y
+          if ($LASTEXITCODE -ne 0) { throw "Unable to extract official FreeCAD runtime." }
+          Remove-Item -LiteralPath $archive -Force
+
+          $freecad = Get-ChildItem -LiteralPath $target -Filter "FreeCAD.exe" -File -Recurse |
+            Where-Object { $_.FullName -notmatch '(?i)uninstall' } |
+            Select-Object -First 1
+          if (-not $freecad) { throw "Extracted FreeCAD runtime does not contain FreeCAD.exe." }
+          $qwindows = Get-ChildItem -LiteralPath $target -Filter "qwindows.dll" -File -Recurse | Select-Object -First 1
+          if (-not $qwindows) { throw "Extracted FreeCAD runtime does not contain qwindows.dll." }
+
+          "ASTERMAX_FREECAD_EXE=$($freecad.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "FREECAD_RUNTIME_ROOT=$target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "FreeCAD.exe: $($freecad.FullName)"
+          Write-Host "qwindows.dll: $($qwindows.FullName)"
+          & $freecad.FullName --version
+
+      - name: Run AsterMax + real FreeCAD embedded-viewer gate
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence/freecad | Out-Null
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          $env:ASTERMAX_STARTUP_STEP = $step
+          $env:ASTERMAX_UI_SMOKE_LOG = (Join-Path (Resolve-Path evidence).Path "ui-smoke.log")
+          $env:ASTERMAX_FREECAD_EMBED_LOG = (Join-Path (Resolve-Path evidence).Path "freecad-embed.log")
+          $env:ASTERMAX_FREECAD_EVIDENCE_DIR = (Resolve-Path evidence/freecad).Path
+          $env:ASTERMAX_REQUIRE_FREECAD_VIEWER = "1"
+          $env:ASTERMAX_FREECAD_FORCE_SOFTWARE_OPENGL = "1"
+
+          Remove-Item $env:ASTERMAX_UI_SMOKE_LOG -Force -ErrorAction SilentlyContinue
+          Remove-Item $env:ASTERMAX_FREECAD_EMBED_LOG -Force -ErrorAction SilentlyContinue
+
+          $before = @(Get-Process FreeCAD -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+          $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
+          if (-not $process.WaitForExit(90000)) {
+            Write-Host "--- AsterMax UI trace before timeout ---"
+            if (Test-Path $env:ASTERMAX_UI_SMOKE_LOG) { Get-Content $env:ASTERMAX_UI_SMOKE_LOG }
+            Write-Host "--- FreeCAD embed trace before timeout ---"
+            if (Test-Path $env:ASTERMAX_FREECAD_EMBED_LOG) { Get-Content $env:ASTERMAX_FREECAD_EMBED_LOG }
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Get-Process FreeCAD -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            throw "AsterMax/FreeCAD embedded viewer gate exceeded 90 seconds."
+          }
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path $env:ASTERMAX_UI_SMOKE_LOG) { Get-Content $env:ASTERMAX_UI_SMOKE_LOG }
+            if (Test-Path $env:ASTERMAX_FREECAD_EMBED_LOG) { Get-Content $env:ASTERMAX_FREECAD_EMBED_LOG }
+            throw "AsterMax startup smoke failed with code $($process.ExitCode)."
+          }
+
+          Write-Host "--- AsterMax UI trace ---"
+          Get-Content $env:ASTERMAX_UI_SMOKE_LOG
+          Write-Host "--- FreeCAD native embed trace ---"
+          Get-Content $env:ASTERMAX_FREECAD_EMBED_LOG
+
+          foreach ($gate in @("embedded-pass", "native-gate-pass")) {
+            if (-not (Select-String -Path $env:ASTERMAX_FREECAD_EMBED_LOG -Pattern $gate -Quiet)) {
+              throw "FreeCAD native viewer did not reach gate: $gate"
+            }
+          }
+          if (-not (Select-String -Path $env:ASTERMAX_UI_SMOKE_LOG -Pattern "cad-sequence-pass" -Quiet)) {
+            throw "TreeView/Details/Delete regression sequence did not pass with FreeCAD enabled."
+          }
+
+          $png = Get-ChildItem evidence/freecad -Filter "*.png" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $png -or $png.Length -lt 10000) {
+            throw "FreeCAD native view did not generate a substantial screenshot evidence PNG."
+          }
+          Write-Host "Native screenshot: $($png.FullName) ($($png.Length) bytes)"
+
+          Start-Sleep -Milliseconds 500
+          $after = @(Get-Process FreeCAD -ErrorAction SilentlyContinue | Where-Object { $before -notcontains $_.Id })
+          if ($after.Count -ne 0) {
+            $ids = $after | Select-Object -ExpandProperty Id
+            $after | Stop-Process -Force -ErrorAction SilentlyContinue
+            throw "Deleting/closing AsterMax left FreeCAD process(es) alive: $($ids -join ', ')"
+          }
+          "PASS native FreeCAD viewer embedded, rendered, deleted and terminated cleanly." | Set-Content evidence/freecad-viewer-summary.txt
+
+      - name: Re-run cylinder OpenCASCADE and TET4 regression
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          & $exe --step-import-smoke $step --expect-solids 1 --expect-faces 3 *>&1 | Tee-Object evidence/cylinder-step-smoke.log
+          if ($LASTEXITCODE -ne 0) { throw "Cylinder STEP/TET4 regression failed." }
+
+      - name: Package AsterMax with official FreeCAD native viewer
+        shell: pwsh
+        run: |
+          $package = "AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-POC-win-x64"
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item publish/win-x64/* package -Recurse -Force
+          Copy-Item windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp package/CILINDRO-SIMPLE.stp -Force
+          Copy-Item evidence package/evidence -Recurse -Force
+          @'
+          @echo off
+          start "" "%~dp0AsterMax-Mechanical.exe"
+          '@ | Set-Content package/RUN-AsterMax.cmd -Encoding ascii
+          @'
+          ASTERMAX FREECAD NATIVE VIEWER POC
+          =================================
+          This build replaces the custom AsterMax STEP painter with the official FreeCAD
+          Qt/Coin3D/OpenCASCADE viewer in an isolated process embedded in the AsterMax workspace.
+
+          POC limitation: native FreeCAD FaceN -> persistent Gmsh face-tag scoping is not yet
+          certified. Geometry visualization, TreeView/Details stability and process cleanup are
+          the acceptance targets of this build.
+          '@ | Set-Content package/README-FREECAD-VIEWER-POC.txt -Encoding utf8
+
+          & 7z a -tzip -mx=5 "$package.zip" ".\package\*"
+          if ($LASTEXITCODE -ne 0) { throw "POC ZIP packaging failed." }
+          $hash = (Get-FileHash "$package.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $package.zip" | Set-Content "$package.zip.sha256" -Encoding ascii
+          Get-Item "$package.zip" | Select-Object Name, Length | Format-Table -AutoSize
+          Get-Content "$package.zip.sha256"
+
+      - name: Upload native-viewer POC and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-FreeCAD-Native-Viewer-POC-win-x64
+          path: |
+            AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-POC-win-x64.zip
+            AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-POC-win-x64.zip.sha256
+            evidence/**
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
