@@ -70,10 +70,12 @@ internal sealed partial class MechanicalForm : Form
         InitializePresentation();
         InitializeSimpleStaticWorkflow();
         WireEvents();
-        // One deterministic selection controller. No timer, no idle repair and no
-        // constructor-time Invoke/BeginInvoke path is allowed to own Details state.
-        InstallSimpleSelectionController();
-        InitializeProductionInteractionEnhancements();
+
+        // Stable Windows interaction architecture: one AfterSelect source and no polling
+        // loop that continuously changes/repairs the live UI while CAD is displayed.
+        InstallStableSelectionController();
+        InitializeStableProductionInteractions();
+
         FormClosing += HandleFormClosingDuringOperation;
         SelectNode("Project");
         _ribbon.SelectedTab = _ribbon.TabPages.Cast<TabPage>()
