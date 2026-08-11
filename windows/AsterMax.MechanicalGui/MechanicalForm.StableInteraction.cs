@@ -96,6 +96,14 @@ internal sealed partial class MechanicalForm
             modelNode.Nodes.Insert(0, geometryNode);
         }
 
+        // Remove stale dictionary entries for nodes that were physically deleted from the
+        // TreeView. Core nodes still attached to the tree are preserved.
+        foreach (var key in _nodes
+                     .Where(pair => pair.Value.TreeView != _outline && !ReferenceEquals(pair.Value, geometryNode))
+                     .Select(pair => pair.Key)
+                     .ToArray())
+            _nodes.Remove(key);
+
         if (geometryNode.Nodes.Count == 0 && !string.IsNullOrWhiteSpace(_geometryPath))
             ClearImportedGeometryVisualState(geometryNode);
     }
@@ -131,7 +139,7 @@ internal sealed partial class MechanicalForm
         }
 
         SetState(geometryNode, ObjectState.NeedsAttention);
-        SetState(modelNode: _nodes.GetValueOrDefault("Model"), state: ObjectState.NeedsAttention);
+        SetState(_nodes.GetValueOrDefault("Model"), ObjectState.NeedsAttention);
         SetState(_nodes.GetValueOrDefault("Mesh"), ObjectState.NeedsAttention);
         MarkSolutionDirty();
 
