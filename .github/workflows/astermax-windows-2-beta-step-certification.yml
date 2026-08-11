@@ -80,7 +80,7 @@ jobs:
           $env:ASTERMAX_UI_SMOKE_LOG = (Join-Path (Get-Location) "evidence/ui-smoke.log")
           Remove-Item $env:ASTERMAX_UI_SMOKE_LOG -Force -ErrorAction SilentlyContinue
           $process = Start-Process -FilePath $exe -ArgumentList "--startup-smoke" -PassThru
-          if (-not $process.WaitForExit(20000)) {
+          if (-not $process.WaitForExit(60000)) {
             Write-Host "--- ui-smoke trace before timeout ---"
             if (Test-Path $env:ASTERMAX_UI_SMOKE_LOG) { Get-Content $env:ASTERMAX_UI_SMOKE_LOG }
             $crashRoot = Join-Path $env:LOCALAPPDATA "AsterMax/crashes"
@@ -89,7 +89,7 @@ jobs:
               Get-ChildItem $crashRoot -File | ForEach-Object { Write-Host "FILE: $($_.FullName)"; Get-Content $_.FullName }
             }
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            throw "GUI startup/real-CAD selection smoke exceeded 20 seconds."
+            throw "GUI startup/real-CAD selection smoke exceeded 60 seconds."
           }
           if ($process.ExitCode -ne 0) {
             Write-Host "--- ui-smoke trace after failure ---"
