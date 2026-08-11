@@ -2,40 +2,44 @@ namespace AsterMax.MechanicalGui;
 
 internal sealed partial class MechanicalForm
 {
-    private bool _uiStateRepairInstalled;
-    private bool _selectionSyncInProgress;
+    private bool _simpleSelectionControllerInstalled;
+    private bool _selectionActivationInProgress;
 
     /// <summary>
-    /// Installs only handle-safe, event-driven UI guards.
-    /// No timer, no Application.Idle hook and no BeginInvoke from the constructor path.
+    /// Deterministic WinForms selection controller.
+    ///
+    /// TreeView.SelectedNode is the single selection source of truth. We deliberately do
+    /// not use timers, Application.Idle, BeginInvoke or splitter repair here. Before a
+    /// TreeView selection changes we commit any active Details edit and render the target
+    /// object synchronously. A left-click confirmation performs the same idempotent render
+    /// once more after the native TreeView has completed its own selection bookkeeping.
     /// </summary>
-    internal void InstallUiStateRepair()
+    internal void InstallSimpleSelectionController()
     {
-        if (_uiStateRepairInstalled) return;
-        _uiStateRepairInstalled = true;
+        if (_simpleSelectionControllerInstalled) return;
+        _simpleSelectionControllerInstalled = true;
 
         ConfigureDetailsMinimumWidths();
 
-        // WireEvents performs the normal synchronous selection update. This second pass
-        // is intentionally synchronous too, but only after the Form handle exists. It
-        // closes the field failure where a programmatic insert changed the blue tree row
-        // while Details/status still described Geometry.
-        _outline.AfterSelect += (_, e) =>
+        // BEFORE the normal AfterSelect subscriber in WireEvents can run, make sure the
+        // DataGridView is not holding an edit transaction that could abort Rows.Clear().
+        _outline.BeforeSelect += (_, e) => ActivateTreeNode(e.Node, "before-select");
+
+        // Explicit left-click fallback. This is intentionally synchronous and makes a
+        // mouse click authoritative even if Windows sends an unusual TreeView selection
+        // notification sequence on a particular machine/DPI configuration.
+        _outline.NodeMouseClick += (_, e) =>
         {
-            if (IsDisposed || !IsHandleCreated || e.Node is null) return;
-            SynchronizeSelectionSurfaces(e.Node);
+            if (e.Button != MouseButtons.Left) return;
+            ActivateTreeNode(e.Node, "mouse-click");
         };
 
-        // Shown guarantees that the native window handle and child controls exist.
-        // Do not call BeginInvoke here: the previous constructor-time subscription made
-        // SelectNode("Project") queue work before a handle existed and caused the exact
-        // "No se puede llamar a Invoke o BeginInvoke..." startup exception.
+        // Shown runs only after native handles exist. No BeginInvoke is required.
         Shown += (_, _) =>
         {
             if (IsDisposed || !IsHandleCreated) return;
-            if (_outline.SelectedNode is { } selectedNode)
-                SynchronizeSelectionSurfaces(selectedNode);
-            RunStartupLoadDetailsRegressionIfRequested();
+            ActivateTreeNode(_outline.SelectedNode, "shown");
+            RunStartupSelectionRegressionIfRequested();
         };
     }
 
@@ -48,74 +52,128 @@ internal sealed partial class MechanicalForm
         _details.Columns[1].FillWeight = 57;
     }
 
-    private void SynchronizeSelectionSurfaces(TreeNode node)
+    /// <summary>
+    /// Render every UI surface from one TreeNode. No deferred work is scheduled.
+    /// </summary>
+    private void ActivateTreeNode(TreeNode? node, string source)
     {
-        if (_selectionSyncInProgress || _busy || _details.IsCurrentCellInEditMode ||
-            node.Tag is not ModelObject selected) return;
+        if (_selectionActivationInProgress || IsDisposed || node?.Tag is not ModelObject model) return;
 
         try
         {
-            _selectionSyncInProgress = true;
+            _selectionActivationInProgress = true;
+
+            // Never abandon a selection change just because the property table was in edit
+            // mode. Commit the cell first, then allow UpdateDetails to rebuild the rows.
+            if (_details.IsCurrentCellInEditMode)
+            {
+                try { _details.EndEdit(); } catch { _details.CancelEdit(); }
+            }
+            try { _details.CurrentCell = null; } catch { }
+
             OnObjectSelected(node);
             HighlightScopeForSelectedTreeObject();
             RefreshProductionSelectionFeedback();
 
-            // Explicit invalidation only. Never reflow splitters from selection code.
-            _details.Invalidate();
+            // Validate the most important invariant immediately. If a legacy code path
+            // changed the grid behind us, rebuild it once synchronously from the same node.
+            var renderedName = ReadRenderedDetailsName();
+            if (!string.Equals(renderedName, model.Name, StringComparison.Ordinal))
+            {
+                UpdateDetails(node);
+                renderedName = ReadRenderedDetailsName();
+            }
+
+            if (!string.Equals(renderedName, model.Name, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"Details selection invariant failed: tree='{model.Name}', details='{renderedName ?? "<none>"}', source={source}.");
+
             _outline.Invalidate();
+            _details.Invalidate();
             _viewport.Invalidate();
-            Log($"UI SELECTION SYNC: '{selected.Name}'.");
+            Log($"UI SELECT [{source}]: {model.Name}");
         }
         finally
         {
-            _selectionSyncInProgress = false;
+            _selectionActivationInProgress = false;
         }
     }
 
+    private string? ReadRenderedDetailsName()
+    {
+        foreach (DataGridViewRow row in _details.Rows)
+        {
+            if (!string.Equals(row.Cells[0].Value?.ToString(), "Name", StringComparison.OrdinalIgnoreCase)) continue;
+            return row.Cells.Count > 1 ? row.Cells[1].Value?.ToString() : null;
+        }
+        return null;
+    }
+
     /// <summary>
-    /// Windows startup regression for the three field failures:
-    /// - no Invoke/BeginInvoke before a native handle exists,
-    /// - Force/Support selection must own Details/status,
-    /// - splitters must remain stable while messages are pumped.
+    /// CI regression for the exact field failures reported from the real Windows build.
+    /// It walks multiple nodes, including Solution Information, and requires Details/status
+    /// to follow the selected node every time. The test also verifies that the property
+    /// panel can recover from an active cell edit without deferred Invoke/BeginInvoke work.
     /// </summary>
-    private void RunStartupLoadDetailsRegressionIfRequested()
+    private void RunStartupSelectionRegressionIfRequested()
     {
         var args = Environment.GetCommandLineArgs();
         if (!args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase))) return;
 
-        RequireUi(IsHandleCreated, "GUI smoke: startup regression ran before the Form handle existed.");
+        RequireUi(IsHandleCreated, "GUI smoke: selection regression ran before the Form handle existed.");
         ValidateStableLayout("initial");
         var before = CaptureSplitterState();
 
         var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: Static Structural analysis is missing.");
-        _outline.SelectedNode = analysis;
-        SynchronizeSelectionSurfaces(analysis);
+        SelectAndActivateForSmoke(analysis);
+
         AddLoad("Force");
         Application.DoEvents();
-
-        if (_outline.SelectedNode?.Tag is not ModelObject { Kind: ObjectKind.Load } load || _outline.SelectedNode is not { } loadNode)
+        var loadNode = _outline.SelectedNode ?? throw new InvalidOperationException("GUI smoke: Force selection is missing.");
+        if (loadNode.Tag is not ModelObject { Kind: ObjectKind.Load } load)
             throw new InvalidOperationException("GUI smoke: inserted Force did not become the selected tree object.");
-
-        // Reproduce the user's stale panel deterministically and recover through the same
-        // synchronous selected-node path used during normal operation.
-        UpdateDetails(_nodes["Geometry"]);
-        _statusSelection.Text = "Selected: Geometry";
-        _contextTitle.Text = "Geometry\nGeometry";
-        SynchronizeSelectionSurfaces(loadNode);
-        Application.DoEvents();
-
+        ActivateTreeNode(loadNode, "smoke-force");
         AssertSelectedObjectOwnsDetails(loadNode, load, requireLoadControls: true);
-        ValidateStableLayout("after Force selection");
 
-        // Also validate a support, because the second field screenshot showed Fixed
-        // Support highlighted while Details/status still reported Geometry.
         AddSupport("Fixed Support");
         Application.DoEvents();
-        if (_outline.SelectedNode?.Tag is not ModelObject { Kind: ObjectKind.Support } support || _outline.SelectedNode is not { } supportNode)
+        var supportNode = _outline.SelectedNode ?? throw new InvalidOperationException("GUI smoke: Fixed Support selection is missing.");
+        if (supportNode.Tag is not ModelObject { Kind: ObjectKind.Support } support)
             throw new InvalidOperationException("GUI smoke: inserted Fixed Support did not become the selected tree object.");
+        ActivateTreeNode(supportNode, "smoke-support");
         AssertSelectedObjectOwnsDetails(supportNode, support, requireLoadControls: false);
 
-        for (var i = 0; i < 8; i++) Application.DoEvents();
+        // Exact node visible in the latest field screenshot.
+        var solutionInformation = AllNodes().FirstOrDefault(node =>
+            node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation })
+            ?? throw new InvalidOperationException("GUI smoke: Solution Information node is missing.");
+        SelectAndActivateForSmoke(solutionInformation);
+        AssertDetailsName(solutionInformation);
+
+        var totalDeformation = AllNodes().FirstOrDefault(node =>
+            node.Tag is ModelObject { Kind: ObjectKind.Result } &&
+            node.Text.Equals("Total Deformation", StringComparison.OrdinalIgnoreCase));
+        if (totalDeformation is not null)
+        {
+            SelectAndActivateForSmoke(totalDeformation);
+            AssertDetailsName(totalDeformation);
+        }
+
+        var geometry = _nodes["Geometry"];
+        SelectAndActivateForSmoke(geometry);
+        AssertDetailsName(geometry);
+
+        // Selecting the same node again must still refresh Details. This covers STEP import
+        // committing new geometry while Geometry was already selected before the import.
+        if (geometry.Tag is ModelObject geometryModel)
+        {
+            var originalName = geometryModel.Name;
+            ActivateTreeNode(geometry, "smoke-same-node-refresh");
+            RequireUi(string.Equals(ReadRenderedDetailsName(), originalName, StringComparison.Ordinal),
+                "GUI smoke: re-activating the same selected node did not refresh Details.");
+        }
+
+        for (var i = 0; i < 4; i++) Application.DoEvents();
         var after = CaptureSplitterState();
         RequireUi(before.ContentDistance == after.ContentDistance,
             $"GUI smoke: Outline splitter moved autonomously ({before.ContentDistance} -> {after.ContentDistance}).");
@@ -124,12 +182,30 @@ internal sealed partial class MechanicalForm
         RequireUi(before.CenterDistance == after.CenterDistance,
             $"GUI smoke: Graphics splitter moved autonomously ({before.CenterDistance} -> {after.CenterDistance}).");
 
-        Log($"PASS GUI HandleSafeStableLayoutAndSelection: Details={_details.ClientSize.Width}px, Value={_details.Columns[1].Width}px, selected={support.Name}.");
+        Log("PASS GUI DeterministicSelectionController: Geometry, Force, Fixed Support, Solution Information and Result followed the selected tree node.");
+    }
+
+    private void SelectAndActivateForSmoke(TreeNode node)
+    {
+        _outline.SelectedNode = node;
+        node.EnsureVisible();
+        ActivateTreeNode(node, "smoke-select");
+        Application.DoEvents();
+    }
+
+    private void AssertDetailsName(TreeNode node)
+    {
+        if (node.Tag is not ModelObject model)
+            throw new InvalidOperationException("GUI smoke: selected node has no model object.");
+        RequireUi(string.Equals(ReadRenderedDetailsName(), model.Name, StringComparison.Ordinal),
+            $"GUI smoke: Details stayed on '{ReadRenderedDetailsName()}' while tree selection is '{model.Name}'.");
+        RequireUi(_statusSelection.Text.Contains(model.Name, StringComparison.OrdinalIgnoreCase),
+            $"GUI smoke: status stayed stale: '{_statusSelection.Text}' while selected={model.Name}.");
     }
 
     private void AssertSelectedObjectOwnsDetails(TreeNode node, ModelObject model, bool requireLoadControls)
     {
-        SynchronizeSelectionSurfaces(node);
+        ActivateTreeNode(node, "smoke-assert");
         var rows = _details.Rows.Cast<DataGridViewRow>()
             .ToDictionary(
                 row => row.Cells[0].Value?.ToString() ?? string.Empty,
@@ -174,7 +250,7 @@ internal sealed partial class MechanicalForm
         RequireUi(_details.ClientSize.Width >= 220,
             $"GUI smoke ({stage}): Details grid collapsed to {_details.ClientSize.Width}px.");
         RequireUi(_details.Columns.Count >= 2 && _details.Columns[1].Visible && _details.Columns[1].Width >= 110,
-            $"GUI smoke ({stage}): Value column is hidden/collapsed (width={(_details.Columns.Count >= 2 ? _details.Columns[1].Width : 0)}px)." );
+            $"GUI smoke ({stage}): Value column is hidden/collapsed (width={(_details.Columns.Count >= 2 ? _details.Columns[1].Width : 0)}px).");
     }
 
     private (int ContentDistance, int RightDistance, int CenterDistance) CaptureSplitterState()
