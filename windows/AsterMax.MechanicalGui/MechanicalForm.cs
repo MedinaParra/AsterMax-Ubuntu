@@ -70,6 +70,9 @@ internal sealed partial class MechanicalForm : Form
         InitializePresentation();
         InitializeSimpleStaticWorkflow();
         WireEvents();
+        // Install deterministic, event-driven UI guards only after the normal tree/detail
+        // events exist. This intentionally replaces the old Application.Idle/timer repair.
+        InstallUiStateRepair();
         InitializeProductionInteractionEnhancements();
         FormClosing += HandleFormClosingDuringOperation;
         SelectNode("Project");
