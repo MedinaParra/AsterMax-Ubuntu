@@ -11,7 +11,7 @@
     <Authors>Exequiel Medina</Authors>
     <Company>AsterMax</Company>
     <Product>AsterMax Windows 2.0 beta — Mechanical</Product>
-    <Description>Windows 10/11 x64 Mechanical environment with transactional OpenCASCADE STEP import, selectable CAD topology, Gmsh tetrahedral meshing and evidence-based tutorial certification.</Description>
+    <Description>Windows 10/11 x64 Mechanical environment with transactional OpenCASCADE STEP import, native FreeCAD Qt/Coin3D visualization, Gmsh tetrahedral meshing and evidence-based tutorial certification.</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -25,10 +25,14 @@
     <Compile Remove="ProjectWorkflowModel.cs" />
     <Compile Remove="WorkflowProjectState.cs" />
     <!-- Obsolete experimental UI layers. They used global timers/reflection and competed
-         with the production TreeView/Details and responsive CAD canvas. -->
+         with the production TreeView/Details and CAD visualization. -->
     <Compile Remove="MechanicalForm.UiStateRepair.cs" />
     <Compile Remove="CadViewerQualityAndNavigation.cs" />
     <Compile Remove="MechanicalInterfaceRoadmapIteration.cs" />
     <EmbeddedResource Include="Icons\AsterMaxIconSet.svg" />
+    <Content Include="FreeCAD\astermax_freecad_viewer.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 </Project>
