@@ -19,10 +19,8 @@ internal sealed partial class MechanicalForm
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
-        // Define the only column as 100% at construction time. Changing this later while
-        // nested split containers and the CAD canvas are already painting can corrupt the
-        // WinForms layout/paint surface and produce the vertical "ghost" panels seen in
-        // field screenshots.
+        // Define the only column as 100% at construction time. Never mutate the root
+        // layout while the CAD canvas is painting.
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
@@ -68,10 +66,11 @@ internal sealed partial class MechanicalForm
         _status.Items.AddRange(new ToolStripItem[] { _statusMain, _statusSelection, _statusSolver });
         root.Controls.Add(_status, 0, 4);
 
-        Shown += (_, _) => BeginInvoke(() =>
+        // Shown is already handle-safe and the final client size is available. There is no
+        // reason to queue another BeginInvoke; keeping this synchronous removes another
+        // asynchronous layout path from the application.
+        Shown += (_, _) =>
         {
-            // Minimums are applied only after the form has a real client size. They make
-            // panel collapse impossible while still allowing the user to move splitters.
             content.Panel1MinSize = 200;
             content.Panel2MinSize = 540;
             right.Panel1MinSize = 420;
@@ -83,7 +82,7 @@ internal sealed partial class MechanicalForm
             SetSafeSplitter(right, Math.Max(430, right.ClientSize.Width - 310));
             SetSafeSplitter(center, Math.Max(300, center.ClientSize.Height - 210));
             _statusMain.Text = "Ready — stable layout validated";
-        });
+        };
     }
 
     private static SplitContainer NewSplitter(Orientation orientation) => new()
@@ -102,7 +101,7 @@ internal sealed partial class MechanicalForm
             : splitter.ClientSize.Height;
 
         // Respect both Panel1MinSize and Panel2MinSize. This is deterministic and never
-        // needs a timer to "repair" a live layout.
+        // needs a timer to repair a live layout.
         var minimum = Math.Max(1, splitter.Panel1MinSize);
         var maximum = extent - splitter.SplitterWidth - Math.Max(1, splitter.Panel2MinSize);
         if (maximum < minimum) return;
