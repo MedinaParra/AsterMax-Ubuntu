@@ -60,7 +60,7 @@ internal sealed partial class MechanicalForm
             PopulateWorksheet(node);
             HighlightWorkflow(node);
             RefreshProductionSelectionFeedback();
-            if (_cadCanvas is null || !_cadCanvas.Visible)
+            if (!IsCadGraphicsActive())
                 UpdateViewport(node);
             _outline.Invalidate();
         }
@@ -70,38 +70,51 @@ internal sealed partial class MechanicalForm
         }
     }
 
+    private bool IsCadGraphicsActive() =>
+        _cadCanvas is not null &&
+        _cadSurfacePreview is not null &&
+        !string.IsNullOrWhiteSpace(_geometryPath);
+
+    /// <summary>
+    /// Keep CAD and the legacy MechanicalViewport as mutually exclusive sibling paint
+    /// surfaces. The decision is based on model state, never Control.Visible: WinForms can
+    /// transiently report Visible=false while a control is being reparented/layouted, and
+    /// using that value as application state caused the CAD view to be disabled again.
+    /// </summary>
     private void EnsureExclusiveGraphicsSurface()
     {
-        if (_cadCanvas is { Visible: true } cad)
+        if (IsCadGraphicsActive() && _cadCanvas is { } cad)
         {
-            var legacyParent = _viewport.Parent;
-            if (legacyParent is not null && ReferenceEquals(cad.Parent, _viewport))
+            var graphicsHost = _viewport.Parent;
+            if (graphicsHost is null) return;
+
+            graphicsHost.SuspendLayout();
+            try
             {
-                var targetBounds = _viewport.Bounds;
-                legacyParent.SuspendLayout();
-                try
+                if (!ReferenceEquals(cad.Parent, graphicsHost))
                 {
-                    _viewport.Controls.Remove(cad);
-                    cad.Dock = DockStyle.None;
-                    cad.Bounds = targetBounds;
-                    cad.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-                    legacyParent.Controls.Add(cad);
-                    cad.BringToFront();
-                    _viewport.Visible = false;
+                    cad.Parent?.Controls.Remove(cad);
+                    graphicsHost.Controls.Add(cad);
+                    SmokeTrace("cad-promoted-to-sibling-host");
                 }
-                finally
-                {
-                    legacyParent.ResumeLayout(false);
-                }
-                SmokeTrace("cad-promoted-to-sibling-host");
-            }
-            else
-            {
+
+                cad.Anchor = AnchorStyles.None;
+                cad.Dock = DockStyle.Fill;
                 _viewport.Visible = false;
+                cad.Visible = true;
+                cad.BringToFront();
+            }
+            finally
+            {
+                graphicsHost.ResumeLayout(true);
             }
             return;
         }
+
+        if (_cadCanvas is not null)
+            _cadCanvas.Visible = false;
         _viewport.Visible = true;
+        _viewport.BringToFront();
     }
 
     private void ActivateStableTreeNode(TreeNode? node, string source)
@@ -173,7 +186,7 @@ internal sealed partial class MechanicalForm
         _viewport.ForceVisible = false;
         _viewport.Caption = "Geometry";
         _viewport.SubCaption = "No geometry imported";
-        _viewport.Visible = true;
+        EnsureExclusiveGraphicsSurface();
         _viewport.Invalidate();
         foreach (var scopedNode in AllNodes().Where(node =>
                      node.Tag is ModelObject { Kind: ObjectKind.Support or ObjectKind.Load }).ToArray())
@@ -265,7 +278,7 @@ internal sealed partial class MechanicalForm
                 if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
                     throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
                 SmokeTrace("post-cad-geometry-state-pass");
-                if (_cadCanvas is null || !_cadCanvas.Visible)
+                if (!IsCadGraphicsActive() || _cadCanvas is not { Visible: true })
                     throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
                 SmokeTrace("post-cad-canvas-visible-pass");
                 if (_cadCanvas.Parent == _viewport)
