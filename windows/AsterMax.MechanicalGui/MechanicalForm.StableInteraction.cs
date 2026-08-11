@@ -53,15 +53,13 @@ internal sealed partial class MechanicalForm
         {
             _stableSelectionBusy = true;
             ReconcileGeometryVisualState();
+            EnsureExclusiveGraphicsSurface();
             RenderDetailsSelection(node, source);
             UpdateContextCommands(node);
             PopulateWorksheet(node);
             HighlightWorkflow(node);
             RefreshProductionSelectionFeedback();
 
-            // A visible CAD canvas is deliberately independent from Outline navigation.
-            // The legacy MechanicalViewport is not invalidated/reconfigured while CAD is
-            // active, which keeps property selection responsive.
             if (_cadCanvas is null || !_cadCanvas.Visible)
                 UpdateViewport(node);
 
@@ -71,6 +69,51 @@ internal sealed partial class MechanicalForm
         {
             _stableSelectionBusy = false;
         }
+    }
+
+    /// <summary>
+    /// CAD and the legacy MechanicalViewport are two independent paint surfaces. The old
+    /// implementation nested ResponsiveCadMeshCanvas inside MechanicalViewport, so both
+    /// custom drawing controls participated in the same WM_PAINT/layout chain. Field tests
+    /// showed the message pump could then stay busy indefinitely after STEP import.
+    ///
+    /// Keep exactly one graphics surface active. When CAD is visible, move it out of the
+    /// legacy viewport and place it as a sibling using the viewport's exact rectangle.
+    /// When CAD is not visible, restore the legacy viewport.
+    /// </summary>
+    private void EnsureExclusiveGraphicsSurface()
+    {
+        if (_cadCanvas is { Visible: true } cad)
+        {
+            var legacyParent = _viewport.Parent;
+            if (legacyParent is not null && ReferenceEquals(cad.Parent, _viewport))
+            {
+                var targetBounds = _viewport.Bounds;
+                legacyParent.SuspendLayout();
+                try
+                {
+                    _viewport.Controls.Remove(cad);
+                    cad.Dock = DockStyle.None;
+                    cad.Bounds = targetBounds;
+                    cad.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+                    legacyParent.Controls.Add(cad);
+                    cad.BringToFront();
+                    _viewport.Visible = false;
+                }
+                finally
+                {
+                    legacyParent.ResumeLayout(false);
+                }
+                SmokeTrace("cad-promoted-to-sibling-host");
+            }
+            else
+            {
+                _viewport.Visible = false;
+            }
+            return;
+        }
+
+        _viewport.Visible = true;
     }
 
     private void ActivateStableTreeNode(TreeNode? node, string source)
@@ -103,11 +146,6 @@ internal sealed partial class MechanicalForm
         if (_productionInteractionsInitialized) return;
         _productionInteractionsInitialized = true;
 
-        // Keep the production shell intentionally simple. The old legend/navigation
-        // controls were inserted as children of the CAD canvas at runtime. Even without
-        // their polling timer, that reparenting introduced another live Layout/Paint layer
-        // exactly when a STEP became visible. The canvas already contains view help and an
-        // orientation triad, so these overlays are not required for functionality.
         ConfigureDetailsSelectionExperience();
         KeyDown += HandleNavigationShortcut;
         FormClosed += (_, _) => CloseOperationOverlay();
@@ -152,6 +190,7 @@ internal sealed partial class MechanicalForm
         _viewport.ForceVisible = false;
         _viewport.Caption = "Geometry";
         _viewport.SubCaption = "No geometry imported";
+        _viewport.Visible = true;
         _viewport.Invalidate();
 
         foreach (var scopedNode in AllNodes().Where(node =>
@@ -184,7 +223,6 @@ internal sealed partial class MechanicalForm
         }
         catch
         {
-            // Diagnostics must never change application behavior.
         }
     }
 
@@ -242,6 +280,8 @@ internal sealed partial class MechanicalForm
             SmokeTrace($"occ-import-pass:nodes={result.Surface.Mesh.Nodes.Count}:tri={result.Surface.Mesh.SurfaceTriangles.Count}");
             CommitGeneralCadImport(cylinder, result);
             SmokeTrace("commit-general-cad-pass");
+            EnsureExclusiveGraphicsSurface();
+            SmokeTrace("exclusive-graphics-pass");
             Application.DoEvents();
             SmokeTrace("post-commit-doevents-pass");
 
@@ -249,6 +289,8 @@ internal sealed partial class MechanicalForm
                 throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
             if (_cadCanvas is null || !_cadCanvas.Visible)
                 throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
+            if (_cadCanvas.Parent == _viewport)
+                throw new InvalidOperationException("GUI smoke: CAD canvas is still nested inside MechanicalViewport.");
 
             var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: analysis missing.");
             SelectThroughRealTreeEvents(analysis, "cad-analysis");
@@ -290,6 +332,8 @@ internal sealed partial class MechanicalForm
                 throw new InvalidOperationException("GUI smoke: deleting imported Geometry left the CAD canvas visible.");
             if (_nodes["Geometry"].Nodes.Count != 0)
                 throw new InvalidOperationException("GUI smoke: deleting imported Geometry left a body in the tree.");
+            if (!_viewport.Visible)
+                throw new InvalidOperationException("GUI smoke: legacy viewport was not restored after deleting CAD.");
 
             Log("PASS GUI RealTreeEventsWithCad: Details followed Fixed Support, Connections, Solution Information and Geometry with STEP visible.");
             Log("PASS GUI CadImportNavigateDelete: deleting the imported body released the CAD view and model state.");
