@@ -84,8 +84,24 @@ jobs:
           $qwindows = Get-ChildItem -LiteralPath $target -Filter "qwindows.dll" -File -Recurse | Select-Object -First 1
           if (-not $qwindows) { throw "Extracted FreeCAD runtime does not contain qwindows.dll." }
 
+          $softwareGl = Get-ChildItem -LiteralPath $target -Filter "opengl32sw.dll" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          Write-Host "--- FreeCAD OpenGL-related runtime files ---"
+          Get-ChildItem -LiteralPath $target -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '(?i)(opengl|mesa|gles|egl|angle).*\.dll$' } |
+            Select-Object -First 80 FullName, Length |
+            Format-Table -AutoSize
+
           "ASTERMAX_FREECAD_EXE=$($freecad.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "FREECAD_RUNTIME_ROOT=$target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "QT_OPENGL=software" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "QT_NO_OPENGL_BUGLIST=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if ($softwareGl) {
+            Write-Host "Found packaged software OpenGL: $($softwareGl.FullName)"
+            "QT_OPENGL_DLL=$($softwareGl.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            Write-Warning "Official FreeCAD archive does not contain opengl32sw.dll. QT_OPENGL=software has no llvmpipe DLL to load on this runner."
+          }
+
           Write-Host "FreeCAD.exe: $($freecad.FullName)"
           Write-Host "qwindows.dll: $($qwindows.FullName)"
           & $freecad.FullName --version
@@ -103,6 +119,9 @@ jobs:
           $env:ASTERMAX_REQUIRE_FREECAD_VIEWER = "1"
           $env:ASTERMAX_FREECAD_FORCE_SOFTWARE_OPENGL = "1"
 
+          Write-Host "QT_OPENGL=$env:QT_OPENGL"
+          Write-Host "QT_OPENGL_DLL=$env:QT_OPENGL_DLL"
+          Write-Host "QT_NO_OPENGL_BUGLIST=$env:QT_NO_OPENGL_BUGLIST"
           Remove-Item $env:ASTERMAX_UI_SMOKE_LOG -Force -ErrorAction SilentlyContinue
           Remove-Item $env:ASTERMAX_FREECAD_EMBED_LOG -Force -ErrorAction SilentlyContinue
 
