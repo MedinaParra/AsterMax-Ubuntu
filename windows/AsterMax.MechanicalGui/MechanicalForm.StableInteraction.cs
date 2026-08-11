@@ -59,6 +59,9 @@ internal sealed partial class MechanicalForm
             HighlightWorkflow(node);
             RefreshProductionSelectionFeedback();
 
+            // A visible CAD canvas is deliberately independent from Outline navigation.
+            // The legacy MechanicalViewport is not invalidated/reconfigured while CAD is
+            // active, which keeps property selection responsive.
             if (_cadCanvas is null || !_cadCanvas.Visible)
                 UpdateViewport(node);
 
@@ -100,13 +103,13 @@ internal sealed partial class MechanicalForm
         if (_productionInteractionsInitialized) return;
         _productionInteractionsInitialized = true;
 
-        InstallEmptyViewportCover();
-        InstallScopeLegend();
-        InstallNavigationControls();
+        // Keep the production shell intentionally simple. The old legend/navigation
+        // controls were inserted as children of the CAD canvas at runtime. Even without
+        // their polling timer, that reparenting introduced another live Layout/Paint layer
+        // exactly when a STEP became visible. The canvas already contains view help and an
+        // orientation triad, so these overlays are not required for functionality.
         ConfigureDetailsSelectionExperience();
         KeyDown += HandleNavigationShortcut;
-
-        Shown += (_, _) => RefreshProductionUiState();
         FormClosed += (_, _) => CloseOperationOverlay();
     }
 
@@ -165,12 +168,6 @@ internal sealed partial class MechanicalForm
         SetState(_nodes.GetValueOrDefault("Model"), ObjectState.NeedsAttention);
         SetState(_nodes.GetValueOrDefault("Mesh"), ObjectState.NeedsAttention);
         MarkSolutionDirty();
-
-        if (_emptyViewportCover is not null)
-        {
-            _emptyViewportCover.Visible = true;
-            _emptyViewportCover.BringToFront();
-        }
 
         Log("GEOMETRY CLEARED: CAD mesh, preview, solver state and viewport were released together.");
     }
