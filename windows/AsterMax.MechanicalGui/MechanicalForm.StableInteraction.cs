@@ -5,17 +5,6 @@ internal sealed partial class MechanicalForm
     private bool _stableSelectionInstalled;
     private bool _stableSelectionBusy;
 
-    /// <summary>
-    /// Deterministic two-phase TreeView selection.
-    ///
-    /// Phase 1 (BeforeSelect) owns Details and status only. It deliberately does not touch
-    /// the CAD canvas, worksheet, workflow or graphics state, so a visible STEP model can
-    /// never prevent the property panel from following the user's click.
-    ///
-    /// Phase 2 (AfterSelect) updates the secondary context. When the responsive CAD canvas
-    /// is visible we do not invalidate the legacy MechanicalViewport from tree navigation;
-    /// CAD drawing/scoping is driven by explicit CAD actions instead.
-    /// </summary>
     internal void InstallStableSelectionController()
     {
         if (_stableSelectionInstalled) return;
@@ -33,9 +22,6 @@ internal sealed partial class MechanicalForm
         };
     }
 
-    /// <summary>
-    /// First-phase UI update. This method must stay independent from CAD rendering.
-    /// </summary>
     private void RenderDetailsSelection(TreeNode? node, string source)
     {
         if (IsDisposed || node?.Tag is not ModelObject model) return;
@@ -55,10 +41,6 @@ internal sealed partial class MechanicalForm
             throw new InvalidOperationException(
                 $"Details invariant failed: tree='{model.Name}', details='{renderedName ?? "<none>"}', source={source}.");
 
-        // Do not call Refresh()/Update() from BeforeSelect: forcing nested native paints
-        // while TreeView is changing selection can create re-entrant WinForms message work.
-        // The second phase is intentionally lightweight when CAD is visible, so normal
-        // Windows painting occurs immediately after this selection event returns.
         _details.Invalidate();
         _status.Invalidate();
     }
@@ -70,19 +52,13 @@ internal sealed partial class MechanicalForm
         try
         {
             _stableSelectionBusy = true;
-
-            // Deletion can change geometry state between BeforeSelect and AfterSelect.
-            // Reconcile first, then render Details once more from the resulting state.
             ReconcileGeometryVisualState();
             RenderDetailsSelection(node, source);
-
             UpdateContextCommands(node);
             PopulateWorksheet(node);
             HighlightWorkflow(node);
             RefreshProductionSelectionFeedback();
 
-            // Do not couple tree navigation to CAD repainting. The responsive CAD canvas
-            // remains visible and interactive while Details/Worksheet can change instantly.
             if (_cadCanvas is null || !_cadCanvas.Visible)
                 UpdateViewport(node);
 
@@ -94,10 +70,6 @@ internal sealed partial class MechanicalForm
         }
     }
 
-    /// <summary>
-    /// Same-node refresh used after STEP import commits new properties while Geometry was
-    /// already selected. It follows the same two-phase path as a real TreeView selection.
-    /// </summary>
     private void ActivateStableTreeNode(TreeNode? node, string source)
     {
         RenderDetailsSelection(node, source + ":details");
@@ -123,10 +95,6 @@ internal sealed partial class MechanicalForm
         return null;
     }
 
-    /// <summary>
-    /// Production extras without any background UI polling. Chrome is attached only when
-    /// the relevant state changes.
-    /// </summary>
     internal void InitializeStableProductionInteractions()
     {
         if (_productionInteractionsInitialized) return;
@@ -207,13 +175,31 @@ internal sealed partial class MechanicalForm
         Log("GEOMETRY CLEARED: CAD mesh, preview, solver state and viewport were released together.");
     }
 
+    private static void SmokeTrace(string stage)
+    {
+        var path = Environment.GetEnvironmentVariable("ASTERMAX_UI_SMOKE_LOG");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+            File.AppendAllText(path, $"{DateTimeOffset.Now:O} | {stage}{Environment.NewLine}");
+        }
+        catch
+        {
+            // Diagnostics must never change application behavior.
+        }
+    }
+
     private async Task RunStableSelectionSmokeIfRequestedAsync()
     {
         var args = Environment.GetCommandLineArgs();
         if (!args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase))) return;
+        SmokeTrace("start");
 
         void SelectThroughRealTreeEvents(TreeNode node, string stage)
         {
+            SmokeTrace("select-begin:" + stage + ":" + node.Text);
             if (ReferenceEquals(_outline.SelectedNode, node))
             {
                 var alternate = AllNodes().FirstOrDefault(candidate => !ReferenceEquals(candidate, node));
@@ -231,6 +217,7 @@ internal sealed partial class MechanicalForm
             if (!_statusSelection.Text.Contains(model.Name, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException(
                     $"GUI smoke ({stage}): status='{_statusSelection.Text}' while tree='{model.Name}'.");
+            SmokeTrace("select-pass:" + stage + ":" + model.Name);
         }
 
         var initialSequence = new[]
@@ -244,6 +231,7 @@ internal sealed partial class MechanicalForm
 
         foreach (var node in initialSequence)
             SelectThroughRealTreeEvents(node, "before-cad");
+        SmokeTrace("empty-tree-sequence-pass");
 
         var cylinder = Environment.GetEnvironmentVariable("ASTERMAX_STARTUP_STEP");
         if (string.IsNullOrWhiteSpace(cylinder))
@@ -251,14 +239,14 @@ internal sealed partial class MechanicalForm
 
         if (File.Exists(cylinder) && GmshCliMesher.FindExecutable() is { } gmsh)
         {
-            // Import the exact STEP through the same OCC/Gmsh service, but do not open the
-            // production operation overlay. The startup harness has its own close timer;
-            // letting that timer collide with _busy would test modal-close timing instead
-            // of the field bug we need to certify here.
+            SmokeTrace("occ-import-begin");
             using var smokeOperation = new OperationController();
             var result = await StepImportService.ImportSurfaceAsync(gmsh, cylinder, smokeOperation, PreviewTimeout);
+            SmokeTrace($"occ-import-pass:nodes={result.Surface.Mesh.Nodes.Count}:tri={result.Surface.Mesh.SurfaceTriangles.Count}");
             CommitGeneralCadImport(cylinder, result);
+            SmokeTrace("commit-general-cad-pass");
             Application.DoEvents();
+            SmokeTrace("post-commit-doevents-pass");
 
             if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
                 throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
@@ -267,13 +255,14 @@ internal sealed partial class MechanicalForm
 
             var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: analysis missing.");
             SelectThroughRealTreeEvents(analysis, "cad-analysis");
+            SmokeTrace("add-support-begin");
             AddSupport("Fixed Support");
             Application.DoEvents();
+            SmokeTrace("add-support-doevents-pass");
             var support = _outline.SelectedNode;
             if (support?.Tag is not ModelObject { Kind: ObjectKind.Support })
                 throw new InvalidOperationException("GUI smoke: Fixed Support insertion did not select the support.");
             SelectThroughRealTreeEvents(support, "cad-fixed-support");
-
             SelectThroughRealTreeEvents(_nodes["Connections"], "cad-connections");
 
             var solutionInformation = AllNodes().First(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation });
@@ -289,11 +278,14 @@ internal sealed partial class MechanicalForm
                 throw new InvalidOperationException("GUI smoke: Geometry Details did not show the imported STEP source.");
             if (!geometryRows.TryGetValue("Bodies", out var bodies) || bodies == "0")
                 throw new InvalidOperationException("GUI smoke: Geometry Details reported zero bodies after STEP import.");
+            SmokeTrace("geometry-properties-pass");
 
             var importedBody = geometry.Nodes.Cast<TreeNode>().First();
             SelectThroughRealTreeEvents(importedBody, "cad-body-before-delete");
+            SmokeTrace("delete-begin");
             DeleteSelected();
             Application.DoEvents();
+            SmokeTrace("delete-doevents-pass");
 
             if (!string.IsNullOrWhiteSpace(_geometryPath))
                 throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
@@ -304,8 +296,10 @@ internal sealed partial class MechanicalForm
 
             Log("PASS GUI RealTreeEventsWithCad: Details followed Fixed Support, Connections, Solution Information and Geometry with STEP visible.");
             Log("PASS GUI CadImportNavigateDelete: deleting the imported body released the CAD view and model state.");
+            SmokeTrace("cad-sequence-pass");
         }
 
         Log("PASS GUI DetailsFirstSelection: Details follows TreeView through real BeforeSelect/AfterSelect events without polling.");
+        SmokeTrace("complete");
     }
 }
