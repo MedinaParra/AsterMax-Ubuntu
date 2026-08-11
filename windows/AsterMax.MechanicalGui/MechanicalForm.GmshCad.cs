@@ -7,12 +7,12 @@ internal sealed partial class MechanicalForm
     private CadModelMetadata? _cadMetadata;
     private CadMesh? _cadSurfacePreview;
     private CadMesh? _cadVolumeMesh;
-    private SelectableCadMeshCanvas? _cadCanvas;
+    private ResponsiveCadMeshCanvas? _cadCanvas;
     private OperationController? _activeOperation;
     private System.Windows.Forms.Timer? _activeOperationUiTimer;
 
-    private TimeSpan PreviewTimeout => ReadTimeout("ASTERMAX_STEP_PREVIEW_TIMEOUT_SECONDS", 60);
-    private TimeSpan VolumeMeshTimeout => ReadTimeout("ASTERMAX_STEP_VOLUME_TIMEOUT_SECONDS", 180);
+    private TimeSpan PreviewTimeout => ReadTimeout("ASTERMAX_STEP_PREVIEW_TIMEOUT_SECONDS", 120);
+    private TimeSpan VolumeMeshTimeout => ReadTimeout("ASTERMAX_STEP_VOLUME_TIMEOUT_SECONDS", 300);
 
     private async Task ImportCadStepAsync(string path)
     {
@@ -36,7 +36,7 @@ internal sealed partial class MechanicalForm
             var result = await StepImportService.ImportSurfaceAsync(gmsh, path, operation, PreviewTimeout);
             operation.Token.ThrowIfCancellationRequested();
 
-            operation.Report("Commit model", "Replacing the active model only after successful validation.", 0.97);
+            operation.Report("Commit model", "Replacing the active model only after successful OCC import.", 0.97);
             if (result.VerifiedPrismFastPath is { } prism)
                 CommitVerifiedPrismFastPath(path, prism, result.Metadata, result.Diagnostics);
             else
@@ -44,7 +44,9 @@ internal sealed partial class MechanicalForm
 
             operation.Complete(OperationOutcome.Succeeded,
                 $"STEP import succeeded in {operation.Elapsed.TotalSeconds:0.00} s.");
-            _statusMain.Text = "STEP loaded — click a face or generate the real volume mesh";
+            _statusMain.Text = result.Metadata.CanAttemptVolumeMesh
+                ? $"STEP loaded — {result.Metadata.TopologyClassification}; volume meshing can be attempted"
+                : $"STEP loaded — {result.Metadata.TopologyClassification}; display/surface workflow";
         }
         catch (OperationCanceledException)
         {
@@ -74,7 +76,9 @@ internal sealed partial class MechanicalForm
 
     private void CommitGeneralCadImport(string path, CadImportResult result)
     {
-        // Transaction commit boundary: destructive state changes begin only after OCC + mesh validation succeeded.
+        // Transaction commit boundary: destructive state changes begin only after OCC
+        // returned a non-empty selectable surface. Closed-solid verification is deferred
+        // to volume meshing and no longer blocks assemblies/shells from being displayed.
         ClearSimpleStateForCadImport();
         ResetCadState();
 
@@ -92,15 +96,24 @@ internal sealed partial class MechanicalForm
         var topology = CadTopologyRegistry.Get(preview);
         var geometry = _nodes["Geometry"];
         geometry.Nodes.Clear();
-        var body = MakeNode(Path.GetFileNameWithoutExtension(path), ObjectKind.Body, ObjectState.UpToDate, "OpenCASCADE STEP Solid");
+        var category = metadata.SolidCount switch
+        {
+            <= 0 => "OpenCASCADE STEP Surface",
+            1 => "OpenCASCADE STEP Solid",
+            _ => "OpenCASCADE STEP Assembly"
+        };
+        var body = MakeNode(Path.GetFileNameWithoutExtension(path), ObjectKind.Body, ObjectState.UpToDate, category);
         var bodyObject = (ModelObject)body.Tag;
         bodyObject.Properties["Geometry Fidelity"] = "Native STEP / OpenCASCADE surface topology";
+        bodyObject.Properties["Topology"] = metadata.TopologyClassification;
         bodyObject.Properties["Length X"] = $"{metadata.Dimensions.X:0.###} mm";
         bodyObject.Properties["Length Y"] = $"{metadata.Dimensions.Y:0.###} mm";
         bodyObject.Properties["Length Z"] = $"{metadata.Dimensions.Z:0.###} mm";
-        bodyObject.Properties["Volume"] = $"{metadata.VolumeMm3:0.###} mm³";
-        bodyObject.Properties["Closed Solid"] = metadata.IsClosed ? "Yes" : "No";
-        bodyObject.Properties["Solid Count"] = metadata.SolidCount.ToString();
+        bodyObject.Properties[metadata.IsClosed ? "Volume" : "Surface volume estimate"] = $"{metadata.VolumeMm3:0.###} mm³";
+        bodyObject.Properties["Closed display skin"] = metadata.IsClosed ? "Yes" : "No — does not block visualization";
+        bodyObject.Properties["Solid Count"] = metadata.SolidCount.ToString("N0");
+        bodyObject.Properties["Closed Shell Count"] = metadata.ClosedShellCount.ToString("N0");
+        bodyObject.Properties["Volume Meshing"] = metadata.CanAttemptVolumeMesh ? "Can attempt Gmsh TET4" : "Unavailable for surface/shell model";
         bodyObject.Properties["Selectable Faces"] = topology.Faces.Count.ToString("N0");
         bodyObject.Properties["Surface Nodes"] = preview.Nodes.Count.ToString("N0");
         bodyObject.Properties["Surface Triangles"] = preview.SurfaceTriangles.Count.ToString("N0");
@@ -117,10 +130,13 @@ internal sealed partial class MechanicalForm
         SetState(_nodes["Mesh"], ObjectState.NeedsAttention);
         MarkSolutionDirty();
 
-        EnsureCadCanvas().SetMesh(_cadEnvelope, preview, false);
+        var canvas = EnsureCadCanvas();
+        canvas.SetMesh(_cadEnvelope, preview, false);
+        if (_emptyViewportCover is not null) _emptyViewportCover.Visible = false;
+        RefreshProductionUiState();
         SelectNode("Geometry");
         Log("REAL STEP PREVIEW: " + result.Diagnostics);
-        Log("Normal left click selects a complete OpenCASCADE face. Ctrl + drag or middle drag rotates the model.");
+        Log("MMB/Ctrl+drag: free orbit. RMB/Shift+MMB: pan. Wheel: zoom. Normal left click selects a CAD face.");
     }
 
     private void CommitVerifiedPrismFastPath(string path, SimpleStepSolid solid, CadModelMetadata metadata, string diagnostics)
@@ -139,12 +155,14 @@ internal sealed partial class MechanicalForm
         _viewport.ResultVisible = false;
         _viewport.SupportVisible = false;
         _viewport.ForceVisible = false;
+        if (_emptyViewportCover is not null) _emptyViewportCover.Visible = false;
 
         var geometry = _nodes["Geometry"];
         geometry.Nodes.Clear();
         var body = MakeNode(Path.GetFileNameWithoutExtension(path), ObjectKind.Body, ObjectState.UpToDate, "Verified Prismatic Solid");
         var bodyObject = (ModelObject)body.Tag;
         bodyObject.Properties["Geometry Fidelity"] = "OCC-verified rectangular STEP; optimized structured path";
+        bodyObject.Properties["Topology"] = metadata.TopologyClassification;
         bodyObject.Properties["Length X"] = $"{solid.LengthX:0.###} mm";
         bodyObject.Properties["Length Y"] = $"{solid.LengthY:0.###} mm";
         bodyObject.Properties["Length Z"] = $"{solid.LengthZ:0.###} mm";
@@ -186,6 +204,16 @@ internal sealed partial class MechanicalForm
             return;
         }
 
+        if (!_cadMetadata.CanAttemptVolumeMesh)
+        {
+            MessageBox.Show(this,
+                "This STEP was imported as a surface/shell model. It can be viewed and scoped, but it does not declare a solid volume for TET4 generation.",
+                "Volume mesh unavailable",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
         var gmsh = GmshCliMesher.FindExecutable();
         if (gmsh is null)
         {
@@ -210,12 +238,12 @@ internal sealed partial class MechanicalForm
                 operation.Token);
             var mesh = run.Mesh;
             if (mesh.Tetrahedra.Count == 0)
-                throw new InvalidDataException("Gmsh did not generate tetrahedral volume elements. Verify that the STEP contains a closed solid volume.");
+                throw new InvalidDataException("Gmsh did not generate tetrahedral volume elements. One or more STEP bodies may be open/non-manifold.");
 
             operation.Report("MSH parse", "Validating volume elements and selectable surface topology.", 0.88);
-            var volumeMetadata = StepImportService.MetadataFromVolume(_cadMetadata, mesh);
+            var volumeMetadata = await Task.Run(() => StepImportService.MetadataFromVolume(_cadMetadata, mesh), operation.Token);
             if (!volumeMetadata.IsClosed || volumeMetadata.VolumeMm3 <= 0)
-                throw new InvalidDataException("Generated volume mesh failed closed-solid or positive-volume verification.");
+                throw new InvalidDataException("Generated volume mesh failed closed-boundary or positive-volume verification.");
 
             _cadVolumeMesh = mesh;
             _meshGenerated = true;
@@ -273,6 +301,10 @@ internal sealed partial class MechanicalForm
         _activeOperation = operation;
         _busy = true;
         ToggleUi(false);
+        // Tree navigation and Details remain usable while OCC/Gmsh works in the
+        // background. Conflicting model commands are still blocked by _busy.
+        _outline.Enabled = true;
+        _details.Enabled = true;
         Cursor = Cursors.WaitCursor;
         operation.ProgressChanged += HandleOperationProgress;
         operation.Report(stage, detail, 0.01);
@@ -299,6 +331,10 @@ internal sealed partial class MechanicalForm
         ToggleUi(true);
         Cursor = Cursors.Default;
         CloseOperationOverlay();
+
+        // Commit/UI events can occur while _busy is true. Render the actual selected node
+        // once after the transaction closes so Details/status cannot remain stale.
+        ActivateStableTreeNode(_outline.SelectedNode, "operation-complete");
     }
 
     private void HandleOperationProgress(OperationProgress progress)
@@ -384,7 +420,7 @@ internal sealed partial class MechanicalForm
         _worksheet.Columns.Add("Property", "Mesh Property");
         _worksheet.Columns.Add("Value", "Value");
         _worksheet.Rows.Add("CAD kernel", "OpenCASCADE through Gmsh");
-        _worksheet.Rows.Add("Displayed geometry", "Closed exterior skin only");
+        _worksheet.Rows.Add("Displayed geometry", "Volume-mesh exterior skin");
         _worksheet.Rows.Add("Element type", "Linear tetrahedron / TET4");
         _worksheet.Rows.Add("Target size", $"{targetSizeMm:0.###} mm");
         _worksheet.Rows.Add("Nodes", mesh.Nodes.Count.ToString("N0"));
@@ -394,9 +430,9 @@ internal sealed partial class MechanicalForm
         _worksheet.Rows.Add("Boundary-condition status", "Click a face to scope supports and loads");
     }
 
-    private SelectableCadMeshCanvas EnsureCadCanvas()
+    private ResponsiveCadMeshCanvas EnsureCadCanvas()
     {
-        _cadCanvas ??= new SelectableCadMeshCanvas(HandleCadFaceSelected);
+        _cadCanvas ??= new ResponsiveCadMeshCanvas(HandleCadFaceSelected);
         if (_cadCanvas.Parent != _viewport)
         {
             _cadCanvas.Dock = DockStyle.Fill;
@@ -405,6 +441,7 @@ internal sealed partial class MechanicalForm
         _cadCanvas.Visible = true;
         _cadCanvas.BringToFront();
         RefreshCadScopeMarkers();
+        RefreshProductionUiState();
         return _cadCanvas;
     }
 
@@ -421,6 +458,7 @@ internal sealed partial class MechanicalForm
         _cadMetadata = null;
         _cadSurfacePreview = null;
         _cadVolumeMesh = null;
+        _cadCanvas?.ClearModel();
         HideCadCanvas();
     }
 
