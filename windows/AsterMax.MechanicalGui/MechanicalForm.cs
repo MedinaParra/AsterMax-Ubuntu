@@ -64,6 +64,9 @@ internal sealed partial class MechanicalForm : Form
         AllowDrop = true;
 
         BuildSafeLayout();
+        // Establish the graphics surface once, before any STEP or selection logic can
+        // reparent a renderer. CAD and the legacy viewport now share this permanent host.
+        InitializeDedicatedGraphicsHost();
         BuildMenus();
         BuildRibbon();
         BuildProjectTree();
