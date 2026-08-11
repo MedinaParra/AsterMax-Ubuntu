@@ -16,11 +16,11 @@ internal sealed partial class MechanicalForm
         ConfigureDetailsMinimumWidths();
 
         _outline.AfterSelect += (_, e) => ActivateStableTreeNode(e.Node, "after-select");
-        Shown += (_, _) =>
+        Shown += async (_, _) =>
         {
             if (IsDisposed || !IsHandleCreated) return;
             ActivateStableTreeNode(_outline.SelectedNode, "shown");
-            RunStableSelectionSmokeIfRequested();
+            await RunStableSelectionSmokeIfRequestedAsync();
         };
     }
 
@@ -152,7 +152,7 @@ internal sealed partial class MechanicalForm
         Log("GEOMETRY CLEARED: CAD mesh, preview, solver state and viewport were released together.");
     }
 
-    private void RunStableSelectionSmokeIfRequested()
+    private async Task RunStableSelectionSmokeIfRequestedAsync()
     {
         var args = Environment.GetCommandLineArgs();
         if (!args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase))) return;
@@ -169,9 +169,48 @@ internal sealed partial class MechanicalForm
         {
             _outline.SelectedNode = node;
             node.EnsureVisible();
-            ActivateStableTreeNode(node, "stable-smoke");
+            ActivateStableTreeNode(node, "stable-smoke-empty");
             if (node.Tag is not ModelObject model || !string.Equals(ReadRenderedDetailsName(), model.Name, StringComparison.Ordinal))
-                throw new InvalidOperationException($"GUI smoke: Details did not follow {node.Text}.");
+                throw new InvalidOperationException($"GUI smoke: Details did not follow {node.Text} before CAD import.");
+        }
+
+        // When Actions runs from the repository root, exercise the exact field scenario:
+        // import the real cylinder, navigate away from Geometry, then delete the imported
+        // body and require the CAD canvas/state to disappear with it.
+        var cylinder = Path.Combine(
+            Environment.CurrentDirectory,
+            "windows",
+            "AsterMax.MechanicalGui",
+            "TestData",
+            "CILINDRO-SIMPLE.stp");
+
+        if (File.Exists(cylinder) && GmshCliMesher.FindExecutable() is not null)
+        {
+            await ImportCadStepAsync(cylinder);
+            if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
+                throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
+            if (_cadCanvas is null || !_cadCanvas.Visible)
+                throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
+
+            var solutionInformation = AllNodes().First(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation });
+            _outline.SelectedNode = solutionInformation;
+            ActivateStableTreeNode(solutionInformation, "stable-smoke-after-cad");
+            if (!string.Equals(ReadRenderedDetailsName(), "Solution Information", StringComparison.Ordinal))
+                throw new InvalidOperationException("GUI smoke: Details froze on Geometry after STEP import.");
+
+            var importedBody = _nodes["Geometry"].Nodes.Cast<TreeNode>().First();
+            _outline.SelectedNode = importedBody;
+            DeleteSelected();
+            Application.DoEvents();
+
+            if (!string.IsNullOrWhiteSpace(_geometryPath))
+                throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
+            if (_cadCanvas is { Visible: true })
+                throw new InvalidOperationException("GUI smoke: deleting imported Geometry left the CAD canvas visible.");
+            if (_nodes["Geometry"].Nodes.Count != 0)
+                throw new InvalidOperationException("GUI smoke: deleting imported Geometry left a body in the tree.");
+
+            Log("PASS GUI CadImportNavigateDelete: imported STEP did not freeze Details and deletion released the CAD view.");
         }
 
         Log("PASS GUI StableSingleAfterSelect: Details follows TreeView.SelectedNode with no polling.");
