@@ -82,6 +82,19 @@ internal sealed class CadModelMetadata
     public required string GmshVersion { get; init; }
     public required IReadOnlyList<string> PersistentFaceIds { get; init; }
     public Vec3 Dimensions => Max - Min;
+
+    // Importability and volume-mesh eligibility are deliberately different concepts.
+    // Any non-empty OCC surface may be displayed. Only STEP files that declare solids are
+    // candidates for a 3-D volume mesh; the real TET4 generation performs the final check.
+    public bool CanAttemptVolumeMesh => SolidCount > 0;
+    public string TopologyClassification => SolidCount switch
+    {
+        <= 0 => "Surface / shell model",
+        1 when IsClosed => "Single closed solid",
+        1 => "Single solid (surface closure diagnostic incomplete)",
+        _ when IsClosed => $"Multi-solid assembly ({SolidCount} solids, closed display skin)",
+        _ => $"Multi-solid assembly ({SolidCount} solids)"
+    };
 }
 
 internal sealed record CadSurfaceMesh(CadMesh Mesh);
@@ -207,29 +220,33 @@ internal static class ManagedGmshMesher
 
             try
             {
-                await process.WaitForExitAsync(linked.Token);
+                await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                await KillTreeAndWaitAsync(process);
-                var stdoutAfterKill = await stdoutTask;
-                var stderrAfterKill = await stderrTask;
+                await KillTreeAndWaitAsync(process).ConfigureAwait(false);
+                var stdoutAfterKill = await stdoutTask.ConfigureAwait(false);
+                var stderrAfterKill = await stderrTask.ConfigureAwait(false);
                 var tail = LastLines(stdoutAfterKill + Environment.NewLine + stderrAfterKill, 18);
                 if (cancellationToken.IsCancellationRequested)
                     throw new OperationCanceledException("Gmsh operation cancelled.\n" + tail, cancellationToken);
                 throw new TimeoutException($"Gmsh exceeded the {timeout.TotalSeconds:0}-second timeout.\n{tail}");
             }
 
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
             var log = stdout + Environment.NewLine + stderr;
             if (process.ExitCode != 0)
                 throw new InvalidOperationException($"Gmsh exited with code {process.ExitCode}.\n\n{LastLines(log, 18)}");
             if (!File.Exists(meshPath))
                 throw new InvalidDataException("Gmsh finished without creating the requested MSH file.\n\n" + LastLines(log, 18));
 
-            var mesh = SelectableGmshMesher.ParseMsh2(meshPath, log);
-            var version = await ReadVersionAsync(executable, cancellationToken);
+            // File.ReadAllLines + topology registration can be expensive for large assemblies.
+            // Keep that CPU/IO work off the WinForms message thread.
+            var mesh = await Task.Run(
+                () => SelectableGmshMesher.ParseMsh2(meshPath, log),
+                cancellationToken).ConfigureAwait(false);
+            var version = await ReadVersionAsync(executable, cancellationToken).ConfigureAwait(false);
             return new GmshRunResult(mesh, version, arguments, watch.Elapsed, process.ExitCode, log);
         }
         finally
@@ -239,7 +256,7 @@ internal static class ManagedGmshMesher
             {
                 try
                 {
-                    if (!process.HasExited) await KillTreeAndWaitAsync(process);
+                    if (!process.HasExited) await KillTreeAndWaitAsync(process).ConfigureAwait(false);
                 }
                 catch { }
                 process.Dispose();
@@ -255,7 +272,7 @@ internal static class ManagedGmshMesher
             if (!process.HasExited) process.Kill(entireProcessTree: true);
         }
         catch { }
-        try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
+        try { await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } catch { }
     }
 
     private static async Task<string> ReadVersionAsync(string executable, CancellationToken cancellationToken)
@@ -275,13 +292,13 @@ internal static class ManagedGmshMesher
         var errorTask = process.StandardError.ReadToEndAsync();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        try { await process.WaitForExitAsync(timeout.Token); }
+        try { await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false); }
         catch
         {
-            await KillTreeAndWaitAsync(process);
+            await KillTreeAndWaitAsync(process).ConfigureAwait(false);
             return "unknown";
         }
-        var text = ((await outputTask) + " " + (await errorTask)).Trim();
+        var text = ((await outputTask.ConfigureAwait(false)) + " " + (await errorTask.ConfigureAwait(false))).Trim();
         return string.IsNullOrWhiteSpace(text) ? "unknown" : text.Split('\n', '\r').FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? "unknown";
     }
 
@@ -293,6 +310,9 @@ internal static class ManagedGmshMesher
 
 internal static class StepImportService
 {
+    private sealed record SourceAnalysis(StepSourceHints Hints, string Sha256);
+    private sealed record SurfaceAnalysis(CadSurfaceTopology Topology, bool IsClosed, double Volume, int EdgeCount, int SolidCount);
+
     public static async Task<CadImportResult> ImportSurfaceAsync(
         string gmshExecutable,
         string path,
@@ -307,8 +327,17 @@ internal static class StepImportService
         var fileInfo = new FileInfo(path);
         if (fileInfo.Length == 0) throw new InvalidDataException("The STEP file is empty.");
 
-        var hints = StepSourceInspector.Inspect(path);
-        var sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+        // Regex inspection and SHA hashing can dominate the UI on large STEP assemblies.
+        // Run both in the worker pool and stream the hash instead of File.ReadAllBytes().
+        var source = await Task.Run(() =>
+        {
+            operation.Token.ThrowIfCancellationRequested();
+            var hints = StepSourceInspector.Inspect(path);
+            using var stream = File.OpenRead(path);
+            using var sha = SHA256.Create();
+            var digest = Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
+            return new SourceAnalysis(hints, digest);
+        }, operation.Token).ConfigureAwait(false);
         operation.Token.ThrowIfCancellationRequested();
 
         operation.Report("OpenCASCADE read", "Reading STEP topology through Gmsh/OpenCASCADE.", 0.20);
@@ -318,61 +347,85 @@ internal static class StepImportService
             null,
             2,
             previewTimeout,
-            operation.Token);
+            operation.Token).ConfigureAwait(false);
         operation.Token.ThrowIfCancellationRequested();
 
-        operation.Report("Surface mesh", "Reading MSH surface and constructing selectable topology.", 0.72);
+        operation.Report("Surface analysis", "Building selectable topology and classifying solids/surfaces.", 0.72);
         var mesh = surfaceRun.Mesh;
         if (mesh.Nodes.Count == 0 || mesh.SurfaceTriangles.Count == 0)
             throw new InvalidDataException("OpenCASCADE imported the STEP, but the surface mesh is empty.");
-        var topology = CadTopologyRegistry.Get(mesh);
-        if (topology.Faces.Count == 0)
-            throw new InvalidDataException("The surface mesh contains no selectable CAD faces.");
 
-        var isClosed = IsClosedTriangleSkin(mesh);
-        var volume = Math.Abs(SignedSkinVolume(mesh));
-        var edgeCount = UniqueMeshEdgeCount(mesh);
-        var solidCount = hints.SolidCount > 0 ? hints.SolidCount : isClosed ? 1 : 0;
+        var analysis = await Task.Run(() =>
+        {
+            operation.Token.ThrowIfCancellationRequested();
+            var topology = CadTopologyRegistry.Get(mesh);
+            if (topology.Faces.Count == 0)
+                throw new InvalidDataException("The surface mesh contains no selectable CAD faces.");
+            var isClosed = IsClosedTriangleSkin(mesh);
+            var volume = Math.Abs(SignedSkinVolume(mesh));
+            var edgeCount = UniqueMeshEdgeCount(mesh);
+            var solidCount = source.Hints.SolidCount > 0 ? source.Hints.SolidCount : isClosed ? 1 : 0;
+            return new SurfaceAnalysis(topology, isClosed, volume, edgeCount, solidCount);
+        }, operation.Token).ConfigureAwait(false);
+
         var metadata = new CadModelMetadata
         {
             SourcePath = path,
-            Sha256 = sha256,
-            SourceUnit = hints.SourceUnit,
-            SourceToMillimetres = hints.SourceToMillimetres,
+            Sha256 = source.Sha256,
+            SourceUnit = source.Hints.SourceUnit,
+            SourceToMillimetres = source.Hints.SourceToMillimetres,
             Min = mesh.Min,
             Max = mesh.Max,
-            SolidCount = solidCount,
-            ClosedShellCount = hints.ClosedShellCount,
-            FaceCount = topology.Faces.Count,
-            MeshEdgeCount = edgeCount,
-            IsClosed = isClosed,
-            VolumeMm3 = volume,
+            SolidCount = analysis.SolidCount,
+            ClosedShellCount = source.Hints.ClosedShellCount,
+            FaceCount = analysis.Topology.Faces.Count,
+            MeshEdgeCount = analysis.EdgeCount,
+            IsClosed = analysis.IsClosed,
+            VolumeMm3 = analysis.Volume,
             GmshVersion = surfaceRun.Version,
-            PersistentFaceIds = topology.Faces.Keys.OrderBy(tag => tag).Select(tag => $"face:{tag}").ToArray()
+            PersistentFaceIds = analysis.Topology.Faces.Keys.OrderBy(tag => tag).Select(tag => $"face:{tag}").ToArray()
         };
 
-        if (solidCount <= 0 || !isClosed || volume <= 0)
-            throw new InvalidDataException($"STEP topology is not a verified closed positive-volume solid (solids={solidCount}, closed={isClosed}, volume={volume:G8} mm^3).");
-
-        // Legacy Cartesian-point prism detection is intentionally after successful OCC import.
-        // It can select a fast rectangular solver path, but it can never reject a general B-Rep.
+        // Critical architectural rule: OCC importability is NOT the same as TET4 eligibility.
+        // Multi-solid assemblies and shell/surface STEP files must still open and remain
+        // navigable. Volume meshing is attempted later only when the model declares solids.
         SimpleStepSolid? prism = null;
-        try
+        if (metadata.SolidCount == 1 && metadata.IsClosed)
         {
-            var candidate = SimpleStepReader.ReadPrismaticSolid(path);
-            if (candidate.IsSupportedPrism) prism = candidate;
-        }
-        catch
-        {
-            // Expected for valid curved B-Reps such as the cylinder regression: never use this as a validity gate.
+            try
+            {
+                prism = await Task.Run(() =>
+                {
+                    try
+                    {
+                        var candidate = SimpleStepReader.ReadPrismaticSolid(path);
+                        return candidate.IsSupportedPrism ? candidate : null;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }, operation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
         }
 
-        operation.Report("Topology", $"Verified {solidCount} solid(s), {metadata.FaceCount} selectable faces and positive volume.", 0.92);
+        operation.Report(
+            "Topology",
+            $"Imported {metadata.TopologyClassification}; {metadata.FaceCount} selectable faces. " +
+            (metadata.CanAttemptVolumeMesh ? "Volume meshing can be attempted." : "Display-only surface/shell model."),
+            0.92);
+
         var diagnostics =
-            $"file={path}; size={fileInfo.Length}; sha256={sha256}; sourceUnit={hints.SourceUnit}; sourceToMm={hints.SourceToMillimetres:G8}; " +
+            $"file={path}; size={fileInfo.Length}; sha256={source.Sha256}; sourceUnit={source.Hints.SourceUnit}; sourceToMm={source.Hints.SourceToMillimetres:G8}; " +
             $"gmsh={surfaceRun.Version}; args={surfaceRun.Arguments}; occ+surface={surfaceRun.Elapsed.TotalMilliseconds:0} ms; " +
-            $"solids={solidCount}; faces={metadata.FaceCount}; meshEdges={edgeCount}; closed={isClosed}; volumeMm3={volume:G10}; " +
-            $"nodes={mesh.Nodes.Count}; triangles={mesh.SurfaceTriangles.Count}";
+            $"class={metadata.TopologyClassification}; solids={analysis.SolidCount}; closedShells={source.Hints.ClosedShellCount}; " +
+            $"faces={metadata.FaceCount}; meshEdges={analysis.EdgeCount}; closedSkinDiagnostic={analysis.IsClosed}; " +
+            $"surfaceVolumeEstimateMm3={analysis.Volume:G10}; nodes={mesh.Nodes.Count}; triangles={mesh.SurfaceTriangles.Count}";
+
         return new CadImportResult
         {
             Metadata = metadata,
