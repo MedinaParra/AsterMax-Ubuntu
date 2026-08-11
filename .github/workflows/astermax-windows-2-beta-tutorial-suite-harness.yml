@@ -1,0 +1,87 @@
+name: AsterMax Windows 2 Beta - Tutorial Suite Harness
+
+on:
+  push:
+    branches:
+      - agent/astermax-windows-2-beta-tutorial-certification-step-fix
+    paths:
+      - ".github/workflows/astermax-windows-2-beta-tutorial-suite-harness.yml"
+      - "windows/AsterMax.MechanicalGui/TutorialCertificationSuite.cs"
+      - "docs/tutorial-certification/TUTORIAL_CERTIFICATION_MATRIX.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tutorial-suite-contract:
+    runs-on: windows-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore build and publish
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+
+      - name: TutorialSuite reports exactly twenty and never passes unavailable cases
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path empty-source | Out-Null
+          New-Item -ItemType Directory -Force -Path evidence/full | Out-Null
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $source = (Resolve-Path empty-source).Path
+          $output = (Resolve-Path evidence/full).Path
+          & $exe --tutorial-suite $source --output $output
+          $code = $LASTEXITCODE
+          if ($code -eq 0) { throw "TutorialSuite_DoesNotPassSkippedCases failed: empty source returned success." }
+          $report = Get-Content evidence/full/tutorial-certification.json -Raw | ConvertFrom-Json
+          if ($report.totalCases -ne 20 -or @($report.cases).Count -ne 20) {
+            throw "TutorialSuite_ReportsExactlyTwentyCases failed."
+          }
+          if ($report.passed -ne 0 -or $report.strictCertificationPercent -ne 0) {
+            throw "Empty/unavailable cases were incorrectly counted as Passed."
+          }
+          if ($report.unavailable -ne 20) {
+            throw "Expected all 20 cases Unavailable against empty source, got $($report.unavailable)."
+          }
+          if (-not (Test-Path evidence/full/tutorial-certification.csv) -or -not (Test-Path evidence/full/tutorial-certification.html)) {
+            throw "Tutorial suite did not emit JSON, CSV and HTML evidence."
+          }
+          Write-Host "PASS TutorialSuite_ReportsExactlyTwentyCases"
+          Write-Host "PASS TutorialSuite_DoesNotPassSkippedCases"
+
+      - name: Single-case debug contract
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence/single | Out-Null
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $source = (Resolve-Path empty-source).Path
+          $output = (Resolve-Path evidence/single).Path
+          & $exe --tutorial-suite $source --output $output --case WS01.1
+          if ($LASTEXITCODE -eq 0) { throw "Unavailable single-case debug run must not return success." }
+          $report = Get-Content evidence/single/tutorial-certification.json -Raw | ConvertFrom-Json
+          if (@($report.cases).Count -ne 20) { throw "Single-case report must preserve the 20-case ledger." }
+          $selected = $report.cases | Where-Object id -eq "WS01.1"
+          if ($selected.status -eq "Passed") { throw "Single-case unavailable result was incorrectly Passed." }
+
+      - name: Upload harness evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-tutorial-suite-harness-evidence
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 30
