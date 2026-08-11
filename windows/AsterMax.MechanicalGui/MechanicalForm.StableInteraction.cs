@@ -210,6 +210,18 @@ internal sealed partial class MechanicalForm
 
     private void ClearImportedGeometryVisualState(TreeNode geometryNode)
     {
+        // A hidden Dock=Fill CAD canvas must not remain as a sibling of MechanicalViewport.
+        // Field/CI traces showed that leaving both custom paint surfaces parented to the
+        // same host could keep WM_PAINT/layout messages alive indefinitely after Delete.
+        // Remove and dispose the CAD canvas first; the next import creates a fresh canvas.
+        if (_cadCanvas is { } cad)
+        {
+            try { cad.ClearModel(); } catch { }
+            try { cad.Parent?.Controls.Remove(cad); } catch { }
+            try { cad.Dispose(); } catch { }
+            _cadCanvas = null;
+        }
+
         ResetCadState();
         _geometryPath = null;
         _meshGenerated = false;
@@ -240,7 +252,7 @@ internal sealed partial class MechanicalForm
         SetState(_nodes.GetValueOrDefault("Model"), ObjectState.NeedsAttention);
         SetState(_nodes.GetValueOrDefault("Mesh"), ObjectState.NeedsAttention);
         MarkSolutionDirty();
-        Log("GEOMETRY CLEARED: CAD mesh, preview, solver state and viewport were released together.");
+        Log("GEOMETRY CLEARED: CAD canvas detached/disposed; mesh, solver state and viewport released together.");
     }
 
     private static void SmokeTrace(string stage)
