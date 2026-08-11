@@ -191,8 +191,15 @@ internal sealed partial class MechanicalForm
                 ClearImportedGeometryVisualState(targetGeometry);
                 SmokeTrace("deferred-geometry-clear-pass");
 
+                // Important: do NOT re-enter the full selection/viewport pipeline here.
+                // We are already inside a BeginInvoke posted by a TreeView delete. Running
+                // CompleteSelectionContext again would reparent/paint the graphics host in
+                // the same message-loop turn. Refresh only Details/status; the next normal
+                // tree selection will update the rest of the secondary context.
                 var selected = _outline.SelectedNode ?? targetGeometry;
-                ActivateStableTreeNode(selected, "geometry-cleared");
+                RenderDetailsSelection(selected, "geometry-cleared");
+                _outline.Invalidate();
+                SmokeTrace("deferred-geometry-details-pass");
             }
             finally
             {
