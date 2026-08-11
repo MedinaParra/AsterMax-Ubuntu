@@ -45,8 +45,8 @@ def _hide_freecad_chrome(main_window) -> None:
 
 
 def _active_view():
-    document = Gui.activeDocument()
-    return document.activeView() if document else None
+    gui_document = Gui.activeDocument()
+    return gui_document.activeView() if gui_document else None
 
 
 def _apply_command(command: str) -> None:
@@ -107,8 +107,12 @@ def _publish_ready(main_window, document) -> None:
             if view_object is not None and bool(getattr(view_object, "Visibility", False)):
                 visible_objects += 1
             shape = getattr(obj, "Shape", None)
-            if shape is not None and not bool(getattr(shape, "isNull", lambda: True)()):
-                shape_objects += 1
+            if shape is not None:
+                try:
+                    if not shape.isNull():
+                        shape_objects += 1
+                except Exception:
+                    pass
 
         _write_ready(
             {
@@ -123,6 +127,7 @@ def _publish_ready(main_window, document) -> None:
                 "freecad_version": ".".join(App.Version()[0:3]),
             }
         )
+        App.Console.PrintMessage("ASTERMAX_FREECAD_VIEWER_READY\n")
     except Exception as exc:
         _write_ready(
             {
@@ -131,6 +136,7 @@ def _publish_ready(main_window, document) -> None:
                 "traceback": traceback.format_exc(),
             }
         )
+        App.Console.PrintError(traceback.format_exc() + "\n")
 
 
 try:
@@ -153,7 +159,7 @@ try:
         if subwindow is not None:
             subwindow.showMaximized()
 
-    # Realize the native Qt/Coin3D widget before AsterMax reparents the HWND.
+    # Realize the Qt/Coin3D window before exposing its native HWND to AsterMax.
     main.show()
     main.raise_()
     QtWidgets.QApplication.processEvents()
@@ -169,7 +175,22 @@ try:
     _command_timer.timeout.connect(_poll_command)
     _command_timer.start()
 
+    # A .py passed on the FreeCAD command line may cause FreeCAD to leave script mode as
+    # soon as the script returns. Keep a real Qt event loop alive so the embedded viewer is
+    # interactive and the ready timer is guaranteed to execute.
+    _viewer_loop = QtCore.QEventLoop()
+    application = QtWidgets.QApplication.instance()
+    try:
+        application.lastWindowClosed.connect(_viewer_loop.quit)
+    except Exception:
+        pass
+    try:
+        main.destroyed.connect(_viewer_loop.quit)
+    except Exception:
+        pass
+
     QtCore.QTimer.singleShot(450, lambda: _publish_ready(main, document))
+    _viewer_loop.exec()
 except Exception as exc:
     _write_ready(
         {
