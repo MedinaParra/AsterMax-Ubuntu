@@ -19,6 +19,11 @@ internal sealed partial class MechanicalForm
             Margin = Padding.Empty,
             Padding = Padding.Empty
         };
+        // Define the only column as 100% at construction time. Changing this later while
+        // nested split containers and the CAD canvas are already painting can corrupt the
+        // WinForms layout/paint surface and produce the vertical "ghost" panels seen in
+        // field screenshots.
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 126));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
@@ -65,11 +70,19 @@ internal sealed partial class MechanicalForm
 
         Shown += (_, _) => BeginInvoke(() =>
         {
-            // Apply desired proportions only after the window has a real client size.
+            // Minimums are applied only after the form has a real client size. They make
+            // panel collapse impossible while still allowing the user to move splitters.
+            content.Panel1MinSize = 200;
+            content.Panel2MinSize = 540;
+            right.Panel1MinSize = 420;
+            right.Panel2MinSize = 240;
+            center.Panel1MinSize = 280;
+            center.Panel2MinSize = 140;
+
             SetSafeSplitter(content, Math.Min(285, Math.Max(220, content.ClientSize.Width / 4)));
             SetSafeSplitter(right, Math.Max(430, right.ClientSize.Width - 310));
             SetSafeSplitter(center, Math.Max(300, center.ClientSize.Height - 210));
-            _statusMain.Text = "Ready — startup layout validated";
+            _statusMain.Text = "Ready — stable layout validated";
         });
     }
 
@@ -88,8 +101,11 @@ internal sealed partial class MechanicalForm
             ? splitter.ClientSize.Width
             : splitter.ClientSize.Height;
 
-        // WinForms requires SplitterDistance to stay inside the current client extent.
-        var maximum = Math.Max(1, extent - splitter.SplitterWidth - 1);
-        splitter.SplitterDistance = Math.Clamp(requested, 1, maximum);
+        // Respect both Panel1MinSize and Panel2MinSize. This is deterministic and never
+        // needs a timer to "repair" a live layout.
+        var minimum = Math.Max(1, splitter.Panel1MinSize);
+        var maximum = extent - splitter.SplitterWidth - Math.Max(1, splitter.Panel2MinSize);
+        if (maximum < minimum) return;
+        splitter.SplitterDistance = Math.Clamp(requested, minimum, maximum);
     }
 }
