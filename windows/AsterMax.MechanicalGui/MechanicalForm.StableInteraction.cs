@@ -4,6 +4,7 @@ internal sealed partial class MechanicalForm
 {
     private bool _stableSelectionInstalled;
     private bool _stableSelectionBusy;
+    private bool _uiSmokeRunning;
 
     internal void InstallStableSelectionController()
     {
@@ -13,6 +14,14 @@ internal sealed partial class MechanicalForm
 
         _outline.BeforeSelect += (_, e) => RenderDetailsSelection(e.Node, "before-select");
         _outline.AfterSelect += (_, e) => CompleteSelectionContext(e.Node, "after-select");
+
+        // Program.cs has a short historical startup watchdog. Once the expanded real-CAD
+        // regression starts, cancel that watchdog close until the regression itself reaches
+        // a terminal state. A successful smoke closes the form explicitly at the end.
+        FormClosing += (_, e) =>
+        {
+            if (_uiSmokeRunning) e.Cancel = true;
+        };
 
         Shown += async (_, _) =>
         {
@@ -71,16 +80,6 @@ internal sealed partial class MechanicalForm
         }
     }
 
-    /// <summary>
-    /// CAD and the legacy MechanicalViewport are two independent paint surfaces. The old
-    /// implementation nested ResponsiveCadMeshCanvas inside MechanicalViewport, so both
-    /// custom drawing controls participated in the same WM_PAINT/layout chain. Field tests
-    /// showed the message pump could then stay busy indefinitely after STEP import.
-    ///
-    /// Keep exactly one graphics surface active. When CAD is visible, move it out of the
-    /// legacy viewport and place it as a sibling using the viewport's exact rectangle.
-    /// When CAD is not visible, restore the legacy viewport.
-    /// </summary>
     private void EnsureExclusiveGraphicsSurface()
     {
         if (_cadCanvas is { Visible: true } cad)
@@ -230,117 +229,130 @@ internal sealed partial class MechanicalForm
     {
         var args = Environment.GetCommandLineArgs();
         if (!args.Any(arg => string.Equals(arg, "--startup-smoke", StringComparison.OrdinalIgnoreCase))) return;
-        SmokeTrace("start");
 
-        void SelectThroughRealTreeEvents(TreeNode node, string stage)
+        var success = false;
+        _uiSmokeRunning = true;
+        try
         {
-            SmokeTrace("select-begin:" + stage + ":" + node.Text);
-            if (ReferenceEquals(_outline.SelectedNode, node))
+            SmokeTrace("start");
+
+            void SelectThroughRealTreeEvents(TreeNode node, string stage)
             {
-                var alternate = AllNodes().FirstOrDefault(candidate => !ReferenceEquals(candidate, node));
-                if (alternate is not null) _outline.SelectedNode = alternate;
+                SmokeTrace("select-begin:" + stage + ":" + node.Text);
+                if (ReferenceEquals(_outline.SelectedNode, node))
+                {
+                    var alternate = AllNodes().FirstOrDefault(candidate => !ReferenceEquals(candidate, node));
+                    if (alternate is not null) _outline.SelectedNode = alternate;
+                }
+                _outline.SelectedNode = node;
+                node.EnsureVisible();
+                Application.DoEvents();
+
+                if (node.Tag is not ModelObject model)
+                    throw new InvalidOperationException($"GUI smoke ({stage}): node has no ModelObject.");
+                if (!string.Equals(ReadRenderedDetailsName(), model.Name, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"GUI smoke ({stage}): Details='{ReadRenderedDetailsName()}' while tree='{model.Name}'.");
+                if (!_statusSelection.Text.Contains(model.Name, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"GUI smoke ({stage}): status='{_statusSelection.Text}' while tree='{model.Name}'.");
+                SmokeTrace("select-pass:" + stage + ":" + model.Name);
             }
-            _outline.SelectedNode = node;
-            node.EnsureVisible();
-            Application.DoEvents();
 
-            if (node.Tag is not ModelObject model)
-                throw new InvalidOperationException($"GUI smoke ({stage}): node has no ModelObject.");
-            if (!string.Equals(ReadRenderedDetailsName(), model.Name, StringComparison.Ordinal))
-                throw new InvalidOperationException(
-                    $"GUI smoke ({stage}): Details='{ReadRenderedDetailsName()}' while tree='{model.Name}'.");
-            if (!_statusSelection.Text.Contains(model.Name, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    $"GUI smoke ({stage}): status='{_statusSelection.Text}' while tree='{model.Name}'.");
-            SmokeTrace("select-pass:" + stage + ":" + model.Name);
+            var initialSequence = new[]
+            {
+                _nodes.GetValueOrDefault("Geometry"),
+                _nodes.GetValueOrDefault("Connections"),
+                FirstAnalysis(),
+                AllNodes().FirstOrDefault(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation }),
+                AllNodes().FirstOrDefault(node => node.Tag is ModelObject { Kind: ObjectKind.Result })
+            }.Where(node => node is not null).Cast<TreeNode>().ToArray();
+
+            foreach (var node in initialSequence)
+                SelectThroughRealTreeEvents(node, "before-cad");
+            SmokeTrace("empty-tree-sequence-pass");
+
+            var cylinder = Environment.GetEnvironmentVariable("ASTERMAX_STARTUP_STEP");
+            if (string.IsNullOrWhiteSpace(cylinder))
+                cylinder = Path.Combine(Environment.CurrentDirectory, "windows", "AsterMax.MechanicalGui", "TestData", "CILINDRO-SIMPLE.stp");
+
+            if (File.Exists(cylinder) && GmshCliMesher.FindExecutable() is { } gmsh)
+            {
+                SmokeTrace("occ-import-begin");
+                using var smokeOperation = new OperationController();
+                var result = await StepImportService.ImportSurfaceAsync(gmsh, cylinder, smokeOperation, PreviewTimeout);
+                SmokeTrace($"occ-import-pass:nodes={result.Surface.Mesh.Nodes.Count}:tri={result.Surface.Mesh.SurfaceTriangles.Count}");
+                CommitGeneralCadImport(cylinder, result);
+                SmokeTrace("commit-general-cad-pass");
+                EnsureExclusiveGraphicsSurface();
+                SmokeTrace("exclusive-graphics-pass");
+                Application.DoEvents();
+                SmokeTrace("post-commit-doevents-pass");
+
+                if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
+                    throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
+                if (_cadCanvas is null || !_cadCanvas.Visible)
+                    throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
+                if (_cadCanvas.Parent == _viewport)
+                    throw new InvalidOperationException("GUI smoke: CAD canvas is still nested inside MechanicalViewport.");
+
+                var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: analysis missing.");
+                SelectThroughRealTreeEvents(analysis, "cad-analysis");
+                SmokeTrace("add-support-begin");
+                AddSupport("Fixed Support");
+                Application.DoEvents();
+                SmokeTrace("add-support-doevents-pass");
+                var support = _outline.SelectedNode;
+                if (support?.Tag is not ModelObject { Kind: ObjectKind.Support })
+                    throw new InvalidOperationException("GUI smoke: Fixed Support insertion did not select the support.");
+                SelectThroughRealTreeEvents(support, "cad-fixed-support");
+                SelectThroughRealTreeEvents(_nodes["Connections"], "cad-connections");
+
+                var solutionInformation = AllNodes().First(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation });
+                SelectThroughRealTreeEvents(solutionInformation, "cad-solution-information");
+
+                var geometry = _nodes["Geometry"];
+                SelectThroughRealTreeEvents(geometry, "cad-geometry");
+                var geometryRows = _details.Rows.Cast<DataGridViewRow>()
+                    .ToDictionary(row => row.Cells[0].Value?.ToString() ?? string.Empty,
+                        row => row.Cells.Count > 1 ? row.Cells[1].Value?.ToString() ?? string.Empty : string.Empty,
+                        StringComparer.OrdinalIgnoreCase);
+                if (!geometryRows.TryGetValue("Source", out var source) || string.IsNullOrWhiteSpace(source) || source.Contains("No geometry", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("GUI smoke: Geometry Details did not show the imported STEP source.");
+                if (!geometryRows.TryGetValue("Bodies", out var bodies) || bodies == "0")
+                    throw new InvalidOperationException("GUI smoke: Geometry Details reported zero bodies after STEP import.");
+                SmokeTrace("geometry-properties-pass");
+
+                var importedBody = geometry.Nodes.Cast<TreeNode>().First();
+                SelectThroughRealTreeEvents(importedBody, "cad-body-before-delete");
+                SmokeTrace("delete-begin");
+                DeleteSelected();
+                Application.DoEvents();
+                SmokeTrace("delete-doevents-pass");
+
+                if (!string.IsNullOrWhiteSpace(_geometryPath))
+                    throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
+                if (_cadCanvas is { Visible: true })
+                    throw new InvalidOperationException("GUI smoke: deleting imported Geometry left the CAD canvas visible.");
+                if (_nodes["Geometry"].Nodes.Count != 0)
+                    throw new InvalidOperationException("GUI smoke: deleting imported Geometry left a body in the tree.");
+                if (!_viewport.Visible)
+                    throw new InvalidOperationException("GUI smoke: legacy viewport was not restored after deleting CAD.");
+
+                Log("PASS GUI RealTreeEventsWithCad: Details followed Fixed Support, Connections, Solution Information and Geometry with STEP visible.");
+                Log("PASS GUI CadImportNavigateDelete: deleting the imported body released the CAD view and model state.");
+                SmokeTrace("cad-sequence-pass");
+            }
+
+            Log("PASS GUI DetailsFirstSelection: Details follows TreeView through real BeforeSelect/AfterSelect events without polling.");
+            SmokeTrace("complete");
+            success = true;
         }
-
-        var initialSequence = new[]
+        finally
         {
-            _nodes.GetValueOrDefault("Geometry"),
-            _nodes.GetValueOrDefault("Connections"),
-            FirstAnalysis(),
-            AllNodes().FirstOrDefault(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation }),
-            AllNodes().FirstOrDefault(node => node.Tag is ModelObject { Kind: ObjectKind.Result })
-        }.Where(node => node is not null).Cast<TreeNode>().ToArray();
-
-        foreach (var node in initialSequence)
-            SelectThroughRealTreeEvents(node, "before-cad");
-        SmokeTrace("empty-tree-sequence-pass");
-
-        var cylinder = Environment.GetEnvironmentVariable("ASTERMAX_STARTUP_STEP");
-        if (string.IsNullOrWhiteSpace(cylinder))
-            cylinder = Path.Combine(Environment.CurrentDirectory, "windows", "AsterMax.MechanicalGui", "TestData", "CILINDRO-SIMPLE.stp");
-
-        if (File.Exists(cylinder) && GmshCliMesher.FindExecutable() is { } gmsh)
-        {
-            SmokeTrace("occ-import-begin");
-            using var smokeOperation = new OperationController();
-            var result = await StepImportService.ImportSurfaceAsync(gmsh, cylinder, smokeOperation, PreviewTimeout);
-            SmokeTrace($"occ-import-pass:nodes={result.Surface.Mesh.Nodes.Count}:tri={result.Surface.Mesh.SurfaceTriangles.Count}");
-            CommitGeneralCadImport(cylinder, result);
-            SmokeTrace("commit-general-cad-pass");
-            EnsureExclusiveGraphicsSurface();
-            SmokeTrace("exclusive-graphics-pass");
-            Application.DoEvents();
-            SmokeTrace("post-commit-doevents-pass");
-
-            if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
-                throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
-            if (_cadCanvas is null || !_cadCanvas.Visible)
-                throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
-            if (_cadCanvas.Parent == _viewport)
-                throw new InvalidOperationException("GUI smoke: CAD canvas is still nested inside MechanicalViewport.");
-
-            var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: analysis missing.");
-            SelectThroughRealTreeEvents(analysis, "cad-analysis");
-            SmokeTrace("add-support-begin");
-            AddSupport("Fixed Support");
-            Application.DoEvents();
-            SmokeTrace("add-support-doevents-pass");
-            var support = _outline.SelectedNode;
-            if (support?.Tag is not ModelObject { Kind: ObjectKind.Support })
-                throw new InvalidOperationException("GUI smoke: Fixed Support insertion did not select the support.");
-            SelectThroughRealTreeEvents(support, "cad-fixed-support");
-            SelectThroughRealTreeEvents(_nodes["Connections"], "cad-connections");
-
-            var solutionInformation = AllNodes().First(node => node.Tag is ModelObject { Kind: ObjectKind.SolutionInformation });
-            SelectThroughRealTreeEvents(solutionInformation, "cad-solution-information");
-
-            var geometry = _nodes["Geometry"];
-            SelectThroughRealTreeEvents(geometry, "cad-geometry");
-            var geometryRows = _details.Rows.Cast<DataGridViewRow>()
-                .ToDictionary(row => row.Cells[0].Value?.ToString() ?? string.Empty,
-                    row => row.Cells.Count > 1 ? row.Cells[1].Value?.ToString() ?? string.Empty : string.Empty,
-                    StringComparer.OrdinalIgnoreCase);
-            if (!geometryRows.TryGetValue("Source", out var source) || string.IsNullOrWhiteSpace(source) || source.Contains("No geometry", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("GUI smoke: Geometry Details did not show the imported STEP source.");
-            if (!geometryRows.TryGetValue("Bodies", out var bodies) || bodies == "0")
-                throw new InvalidOperationException("GUI smoke: Geometry Details reported zero bodies after STEP import.");
-            SmokeTrace("geometry-properties-pass");
-
-            var importedBody = geometry.Nodes.Cast<TreeNode>().First();
-            SelectThroughRealTreeEvents(importedBody, "cad-body-before-delete");
-            SmokeTrace("delete-begin");
-            DeleteSelected();
-            Application.DoEvents();
-            SmokeTrace("delete-doevents-pass");
-
-            if (!string.IsNullOrWhiteSpace(_geometryPath))
-                throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
-            if (_cadCanvas is { Visible: true })
-                throw new InvalidOperationException("GUI smoke: deleting imported Geometry left the CAD canvas visible.");
-            if (_nodes["Geometry"].Nodes.Count != 0)
-                throw new InvalidOperationException("GUI smoke: deleting imported Geometry left a body in the tree.");
-            if (!_viewport.Visible)
-                throw new InvalidOperationException("GUI smoke: legacy viewport was not restored after deleting CAD.");
-
-            Log("PASS GUI RealTreeEventsWithCad: Details followed Fixed Support, Connections, Solution Information and Geometry with STEP visible.");
-            Log("PASS GUI CadImportNavigateDelete: deleting the imported body released the CAD view and model state.");
-            SmokeTrace("cad-sequence-pass");
+            _uiSmokeRunning = false;
+            if (success && !IsDisposed)
+                Close();
         }
-
-        Log("PASS GUI DetailsFirstSelection: Details follows TreeView through real BeforeSelect/AfterSelect events without polling.");
-        SmokeTrace("complete");
     }
 }
