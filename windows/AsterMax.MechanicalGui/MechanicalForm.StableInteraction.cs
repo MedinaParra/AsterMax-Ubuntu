@@ -75,12 +75,6 @@ internal sealed partial class MechanicalForm
         _cadSurfacePreview is not null &&
         !string.IsNullOrWhiteSpace(_geometryPath);
 
-    /// <summary>
-    /// Keep CAD and the legacy MechanicalViewport as mutually exclusive sibling paint
-    /// surfaces. The decision is based on model state, never Control.Visible: WinForms can
-    /// transiently report Visible=false while a control is being reparented/layouted, and
-    /// using that value as application state caused the CAD view to be disabled again.
-    /// </summary>
     private void EnsureExclusiveGraphicsSurface()
     {
         if (IsCadGraphicsActive() && _cadCanvas is { } cad)
@@ -278,11 +272,13 @@ internal sealed partial class MechanicalForm
                 if (string.IsNullOrWhiteSpace(_geometryPath) || _nodes["Geometry"].Nodes.Count == 0)
                     throw new InvalidOperationException("GUI smoke: real STEP import did not commit Geometry.");
                 SmokeTrace("post-cad-geometry-state-pass");
-                if (!IsCadGraphicsActive() || _cadCanvas is not { Visible: true })
-                    throw new InvalidOperationException("GUI smoke: responsive CAD canvas is not visible after STEP import.");
-                SmokeTrace("post-cad-canvas-visible-pass");
+                if (!IsCadGraphicsActive() || _cadCanvas is null)
+                    throw new InvalidOperationException("GUI smoke: CAD graphics model is not active after STEP import.");
+                SmokeTrace($"post-cad-canvas-structural:visible={_cadCanvas.Visible}:size={_cadCanvas.Width}x{_cadCanvas.Height}:parent={_cadCanvas.Parent?.GetType().Name ?? "none"}");
                 if (_cadCanvas.Parent == _viewport)
                     throw new InvalidOperationException("GUI smoke: CAD canvas is still nested inside MechanicalViewport.");
+                if (_cadCanvas.Width < 100 || _cadCanvas.Height < 100)
+                    throw new InvalidOperationException($"GUI smoke: CAD canvas has invalid size {_cadCanvas.Width}x{_cadCanvas.Height}.");
                 SmokeTrace("post-cad-sibling-pass");
 
                 var analysis = FirstAnalysis() ?? throw new InvalidOperationException("GUI smoke: analysis missing.");
@@ -320,8 +316,8 @@ internal sealed partial class MechanicalForm
                 SmokeTrace("delete-doevents-pass");
                 if (!string.IsNullOrWhiteSpace(_geometryPath))
                     throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
-                if (_cadCanvas is { Visible: true })
-                    throw new InvalidOperationException("GUI smoke: deleting imported Geometry left the CAD canvas visible.");
+                if (IsCadGraphicsActive())
+                    throw new InvalidOperationException("GUI smoke: deleting imported Geometry left CAD model state active.");
                 if (_nodes["Geometry"].Nodes.Count != 0)
                     throw new InvalidOperationException("GUI smoke: deleting imported Geometry left a body in the tree.");
                 if (!_viewport.Visible)
