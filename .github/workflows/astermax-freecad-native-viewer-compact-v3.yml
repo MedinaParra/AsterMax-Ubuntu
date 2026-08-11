@@ -1,0 +1,242 @@
+name: AsterMax FreeCAD Native Viewer Compact POC v3
+
+on:
+  push:
+    branches:
+      - agent/astermax-freecad-native-viewer-poc
+    paths:
+      - ".github/workflows/astermax-freecad-native-viewer-compact-v3.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FREECAD_VERSION: "1.1.3"
+  FREECAD_ASSET: "FreeCAD_1.1.3-Windows-x86_64-py311.7z"
+  FREECAD_SHA256: "9c6959dc9c4dba64dd818a62447e3dfedb4221d776fb044b239d462f150bcec4"
+
+jobs:
+  compact-local-gpu-poc:
+    runs-on: windows-2022
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout POC branch
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build and publish AsterMax
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+          if (-not (Test-Path publish/win-x64/AsterMax-Mechanical.exe)) { throw "AsterMax publish failed." }
+          if (-not (Test-Path publish/win-x64/FreeCAD/astermax_freecad_viewer.py)) { throw "FreeCAD bridge script is missing." }
+
+      - name: Bundle compact Gmsh runtime
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip" -OutFile gmsh.zip -UseBasicParsing
+          Expand-Archive gmsh.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          if (-not $source) { throw "Invalid Gmsh archive." }
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Get-ChildItem $source.FullName -File | Copy-Item -Destination $target -Force
+          if (-not (Test-Path "$target/gmsh.exe")) { throw "Compact Gmsh runtime is missing gmsh.exe." }
+          $license = Get-ChildItem $source.FullName -File | Where-Object { $_.Name -match '(?i)license|copying|copyright' } | Select-Object -First 1
+          if ($license) { Copy-Item $license.FullName "$target/$($license.Name)" -Force }
+          & "$target/gmsh.exe" --version
+
+      - name: Stage real 7-Zip extractor with license
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "C:\Program Files\7-Zip\7z.exe",
+            "C:\Program Files (x86)\7-Zip\7z.exe"
+          )
+          $seven = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $seven) { throw "Real 7-Zip installation was not found on the runner." }
+          $sevenDir = Split-Path $seven -Parent
+          Write-Host "Using real 7-Zip: $seven"
+          Get-ChildItem $sevenDir | Select-Object Name, Length | Format-Table -AutoSize
+          New-Item -ItemType Directory -Force -Path publish/extractor | Out-Null
+          Copy-Item $seven publish/extractor/7z.exe -Force
+          foreach ($file in @("7z.dll", "License.txt", "readme.txt", "History.txt")) {
+            $candidate = Join-Path $sevenDir $file
+            if (Test-Path $candidate) { Copy-Item $candidate "publish/extractor/$file" -Force }
+          }
+          if (-not (Test-Path publish/extractor/7z.exe)) { throw "7z.exe was not staged." }
+          if (-not (Test-Path publish/extractor/7z.dll)) { throw "7z.dll was not staged." }
+          if (-not (Test-Path publish/extractor/License.txt)) { throw "7-Zip license was not staged." }
+          & publish/extractor/7z.exe i | Select-Object -First 20
+
+      - name: Download verify and extraction-test official FreeCAD archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path publish/runtime | Out-Null
+          $archive = (Resolve-Path publish/runtime).Path + "\$env:FREECAD_ASSET"
+          $url = "https://github.com/FreeCAD/FreeCAD/releases/download/$env:FREECAD_VERSION/$env:FREECAD_ASSET"
+          Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:FREECAD_SHA256) { throw "FreeCAD archive SHA mismatch: $hash" }
+          Write-Host "FreeCAD official archive verified: $hash"
+
+          New-Item -ItemType Directory -Force -Path freecad-extraction-test | Out-Null
+          & publish/extractor/7z.exe x $archive "-ofreecad-extraction-test" -y
+          if ($LASTEXITCODE -ne 0) { throw "Bundled 7-Zip could not extract the official FreeCAD archive." }
+          $freecad = Get-ChildItem freecad-extraction-test -Filter FreeCAD.exe -File -Recurse | Select-Object -First 1
+          $qwindows = Get-ChildItem freecad-extraction-test -Filter qwindows.dll -File -Recurse | Select-Object -First 1
+          $softgl = Get-ChildItem freecad-extraction-test -Filter opengl32sw.dll -File -Recurse | Select-Object -First 1
+          if (-not $freecad -or -not $qwindows -or -not $softgl) { throw "Extracted FreeCAD validation runtime is incomplete." }
+          Write-Host "FreeCAD.exe=$($freecad.FullName)"
+          Write-Host "qwindows.dll=$($qwindows.FullName)"
+          Write-Host "opengl32sw.dll=$($softgl.FullName)"
+          & $freecad.FullName --version
+
+      - name: Cylinder OCC and TET4 regression
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $step = (Resolve-Path windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp).Path
+          & $exe --step-import-smoke $step --expect-solids 1 --expect-faces 3 *>&1 | Tee-Object evidence/cylinder-step-smoke.log
+          if ($LASTEXITCODE -ne 0) { throw "Cylinder regression failed." }
+          @"
+          AsterMax FreeCAD Native Viewer compact POC v3
+          branch=$env:GITHUB_REF_NAME
+          commit=$env:GITHUB_SHA
+          freecad_version=$env:FREECAD_VERSION
+          freecad_archive_sha256=$env:FREECAD_SHA256
+          first_run_extractor=bundled_7zip_verified
+          graphical_certification=LOCAL_WINDOWS_PENDING
+          "@ | Set-Content evidence/compact-poc-summary.txt -Encoding utf8
+
+      - name: Build compact first-run package
+        shell: pwsh
+        run: |
+          $name = "AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64"
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item publish/win-x64/* package -Recurse -Force
+          New-Item -ItemType Directory -Force -Path package/tools/extractor | Out-Null
+          Copy-Item publish/extractor/* package/tools/extractor -Force
+          Copy-Item "publish/runtime/$env:FREECAD_ASSET" "package/tools/$env:FREECAD_ASSET" -Force
+          Copy-Item windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp package/CILINDRO-SIMPLE.stp -Force
+          Copy-Item evidence package/evidence -Recurse -Force
+
+          @'
+          @echo off
+          setlocal
+          set "ROOT=%~dp0"
+          set "FCROOT=%ROOT%tools\freecad"
+          set "FCEXE=%FCROOT%\FreeCAD_1.1.3-Windows-x86_64-py311\FreeCAD.exe"
+          set "SEVEN=%ROOT%tools\extractor\7z.exe"
+          if not exist "%FCEXE%" (
+            echo.
+            echo [AsterMax] Primera ejecucion: extrayendo FreeCAD 1.1.3 oficial...
+            echo [AsterMax] Espere. Se requieren aproximadamente 2.4 GB libres.
+            if not exist "%FCROOT%" mkdir "%FCROOT%"
+            "%SEVEN%" x "%ROOT%tools\FreeCAD_1.1.3-Windows-x86_64-py311.7z" "-o%FCROOT%" -y
+            if errorlevel 1 (
+              echo ERROR: no se pudo extraer FreeCAD.
+              pause
+              exit /b 1
+            )
+          )
+          if not exist "%FCEXE%" (
+            echo ERROR: FreeCAD.exe no fue encontrado despues de la extraccion.
+            pause
+            exit /b 1
+          )
+          set "ASTERMAX_FREECAD_EXE=%FCEXE%"
+          set ASTERMAX_FREECAD_FORCE_SOFTWARE_OPENGL=
+          set QT_OPENGL=
+          set QT_OPENGL_DLL=
+          start "" "%ROOT%AsterMax-Mechanical.exe"
+          endlocal
+          '@ | Set-Content package/RUN-AsterMax-HARDWARE.cmd -Encoding ascii
+
+          @'
+          @echo off
+          setlocal EnableDelayedExpansion
+          set "ROOT=%~dp0"
+          set "FCROOT=%ROOT%tools\freecad"
+          set "FCEXE=%FCROOT%\FreeCAD_1.1.3-Windows-x86_64-py311\FreeCAD.exe"
+          set "SEVEN=%ROOT%tools\extractor\7z.exe"
+          if not exist "%FCEXE%" (
+            echo.
+            echo [AsterMax] Primera ejecucion: extrayendo FreeCAD 1.1.3 oficial...
+            if not exist "%FCROOT%" mkdir "%FCROOT%"
+            "%SEVEN%" x "%ROOT%tools\FreeCAD_1.1.3-Windows-x86_64-py311.7z" "-o%FCROOT%" -y
+            if errorlevel 1 (
+              echo ERROR: no se pudo extraer FreeCAD.
+              pause
+              exit /b 1
+            )
+          )
+          set "ASTERMAX_FREECAD_EXE=%FCEXE%"
+          set "ASTERMAX_FREECAD_FORCE_SOFTWARE_OPENGL=1"
+          set "QT_OPENGL=software"
+          for /r "%FCROOT%" %%F in (opengl32sw.dll) do set "QT_OPENGL_DLL=%%F"
+          if not defined QT_OPENGL_DLL (
+            echo ERROR: opengl32sw.dll no fue encontrado.
+            pause
+            exit /b 1
+          )
+          start "" "%ROOT%AsterMax-Mechanical.exe"
+          endlocal
+          '@ | Set-Content package/RUN-AsterMax-SOFTWARE-GL.cmd -Encoding ascii
+
+          @'
+          ASTERMAX FREECAD NATIVE VIEWER — COMPACT LOCAL POC v3
+          ======================================================
+          Esta compilacion desactiva el pintor STEP WinForms personalizado. La geometria
+          se visualiza con FreeCAD 1.1.3 oficial (Qt/Coin3D/OpenCASCADE) en un proceso
+          aislado, incrustado en el workspace de AsterMax mediante HWND nativo.
+
+          PRUEBA
+          1. Descomprimir TODO el ZIP en una carpeta nueva.
+          2. Ejecutar RUN-AsterMax-HARDWARE.cmd.
+          3. En la primera ejecucion, el 7-Zip incluido extraera FreeCAD (~2.3 GB).
+          4. Importar CILINDRO-SIMPLE.stp.
+          5. Confirmar que el cilindro permanece visible al seleccionar Geometry,
+             Materials, Connections y Analysis Settings, y que Details responde.
+          6. Eliminar el cilindro y confirmar que vuelve el workspace vacio.
+          7. Si el modo hardware no crea el visor, cerrar todo y ejecutar
+             RUN-AsterMax-SOFTWARE-GL.cmd.
+
+          LIMITACION POC
+          El puente FreeCAD FaceN -> etiqueta persistente Gmsh/AsterMax aun no esta
+          certificado. No utilizar esta compilacion para validar el scoping final de
+          soportes o cargas por cara hasta completar esa fase.
+          '@ | Set-Content package/README-FREECAD-COMPACT-POC.txt -Encoding utf8
+
+          & "C:\Program Files\7-Zip\7z.exe" a -tzip -mx=5 "$name.zip" ".\package\*"
+          if ($LASTEXITCODE -ne 0) { throw "Compact ZIP packaging failed." }
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name.zip" | Set-Content "$name.zip.sha256" -Encoding ascii
+          $size = (Get-Item "$name.zip").Length
+          Write-Host "compact_zip_bytes=$size"
+          Write-Host "compact_zip_sha256=$hash"
+          if ($size -ge 530000000) { throw "Compact package is still too large for connector handoff: $size bytes." }
+
+      - name: Upload compact POC
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64
+          path: |
+            AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64.zip
+            AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64.zip.sha256
+            evidence/**
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
