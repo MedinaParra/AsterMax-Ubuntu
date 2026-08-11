@@ -191,11 +191,6 @@ internal sealed partial class MechanicalForm
                 ClearImportedGeometryVisualState(targetGeometry);
                 SmokeTrace("deferred-geometry-clear-pass");
 
-                // Important: do NOT re-enter the full selection/viewport pipeline here.
-                // We are already inside a BeginInvoke posted by a TreeView delete. Running
-                // CompleteSelectionContext again would reparent/paint the graphics host in
-                // the same message-loop turn. Refresh only Details/status; the next normal
-                // tree selection will update the rest of the secondary context.
                 var selected = _outline.SelectedNode ?? targetGeometry;
                 RenderDetailsSelection(selected, "geometry-cleared");
                 _outline.Invalidate();
@@ -210,10 +205,6 @@ internal sealed partial class MechanicalForm
 
     private void ClearImportedGeometryVisualState(TreeNode geometryNode)
     {
-        // A hidden Dock=Fill CAD canvas must not remain as a sibling of MechanicalViewport.
-        // Field/CI traces showed that leaving both custom paint surfaces parented to the
-        // same host could keep WM_PAINT/layout messages alive indefinitely after Delete.
-        // Remove and dispose the CAD canvas first; the next import creates a fresh canvas.
         if (_cadCanvas is { } cad)
         {
             try { cad.ClearModel(); } catch { }
@@ -370,8 +361,14 @@ internal sealed partial class MechanicalForm
                 SmokeTrace("delete-begin");
                 DeleteSelected();
                 SmokeTrace("delete-returned");
-                Application.DoEvents();
-                SmokeTrace("delete-doevents-pass");
+
+                // Yield normally to the WinForms synchronization context so the posted
+                // geometry cleanup runs exactly as it does after a real user Delete event.
+                // Do not call Application.DoEvents here: nested pumping was itself capable
+                // of waiting indefinitely even after cleanup had completed successfully.
+                await Task.Delay(120);
+                SmokeTrace("delete-message-loop-pass");
+
                 if (!string.IsNullOrWhiteSpace(_geometryPath))
                     throw new InvalidOperationException("GUI smoke: deleting imported Geometry left _geometryPath active.");
                 if (IsCadGraphicsActive())
