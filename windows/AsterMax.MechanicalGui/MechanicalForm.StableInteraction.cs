@@ -5,6 +5,7 @@ internal sealed partial class MechanicalForm
     private bool _stableSelectionInstalled;
     private bool _stableSelectionBusy;
     private bool _uiSmokeRunning;
+    private bool _geometryClearScheduled;
 
     internal void InstallStableSelectionController()
     {
@@ -145,6 +146,12 @@ internal sealed partial class MechanicalForm
         FormClosed += (_, _) => CloseOperationOverlay();
     }
 
+    /// <summary>
+    /// TreeView removes a selected node synchronously and can raise selection notifications
+    /// while its native delete operation is still active. Never tear down/reparent the CAD
+    /// canvas from inside that notification. Queue one cleanup after the native TreeView
+    /// operation returns to the normal message loop.
+    /// </summary>
     private void ReconcileGeometryVisualState()
     {
         if (!_nodes.TryGetValue("Model", out var modelNode)) return;
@@ -154,13 +161,44 @@ internal sealed partial class MechanicalForm
             geometryNode = MakeNode("Geometry", ObjectKind.Geometry, ObjectState.NeedsAttention, "Geometry");
             modelNode.Nodes.Insert(0, geometryNode);
         }
+
         foreach (var key in _nodes
                      .Where(pair => pair.Value.TreeView != _outline && !ReferenceEquals(pair.Value, geometryNode))
                      .Select(pair => pair.Key)
                      .ToArray())
             _nodes.Remove(key);
-        if (geometryNode.Nodes.Count == 0 && !string.IsNullOrWhiteSpace(_geometryPath))
+
+        if (geometryNode.Nodes.Count != 0 || string.IsNullOrWhiteSpace(_geometryPath) || _geometryClearScheduled)
+            return;
+
+        if (!IsHandleCreated || IsDisposed)
+        {
             ClearImportedGeometryVisualState(geometryNode);
+            return;
+        }
+
+        _geometryClearScheduled = true;
+        var targetGeometry = geometryNode;
+        BeginInvoke(new Action(() =>
+        {
+            try
+            {
+                if (IsDisposed) return;
+                if (targetGeometry.TreeView != _outline) return;
+                if (targetGeometry.Nodes.Count != 0 || string.IsNullOrWhiteSpace(_geometryPath)) return;
+
+                SmokeTrace("deferred-geometry-clear-begin");
+                ClearImportedGeometryVisualState(targetGeometry);
+                SmokeTrace("deferred-geometry-clear-pass");
+
+                var selected = _outline.SelectedNode ?? targetGeometry;
+                ActivateStableTreeNode(selected, "geometry-cleared");
+            }
+            finally
+            {
+                _geometryClearScheduled = false;
+            }
+        }));
     }
 
     private void ClearImportedGeometryVisualState(TreeNode geometryNode)
@@ -312,6 +350,7 @@ internal sealed partial class MechanicalForm
                 SelectThroughRealTreeEvents(importedBody, "cad-body-before-delete");
                 SmokeTrace("delete-begin");
                 DeleteSelected();
+                SmokeTrace("delete-returned");
                 Application.DoEvents();
                 SmokeTrace("delete-doevents-pass");
                 if (!string.IsNullOrWhiteSpace(_geometryPath))
