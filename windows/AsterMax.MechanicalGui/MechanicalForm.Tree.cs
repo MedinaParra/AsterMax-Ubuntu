@@ -47,9 +47,7 @@ internal sealed partial class MechanicalForm
     private void WireEvents()
     {
         _outline.DrawNode += DrawTreeNode;
-        // Selection rendering is owned exclusively by InstallSimpleSelectionController().
-        // Keeping a second AfterSelect -> OnObjectSelected path was the source of competing
-        // Details state and made selection order dependent on WinForms event timing.
+        // Selection rendering is owned exclusively by InstallStableSelectionController().
         _outline.NodeMouseClick += (_, e) =>
         {
             if (e.Button != MouseButtons.Right) return;
@@ -336,12 +334,11 @@ internal sealed partial class MechanicalForm
         _outline.SelectedNode = node;
         node.EnsureVisible();
 
-        // WinForms does not emit BeforeSelect/AfterSelect when SelectedNode is assigned to
-        // the node that is already selected. STEP import commonly does exactly that:
-        // Geometry is selected before import, then its contents/path change. Force a single
-        // synchronous render so Details cannot remain on "No geometry imported / Bodies 0".
+        // AfterSelect is not emitted when the same selected node is assigned again. STEP
+        // import commonly updates Geometry while Geometry is already selected, so force the
+        // one stable synchronous render in that exact case.
         if (!changed)
-            ActivateTreeNode(node, "same-node-refresh");
+            ActivateStableTreeNode(node, "same-node-refresh");
     }
 
     private static void SetState(TreeNode? node, ObjectState state)
