@@ -1,0 +1,135 @@
+name: AsterMax Windows 2 Beta - P0.3 STEP Regression
+
+on:
+  push:
+    branches:
+      - agent/astermax-windows-2-beta-tutorial-certification-step-fix
+    paths:
+      - ".github/workflows/astermax-windows-2-beta-p0-3-regression.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+      - "docs/tutorial-certification/P0_3_OCC_REFERENCE.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  p0-3-step-regression:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore and build Release
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Publish portable win-x64
+        shell: pwsh
+        run: |
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+
+      - name: Bundle Gmsh OpenCASCADE
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip" -OutFile gmsh.zip
+          Expand-Archive gmsh.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          $target = "publish/win-x64/tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+          if (-not (Test-Path "$target/gmsh.exe")) { throw "Bundled gmsh.exe missing." }
+          if (-not (Test-Path "$target/LICENSE.txt")) { throw "Bundled Gmsh license missing." }
+
+      - name: Generate P0.3 topology fixtures
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path fixtures | Out-Null
+          Copy-Item windows/AsterMax.MechanicalGui/TestData/CILINDRO-SIMPLE.stp fixtures/CILINDRO-SIMPLE.stp
+          @'
+          SetFactory("OpenCASCADE");
+          Box(1) = {0, 0, 0, 80, 40, 20};
+          Box(2) = {120, 0, 0, 50, 50, 30};
+          Save "multi-solid.step";
+          '@ | Set-Content fixtures/multi.geo -Encoding ascii
+          @'
+          SetFactory("OpenCASCADE");
+          Rectangle(1) = {0, 0, 0, 100, 60};
+          Save "surface-2d.step";
+          '@ | Set-Content fixtures/surface.geo -Encoding ascii
+          $gmsh = (Resolve-Path publish/win-x64/tools/gmsh/gmsh.exe).Path
+          $work = (Resolve-Path fixtures).Path
+          & $gmsh "$work/multi.geo" -0 -nopopup -v 2
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$work/multi-solid.step")) { throw "multi-solid STEP generation failed." }
+          & $gmsh "$work/surface.geo" -0 -nopopup -v 2
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$work/surface-2d.step")) { throw "surface STEP generation failed." }
+          Remove-Item fixtures/*.geo -Force
+
+      - name: Run P0.3 batch classifier
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          $exe = (Resolve-Path publish/win-x64/AsterMax-Mechanical.exe).Path
+          $fixtures = (Resolve-Path fixtures).Path
+          $out = Join-Path (Resolve-Path evidence).Path "p0-3-synthetic.json"
+          & $exe --step-regression-batch $fixtures --out $out
+          if ($LASTEXITCODE -ne 0) { throw "P0.3 batch classifier failed with code $LASTEXITCODE." }
+          $report = Get-Content $out -Raw | ConvertFrom-Json
+          if ($report.fileCount -ne 3) { throw "Expected exactly 3 P0.3 fixtures." }
+          $single = @($report.records | Where-Object classification -eq "single_solid").Count
+          $multi = @($report.records | Where-Object classification -eq "multi_solid_or_assembly").Count
+          $surface = @($report.records | Where-Object classification -eq "surface_or_2d").Count
+          if ($single -ne 1 -or $multi -ne 1 -or $surface -ne 1) {
+            throw "Unexpected classifier summary: single=$single multi=$multi surface=$surface"
+          }
+          $cylinder = $report.records | Where-Object file -eq "CILINDRO-SIMPLE.stp"
+          if ($cylinder.SolidCount -ne 1 -or $cylinder.FaceCount -ne 3 -or $cylinder.Tet4 -le 0) {
+            throw "Cylinder classification/volume mesh regression failed."
+          }
+          $surfaceCase = $report.records | Where-Object file -eq "surface-2d.step"
+          if ($surfaceCase.Tet4 -ne $null) { throw "Surface-only fixture must not be sent through TET4 volume meshing." }
+          Copy-Item docs/tutorial-certification/P0_3_OCC_REFERENCE.json evidence/P0_3_OCC_REFERENCE.json
+          Write-Host "P0.3 classifier PASS | single=$single multi=$multi surface=$surface"
+
+      - name: Package P0.3 regression executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact/evidence | Out-Null
+          Copy-Item publish/win-x64/AsterMax-Mechanical.exe artifact/AsterMax-Mechanical-0.8.1-beta.exe
+          Copy-Item publish/win-x64/tools artifact/tools -Recurse -Force
+          Copy-Item evidence/* artifact/evidence -Recurse -Force
+          Copy-Item fixtures artifact/fixtures -Recurse -Force
+          @'
+          @echo off
+          setlocal
+          set "ROOT=%~dp0"
+          "%ROOT%AsterMax-Mechanical-0.8.1-beta.exe" --step-regression-batch "%ROOT%fixtures" --out "%ROOT%evidence\p0-3-rerun.json"
+          echo Exit code: %ERRORLEVEL%
+          pause
+          '@ | Set-Content artifact/RUN-P0-3-REGRESSION.cmd -Encoding ascii
+          Compress-Archive -Path artifact/* -DestinationPath AsterMax-Windows-2.0-beta-P0.3-regression-win-x64.zip -Force
+          $hash = (Get-FileHash AsterMax-Windows-2.0-beta-P0.3-regression-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Windows-2.0-beta-P0.3-regression-win-x64.zip" | Set-Content AsterMax-Windows-2.0-beta-P0.3-regression-win-x64.zip.sha256 -Encoding ascii
+
+      - name: Upload P0.3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Windows-2.0-beta-P0.3-regression-win-x64
+          path: |
+            AsterMax-Windows-2.0-beta-P0.3-regression-win-x64.zip
+            AsterMax-Windows-2.0-beta-P0.3-regression-win-x64.zip.sha256
+            evidence/**
+          if-no-files-found: error
+          retention-days: 30
