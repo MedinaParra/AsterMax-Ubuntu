@@ -24,13 +24,11 @@
     <Compile Remove="ProjectWorkflowDomain.cs" />
     <Compile Remove="ProjectWorkflowModel.cs" />
     <Compile Remove="WorkflowProjectState.cs" />
-    <!-- Obsolete experimental UI layers. They used global timers/reflection and competed
-         with the production TreeView/Details and CAD visualization. -->
     <Compile Remove="MechanicalForm.UiStateRepair.cs" />
     <Compile Remove="CadViewerQualityAndNavigation.cs" />
     <Compile Remove="MechanicalInterfaceRoadmapIteration.cs" />
     <EmbeddedResource Include="Icons\AsterMaxIconSet.svg" />
-    <Content Include="FreeCAD\astermax_freecad_viewer.py">
+    <Content Include="FreeCAD\**\*.py">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
