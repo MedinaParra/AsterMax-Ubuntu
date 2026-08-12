@@ -1,0 +1,190 @@
+name: AsterMax FreeCAD Drive Split POC v3
+
+on:
+  push:
+    branches:
+      - agent/astermax-freecad-native-viewer-poc
+    paths:
+      - ".github/workflows/astermax-freecad-drive-split-v3.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  split-drive-safe:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: "31539676937"
+      SOURCE_ARTIFACT: "AsterMax-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64"
+      ZIP_NAME: "AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64.zip"
+      ZIP_SHA256: "90f00bdaca90cc7220759fe222ff8fda602acb244c4eb1744da39a953bd5314d"
+
+    steps:
+      - name: Download exact previously-built POC artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path source | Out-Null
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name $env:SOURCE_ARTIFACT --dir source
+          $zip = Join-Path (Resolve-Path source).Path $env:ZIP_NAME
+          if (-not (Test-Path $zip)) { throw "Expected inner ZIP was not downloaded: $zip" }
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:ZIP_SHA256) { throw "Source ZIP SHA mismatch: $hash" }
+          Write-Host "Verified exact source ZIP: $hash"
+
+      - name: Split into Drive-safe 75 MiB volumes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path parts | Out-Null
+          $zip = Join-Path (Resolve-Path source).Path $env:ZIP_NAME
+          $chunkSize = 75MB
+          $input = [System.IO.File]::OpenRead($zip)
+          try {
+            $index = 1
+            $buffer = New-Object byte[] (1MB)
+            while ($input.Position -lt $input.Length) {
+              $partName = "$($env:ZIP_NAME).part{0:D2}" -f $index
+              $partPath = Join-Path (Resolve-Path parts).Path $partName
+              $output = [System.IO.File]::Create($partPath)
+              try {
+                $remaining = [Math]::Min([int64]$chunkSize, $input.Length - $input.Position)
+                while ($remaining -gt 0) {
+                  $toRead = [Math]::Min([int64]$buffer.Length, $remaining)
+                  $read = $input.Read($buffer, 0, [int]$toRead)
+                  if ($read -le 0) { break }
+                  $output.Write($buffer, 0, $read)
+                  $remaining -= $read
+                }
+              } finally {
+                $output.Dispose()
+              }
+              $index++
+            }
+          } finally {
+            $input.Dispose()
+          }
+
+          $parts = Get-ChildItem parts -File | Sort-Object Name
+          if ($parts.Count -ne 7) { throw "Expected 7 split volumes, found $($parts.Count)." }
+          foreach ($part in $parts) {
+            if ($part.Length -ge 100MB) { throw "Part exceeds Drive connector limit: $($part.Name) $($part.Length)" }
+            Write-Host "$($part.Name) bytes=$($part.Length) sha256=$((Get-FileHash $part.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+          }
+
+      - name: Create reconstruction helper
+        shell: pwsh
+        run: |
+          @"
+          AsterMax FreeCAD Native Viewer COMPACT POC v3
+          =============================================
+
+          Estos archivos fueron divididos en 7 volumenes para poder subirlos a Google Drive.
+
+          PASOS:
+          1. Descarga los 7 archivos .part01 ... .part07.
+          2. Ponlos todos en la MISMA carpeta junto a RECONSTRUIR-AsterMax.ps1 y RECONSTRUIR-AsterMax.cmd.
+          3. Haz doble clic en RECONSTRUIR-AsterMax.cmd.
+          4. Se reconstruira: $env:ZIP_NAME
+          5. El script verificara SHA-256 automaticamente.
+
+          SHA-256 esperado:
+          $env:ZIP_SHA256
+          "@ | Set-Content parts/README-RECONSTRUIR.txt -Encoding utf8
+
+          @'
+          param()
+          $ErrorActionPreference = "Stop"
+          $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+          $zipName = "AsterMax-Windows-2.0-beta-FreeCAD-Native-Viewer-COMPACT-POC-v3-win-x64.zip"
+          $expected = "90f00bdaca90cc7220759fe222ff8fda602acb244c4eb1744da39a953bd5314d"
+          $parts = Get-ChildItem $root -Filter "$zipName.part*" -File | Sort-Object Name
+          if ($parts.Count -ne 7) { throw "Se esperaban 7 partes y se encontraron $($parts.Count)." }
+          $outPath = Join-Path $root $zipName
+          if (Test-Path $outPath) { Remove-Item $outPath -Force }
+          $out = [System.IO.File]::Create($outPath)
+          try {
+            foreach ($part in $parts) {
+              Write-Host "Uniendo $($part.Name)..."
+              $src = [System.IO.File]::OpenRead($part.FullName)
+              try { $src.CopyTo($out) } finally { $src.Dispose() }
+            }
+          } finally { $out.Dispose() }
+          $actual = (Get-FileHash $outPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            Remove-Item $outPath -Force -ErrorAction SilentlyContinue
+            throw "SHA-256 incorrecto: $actual"
+          }
+          Write-Host "OK. ZIP reconstruido y verificado: $outPath"
+          Write-Host "SHA-256: $actual"
+          Read-Host "Presiona Enter para cerrar"
+          '@ | Set-Content parts/RECONSTRUIR-AsterMax.ps1 -Encoding utf8
+
+          @'
+          @echo off
+          powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0RECONSTRUIR-AsterMax.ps1"
+          if errorlevel 1 pause
+          '@ | Set-Content parts/RECONSTRUIR-AsterMax.cmd -Encoding ascii
+
+      - name: Upload Drive part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-01
+          path: |
+            parts/*.part01
+            parts/README-RECONSTRUIR.txt
+            parts/RECONSTRUIR-AsterMax.ps1
+            parts/RECONSTRUIR-AsterMax.cmd
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Drive part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-02
+          path: parts/*.part02
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Drive part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-03
+          path: parts/*.part03
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Drive part 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-04
+          path: parts/*.part04
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Drive part 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-05
+          path: parts/*.part05
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Drive part 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-06
+          path: parts/*.part06
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload Drive part 07
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Drive-Part-07
+          path: parts/*.part07
+          compression-level: 0
+          retention-days: 7
