@@ -2,12 +2,10 @@ namespace AsterMax.MechanicalGui;
 
 /// <summary>
 /// Compatibility adapter retained so the existing AsterMax FEM/scoping model does not
-/// need to change in the first FreeCAD viewer iteration.
+/// need to change while the native CAD engine is integrated.
 ///
-/// IMPORTANT: when the official FreeCAD runtime is available this control does not paint
-/// CAD at all. It delegates visualization to FreeCadNativeViewerHost, whose renderer lives
-/// in the isolated FreeCAD Qt/Coin3D process. That removes the custom WinForms paint loop
-/// that caused the physical Windows white-screen/Details regressions.
+/// The control itself never paints STEP geometry when FreeCAD is available. Visualization
+/// is delegated to FreeCadNativeViewerHostV4, bootstrapped through FreeCAD Mod/InitGui.
 /// </summary>
 internal sealed class ResponsiveCadMeshCanvas : Control
 {
@@ -17,8 +15,6 @@ internal sealed class ResponsiveCadMeshCanvas : Control
     private bool _volumeMesh;
     private bool _nativeMode;
 
-    // Keep these fields for compatibility with the existing view-preset code, which still
-    // reflects them during the POC. FreeCAD itself owns interactive orbit/pan/zoom.
     private float _zoom = 1f;
     private float _yaw = -.55f;
     private float _pitch = .45f;
@@ -41,10 +37,9 @@ internal sealed class ResponsiveCadMeshCanvas : Control
         _yaw = -.55f;
         _pitch = .45f;
 
-        if (FindForm() is MechanicalForm form && FreeCadNativeViewerHost.FindExecutable() is not null)
+        if (FindForm() is MechanicalForm form && FreeCadNativeViewerHostV4.FindExecutable() is not null)
         {
             _nativeMode = true;
-            // Never let this compatibility surface cover the native Qt child window.
             base.SetVisibleCore(false);
             Region = new Region(Rectangle.Empty);
 
@@ -56,13 +51,13 @@ internal sealed class ResponsiveCadMeshCanvas : Control
 
             if (required)
             {
-                var ready = native.ShowStepBlocking(envelope.SourcePath, TimeSpan.FromSeconds(50));
+                var ready = native.ShowStepBlocking(envelope.SourcePath, TimeSpan.FromSeconds(60));
                 if (!native.IsReady)
                     throw new InvalidOperationException("FreeCAD viewer reached ready state but its HWND is not embedded in AsterMax.");
                 if (!native.ScreenshotLooksRendered(out var diagnostic))
                     throw new InvalidOperationException("FreeCAD native screenshot gate failed: " + diagnostic);
                 AppendEvidence(
-                    $"native-gate-pass freecad={ready.FreeCadVersion} objects={ready.Objects} shapes={ready.ShapeObjects} {diagnostic}");
+                    $"native-v4-gate-pass freecad={ready.FreeCadVersion} objects={ready.Objects} shapes={ready.ShapeObjects} {diagnostic}");
             }
             else
             {
@@ -144,21 +139,18 @@ internal sealed class ResponsiveCadMeshCanvas : Control
 
     public void SetScopeMarkers(IEnumerable<int> supportTags, IEnumerable<int> loadTags)
     {
-        // Phase 1 intentionally leaves AsterMax/Gmsh scope metadata untouched. Mapping a
-        // FreeCAD FaceN selection back to persistent Gmsh/OCC face tags is a separate gate.
-        // Keeping this method makes current supports/loads data structures compatible.
+        // FaceN -> persistent AsterMax/Gmsh tag mapping is intentionally a separate gate.
     }
 
     public void SelectSurface(int? tag)
     {
-        // Native FreeCAD selection synchronization is implemented in the next POC gate.
-        // Do not manufacture a face selection here: that would create false FEM scoping.
+        // Do not invent FreeCAD/AsterMax face correspondence until that mapping is certified.
     }
 
     protected override void SetVisibleCore(bool value)
     {
-        // Existing AsterMax code still calls cad.Visible=true. In native mode that must not
-        // resurrect a blank WinForms control above the embedded FreeCAD HWND.
+        // Existing AsterMax code still calls cad.Visible=true. Native mode must never
+        // resurrect an empty compatibility control above the embedded Qt window.
         base.SetVisibleCore(_nativeMode ? false : value);
     }
 
@@ -174,8 +166,8 @@ internal sealed class ResponsiveCadMeshCanvas : Control
         using var bodyBrush = new SolidBrush(MechanicalForm.TextMuted);
         e.Graphics.DrawString("FreeCAD native viewer runtime is not available", title, titleBrush, 28, 32);
         e.Graphics.DrawString(
-            "Use the complete AsterMax FreeCAD-viewer package or configure ASTERMAX_FREECAD_EXE.\n" +
-            "The old custom CAD painter is intentionally disabled in this POC.",
+            "Use the complete AsterMax FreeCAD-viewer package or configure ASTERMAX_FREECAD_ROOT.\n" +
+            "The old custom CAD painter remains disabled.",
             body,
             bodyBrush,
             28,
@@ -192,23 +184,23 @@ internal sealed class ResponsiveCadMeshCanvas : Control
         }
     }
 
-    private static async Task LaunchNativeViewerAsync(FreeCadNativeViewerHost native, string stepPath)
+    private static async Task LaunchNativeViewerAsync(FreeCadNativeViewerHostV4 native, string stepPath)
     {
         try
         {
-            var ready = await native.ShowStepAsync(stepPath, TimeSpan.FromSeconds(50));
+            var ready = await native.ShowStepAsync(stepPath, TimeSpan.FromSeconds(60));
             if (!native.IsReady)
                 throw new InvalidOperationException("FreeCAD HWND did not remain embedded after launch.");
             AppendEvidence(
-                $"native-ready freecad={ready.FreeCadVersion} objects={ready.Objects} shapes={ready.ShapeObjects}");
+                $"native-v4-ready freecad={ready.FreeCadVersion} objects={ready.Objects} shapes={ready.ShapeObjects}");
         }
         catch (OperationCanceledException)
         {
-            AppendEvidence("native-viewer-cancelled");
+            AppendEvidence("native-v4-viewer-cancelled");
         }
         catch (Exception exception)
         {
-            AppendEvidence("native-viewer-failed " + exception);
+            AppendEvidence("native-v4-viewer-failed " + exception);
         }
     }
 
