@@ -88,72 +88,82 @@ internal sealed class FreeCadNativeViewerHostV4 : Panel
     }
 
     /// <summary>
-    /// Resolve a real FreeCAD engine executable. If an explicit path points to a package
-    /// launcher, scan the same runtime and prefer Library/bin or bin, matching the Windows
-    /// layout already used by SolidFreeCAD.
+    /// Resolve a real FreeCAD GUI entry point using the runtime layout instead of a generic
+    /// filename score. The official FreeCAD 1.1.x portable package starts from root\FreeCAD.exe,
+    /// while SolidFreeCAD's pixi build uses Library\bin\FreeCAD.exe. Internal bin helpers must
+    /// never outrank an explicitly configured or known package entry point.
     /// </summary>
     public static string? FindExecutable()
     {
-        var roots = new List<string>();
         var explicitExe = Environment.GetEnvironmentVariable("ASTERMAX_FREECAD_EXE")
                           ?? Environment.GetEnvironmentVariable("FREECAD_EXE");
         if (!string.IsNullOrWhiteSpace(explicitExe) && File.Exists(explicitExe))
-        {
-            var explicitFull = Path.GetFullPath(explicitExe);
-            roots.Add(ResolveRuntimeRoot(Path.GetDirectoryName(explicitFull)!));
-        }
+            return Path.GetFullPath(explicitExe);
 
         var explicitRoot = Environment.GetEnvironmentVariable("ASTERMAX_FREECAD_ROOT");
         if (!string.IsNullOrWhiteSpace(explicitRoot) && Directory.Exists(explicitRoot))
-            roots.Add(Path.GetFullPath(explicitRoot));
+        {
+            var resolved = FindKnownEntryPoint(Path.GetFullPath(explicitRoot));
+            if (resolved is not null) return resolved;
+        }
 
         var bundledRoot = Path.Combine(AppContext.BaseDirectory, "tools", "freecad");
-        if (Directory.Exists(bundledRoot)) roots.Add(bundledRoot);
+        if (Directory.Exists(bundledRoot))
+        {
+            var resolved = FindKnownEntryPoint(bundledRoot);
+            if (resolved is not null) return resolved;
+        }
 
         foreach (var programRoot in new[]
                  {
                      Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "FreeCAD 1.1"),
                      Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "FreeCAD")
                  })
-            if (Directory.Exists(programRoot)) roots.Add(programRoot);
-
-        var candidates = new List<string>();
-        if (!string.IsNullOrWhiteSpace(explicitExe) && File.Exists(explicitExe))
-            candidates.Add(Path.GetFullPath(explicitExe));
-
-        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            try
-            {
-                candidates.AddRange(Directory.EnumerateFiles(root, "FreeCAD.exe", SearchOption.AllDirectories));
-            }
-            catch (UnauthorizedAccessException) { }
-            catch (DirectoryNotFoundException) { }
+            if (!Directory.Exists(programRoot)) continue;
+            var resolved = FindKnownEntryPoint(programRoot);
+            if (resolved is not null) return resolved;
         }
 
-        return candidates
-            .Where(File.Exists)
-            .Where(path => !path.Contains("uninstall", StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(ScoreExecutable)
-            .ThenBy(path => path.Length)
-            .FirstOrDefault();
+        return null;
     }
 
-    private static int ScoreExecutable(string path)
+    private static string? FindKnownEntryPoint(string root)
     {
-        var normalized = path.Replace('/', '\\');
-        var score = 0;
-        if (normalized.Contains("\\Library\\bin\\", StringComparison.OrdinalIgnoreCase)) score += 500;
-        else if (normalized.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase)) score += 400;
-        if (normalized.Contains("\\tools\\freecad\\", StringComparison.OrdinalIgnoreCase)) score += 80;
-        if (string.Equals(Path.GetFileName(path), "FreeCAD.exe", StringComparison.OrdinalIgnoreCase)) score += 20;
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(root, "FreeCAD.exe"),
+                     Path.Combine(root, "Library", "bin", "FreeCAD.exe"),
+                     Path.Combine(root, "bin", "FreeCAD.exe")
+                 })
+            if (File.Exists(candidate)) return Path.GetFullPath(candidate);
 
-        // A root-level executable in the official portable package may be a launcher. It is
-        // retained as fallback but deliberately ranked below the engine binaries.
-        var root = ResolveRuntimeRoot(Path.GetDirectoryName(path)!);
-        if (string.Equals(Path.GetDirectoryName(path), root, StringComparison.OrdinalIgnoreCase)) score -= 100;
-        return score;
+        try
+        {
+            // When root is a container such as tools\freecad, choose the shallowest package
+            // entry point. In the official archive this selects
+            // FreeCAD_1.1.x-Windows-x86_64-py311\FreeCAD.exe before any nested bin helper.
+            return Directory.EnumerateFiles(root, "FreeCAD.exe", SearchOption.AllDirectories)
+                .Where(File.Exists)
+                .Where(path => !path.Contains("uninstall", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(path => RelativeDepth(root, path))
+                .ThenBy(path => path.Contains("\\Library\\bin\\", StringComparison.OrdinalIgnoreCase) ? 1 :
+                                path.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase) ? 2 : 0)
+                .ThenBy(path => path.Length)
+                .FirstOrDefault();
+        }
+        catch (UnauthorizedAccessException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
+    private static int RelativeDepth(string root, string path)
+    {
+        try
+        {
+            var relative = Path.GetRelativePath(root, path);
+            return relative.Count(ch => ch == Path.DirectorySeparatorChar || ch == Path.AltDirectorySeparatorChar);
+        }
+        catch { return int.MaxValue; }
     }
 
     public async Task<ViewerReady> ShowStepAsync(
