@@ -3,7 +3,7 @@ namespace AsterMax.MechanicalGui;
 internal sealed partial class MechanicalForm
 {
     private Panel? _graphicsViewportHost;
-    private FreeCadNativeViewerHost? _freeCadNativeViewer;
+    private FreeCadNativeViewerHostV4? _freeCadNativeViewer;
 
     /// <summary>
     /// Owns every graphics surface for the full form lifetime. The original viewport,
@@ -17,9 +17,6 @@ internal sealed partial class MechanicalForm
         if (outer is null)
             throw new InvalidOperationException("Graphics viewport has no layout parent.");
 
-        // Preserve the exact original z-order occupied by MechanicalViewport. Re-adding a
-        // Dock=Fill control at a different z-order was the source of the previous white
-        // workspace regression on physical Windows even though structural CI still passed.
         var originalIndex = outer.Controls.GetChildIndex(_viewport);
         var host = new Panel
         {
@@ -32,7 +29,9 @@ internal sealed partial class MechanicalForm
             Visible = true
         };
 
-        var freeCad = new FreeCadNativeViewerHost();
+        // V4 is bootstrapped by FreeCAD's normal Mod/InitGui lifecycle, matching the
+        // runtime strategy already proven in SolidFreeCAD. It is not a Workbench.
+        var freeCad = new FreeCadNativeViewerHostV4();
 
         outer.SuspendLayout();
         try
@@ -45,9 +44,6 @@ internal sealed partial class MechanicalForm
             freeCad.Visible = false;
             _viewport.BringToFront();
 
-            // The legacy compatibility adapter can still be promoted here by the existing
-            // interaction controller, but when FreeCAD is available it deliberately has an
-            // empty region and never paints over the native Qt/Coin3D child window.
             host.ControlAdded += (_, eventArgs) =>
             {
                 if (eventArgs.Control is not ResponsiveCadMeshCanvas cad) return;
@@ -78,7 +74,7 @@ internal sealed partial class MechanicalForm
                ?? throw new InvalidOperationException("Dedicated graphics host was not initialized.");
     }
 
-    internal FreeCadNativeViewerHost RequireFreeCadNativeViewer()
+    internal FreeCadNativeViewerHostV4 RequireFreeCadNativeViewer()
     {
         InitializeDedicatedGraphicsHost();
         return _freeCadNativeViewer
