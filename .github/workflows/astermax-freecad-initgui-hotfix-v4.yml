@@ -1,0 +1,135 @@
+name: AsterMax FreeCAD InitGui Hotfix v4
+
+on:
+  push:
+    branches:
+      - agent/astermax-freecad-native-viewer-poc
+    paths:
+      - ".github/workflows/astermax-freecad-initgui-hotfix-v4.yml"
+      - "windows/AsterMax.MechanicalGui/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hotfix:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build and publish
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+          dotnet publish windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish
+          if (-not (Test-Path publish/AsterMax-Mechanical.exe)) { throw "AsterMax exe missing." }
+          if (-not (Test-Path publish/FreeCAD/AsterMaxBridge/InitGui.py)) { throw "InitGui bridge missing." }
+          if (-not (Test-Path publish/FreeCAD/AsterMaxBridge/astermax_bridge.py)) { throw "Bridge service missing." }
+
+      - name: Core regression smoke
+        shell: pwsh
+        run: |
+          & publish/AsterMax-Mechanical.exe --solver-smoke
+          if ($LASTEXITCODE -ne 0) { throw "Core solver smoke failed." }
+
+      - name: Package overwrite hotfix
+        shell: pwsh
+        run: |
+          $name = "AsterMax-FreeCAD-InitGui-HOTFIX-v4"
+          New-Item -ItemType Directory -Force -Path patch/FreeCAD | Out-Null
+          Copy-Item publish/AsterMax-Mechanical.exe patch/AsterMax-Mechanical.exe -Force
+          Copy-Item publish/FreeCAD/* patch/FreeCAD -Recurse -Force
+
+          @'
+          @echo off
+          setlocal
+          set "ROOT=%~dp0"
+          set "FCROOT=%ROOT%tools\freecad\FreeCAD_1.1.3-Windows-x86_64-py311"
+          if not exist "%FCROOT%" (
+            echo ERROR: No encuentro FreeCAD extraido en:
+            echo %FCROOT%
+            echo Ejecuta primero el paquete COMPACT POC v3 para extraer FreeCAD.
+            pause
+            exit /b 1
+          )
+          set "ASTERMAX_FREECAD_ROOT=%FCROOT%"
+          set ASTERMAX_FREECAD_EXE=
+          set FREECAD_EXE=
+          set ASTERMAX_FREECAD_FORCE_SOFTWARE_OPENGL=
+          set QT_OPENGL=
+          set QT_OPENGL_DLL=
+          start "" "%ROOT%AsterMax-Mechanical.exe"
+          endlocal
+          '@ | Set-Content patch/RUN-AsterMax-HARDWARE.cmd -Encoding ascii
+
+          @'
+          @echo off
+          setlocal EnableDelayedExpansion
+          set "ROOT=%~dp0"
+          set "FCROOT=%ROOT%tools\freecad\FreeCAD_1.1.3-Windows-x86_64-py311"
+          if not exist "%FCROOT%" (
+            echo ERROR: No encuentro FreeCAD extraido en %FCROOT%
+            pause
+            exit /b 1
+          )
+          set "ASTERMAX_FREECAD_ROOT=%FCROOT%"
+          set ASTERMAX_FREECAD_EXE=
+          set FREECAD_EXE=
+          set "ASTERMAX_FREECAD_FORCE_SOFTWARE_OPENGL=1"
+          set "QT_OPENGL=software"
+          for /r "%FCROOT%" %%F in (opengl32sw.dll) do set "QT_OPENGL_DLL=%%F"
+          start "" "%ROOT%AsterMax-Mechanical.exe"
+          endlocal
+          '@ | Set-Content patch/RUN-AsterMax-SOFTWARE-GL.cmd -Encoding ascii
+
+          @'
+          ASTERMAX FREECAD INITGUI HOTFIX v4
+          =================================
+          Este parche NO incluye FreeCAD nuevamente. Debe copiarse sobre la carpeta del
+          COMPACT POC v3 que ya ejecutaste y en la que tools\freecad ya fue extraido.
+
+          CAMBIO CLAVE
+          - Ya no se ejecuta FreeCAD.exe pasando un script .py por linea de comandos.
+          - AsterMax instala un modulo oculto Mod/AsterMaxBridge/InitGui.py.
+          - FreeCAD arranca por su ciclo GUI normal y el bridge se carga desde InitGui.
+          - No se registra ningun Workbench AsterMax dentro de FreeCAD.
+          - Se prioriza Library\bin\FreeCAD.exe / bin\FreeCAD.exe sobre launchers de raiz.
+          - Si vuelve a fallar, el panel muestra la fase exacta del bootstrap y el ejecutable usado.
+
+          INSTALACION
+          1. Cierra AsterMax y cualquier FreeCAD abierto.
+          2. Extrae este ZIP DIRECTAMENTE SOBRE la carpeta del POC v3.
+          3. Acepta reemplazar AsterMax-Mechanical.exe y los .cmd.
+          4. Ejecuta RUN-AsterMax-HARDWARE.cmd.
+          5. Importa CILINDRO-SIMPLE.stp.
+          '@ | Set-Content patch/README-HOTFIX-v4.txt -Encoding utf8
+
+          Compress-Archive -Path patch/* -DestinationPath "$name.zip" -Force -CompressionLevel Optimal
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $name.zip" | Set-Content "$name.zip.sha256" -Encoding ascii
+          $size = (Get-Item "$name.zip").Length
+          Write-Host "hotfix_bytes=$size"
+          Write-Host "hotfix_sha256=$hash"
+
+      - name: Upload hotfix
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-FreeCAD-InitGui-HOTFIX-v4
+          path: |
+            AsterMax-FreeCAD-InitGui-HOTFIX-v4.zip
+            AsterMax-FreeCAD-InitGui-HOTFIX-v4.zip.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
