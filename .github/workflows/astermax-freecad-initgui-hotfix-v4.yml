@@ -41,8 +41,8 @@ jobs:
       - name: Core regression smoke
         shell: pwsh
         run: |
-          & publish/AsterMax-Mechanical.exe --solver-smoke
-          if ($LASTEXITCODE -ne 0) { throw "Core solver smoke failed." }
+          dotnet run --project windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj `
+            -c Release --no-build -- --solver-smoke
 
       - name: Package overwrite hotfix
         shell: pwsh
