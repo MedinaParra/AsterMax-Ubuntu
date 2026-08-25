@@ -9,6 +9,7 @@ static class DomainSmoke
             RunContactOffsetSmoke();
             RunJointSmoke();
             RunRemoteBoundaryConditionSmoke();
+            RunConstraintEquationSmoke();
             return 0;
         }
         catch (Exception exception)
@@ -300,6 +301,163 @@ static class DomainSmoke
             throw new InvalidOperationException($"WS06.3 expected 9 deterministic rejection fixtures, observed {expectedFailures}.");
 
         Console.WriteLine("PASS WS06.3 Remote Boundary Conditions domain smoke | valid-frames=2 | valid-component-sets=3 | valid-couplings=3 | deterministic-rejections=9");
+    }
+
+    private static void RunConstraintEquationSmoke()
+    {
+        var expectedFailures = 0;
+        var node1X = new ConstraintEquationTerm(
+            new ConstraintTermTarget(ConstraintTargetKind.MeshNode, 1, null),
+            ConstraintDegreeOfFreedom.TranslationX,
+            1.0);
+        var node2X = new ConstraintEquationTerm(
+            new ConstraintTermTarget(ConstraintTargetKind.MeshNode, 2, null),
+            ConstraintDegreeOfFreedom.TranslationX,
+            -1.0);
+
+        var tie = new ConstraintEquationDefinition
+        {
+            Id = Guid.NewGuid(),
+            Name = "Ux tie",
+            Terms = new[] { node1X, node2X },
+            RightHandSide = 0.0
+        };
+        tie.Validate();
+
+        var remoteA = Guid.NewGuid();
+        var remoteB = Guid.NewGuid();
+        var remoteRotationTie = new ConstraintEquationDefinition
+        {
+            Id = Guid.NewGuid(),
+            Name = "Remote Rz tie",
+            Terms = new[]
+            {
+                new ConstraintEquationTerm(
+                    new ConstraintTermTarget(ConstraintTargetKind.RemotePoint, null, remoteA),
+                    ConstraintDegreeOfFreedom.RotationZ,
+                    1.0),
+                new ConstraintEquationTerm(
+                    new ConstraintTermTarget(ConstraintTargetKind.RemotePoint, null, remoteB),
+                    ConstraintDegreeOfFreedom.RotationZ,
+                    -1.0)
+            },
+            RightHandSide = 0.0
+        };
+        remoteRotationTie.Validate();
+
+        var mixed = new ConstraintEquationDefinition
+        {
+            Id = Guid.NewGuid(),
+            Name = "Lever-arm compatibility",
+            Terms = new[]
+            {
+                new ConstraintEquationTerm(
+                    new ConstraintTermTarget(ConstraintTargetKind.MeshNode, 3, null),
+                    ConstraintDegreeOfFreedom.TranslationY,
+                    1.0),
+                new ConstraintEquationTerm(
+                    new ConstraintTermTarget(ConstraintTargetKind.RemotePoint, null, remoteA),
+                    ConstraintDegreeOfFreedom.RotationZ,
+                    -1.0)
+            },
+            RightHandSide = 0.0,
+            MixedDofLengthScale = 250.0
+        };
+        var scaled = mixed.BuildDimensionallyScaledTerms();
+        if (Math.Abs(scaled[1].Coefficient + 250.0) > 1e-12)
+            throw new InvalidOperationException("Mixed constraint equation did not apply the dimensional length scale to rotational terms.");
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationDefinition
+            {
+                Id = Guid.NewGuid(),
+                Name = "single-term",
+                Terms = new[] { node1X },
+                RightHandSide = 0.0
+            }.Validate(),
+            "constraint equation accepted a single term",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationTerm(
+                new ConstraintTermTarget(ConstraintTargetKind.MeshNode, 1, null),
+                ConstraintDegreeOfFreedom.TranslationX,
+                0.0).Validate("zero-coefficient"),
+            "constraint equation accepted a zero coefficient",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationDefinition
+            {
+                Id = Guid.NewGuid(),
+                Name = "duplicate-term",
+                Terms = new[] { node1X, node1X with { Coefficient = -1.0 } },
+                RightHandSide = 0.0
+            }.Validate(),
+            "constraint equation accepted duplicate target/DOF terms",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationTerm(
+                new ConstraintTermTarget(ConstraintTargetKind.MeshNode, 1, null),
+                ConstraintDegreeOfFreedom.RotationX,
+                1.0).Validate("solid-node-rotation"),
+            "constraint equation accepted rotational DOF on a solid mesh node",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationDefinition
+            {
+                Id = Guid.NewGuid(),
+                Name = "mixed-without-scale",
+                Terms = new[]
+                {
+                    node1X,
+                    new ConstraintEquationTerm(
+                        new ConstraintTermTarget(ConstraintTargetKind.RemotePoint, null, remoteA),
+                        ConstraintDegreeOfFreedom.RotationZ,
+                        -1.0)
+                },
+                RightHandSide = 0.0
+            }.Validate(),
+            "mixed constraint equation accepted missing dimensional scale",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationDefinition
+            {
+                Id = Guid.NewGuid(),
+                Name = "scale-on-translation-only",
+                Terms = new[] { node1X, node2X },
+                RightHandSide = 0.0,
+                MixedDofLengthScale = 100.0
+            }.Validate(),
+            "translation-only constraint equation accepted a mixed-DOF scale",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationTerm(
+                new ConstraintTermTarget(ConstraintTargetKind.MeshNode, 0, null),
+                ConstraintDegreeOfFreedom.TranslationX,
+                1.0).Validate("invalid-node-id"),
+            "constraint equation accepted an invalid mesh-node ID",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new ConstraintEquationDefinition
+            {
+                Id = Guid.NewGuid(),
+                Name = "non-finite-rhs",
+                Terms = new[] { node1X, node2X },
+                RightHandSide = double.PositiveInfinity
+            }.Validate(),
+            "constraint equation accepted a non-finite right-hand side",
+            ref expectedFailures);
+
+        if (expectedFailures != 8)
+            throw new InvalidOperationException($"WS06.4 expected 8 deterministic rejection fixtures, observed {expectedFailures}.");
+
+        Console.WriteLine("PASS WS06.4 Constraint Equations domain smoke | valid-equations=3 | mixed-dimensional-scaling=1 | deterministic-rejections=8");
     }
 
     private static void ExpectInvalidOperation(Action action, string message, ref int counter)
