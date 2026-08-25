@@ -69,6 +69,54 @@ try
     if (remoteLoad.MomentConservationError > 1e-10)
         throw new InvalidOperationException($"Remote Force moment conservation failed: {remoteLoad.MomentConservationError:E3}.");
 
+    var localCondition = new RemoteBoundaryConditionDefinition
+    {
+        Id = Guid.NewGuid(),
+        Name = "Local-frame Remote Force transform",
+        ScopeSelectionId = selection.Id,
+        Type = RemoteBoundaryConditionType.Force,
+        RemotePoint = remotePoint,
+        CoordinateFrame = new RemoteCoordinateFrame(
+            false,
+            new RemoteVector3(0, 1, 0),
+            new RemoteVector3(0, 0, 1)),
+        Coupling = new RemoteCouplingDefinition(
+            RemoteCouplingBehavior.Deformable,
+            RemoteWeightingMethod.Uniform,
+            null),
+        Components = new RemoteComponents(1000.0, 175.0, -125.0, null, null, null)
+    };
+    var localLoad = RemoteForceRuntime.Build(mesh, selections, geometrySignature, localCondition);
+    var expectedLocalToGlobal = new Vec3(-125.0, 1000.0, 175.0);
+    var localTransformError = (localLoad.RequestedForceN - expectedLocalToGlobal).Length /
+                              Math.Max(expectedLocalToGlobal.Length, 1.0);
+    if (localTransformError > 1e-12)
+        throw new InvalidOperationException($"Remote Force local coordinate transform failed: {localTransformError:E3}.");
+
+    var rigidCondition = new RemoteBoundaryConditionDefinition
+    {
+        Id = Guid.NewGuid(),
+        Name = "Rigid Remote Force must reject",
+        ScopeSelectionId = selection.Id,
+        Type = RemoteBoundaryConditionType.Force,
+        RemotePoint = remotePoint,
+        CoordinateFrame = RemoteCoordinateFrame.Global,
+        Coupling = new RemoteCouplingDefinition(
+            RemoteCouplingBehavior.Rigid,
+            RemoteWeightingMethod.Uniform,
+            null),
+        Components = new RemoteComponents(1000.0, 0.0, 0.0, null, null, null)
+    };
+    try
+    {
+        _ = RemoteForceRuntime.Build(mesh, selections, geometrySignature, rigidCondition);
+        throw new InvalidOperationException("Remote Force runtime silently accepted rigid coupling before remote-point MPC support exists.");
+    }
+    catch (InvalidOperationException exception) when (exception.Message.Contains("rigid", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("PASS Remote Force unsupported-rigid rejection");
+    }
+
     using var solveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
     var solution = GeneralCadTet4Solver.Solve(
         mesh,
@@ -97,8 +145,9 @@ try
         $"PASS Remote Force runtime | nodes={mesh.Nodes.Count}, TET4={mesh.Tetrahedra.Count}, faces={topology.Faces.Count}, " +
         $"surface-loads={remoteLoad.SurfaceForces.Count}, requested=({requested.X:G8},{requested.Y:G8},{requested.Z:G8}) N, " +
         $"force-error={remoteLoad.ForceConservationError:E3}, moment-error={remoteLoad.MomentConservationError:E3}, " +
-        $"Umax={solution.MaxDisplacementMm:G8} mm, VM={solution.MaxVonMisesMpa:G8} MPa, " +
-        $"residual={solution.RelativeResidual:E3}, equilibrium={solution.EquilibriumError:E3}");
+        $"local-transform-error={localTransformError:E3}, Umax={solution.MaxDisplacementMm:G8} mm, " +
+        $"VM={solution.MaxVonMisesMpa:G8} MPa, residual={solution.RelativeResidual:E3}, " +
+        $"equilibrium={solution.EquilibriumError:E3}");
     return 0;
 }
 catch (OperationCanceledException)
