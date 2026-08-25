@@ -1,0 +1,96 @@
+name: AsterMax Runtime Remote Moment TET4 Validation
+
+on:
+  push:
+    branches:
+      - agent/runtime-remote-moment-tet4
+    paths:
+      - "windows/AsterMax.MechanicalGui/**"
+      - "windows/AsterMax.MechanicalGui.RemoteMomentSmoke/**"
+      - "windows/AsterMax.MechanicalGui.RemoteForceSmoke/**"
+      - "windows/AsterMax.MechanicalGui.DomainSmoke/**"
+      - "docs/validation/**"
+      - ".github/workflows/runtime-remote-moment-tet4-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate-remote-moment:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore and build application Release
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+          dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Existing solver regression
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path windows/AsterMax.MechanicalGui/bin/Release/net8.0-windows/win-x64/AsterMax-Mechanical.exe
+          $process = Start-Process -FilePath $exe -ArgumentList "--solver-smoke" -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Existing solver regression failed with code $($process.ExitCode)." }
+
+      - name: WS06 and MPC regression
+        shell: pwsh
+        run: |
+          dotnet restore windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj
+          dotnet run --project windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj -c Release --no-restore
+
+      - name: Restore Remote Force regression smoke
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui.RemoteForceSmoke/AsterMax.MechanicalGui.RemoteForceSmoke.csproj
+
+      - name: Restore Remote Moment runtime smoke
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui.RemoteMomentSmoke/AsterMax.MechanicalGui.RemoteMomentSmoke.csproj
+
+      - name: Acquire Gmsh and generate STEP benchmark
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://gmsh.info/bin/Windows/gmsh-4.15.2-Windows64.zip" -OutFile gmsh.zip
+          Expand-Archive gmsh.zip -DestinationPath gmsh-extract -Force
+          $source = Get-ChildItem gmsh-extract -Directory | Select-Object -First 1
+          $target = "tools/gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item "$($source.FullName)/*" $target -Recurse -Force
+
+          New-Item -ItemType Directory -Force -Path smoke-cad | Out-Null
+          @'
+          SetFactory("OpenCASCADE");
+          Box(1) = {0, 0, 0, 80, 50, 20};
+          Cylinder(2) = {20, 25, -5, 0, 0, 30, 6};
+          Cylinder(3) = {60, 25, -5, 0, 0, 30, 6};
+          BooleanDifference(10) = { Volume{1}; Delete; }{ Volume{2,3}; Delete; };
+          Save "complex-flange.step";
+          '@ | Set-Content smoke-cad/complex.geo -Encoding ascii
+          $gmsh = (Resolve-Path "$target/gmsh.exe").Path
+          $working = (Resolve-Path smoke-cad).Path
+          $process = Start-Process -FilePath $gmsh -ArgumentList @("complex.geo", "-0", "-nopopup", "-v", "3") -WorkingDirectory $working -PassThru -Wait
+          if ($process.ExitCode -ne 0 -or -not (Test-Path "$working/complex-flange.step")) { throw "STEP benchmark generation failed." }
+
+      - name: Remote Force regression on shared transfer kernel
+        shell: pwsh
+        run: |
+          $gmsh = Resolve-Path tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          dotnet run --project windows/AsterMax.MechanicalGui.RemoteForceSmoke/AsterMax.MechanicalGui.RemoteForceSmoke.csproj `
+            -c Release --no-restore -- $gmsh.Path $step.Path
+
+      - name: Real pure Remote Moment TET4 benchmark
+        shell: pwsh
+        run: |
+          $gmsh = Resolve-Path tools/gmsh/gmsh.exe
+          $step = Resolve-Path smoke-cad/complex-flange.step
+          dotnet run --project windows/AsterMax.MechanicalGui.RemoteMomentSmoke/AsterMax.MechanicalGui.RemoteMomentSmoke.csproj `
+            -c Release --no-restore -- $gmsh.Path $step.Path
