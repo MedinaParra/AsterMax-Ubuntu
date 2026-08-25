@@ -1,0 +1,47 @@
+name: AsterMax Runtime MPC Schur Validation
+
+on:
+  push:
+    branches:
+      - agent/runtime-mpc-schur-kernel
+    paths:
+      - "windows/AsterMax.MechanicalGui/**"
+      - "windows/AsterMax.MechanicalGui.DomainSmoke/**"
+      - "docs/validation/**"
+      - ".github/workflows/runtime-mpc-schur-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-regression-and-mpc:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore application
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+
+      - name: Build application Release
+        shell: pwsh
+        run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Core solver regression smoke
+        shell: pwsh
+        run: dotnet run --project windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-build -- --solver-smoke
+
+      - name: Restore numerical/domain smoke harness
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj
+
+      - name: MPC analytical and WS06 regression smoke
+        shell: pwsh
+        run: dotnet run --project windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj -c Release --no-restore
