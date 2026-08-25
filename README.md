@@ -77,6 +77,16 @@ The application also includes:
 - multistep load histories;
 - Mechanical-style failure-theory Stress Tool.
 
+## Engineering manifesto
+
+AsterMax's long-term direction is defined in the [AsterMax Engineering Manifesto](docs/MANIFESTO.md).
+
+Its central engineering contract is:
+
+> **AI proposes → the model is explicit → the engineer decides → the solver executes → benchmarks verify → AI interprets.**
+
+The manifesto defines the future natural-language engineering agent, the manually editable analysis tree, standards traceability, time-aware modelling fidelity, explicit capability boundaries and the long-term path toward multiphysics while preserving deterministic numerical validation.
+
 ## Install
 
 ```bash
