@@ -6,6 +6,7 @@ on:
       - agent/ws06-1-contact-offset-control
     paths:
       - "windows/AsterMax.MechanicalGui/**"
+      - "windows/AsterMax.MechanicalGui.DomainSmoke/**"
       - "docs/validation/**"
       - "docs/roadmap/**"
       - ".github/workflows/ws06-contact-domain-validation.yml"
@@ -26,14 +27,22 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore
+      - name: Restore application
         shell: pwsh
         run: dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
 
-      - name: Build Release
+      - name: Build application Release
         shell: pwsh
         run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
 
       - name: Core solver regression smoke
         shell: pwsh
         run: dotnet run --project windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-build -- --solver-smoke
+
+      - name: Restore contact domain smoke harness
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj
+
+      - name: WS06.1 contact offset domain smoke
+        shell: pwsh
+        run: dotnet run --project windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj -c Release --no-restore
