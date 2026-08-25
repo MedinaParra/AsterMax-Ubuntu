@@ -21,15 +21,15 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 11 | WS05.2 Mesh Control | Accepted | Validation required | Source-complete |
 | 12 | WS06.1 Contact Offset Control | Accepted | Domain regression passed; nonlinear benchmark required | Source-complete |
 | 13 | WS06.2 Joints | Accepted | Domain regression passed; MPC/kinematic benchmark required | Source-complete |
-| 14 | WS06.3 Remote Boundary Conditions | Accepted | Validation required | Source-complete |
-| 15 | WS06.4 Constraint Equations | Pending | Required | Pending |
+| 14 | WS06.3 Remote Boundary Conditions | Accepted | Domain regression passed; MPC/equilibrium benchmark required | Source-complete |
+| 15 | WS06.4 Constraint Equations | Accepted | Validation required | Source-complete |
 | 16 | WS07.1 Modal Analysis | Pending | Required | Pending |
 | 17 | WS07.2 Steady-State Thermal | Pending | Required | Pending |
 | 18 | WS07.3 Multistep Analysis | Pending | Required | Pending |
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 70%.**
+**Current source/design progress: 75%.**
 
 ## Certified source evidence
 
@@ -87,10 +87,14 @@ Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solut
 
 ### Increment 14 — WS06.3 Remote Boundary Conditions
 
-`RemoteBoundaryConditionDomain.cs` defines remote displacement, force and moment conditions with global/local coordinate frames, rigid/deformable coupling, weighting semantics, remote points, component compatibility and named-selection scoping. Evidence: `docs/validation/ws06-3-remote-boundary-conditions-contract.md`.
+`RemoteBoundaryConditionDomain.cs` defines remote displacement, force and moment conditions with global/local coordinate frames, rigid/deformable coupling, weighting semantics, remote points, component compatibility and named-selection scoping. Windows Release build, core solver regression and remote BC domain fixtures passed before integration. Evidence: `docs/validation/ws06-3-remote-boundary-conditions-contract.md`.
+
+### Increment 15 — WS06.4 Constraint Equations
+
+`ConstraintEquationDomain.cs` defines linear multi-point equations over mesh-node and remote-point DOFs with finite non-zero coefficients, duplicate-term rejection, finite RHS and explicit dimensional scaling for translation/rotation coupling. Evidence: `docs/validation/ws06-4-constraint-equations-contract.md`.
 
 ## Compile gate
 
 The 50% gate passed on Windows x64: restore, Release build, tutorial capability smoke tests, self-contained single-file publish, bundled Gmsh verification and artifact upload completed successfully. Every subsequent increment must preserve this gate.
 
-WS06.1 and WS06.2 preserved the Windows Release build and core solver smoke and passed their dedicated/shared domain regressions. WS06.3 must pass the same Windows regression gate plus its remote-boundary-condition domain fixtures before integration. Source-complete status does not imply that nonlinear contact, joint or remote coupling equations are solver-complete; physical/solver benchmarks remain mandatory.
+WS06.1 through WS06.3 preserved the Windows Release build and core solver smoke and passed shared domain regressions before integration. WS06.4 must preserve the same gate and pass its algebraic constraint fixtures before integration. Source-complete status does not imply that contact, joints, remote coupling or constraint equations are fully assembled/enforced by the solver; physical and solver-level MPC benchmarks remain mandatory.
