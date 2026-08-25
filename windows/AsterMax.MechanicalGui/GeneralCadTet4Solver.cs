@@ -300,7 +300,7 @@ internal static class GeneralCadTet4Solver
                 var globalDof = nodeIndex * 3 + component;
                 var freeDof = globalToFree[globalDof];
                 if (freeDof < 0)
-                    continue; // fixed support value is exactly zero, so its term contributes nothing to RHS.
+                    continue;
                 coefficients[freeDof] = coefficients.GetValueOrDefault(freeDof) + term.Coefficient;
             }
 
@@ -310,7 +310,7 @@ internal static class GeneralCadTet4Solver
             if (coefficients.Count == 0)
             {
                 if (Math.Abs(equation.RightHandSide) <= 1e-12)
-                    continue; // equation is already satisfied entirely by zero-valued fixed DOFs.
+                    continue;
                 throw new InvalidOperationException(
                     $"Constraint equation '{equation.Name}' conflicts with the fixed supports: all active terms are fixed at zero but RHS={equation.RightHandSide:G17}.");
             }
@@ -585,7 +585,7 @@ internal static class GeneralCadTet4Solver
         for (var row = 0; row < result.GetLength(0); row++)
         for (var inner = 0; inner < left.GetLength(1); inner++)
         for (var column = 0; column < result.GetLength(1); column++)
-            result[row, column] += left[inner, row] * right[inner, column];
+            result[row, column] += left[row, inner] * right[inner, column];
         return result;
     }
 
