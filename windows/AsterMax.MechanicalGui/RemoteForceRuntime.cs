@@ -169,6 +169,15 @@ internal static class RemoteForceRuntime
         Vec3 requestedForce,
         string name)
     {
+        var characteristicLength = centroids
+            .Select(point => (point - remotePoint).Length)
+            .Where(length => length > 1e-12)
+            .DefaultIfEmpty(0.0)
+            .Max();
+        if (!double.IsFinite(characteristicLength) || characteristicLength <= 1e-12)
+            throw new InvalidOperationException($"Remote Force '{name}' has no finite geometric lever arm relative to its remote point.");
+        var inverseLength = 1.0 / characteristicLength;
+
         var unknownCount = centroids.Count * 3;
         var a = new double[6, unknownCount];
         for (var item = 0; item < centroids.Count; item++)
@@ -179,13 +188,14 @@ internal static class RemoteForceRuntime
             a[1, column + 1] = 1.0;
             a[2, column + 2] = 1.0;
 
-            // r x f = [ry*fz-rz*fy, rz*fx-rx*fz, rx*fy-ry*fx]
-            a[3, column + 1] = -r.Z;
-            a[3, column + 2] = r.Y;
-            a[4, column] = r.Z;
-            a[4, column + 2] = -r.X;
-            a[5, column] = -r.Y;
-            a[5, column + 1] = r.X;
+            // Moment rows are divided by a characteristic length so all six equilibrium
+            // equations have force units and the rank test is not geometry-scale dependent.
+            a[3, column + 1] = -r.Z * inverseLength;
+            a[3, column + 2] = r.Y * inverseLength;
+            a[4, column] = r.Z * inverseLength;
+            a[4, column + 2] = -r.X * inverseLength;
+            a[5, column] = -r.Y * inverseLength;
+            a[5, column + 1] = r.X * inverseLength;
         }
 
         // Weighted minimum-norm equivalent load: f = W A^T (A W A^T)^-1 b.
