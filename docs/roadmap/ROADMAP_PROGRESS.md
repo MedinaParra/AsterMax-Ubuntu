@@ -19,8 +19,8 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 09 | WS04.2 Design Points | Accepted | Passed at 50% gate | Complete |
 | 10 | WS05.1 Mesh Creation | Accepted | Passed at 50% gate | Complete |
 | 11 | WS05.2 Mesh Control | Accepted | Validation required | Source-complete |
-| 12 | WS06.1 Contact Offset Control | Accepted | Validation required | Source-complete |
-| 13 | WS06.2 Joints | Pending | Required | Pending |
+| 12 | WS06.1 Contact Offset Control | Accepted | Domain regression passed; nonlinear benchmark required | Source-complete |
+| 13 | WS06.2 Joints | Accepted | Validation required | Source-complete |
 | 14 | WS06.3 Remote Boundary Conditions | Pending | Required | Pending |
 | 15 | WS06.4 Constraint Equations | Pending | Required | Pending |
 | 16 | WS07.1 Modal Analysis | Pending | Required | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 60%.**
+**Current source/design progress: 65%.**
 
 ## Certified source evidence
 
@@ -79,10 +79,14 @@ Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solut
 
 ### Increment 12 — WS06.1 Contact Offset Control
 
-`ContactDomain.cs` now defines explicit initial-gap treatment for preserve, signed user offset and adjust-to-touch behavior, with deterministic compatibility checks against pinball search radius and penetration tolerance. Evidence: `docs/validation/ws06-1-contact-offset-control-contract.md`.
+`ContactDomain.cs` defines explicit initial-gap treatment for preserve, signed user offset and adjust-to-touch behavior, with deterministic compatibility checks against pinball search radius and penetration tolerance. Windows Release build, the existing core solver regression and dedicated contact-offset domain fixtures passed before integration. Evidence: `docs/validation/ws06-1-contact-offset-control-contract.md`.
+
+### Increment 13 — WS06.2 Joints
+
+`JointDomain.cs` defines Fixed, Revolute, Cylindrical, Translational, Universal, Spherical and Planar joint families with deterministic local-frame mobility, elastic stiffness, travel/angle limits, stop stiffness and named-selection scoping. Evidence: `docs/validation/ws06-2-joints-contract.md`.
 
 ## Compile gate
 
 The 50% gate passed on Windows x64: restore, Release build, tutorial capability smoke tests, self-contained single-file publish, bundled Gmsh verification and artifact upload completed successfully. Every subsequent increment must preserve this gate.
 
-The WS06.1 branch must pass the dedicated Windows Release build and core solver regression smoke before the increment may be promoted from source-complete to runtime-validated.
+WS06.1 preserved the Windows Release build and core solver smoke and passed its dedicated domain regression. WS06.2 must pass the same Windows regression gate plus its seven-family joint domain smoke before integration. Source-complete status does not imply that nonlinear contact or joint constraint formulations are solver-complete; physical/solver benchmarks remain mandatory.
