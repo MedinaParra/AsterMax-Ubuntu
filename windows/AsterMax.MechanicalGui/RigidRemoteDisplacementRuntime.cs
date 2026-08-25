@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace AsterMax.MechanicalGui;
 
 internal sealed record RigidRemoteDisplacementConstraintSet(
@@ -88,16 +91,19 @@ internal static class RigidRemoteDisplacementRuntime
         {
             var lever = mesh.Nodes[nodeIndex] - remotePoint;
             var target = translation + Cross(rotation, lever);
-            AddEquation(equations, condition.Name, nodeIndex + 1, anchorIndex + 1,
+            AddEquation(equations, condition.Id, condition.Name, nodeIndex + 1, anchorIndex + 1,
                 ConstraintDegreeOfFreedom.TranslationX, target.X);
-            AddEquation(equations, condition.Name, nodeIndex + 1, anchorIndex + 1,
+            AddEquation(equations, condition.Id, condition.Name, nodeIndex + 1, anchorIndex + 1,
                 ConstraintDegreeOfFreedom.TranslationY, target.Y);
-            AddEquation(equations, condition.Name, nodeIndex + 1, anchorIndex + 1,
+            AddEquation(equations, condition.Id, condition.Name, nodeIndex + 1, anchorIndex + 1,
                 ConstraintDegreeOfFreedom.TranslationZ, target.Z);
         }
 
         foreach (var equation in equations)
             equation.Validate();
+
+        if (equations.Select(equation => equation.Id).Distinct().Count() != equations.Count)
+            throw new InvalidOperationException($"Remote Displacement '{condition.Name}' produced duplicate deterministic MPC identifiers.");
 
         return new RigidRemoteDisplacementConstraintSet(
             condition.Name,
@@ -134,6 +140,7 @@ internal static class RigidRemoteDisplacementRuntime
 
     private static void AddEquation(
         ICollection<ConstraintEquationDefinition> equations,
+        Guid remoteId,
         string remoteName,
         int nodeId,
         int anchorNodeId,
@@ -142,7 +149,7 @@ internal static class RigidRemoteDisplacementRuntime
     {
         var equation = new ConstraintEquationDefinition
         {
-            Id = Guid.NewGuid(),
+            Id = StableEquationId(remoteId, nodeId, dof),
             Name = $"{remoteName} / node {nodeId} / {dof}",
             Terms = new[]
             {
@@ -158,6 +165,13 @@ internal static class RigidRemoteDisplacementRuntime
             RightHandSide = targetMm
         };
         equations.Add(equation);
+    }
+
+    private static Guid StableEquationId(Guid remoteId, int nodeId, ConstraintDegreeOfFreedom dof)
+    {
+        var key = Encoding.UTF8.GetBytes($"rigid-remote-displacement|{remoteId:D}|node:{nodeId}|dof:{dof}");
+        var hash = SHA256.HashData(key);
+        return new Guid(hash.Take(16).ToArray());
     }
 
     private static Vec3 Cross(Vec3 a, Vec3 b) => new(
