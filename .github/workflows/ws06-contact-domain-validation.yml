@@ -1,0 +1,39 @@
+name: AsterMax WS06 Contact Domain Validation
+
+on:
+  push:
+    branches:
+      - agent/ws06-1-contact-offset-control
+    paths:
+      - "windows/AsterMax.MechanicalGui/**"
+      - "docs/validation/**"
+      - "docs/roadmap/**"
+      - ".github/workflows/ws06-contact-domain-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj
+
+      - name: Build Release
+        shell: pwsh
+        run: dotnet build windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-restore
+
+      - name: Core solver regression smoke
+        shell: pwsh
+        run: dotnet run --project windows/AsterMax.MechanicalGui/AsterMax.MechanicalGui.csproj -c Release --no-build -- --solver-smoke
