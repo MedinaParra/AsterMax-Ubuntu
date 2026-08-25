@@ -20,8 +20,8 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 10 | WS05.1 Mesh Creation | Accepted | Passed at 50% gate | Complete |
 | 11 | WS05.2 Mesh Control | Accepted | Validation required | Source-complete |
 | 12 | WS06.1 Contact Offset Control | Accepted | Domain regression passed; nonlinear benchmark required | Source-complete |
-| 13 | WS06.2 Joints | Accepted | Validation required | Source-complete |
-| 14 | WS06.3 Remote Boundary Conditions | Pending | Required | Pending |
+| 13 | WS06.2 Joints | Accepted | Domain regression passed; MPC/kinematic benchmark required | Source-complete |
+| 14 | WS06.3 Remote Boundary Conditions | Accepted | Validation required | Source-complete |
 | 15 | WS06.4 Constraint Equations | Pending | Required | Pending |
 | 16 | WS07.1 Modal Analysis | Pending | Required | Pending |
 | 17 | WS07.2 Steady-State Thermal | Pending | Required | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 65%.**
+**Current source/design progress: 70%.**
 
 ## Certified source evidence
 
@@ -83,10 +83,14 @@ Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solut
 
 ### Increment 13 — WS06.2 Joints
 
-`JointDomain.cs` defines Fixed, Revolute, Cylindrical, Translational, Universal, Spherical and Planar joint families with deterministic local-frame mobility, elastic stiffness, travel/angle limits, stop stiffness and named-selection scoping. Evidence: `docs/validation/ws06-2-joints-contract.md`.
+`JointDomain.cs` defines Fixed, Revolute, Cylindrical, Translational, Universal, Spherical and Planar joint families with deterministic local-frame mobility, elastic stiffness, travel/angle limits, stop stiffness and named-selection scoping. Windows Release build, core solver regression and seven-family joint domain fixtures passed before integration. Evidence: `docs/validation/ws06-2-joints-contract.md`.
+
+### Increment 14 — WS06.3 Remote Boundary Conditions
+
+`RemoteBoundaryConditionDomain.cs` defines remote displacement, force and moment conditions with global/local coordinate frames, rigid/deformable coupling, weighting semantics, remote points, component compatibility and named-selection scoping. Evidence: `docs/validation/ws06-3-remote-boundary-conditions-contract.md`.
 
 ## Compile gate
 
 The 50% gate passed on Windows x64: restore, Release build, tutorial capability smoke tests, self-contained single-file publish, bundled Gmsh verification and artifact upload completed successfully. Every subsequent increment must preserve this gate.
 
-WS06.1 preserved the Windows Release build and core solver smoke and passed its dedicated domain regression. WS06.2 must pass the same Windows regression gate plus its seven-family joint domain smoke before integration. Source-complete status does not imply that nonlinear contact or joint constraint formulations are solver-complete; physical/solver benchmarks remain mandatory.
+WS06.1 and WS06.2 preserved the Windows Release build and core solver smoke and passed their dedicated/shared domain regressions. WS06.3 must pass the same Windows regression gate plus its remote-boundary-condition domain fixtures before integration. Source-complete status does not imply that nonlinear contact, joint or remote coupling equations are solver-complete; physical/solver benchmarks remain mandatory.
