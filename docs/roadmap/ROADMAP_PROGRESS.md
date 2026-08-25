@@ -19,7 +19,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 09 | WS04.2 Design Points | Accepted | Passed at 50% gate | Complete |
 | 10 | WS05.1 Mesh Creation | Accepted | Passed at 50% gate | Complete |
 | 11 | WS05.2 Mesh Control | Accepted | Validation required | Source-complete |
-| 12 | WS06.1 Contact Offset Control | Pending | Required | Pending |
+| 12 | WS06.1 Contact Offset Control | Accepted | Validation required | Source-complete |
 | 13 | WS06.2 Joints | Pending | Required | Pending |
 | 14 | WS06.3 Remote Boundary Conditions | Pending | Required | Pending |
 | 15 | WS06.4 Constraint Equations | Pending | Required | Pending |
@@ -29,7 +29,7 @@ The roadmap is divided into 20 workshop-equivalent increments. Each certified in
 | 19 | WS08.1 Eigenvalue Buckling | Pending | Required | Pending |
 | 20 | WS08.2 Submodeling | Pending | Required | Pending |
 
-**Current source/design progress: 55%.**
+**Current source/design progress: 60%.**
 
 ## Certified source evidence
 
@@ -77,6 +77,12 @@ Mechanical-style layout, STEP/CAD-face scoping, material/support/load/mesh/solut
 
 `MeshControlDomain.cs` defines mesh-owned controls for body, face and edge sizing, sphere of influence, inflation and refinement with typed scopes, geometry revision binding, hard/soft behavior and deterministic validation. Evidence: `docs/validation/ws05-2-mesh-control-contract.md`.
 
+### Increment 12 — WS06.1 Contact Offset Control
+
+`ContactDomain.cs` now defines explicit initial-gap treatment for preserve, signed user offset and adjust-to-touch behavior, with deterministic compatibility checks against pinball search radius and penetration tolerance. Evidence: `docs/validation/ws06-1-contact-offset-control-contract.md`.
+
 ## Compile gate
 
 The 50% gate passed on Windows x64: restore, Release build, tutorial capability smoke tests, self-contained single-file publish, bundled Gmsh verification and artifact upload completed successfully. Every subsequent increment must preserve this gate.
+
+The WS06.1 branch must pass the dedicated Windows Release build and core solver regression smoke before the increment may be promoted from source-complete to runtime-validated.
