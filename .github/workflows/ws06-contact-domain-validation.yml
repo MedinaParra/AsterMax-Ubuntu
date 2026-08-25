@@ -6,6 +6,7 @@ on:
       - agent/ws06-1-contact-offset-control
       - agent/ws06-2-joints
       - agent/ws06-3-remote-boundary-conditions
+      - agent/ws06-4-constraint-equations
     paths:
       - "windows/AsterMax.MechanicalGui/**"
       - "windows/AsterMax.MechanicalGui.DomainSmoke/**"
@@ -45,6 +46,6 @@ jobs:
         shell: pwsh
         run: dotnet restore windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj
 
-      - name: WS06 contact joints and remote BC domain smoke
+      - name: WS06 interaction and constraint domain smoke
         shell: pwsh
         run: dotnet run --project windows/AsterMax.MechanicalGui.DomainSmoke/AsterMax.MechanicalGui.DomainSmoke.csproj -c Release --no-restore
