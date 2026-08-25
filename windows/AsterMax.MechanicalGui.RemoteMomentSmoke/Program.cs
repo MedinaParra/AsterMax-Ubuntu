@@ -146,8 +146,15 @@ try
         throw new InvalidOperationException("Remote Moment TET4 solution returned invalid von Mises stress.");
     if (!double.IsFinite(solution.RelativeResidual) || solution.RelativeResidual > 2e-6)
         throw new InvalidOperationException($"Remote Moment TET4 PCG residual failed: {solution.RelativeResidual:E3}.");
-    if (!double.IsFinite(solution.EquilibriumError) || solution.EquilibriumError > 5e-5)
-        throw new InvalidOperationException($"Remote Moment TET4 force equilibrium failed: {solution.EquilibriumError:E3}.");
+
+    var forceResidualN = (solution.ReactionN + solution.AppliedForceN).Length;
+    var equivalentForceScaleN = remoteLoad.SurfaceForces.Sum(load => load.TotalForceN.Length);
+    var pureMomentForceEquilibriumError = forceResidualN / Math.Max(equivalentForceScaleN, 1e-12);
+    if (!double.IsFinite(pureMomentForceEquilibriumError) || pureMomentForceEquilibriumError > 5e-5)
+        throw new InvalidOperationException(
+            $"Remote Moment TET4 load-scaled force equilibrium failed: {pureMomentForceEquilibriumError:E3} " +
+            $"(residual {forceResidualN:E3} N, equivalent-force scale {equivalentForceScaleN:E3} N).");
+
     if (!double.IsFinite(solution.MomentEquilibriumError) || solution.MomentEquilibriumError > 5e-5)
         throw new InvalidOperationException($"Remote Moment TET4 moment equilibrium failed: {solution.MomentEquilibriumError:E3}.");
     if (solution.AppliedForceN.Length > 1e-8)
@@ -164,8 +171,9 @@ try
         $"force-error={remoteLoad.ForceConservationError:E3}, moment-error={remoteLoad.MomentConservationError:E3}, " +
         $"local-transform-error={localTransformError:E3}, applied-moment-error={appliedMomentError:E3}, " +
         $"Umax={solution.MaxDisplacementMm:G8} mm, VM={solution.MaxVonMisesMpa:G8} MPa, " +
-        $"residual={solution.RelativeResidual:E3}, force-equilibrium={solution.EquilibriumError:E3}, " +
-        $"moment-equilibrium={solution.MomentEquilibriumError:E3}");
+        $"residual={solution.RelativeResidual:E3}, force-residual={forceResidualN:E3} N, " +
+        $"load-scaled-force-equilibrium={pureMomentForceEquilibriumError:E3}, " +
+        $"moment-equilibrium={solution.MomentEquilibriumError:E3}, legacy-force-equilibrium={solution.EquilibriumError:E3}");
     return 0;
 }
 catch (OperationCanceledException)
