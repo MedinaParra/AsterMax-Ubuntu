@@ -24,6 +24,9 @@ internal sealed class GeneralCadStaticSolution
     public int ActiveConstraintCount { get; init; }
     public double MaximumConstraintResidual { get; init; }
     public double MaximumConstraintMultiplier { get; init; }
+    public Vec3 ReactionMomentNmm { get; init; }
+    public Vec3 AppliedMomentNmm { get; init; }
+    public double MomentEquilibriumError { get; init; }
 }
 
 internal static class GeneralCadTet4Solver
@@ -69,15 +72,24 @@ internal static class GeneralCadTet4Solver
             DistributeSurfaceForce(mesh, force, fullLoad);
             appliedForce += force.TotalForceN;
         }
-        if (!double.IsFinite(appliedForce.Length) || appliedForce.Length <= 1e-12)
-            throw new InvalidOperationException("The resultant applied force is zero or invalid.");
+        if (!double.IsFinite(appliedForce.Length))
+            throw new InvalidOperationException("The resultant applied force is invalid.");
+
+        var appliedMoment = Vec3.Zero;
+        for (var node = 0; node < mesh.Nodes.Count; node++)
+        {
+            var nodalForce = new Vec3(fullLoad[node * 3], fullLoad[node * 3 + 1], fullLoad[node * 3 + 2]);
+            appliedMoment += Cross(mesh.Nodes[node], nodalForce);
+        }
+        if (!double.IsFinite(appliedMoment.Length))
+            throw new InvalidOperationException("The resultant applied moment is invalid.");
 
         var reducedLoad = new double[freeToGlobal.Count];
         for (var free = 0; free < freeToGlobal.Count; free++)
             reducedLoad[free] = fullLoad[freeToGlobal[free]];
         var freeLoadNorm = Norm(reducedLoad);
         if (freeLoadNorm <= 1e-14)
-            throw new InvalidOperationException("All applied force is acting on constrained degrees of freedom.");
+            throw new InvalidOperationException("All applied loading is zero or acts only on constrained degrees of freedom.");
 
         progress?.Invoke($"Assembling sparse stiffness matrix: {mesh.Tetrahedra.Count:N0} TET4, {freeToGlobal.Count:N0} free DOF...");
         var constitutive = Constitutive(material.YoungModulusMpa, material.PoissonRatio);
@@ -212,12 +224,15 @@ internal static class GeneralCadTet4Solver
             nodalVonMises[node] = nodalVolumeSum[node] <= 1e-18 ? 0 : nodalStressSum[node] / nodalVolumeSum[node];
 
         var reaction = Vec3.Zero;
+        var reactionMoment = Vec3.Zero;
         foreach (var node in fixedNodes)
         {
-            var x = internalForce[node * 3] - fullLoad[node * 3];
-            var y = internalForce[node * 3 + 1] - fullLoad[node * 3 + 1];
-            var z = internalForce[node * 3 + 2] - fullLoad[node * 3 + 2];
-            reaction += new Vec3(x, y, z);
+            var nodalReaction = new Vec3(
+                internalForce[node * 3] - fullLoad[node * 3],
+                internalForce[node * 3 + 1] - fullLoad[node * 3 + 1],
+                internalForce[node * 3 + 2] - fullLoad[node * 3 + 2]);
+            reaction += nodalReaction;
+            reactionMoment += Cross(mesh.Nodes[node], nodalReaction);
         }
 
         var maxDisplacement = 0.0;
@@ -234,10 +249,19 @@ internal static class GeneralCadTet4Solver
         if (!double.IsFinite(equilibriumError))
             throw new InvalidOperationException("The force-equilibrium result is not finite.");
 
+        var characteristicLength = MeshCharacteristicLength(mesh);
+        var momentScale = Math.Max(
+            appliedMoment.Length,
+            Math.Max(appliedForce.Length * Math.Max(characteristicLength, 1.0), 1.0));
+        var momentEquilibriumError = (reactionMoment + appliedMoment).Length / momentScale;
+        if (!double.IsFinite(momentEquilibriumError))
+            throw new InvalidOperationException("The moment-equilibrium result is not finite.");
+
         watch.Stop();
         progress?.Invoke(
             $"Solution complete: {iterations:N0} aggregate PCG iterations, residual {relativeResidual:E3}, " +
-            $"equilibrium {equilibriumError:E3}, MPC residual {maximumConstraintResidual:E3}.");
+            $"force equilibrium {equilibriumError:E3}, moment equilibrium {momentEquilibriumError:E3}, " +
+            $"MPC residual {maximumConstraintResidual:E3}.");
         return new GeneralCadStaticSolution
         {
             Displacements = displacement,
@@ -256,7 +280,10 @@ internal static class GeneralCadTet4Solver
             Elapsed = watch.Elapsed,
             ActiveConstraintCount = reducedConstraints.Count,
             MaximumConstraintResidual = maximumConstraintResidual,
-            MaximumConstraintMultiplier = maximumConstraintMultiplier
+            MaximumConstraintMultiplier = maximumConstraintMultiplier,
+            ReactionMomentNmm = reactionMoment,
+            AppliedMomentNmm = appliedMoment,
+            MomentEquilibriumError = momentEquilibriumError
         };
     }
 
@@ -335,7 +362,7 @@ internal static class GeneralCadTet4Solver
         if (fixedNodes.Count == 0)
             throw new InvalidOperationException("The model has no fixed-support nodes.");
         if (surfaceForces.Count == 0)
-            throw new InvalidOperationException("The model has no scoped surface force.");
+            throw new InvalidOperationException("The model has no scoped surface force or equivalent surface load.");
         foreach (var force in surfaceForces)
         {
             if (force.TriangleIndices.Count == 0)
@@ -657,6 +684,18 @@ internal static class GeneralCadTet4Solver
         return Math.Sqrt(
             0.5 * (Math.Pow(sx - sy, 2) + Math.Pow(sy - sz, 2) + Math.Pow(sz - sx, 2)) +
             3 * (txy * txy + tyz * tyz + txz * txz));
+    }
+
+    private static double MeshCharacteristicLength(CadMesh mesh)
+    {
+        if (mesh.Nodes.Count == 0) return 1.0;
+        var minX = mesh.Nodes.Min(point => point.X);
+        var minY = mesh.Nodes.Min(point => point.Y);
+        var minZ = mesh.Nodes.Min(point => point.Z);
+        var maxX = mesh.Nodes.Max(point => point.X);
+        var maxY = mesh.Nodes.Max(point => point.Y);
+        var maxZ = mesh.Nodes.Max(point => point.Z);
+        return new Vec3(maxX - minX, maxY - minY, maxZ - minZ).Length;
     }
 
     private static double TriangleArea(Vec3 a, Vec3 b, Vec3 c) => Cross(b - a, c - a).Length * .5;
