@@ -8,6 +8,7 @@ static class DomainSmoke
         {
             RunContactOffsetSmoke();
             RunJointSmoke();
+            RunRemoteBoundaryConditionSmoke();
             return 0;
         }
         catch (Exception exception)
@@ -208,6 +209,97 @@ static class DomainSmoke
             throw new InvalidOperationException($"WS06.2 expected 5 deterministic rejection fixtures, observed {expectedFailures}.");
 
         Console.WriteLine("PASS WS06.2 Joints domain smoke | joint-families=7 | valid-frames=2 | valid-dof-settings=2 | deterministic-rejections=5");
+    }
+
+    private static void RunRemoteBoundaryConditionSmoke()
+    {
+        var expectedFailures = 0;
+
+        RemoteCoordinateFrame.Global.Validate("global-displacement");
+        new RemoteCoordinateFrame(
+            false,
+            new RemoteVector3(1, 0, 0),
+            new RemoteVector3(0, 1, 0)).Validate("local-frame");
+
+        new RemoteComponents(0.0, null, null, null, null, 0.01)
+            .Validate("remote-displacement", RemoteBoundaryConditionType.Displacement);
+        new RemoteComponents(1000.0, -250.0, null, null, null, null)
+            .Validate("remote-force", RemoteBoundaryConditionType.Force);
+        new RemoteComponents(null, null, null, null, 5000.0, null)
+            .Validate("remote-moment", RemoteBoundaryConditionType.Moment);
+
+        new RemoteCouplingDefinition(RemoteCouplingBehavior.Rigid, RemoteWeightingMethod.Uniform, null)
+            .Validate("rigid-coupling");
+        new RemoteCouplingDefinition(RemoteCouplingBehavior.Deformable, RemoteWeightingMethod.AreaWeighted, null)
+            .Validate("area-coupling");
+        new RemoteCouplingDefinition(RemoteCouplingBehavior.Deformable, RemoteWeightingMethod.DistanceWeighted, 2.0)
+            .Validate("distance-coupling");
+
+        ExpectInvalidOperation(
+            () => new RemoteCoordinateFrame(
+                true,
+                new RemoteVector3(1, 0, 0),
+                null).Validate("global-with-local-axis"),
+            "global remote frame accepted a local axis",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteCoordinateFrame(false, null, null).Validate("missing-local-axes"),
+            "local remote frame accepted missing axes",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteCoordinateFrame(
+                false,
+                new RemoteVector3(1, 0, 0),
+                new RemoteVector3(2, 0, 0)).Validate("collinear-local-axes"),
+            "local remote frame accepted collinear axes",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteComponents(1000.0, null, null, null, 1.0, null)
+                .Validate("force-with-moment", RemoteBoundaryConditionType.Force),
+            "remote force accepted rotational components",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteComponents(1.0, null, null, null, 1000.0, null)
+                .Validate("moment-with-force", RemoteBoundaryConditionType.Moment),
+            "remote moment accepted translational components",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteComponents(0.0, 0.0, 0.0, null, null, null)
+                .Validate("zero-force", RemoteBoundaryConditionType.Force),
+            "remote force accepted an all-zero load",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteCouplingDefinition(
+                RemoteCouplingBehavior.Deformable,
+                RemoteWeightingMethod.DistanceWeighted,
+                null).Validate("missing-distance-exponent"),
+            "distance weighting accepted a missing exponent",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteCouplingDefinition(
+                RemoteCouplingBehavior.Rigid,
+                RemoteWeightingMethod.AreaWeighted,
+                null).Validate("rigid-area-weighting"),
+            "rigid coupling accepted deformable weighting",
+            ref expectedFailures);
+
+        ExpectInvalidOperation(
+            () => new RemoteComponents(double.NaN, null, null, null, null, null)
+                .Validate("nan-displacement", RemoteBoundaryConditionType.Displacement),
+            "remote components accepted a non-finite value",
+            ref expectedFailures);
+
+        if (expectedFailures != 9)
+            throw new InvalidOperationException($"WS06.3 expected 9 deterministic rejection fixtures, observed {expectedFailures}.");
+
+        Console.WriteLine("PASS WS06.3 Remote Boundary Conditions domain smoke | valid-frames=2 | valid-component-sets=3 | valid-couplings=3 | deterministic-rejections=9");
     }
 
     private static void ExpectInvalidOperation(Action action, string message, ref int counter)
