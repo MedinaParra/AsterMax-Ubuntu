@@ -9,13 +9,11 @@ internal static class MpcRuntimeSmoke
         RunTwoDofTieBenchmark();
         RunThreeDofChainBenchmark();
         RunDependentConstraintRejection();
-        Console.WriteLine("PASS MPC runtime Schur kernel | 2-DOF tie + 3-DOF chain + dependent-row rejection");
+        Console.WriteLine("PASS MPC runtime Schur kernel | 2-DOF tie + 3-DOF chain + equilibrium-force recovery + dependent-row rejection");
     }
 
     private static void RunTwoDofTieBenchmark()
     {
-        // K = [ 2 -1; -1 2 ], f = [1, 0], constraint u1-u2=0.
-        // Analytical constrained solution is u=[0.5, 0.5].
         static LinearSystemSolveResult SolveBase(double[] rhs)
         {
             if (rhs.Length != 2) throw new InvalidOperationException("2-DOF benchmark received an invalid RHS length.");
@@ -47,12 +45,14 @@ internal static class MpcRuntimeSmoke
             throw new InvalidOperationException($"2-DOF MPC residual too large: {result.MaximumConstraintResidual:E3}.");
         if (result.Multipliers.Length != 1 || !double.IsFinite(result.Multipliers[0]))
             throw new InvalidOperationException("2-DOF MPC multiplier was not recovered.");
+        if (result.EquilibriumForces.Length != 2)
+            throw new InvalidOperationException("2-DOF MPC equilibrium-force vector length mismatch.");
+        AssertNear(result.EquilibriumForces[0], -0.5, 1e-12, "2-DOF equilibrium force 1");
+        AssertNear(result.EquilibriumForces[1], 0.5, 1e-12, "2-DOF equilibrium force 2");
     }
 
     private static void RunThreeDofChainBenchmark()
     {
-        // Unit stiffness K=I, f=[3,0,0], with u1=u2 and u2=u3.
-        // Energy minimization under the two independent constraints gives u=[1,1,1].
         static LinearSystemSolveResult SolveIdentity(double[] rhs) =>
             new((double[])rhs.Clone(), Iterations: 1, RelativeResidual: 0.0);
 
@@ -78,6 +78,12 @@ internal static class MpcRuntimeSmoke
             throw new InvalidOperationException($"3-DOF MPC residual too large: {result.MaximumConstraintResidual:E3}.");
         if (result.Multipliers.Length != 2)
             throw new InvalidOperationException("3-DOF MPC multiplier count mismatch.");
+        if (result.EquilibriumForces.Length != 3)
+            throw new InvalidOperationException("3-DOF MPC equilibrium-force vector length mismatch.");
+        AssertNear(result.EquilibriumForces[0], -2.0, 1e-12, "3-DOF equilibrium force 1");
+        AssertNear(result.EquilibriumForces[1], 1.0, 1e-12, "3-DOF equilibrium force 2");
+        AssertNear(result.EquilibriumForces[2], 1.0, 1e-12, "3-DOF equilibrium force 3");
+        AssertNear(result.EquilibriumForces.Sum(), 0.0, 1e-12, "3-DOF equilibrium resultant");
     }
 
     private static void RunDependentConstraintRejection()
