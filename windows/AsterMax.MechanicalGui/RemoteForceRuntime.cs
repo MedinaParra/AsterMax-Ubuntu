@@ -1,8 +1,8 @@
 namespace AsterMax.MechanicalGui;
 
-internal sealed record CadNodalForceSet(
+internal sealed record RemoteForceSurfaceLoadSet(
     string Name,
-    IReadOnlyDictionary<int, Vec3> NodeForces,
+    IReadOnlyList<CadSurfaceForce> SurfaceForces,
     Vec3 RemotePointMm,
     Vec3 RequestedForceN,
     double ForceConservationError,
@@ -12,7 +12,7 @@ internal static class RemoteForceRuntime
 {
     private const double RankTolerance = 1e-11;
 
-    public static CadNodalForceSet Build(
+    public static RemoteForceSurfaceLoadSet Build(
         CadMesh mesh,
         NamedSelectionCatalog selections,
         string activeGeometrySignature,
@@ -31,29 +31,45 @@ internal static class RemoteForceRuntime
                 "The current runtime slice certifies deformable load transfer only; rigid remote kinematics require remote-point MPC DOFs.");
 
         var scopeDefinition = selections.Get(condition.ScopeSelectionId);
+        if (scopeDefinition.EntityType != NamedSelectionEntityType.Face)
+            throw new InvalidOperationException(
+                $"Remote Force runtime currently requires a face-based named selection, not {scopeDefinition.EntityType}.");
         var scope = selections.Resolve(condition.ScopeSelectionId, activeGeometrySignature);
-        var scopedNodes = ResolveScopedNodes(mesh, scopeDefinition.EntityType, scope);
-        if (scopedNodes.Count < 3)
-            throw new InvalidOperationException($"Remote Force '{condition.Name}' requires at least three scoped mesh nodes.");
+        var triangles = ResolveScopedTriangles(mesh, scope);
+        if (triangles.Count < 2)
+            throw new InvalidOperationException($"Remote Force '{condition.Name}' requires at least two scoped surface triangles.");
 
         var remotePoint = new Vec3(condition.RemotePoint.X, condition.RemotePoint.Y, condition.RemotePoint.Z);
         var requestedForce = ResolveForceVector(condition);
         if (!double.IsFinite(requestedForce.Length) || requestedForce.Length <= 1e-12)
             throw new InvalidOperationException($"Remote Force '{condition.Name}' resolves to a zero or invalid global force vector.");
 
-        var weights = BuildWeights(mesh, scopedNodes, scopeDefinition.EntityType, scope, remotePoint, condition.Coupling);
-        var nodalForces = SolveEquivalentNodalForces(mesh, scopedNodes, weights, remotePoint, requestedForce, condition.Name);
+        var centroids = triangles.Select(index => TriangleCentroid(mesh, index)).ToArray();
+        var weights = BuildWeights(mesh, triangles, centroids, remotePoint, condition.Coupling);
+        var equivalentForces = SolveEquivalentTriangleForces(
+            centroids,
+            weights,
+            remotePoint,
+            requestedForce,
+            condition.Name);
+
         var resultant = Vec3.Zero;
         var momentAboutRemote = Vec3.Zero;
-        foreach (var (nodeIndex, force) in nodalForces)
+        var surfaceForces = new List<CadSurfaceForce>(triangles.Count);
+        for (var index = 0; index < triangles.Count; index++)
         {
+            var force = equivalentForces[index];
             resultant += force;
-            momentAboutRemote += Cross(mesh.Nodes[nodeIndex] - remotePoint, force);
+            momentAboutRemote += Cross(centroids[index] - remotePoint, force);
+            surfaceForces.Add(new CadSurfaceForce(
+                new[] { triangles[index] },
+                force,
+                $"{condition.Name} / triangle {triangles[index] + 1}"));
         }
 
         var forceError = (resultant - requestedForce).Length / Math.Max(requestedForce.Length, 1.0);
-        var characteristicLength = scopedNodes
-            .Select(node => (mesh.Nodes[node] - remotePoint).Length)
+        var characteristicLength = centroids
+            .Select(point => (point - remotePoint).Length)
             .DefaultIfEmpty(1.0)
             .Max();
         var momentScale = Math.Max(requestedForce.Length * Math.Max(characteristicLength, 1.0), 1.0);
@@ -63,39 +79,27 @@ internal static class RemoteForceRuntime
         if (!double.IsFinite(momentError) || momentError > 1e-10)
             throw new InvalidOperationException($"Remote Force '{condition.Name}' failed moment conservation about its remote point: {momentError:E3}.");
 
-        return new CadNodalForceSet(
+        return new RemoteForceSurfaceLoadSet(
             condition.Name,
-            nodalForces,
+            surfaceForces,
             remotePoint,
             requestedForce,
             forceError,
             momentError);
     }
 
-    private static IReadOnlyList<int> ResolveScopedNodes(
-        CadMesh mesh,
-        NamedSelectionEntityType entityType,
-        MechanicalScope scope)
+    private static IReadOnlyList<int> ResolveScopedTriangles(CadMesh mesh, MechanicalScope scope)
     {
-        IEnumerable<int> nodes = entityType switch
+        var topology = CadTopologyRegistry.Get(mesh);
+        var triangles = new SortedSet<int>();
+        foreach (var faceId in scope.FaceIds)
         {
-            NamedSelectionEntityType.MeshNode => scope.NodeIds.Select(id => id - 1),
-            NamedSelectionEntityType.Face => scope.FaceIds.SelectMany(faceId =>
-            {
-                var topology = CadTopologyRegistry.Get(mesh);
-                if (!topology.Faces.TryGetValue(faceId, out var face))
-                    throw new InvalidOperationException($"Remote Force face scope references Face {faceId}, absent from the active mesh.");
-                return face.NodeIndices;
-            }),
-            _ => throw new InvalidOperationException(
-                $"Remote Force runtime currently supports Face or MeshNode named selections, not {entityType}.")
-        };
-
-        var resolved = nodes.Distinct().OrderBy(index => index).ToArray();
-        foreach (var node in resolved)
-            if ((uint)node >= (uint)mesh.Nodes.Count)
-                throw new InvalidOperationException($"Remote Force scope references mesh node {node + 1}, outside the active mesh.");
-        return resolved;
+            if (!topology.Faces.TryGetValue(faceId, out var face))
+                throw new InvalidOperationException($"Remote Force face scope references Face {faceId}, absent from the active mesh.");
+            foreach (var triangleIndex in face.TriangleIndices)
+                triangles.Add(triangleIndex);
+        }
+        return triangles.ToArray();
     }
 
     private static Vec3 ResolveForceVector(RemoteBoundaryConditionDefinition condition)
@@ -119,71 +123,58 @@ internal static class RemoteForceRuntime
 
     private static double[] BuildWeights(
         CadMesh mesh,
-        IReadOnlyList<int> scopedNodes,
-        NamedSelectionEntityType entityType,
-        MechanicalScope scope,
+        IReadOnlyList<int> triangles,
+        IReadOnlyList<Vec3> centroids,
         Vec3 remotePoint,
         RemoteCouplingDefinition coupling)
     {
-        var raw = scopedNodes.ToDictionary(node => node, _ => 0.0);
+        var raw = new double[triangles.Count];
         switch (coupling.Weighting)
         {
             case RemoteWeightingMethod.Uniform:
-                foreach (var node in scopedNodes) raw[node] = 1.0;
+                Array.Fill(raw, 1.0);
                 break;
 
             case RemoteWeightingMethod.AreaWeighted:
-                if (entityType != NamedSelectionEntityType.Face)
-                    throw new InvalidOperationException("Area-weighted Remote Force requires a face-based named selection.");
-                var topology = CadTopologyRegistry.Get(mesh);
-                foreach (var faceId in scope.FaceIds)
+                for (var index = 0; index < triangles.Count; index++)
                 {
-                    if (!topology.Faces.TryGetValue(faceId, out var face))
-                        throw new InvalidOperationException($"Area weighting references Face {faceId}, absent from the active mesh.");
-                    foreach (var triangleIndex in face.TriangleIndices)
-                    {
-                        var triangle = mesh.SurfaceTriangles[triangleIndex];
-                        var area = TriangleArea(mesh.Nodes[triangle[0]], mesh.Nodes[triangle[1]], mesh.Nodes[triangle[2]]);
-                        foreach (var node in triangle)
-                            if (raw.ContainsKey(node)) raw[node] += area / 3.0;
-                    }
+                    var triangle = mesh.SurfaceTriangles[triangles[index]];
+                    raw[index] = TriangleArea(mesh.Nodes[triangle[0]], mesh.Nodes[triangle[1]], mesh.Nodes[triangle[2]]);
                 }
                 break;
 
             case RemoteWeightingMethod.DistanceWeighted:
                 var exponent = coupling.DistanceWeightExponent!.Value;
-                var distances = scopedNodes.Select(node => (mesh.Nodes[node] - remotePoint).Length).ToArray();
+                var distances = centroids.Select(point => (point - remotePoint).Length).ToArray();
                 var characteristic = distances.Where(distance => distance > 1e-12).DefaultIfEmpty(1.0).Average();
                 var floor = Math.Max(characteristic * 1e-9, 1e-12);
-                for (var index = 0; index < scopedNodes.Count; index++)
-                    raw[scopedNodes[index]] = 1.0 / Math.Pow(Math.Max(distances[index], floor), exponent);
+                for (var index = 0; index < triangles.Count; index++)
+                    raw[index] = 1.0 / Math.Pow(Math.Max(distances[index], floor), exponent);
                 break;
 
             default:
                 throw new InvalidOperationException($"Unsupported Remote Force weighting {coupling.Weighting}.");
         }
 
-        var values = scopedNodes.Select(node => raw[node]).ToArray();
-        if (values.Any(value => !double.IsFinite(value) || value <= 0.0))
-            throw new InvalidOperationException("Remote Force weighting produced a non-positive or non-finite nodal weight.");
-        var sum = values.Sum();
-        return values.Select(value => value / sum).ToArray();
+        if (raw.Any(value => !double.IsFinite(value) || value <= 0.0))
+            throw new InvalidOperationException("Remote Force weighting produced a non-positive or non-finite triangle weight.");
+        var sum = raw.Sum();
+        return raw.Select(value => value / sum).ToArray();
     }
 
-    private static IReadOnlyDictionary<int, Vec3> SolveEquivalentNodalForces(
-        CadMesh mesh,
-        IReadOnlyList<int> nodes,
+    private static Vec3[] SolveEquivalentTriangleForces(
+        IReadOnlyList<Vec3> centroids,
         IReadOnlyList<double> weights,
         Vec3 remotePoint,
         Vec3 requestedForce,
         string name)
     {
-        var unknownCount = nodes.Count * 3;
+        var unknownCount = centroids.Count * 3;
         var a = new double[6, unknownCount];
-        for (var nodePosition = 0; nodePosition < nodes.Count; nodePosition++)
+        for (var item = 0; item < centroids.Count; item++)
         {
-            var r = mesh.Nodes[nodes[nodePosition]] - remotePoint;
-            var column = nodePosition * 3;
+            var r = centroids[item] - remotePoint;
+            var column = item * 3;
             a[0, column] = 1.0;
             a[1, column + 1] = 1.0;
             a[2, column + 2] = 1.0;
@@ -197,15 +188,16 @@ internal static class RemoteForceRuntime
             a[5, column + 1] = r.X;
         }
 
+        // Weighted minimum-norm equivalent load: f = W A^T (A W A^T)^-1 b.
         var gram = new double[6, 6];
         for (var row = 0; row < 6; row++)
         for (var column = 0; column < 6; column++)
         {
             var sum = 0.0;
-            for (var nodePosition = 0; nodePosition < nodes.Count; nodePosition++)
+            for (var item = 0; item < centroids.Count; item++)
             {
-                var weight = weights[nodePosition];
-                var baseColumn = nodePosition * 3;
+                var weight = weights[item];
+                var baseColumn = item * 3;
                 for (var component = 0; component < 3; component++)
                     sum += a[row, baseColumn + component] * weight * a[column, baseColumn + component];
             }
@@ -213,19 +205,22 @@ internal static class RemoteForceRuntime
         }
 
         var rhs = new[] { requestedForce.X, requestedForce.Y, requestedForce.Z, 0.0, 0.0, 0.0 };
-        var multipliers = SolveDensePivoted(gram, rhs,
-            $"Remote Force '{name}' scope cannot represent a full force/moment-equivalent load transfer. Use a non-collinear face/node scope.");
+        var multipliers = SolveDensePivoted(
+            gram,
+            rhs,
+            $"Remote Force '{name}' scope cannot represent a full force/moment-equivalent transfer. " +
+            "Use a surface with sufficient non-collinear triangle centroids or move the remote point.");
 
-        var result = new Dictionary<int, Vec3>(nodes.Count);
-        for (var nodePosition = 0; nodePosition < nodes.Count; nodePosition++)
+        var result = new Vec3[centroids.Count];
+        for (var item = 0; item < centroids.Count; item++)
         {
-            var weight = weights[nodePosition];
-            var baseColumn = nodePosition * 3;
+            var weight = weights[item];
+            var baseColumn = item * 3;
             var force = new double[3];
             for (var component = 0; component < 3; component++)
             for (var equation = 0; equation < 6; equation++)
                 force[component] += weight * a[equation, baseColumn + component] * multipliers[equation];
-            result[nodes[nodePosition]] = new Vec3(force[0], force[1], force[2]);
+            result[item] = new Vec3(force[0], force[1], force[2]);
         }
         return result;
     }
@@ -270,6 +265,14 @@ internal static class RemoteForceRuntime
         if (solution.Any(value => !double.IsFinite(value)))
             throw new InvalidOperationException(failureMessage);
         return solution;
+    }
+
+    private static Vec3 TriangleCentroid(CadMesh mesh, int triangleIndex)
+    {
+        if ((uint)triangleIndex >= (uint)mesh.SurfaceTriangles.Count)
+            throw new InvalidOperationException($"Remote Force references boundary triangle {triangleIndex}, outside the active mesh.");
+        var triangle = mesh.SurfaceTriangles[triangleIndex];
+        return (mesh.Nodes[triangle[0]] + mesh.Nodes[triangle[1]] + mesh.Nodes[triangle[2]]) / 3.0;
     }
 
     private static Vec3 ToVec(RemoteVector3 value) => new(value.X, value.Y, value.Z);
