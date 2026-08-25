@@ -13,6 +13,7 @@ internal sealed record MpcConstraintRow(
 internal sealed record MpcSchurSolveResult(
     double[] Solution,
     double[] Multipliers,
+    double[] EquilibriumForces,
     int TotalLinearIterations,
     double MaximumLinearResidual,
     double MaximumConstraintResidual);
@@ -46,6 +47,7 @@ internal static class MpcSchurComplementKernel
             return new MpcSchurSolveResult(
                 unconstrainedOnly.Solution,
                 Array.Empty<double>(),
+                new double[unknownCount],
                 unconstrainedOnly.Iterations,
                 unconstrainedOnly.RelativeResidual,
                 0.0);
@@ -93,13 +95,24 @@ internal static class MpcSchurComplementKernel
             "MPC Schur complement. Constraints may be dependent, contradictory or poorly scaled.");
 
         var constrainedSolution = (double[])baseSolve.Solution.Clone();
+        var equilibriumForces = new double[unknownCount];
         for (var constraintIndex = 0; constraintIndex < normalizedRows.Length; constraintIndex++)
         {
             var multiplier = multipliers[constraintIndex];
             var influence = influenceSolutions[constraintIndex];
             for (var index = 0; index < constrainedSolution.Length; index++)
                 constrainedSolution[index] -= influence[index] * multiplier;
+
+            // Since u = u0 - K^-1 C^T lambda, the constrained primal equation is
+            // K u - f = -C^T lambda. Return that exact reduced-system equilibrium
+            // contribution so callers do not have to reconstruct forces from the
+            // normalized Schur rows or infer the multiplier sign convention.
+            foreach (var (index, coefficient) in normalizedRows[constraintIndex].Coefficients)
+                equilibriumForces[index] -= coefficient * multiplier;
         }
+
+        if (equilibriumForces.Any(value => !double.IsFinite(value)))
+            throw new InvalidOperationException("MPC equilibrium-force recovery produced a non-finite value.");
 
         var maximumConstraintResidual = 0.0;
         for (var rowIndex = 0; rowIndex < normalizedRows.Length; rowIndex++)
@@ -114,6 +127,7 @@ internal static class MpcSchurComplementKernel
         return new MpcSchurSolveResult(
             constrainedSolution,
             multipliers,
+            equilibriumForces,
             totalIterations,
             maximumLinearResidual,
             maximumConstraintResidual);
