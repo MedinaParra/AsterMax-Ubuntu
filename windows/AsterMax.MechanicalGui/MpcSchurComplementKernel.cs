@@ -44,13 +44,13 @@ internal static class MpcSchurComplementKernel
         if (constraints.Count == 0)
         {
             var unconstrainedOnly = ValidateLinearSolve(solveBaseSystem(rightHandSide.ToArray()), unknownCount, "base system");
-            return new MpcSchurSolveResult(
+            return Complete(new MpcSchurSolveResult(
                 unconstrainedOnly.Solution,
                 Array.Empty<double>(),
                 new double[unknownCount],
                 unconstrainedOnly.Iterations,
                 unconstrainedOnly.RelativeResidual,
-                0.0);
+                0.0));
         }
 
         var normalizedRows = constraints
@@ -124,13 +124,19 @@ internal static class MpcSchurComplementKernel
             maximumConstraintResidual = Math.Max(maximumConstraintResidual, Math.Abs(residual));
         }
 
-        return new MpcSchurSolveResult(
+        return Complete(new MpcSchurSolveResult(
             constrainedSolution,
             multipliers,
             equilibriumForces,
             totalIterations,
             maximumLinearResidual,
-            maximumConstraintResidual);
+            maximumConstraintResidual));
+    }
+
+    private static MpcSchurSolveResult Complete(MpcSchurSolveResult result)
+    {
+        MpcSchurDiagnostics.Publish(result);
+        return result;
     }
 
     private static MpcConstraintRow NormalizeRow(MpcConstraintRow row, int unknownCount)
@@ -164,7 +170,6 @@ internal static class MpcSchurComplementKernel
         if (!double.IsFinite(norm) || norm <= 1e-15)
             throw new InvalidOperationException($"MPC constraint '{row.Name}' has an invalid coefficient norm.");
 
-        // Normalize each row so Schur rank checks are not dominated by arbitrary coefficient scale.
         var scaled = normalized.ToDictionary(pair => pair.Key, pair => pair.Value / norm);
         return new MpcConstraintRow(row.Name.Trim(), scaled, row.RightHandSide / norm);
     }
