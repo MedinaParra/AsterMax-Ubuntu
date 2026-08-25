@@ -107,15 +107,18 @@ try
             null),
         Components = new RemoteComponents(1000.0, 0.0, 0.0, null, null, null)
     };
+    var rigidRejected = false;
     try
     {
         _ = RemoteForceRuntime.Build(mesh, selections, geometrySignature, rigidCondition);
-        throw new InvalidOperationException("Remote Force runtime silently accepted rigid coupling before remote-point MPC support exists.");
     }
     catch (InvalidOperationException exception) when (exception.Message.Contains("rigid", StringComparison.OrdinalIgnoreCase))
     {
-        Console.WriteLine("PASS Remote Force unsupported-rigid rejection");
+        rigidRejected = true;
     }
+    if (!rigidRejected)
+        throw new InvalidOperationException("Remote Force runtime silently accepted rigid coupling before remote-point MPC support exists.");
+    Console.WriteLine("PASS Remote Force unsupported-rigid rejection");
 
     using var solveTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
     var solution = GeneralCadTet4Solver.Solve(
