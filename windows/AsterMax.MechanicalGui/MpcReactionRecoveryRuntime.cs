@@ -8,8 +8,7 @@ internal sealed record GeneralCadMpcReactionSolution(
     Vec3 CompleteReactionForceN,
     Vec3 CompleteReactionMomentNmm,
     double CompleteForceEquilibriumError,
-    double CompleteMomentEquilibriumError,
-    double MaximumReducedEquilibriumForceMismatchN);
+    double CompleteMomentEquilibriumError);
 
 /// <summary>
 /// Executes the existing native TET4 solver once and recovers the exact free-DOF
@@ -103,13 +102,6 @@ internal static class MpcReactionRecoveryRuntime
             if (!double.IsFinite(forceError) || !double.IsFinite(momentError))
                 throw new InvalidOperationException("Complete MPC force/moment equilibrium produced a non-finite metric.");
 
-            // Independent numerical cross-check: on every free DOF, K*u-f recovered from
-            // the final element internal-force field is represented by -C^T*lambda. The
-            // structural solver does not expose per-DOF internal forces, so this adapter's
-            // exact Schur vector is the source of truth; the real benchmark additionally
-            // verifies global force and moment closure against the solver's support reactions.
-            var maxRecoveredForce = captured.EquilibriumForces.Select(Math.Abs).DefaultIfEmpty(0.0).Max();
-
             return new GeneralCadMpcReactionSolution(
                 structural,
                 globalMpcForces,
@@ -118,8 +110,7 @@ internal static class MpcReactionRecoveryRuntime
                 completeReaction,
                 completeReactionMoment,
                 forceError,
-                momentError,
-                MaximumReducedEquilibriumForceMismatchN: 0.0 * maxRecoveredForce);
+                momentError);
         }
     }
 
