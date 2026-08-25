@@ -21,6 +21,9 @@ internal sealed class GeneralCadStaticSolution
     public required int Iterations { get; init; }
     public required int FreeDofCount { get; init; }
     public required TimeSpan Elapsed { get; init; }
+    public int ActiveConstraintCount { get; init; }
+    public double MaximumConstraintResidual { get; init; }
+    public double MaximumConstraintMultiplier { get; init; }
 }
 
 internal static class GeneralCadTet4Solver
@@ -31,7 +34,8 @@ internal static class GeneralCadTet4Solver
         IReadOnlyCollection<int> fixedNodes,
         IReadOnlyList<CadSurfaceForce> surfaceForces,
         Action<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<ConstraintEquationDefinition>? constraintEquations = null)
     {
         var watch = Stopwatch.StartNew();
         Validate(mesh, material, fixedNodes, surfaceForces);
@@ -108,15 +112,56 @@ internal static class GeneralCadTet4Solver
         stiffness.ValidateDiagonal();
         stiffness.Freeze();
 
-        progress?.Invoke($"Solving sparse positive-definite system ({freeToGlobal.Count:N0} unknowns)...");
         var maximumIterations = Math.Clamp(freeToGlobal.Count * 3, 300, 8000);
-        var (reducedDisplacement, iterations, relativeResidual) = SolvePreconditionedConjugateGradient(
-            stiffness,
-            reducedLoad,
-            maximumIterations,
-            1e-6,
-            progress,
-            cancellationToken);
+        var reducedConstraints = BuildReducedMpcRows(mesh, constraintEquations, globalToFree);
+        double[] reducedDisplacement;
+        int iterations;
+        double relativeResidual;
+        var maximumConstraintResidual = 0.0;
+        var maximumConstraintMultiplier = 0.0;
+
+        if (reducedConstraints.Count == 0)
+        {
+            progress?.Invoke($"Solving sparse positive-definite system ({freeToGlobal.Count:N0} unknowns)...");
+            (reducedDisplacement, iterations, relativeResidual) = SolvePreconditionedConjugateGradient(
+                stiffness,
+                reducedLoad,
+                maximumIterations,
+                1e-6,
+                progress,
+                cancellationToken);
+        }
+        else
+        {
+            progress?.Invoke(
+                $"Solving sparse TET4 system with {reducedConstraints.Count:N0} exact MPC equation(s) using a Schur complement...");
+            var constrainedSolve = MpcSchurComplementKernel.Solve(
+                freeToGlobal.Count,
+                reducedLoad,
+                reducedConstraints,
+                rightHandSide =>
+                {
+                    var (solution, localIterations, localResidual) = SolvePreconditionedConjugateGradient(
+                        stiffness,
+                        rightHandSide,
+                        maximumIterations,
+                        1e-7,
+                        null,
+                        cancellationToken);
+                    return new LinearSystemSolveResult(solution, localIterations, localResidual);
+                });
+
+            reducedDisplacement = constrainedSolve.Solution;
+            iterations = constrainedSolve.TotalLinearIterations;
+            relativeResidual = constrainedSolve.MaximumLinearResidual;
+            maximumConstraintResidual = constrainedSolve.MaximumConstraintResidual;
+            maximumConstraintMultiplier = constrainedSolve.Multipliers.Select(Math.Abs).DefaultIfEmpty(0.0).Max();
+            if (!double.IsFinite(maximumConstraintResidual) || maximumConstraintResidual > 1e-8)
+                throw new InvalidOperationException(
+                    $"The MPC solve did not satisfy the active equations. Maximum residual: {maximumConstraintResidual:E3}.");
+            progress?.Invoke(
+                $"MPC enforcement passed: {reducedConstraints.Count:N0} equation(s), maximum residual {maximumConstraintResidual:E3}.");
+        }
 
         var displacement = new double[degreeCount];
         for (var free = 0; free < freeToGlobal.Count; free++)
@@ -190,7 +235,9 @@ internal static class GeneralCadTet4Solver
             throw new InvalidOperationException("The force-equilibrium result is not finite.");
 
         watch.Stop();
-        progress?.Invoke($"Solution complete: {iterations:N0} iterations, residual {relativeResidual:E3}, equilibrium {equilibriumError:E3}.");
+        progress?.Invoke(
+            $"Solution complete: {iterations:N0} aggregate PCG iterations, residual {relativeResidual:E3}, " +
+            $"equilibrium {equilibriumError:E3}, MPC residual {maximumConstraintResidual:E3}.");
         return new GeneralCadStaticSolution
         {
             Displacements = displacement,
@@ -206,8 +253,71 @@ internal static class GeneralCadTet4Solver
             RelativeResidual = relativeResidual,
             Iterations = iterations,
             FreeDofCount = freeToGlobal.Count,
-            Elapsed = watch.Elapsed
+            Elapsed = watch.Elapsed,
+            ActiveConstraintCount = reducedConstraints.Count,
+            MaximumConstraintResidual = maximumConstraintResidual,
+            MaximumConstraintMultiplier = maximumConstraintMultiplier
         };
+    }
+
+    private static IReadOnlyList<MpcConstraintRow> BuildReducedMpcRows(
+        CadMesh mesh,
+        IReadOnlyList<ConstraintEquationDefinition>? equations,
+        IReadOnlyList<int> globalToFree)
+    {
+        if (equations is null || equations.Count == 0)
+            return Array.Empty<MpcConstraintRow>();
+
+        var rows = new List<MpcConstraintRow>(equations.Count);
+        foreach (var equation in equations)
+        {
+            if (equation is null)
+                throw new InvalidOperationException("The active MPC collection contains a null equation.");
+            equation.Validate();
+            var coefficients = new Dictionary<int, double>();
+            foreach (var term in equation.BuildDimensionallyScaledTerms())
+            {
+                if (term.Target.Kind != ConstraintTargetKind.MeshNode)
+                    throw new InvalidOperationException(
+                        $"Constraint equation '{equation.Name}' contains a remote-point DOF. " +
+                        "The native TET4 runtime currently accepts mesh-node translational MPC terms only.");
+
+                var nodeId = term.Target.NodeId!.Value;
+                var nodeIndex = nodeId - 1;
+                if ((uint)nodeIndex >= (uint)mesh.Nodes.Count)
+                    throw new InvalidOperationException(
+                        $"Constraint equation '{equation.Name}' references mesh node {nodeId}, outside the active mesh (1..{mesh.Nodes.Count}).");
+
+                var component = term.DegreeOfFreedom switch
+                {
+                    ConstraintDegreeOfFreedom.TranslationX => 0,
+                    ConstraintDegreeOfFreedom.TranslationY => 1,
+                    ConstraintDegreeOfFreedom.TranslationZ => 2,
+                    _ => throw new InvalidOperationException(
+                        $"Constraint equation '{equation.Name}' contains rotational DOF {term.DegreeOfFreedom}; " +
+                        "solid TET4 nodes expose translational DOFs only.")
+                };
+                var globalDof = nodeIndex * 3 + component;
+                var freeDof = globalToFree[globalDof];
+                if (freeDof < 0)
+                    continue;
+                coefficients[freeDof] = coefficients.GetValueOrDefault(freeDof) + term.Coefficient;
+            }
+
+            foreach (var key in coefficients.Where(pair => Math.Abs(pair.Value) <= 1e-15).Select(pair => pair.Key).ToArray())
+                coefficients.Remove(key);
+
+            if (coefficients.Count == 0)
+            {
+                if (Math.Abs(equation.RightHandSide) <= 1e-12)
+                    continue;
+                throw new InvalidOperationException(
+                    $"Constraint equation '{equation.Name}' conflicts with the fixed supports: all active terms are fixed at zero but RHS={equation.RightHandSide:G17}.");
+            }
+
+            rows.Add(new MpcConstraintRow(equation.Name, coefficients, equation.RightHandSide));
+        }
+        return rows;
     }
 
     private static void Validate(
