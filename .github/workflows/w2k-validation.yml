@@ -1,0 +1,73 @@
+name: W2K Friction Screening Validation
+
+on:
+  push:
+    branches:
+      - "validation/W2K-friction-screening"
+  workflow_dispatch:
+
+jobs:
+  validate-w2k:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install core and dev dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Fetch frozen W2J baseline
+        run: git fetch origin work/W2J-gap-closure-contact:refs/remotes/origin/work/W2J-gap-closure-contact
+      - name: Validate W2K WorkPackage contract
+        run: astermax-harness validate harness/workpackages/W2K_friction_screening.yaml
+      - name: Verify exact W2K scope budget against W2J
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.harness.policy import evaluate_scope
+          from astermax.harness.runner import get_changed_files, load_workpackage
+          package, _ = load_workpackage('harness/workpackages/W2K_friction_screening.yaml')
+          files = get_changed_files(Path('.').resolve(), 'origin/work/W2J-gap-closure-contact')
+          validation_only = '.github/workflows/w2k-validation.yml'
+          if validation_only not in files:
+              raise SystemExit('Expected validation-only workflow is absent from validation branch diff.')
+          unexpected = sorted(path for path in files if path != validation_only and path not in package.allowed_files)
+          if unexpected:
+              raise SystemExit(f'Unexpected out-of-WorkPackage files: {unexpected}')
+          candidate_files = [path for path in files if path != validation_only]
+          if sorted(candidate_files) != sorted(package.allowed_files):
+              raise SystemExit(f'Candidate diff must exactly equal W2K allowlist; candidate={sorted(candidate_files)}, allowed={sorted(package.allowed_files)}')
+          result = evaluate_scope(package, candidate_files)
+          print(result.model_dump_json(indent=2))
+          raise SystemExit(0 if result.status.value == 'PASS' else 1)
+          '@ | python -
+      - name: Run W2K adversarial tests
+        run: python -m pytest -q tests/test_friction_screening.py
+      - name: Run W2J regression tests
+        run: python -m pytest -q tests/test_exploratory_gap_closure.py
+      - name: Run all non-numerical software tests
+        run: python -m pytest -q --ignore=tests/benchmarks
+      - name: Run coding harness tests
+        run: python -m pytest -q tests/test_coding_harness.py
+      - name: Run frontier methodology tests
+        run: python -m pytest -q tests/test_frontier_methodology.py
+      - name: Run frozen frontier validity suite
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.harness.evals import run_frozen_eval_suite
+          result = run_frozen_eval_suite(Path('.').resolve(), Path('harness/evals/frontier.v1.yaml'), 'frontier_validity')
+          print(result.model_dump_json(indent=2))
+          raise SystemExit(0 if result.status.value == 'PASS' else 1)
+          '@ | python -
+      - name: Compile source tree
+        run: python -m compileall -q src
+      - name: Record evidence boundary
+        shell: pwsh
+        run: |
+          Write-Host "W2K is an exploratory scalar Coulomb screening model only."
+          Write-Host "NO_GROSS_SLIP_SCREEN is not SAFE, solver truth, or engineering acceptance."
