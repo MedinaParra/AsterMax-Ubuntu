@@ -91,6 +91,8 @@ def convert_rmed_result(
         vtu_path.relative_to(root)
     except ValueError as exc:
         raise SolverEvidenceError("VTU output escapes run directory") from exc
+    if vtu_path == (root / source_artifact.relative_path).resolve():
+        raise SolverEvidenceError("VTU output must not overwrite the solver RMED")
 
     export = write_vtu(med_result, vtu_path, relative_path=vtu_relative_path)
     vtu_artifact = _artifact(root, vtu_relative_path, "application/vnd.vtk.vtu+xml")
@@ -113,7 +115,12 @@ def convert_rmed_result(
             "vtk_array_name": field.vtk_array_name,
             "vtk_scope": field.vtk_scope,
             "derived_vtk_array_names": list(field.derived_vtk_array_names),
-            "evidence_class": "SOLVER_RESULT",
+            "source_evidence_class": "SOLVER_RESULT",
+            "artifact_evidence_class": "DETERMINISTIC_CALCULATION",
+            "derived_evidence_class": (
+                "DETERMINISTIC_CALCULATION" if field.derived_vtk_array_names else None
+            ),
+            "raw_values_preserved": True,
         }
         descriptor_fields.append(
             ResultFieldDescriptorV1(
@@ -153,6 +160,8 @@ def convert_rmed_result(
             "point_count": export.point_count,
             "cell_count": export.cell_count,
             "raw_values_preserved": True,
+            "source_evidence_class": "SOLVER_RESULT",
+            "artifact_evidence_class": "DETERMINISTIC_CALCULATION",
         },
     )
     descriptor_path = root / "output" / "result_descriptor.json"
@@ -175,6 +184,8 @@ def convert_rmed_result(
                 "raw arrays serialized with 17 significant digits; exact IEEE-754 "
                 "round-trip is required by deterministic tests"
             ),
+            "source_evidence_class": "SOLVER_RESULT",
+            "artifact_evidence_class": "DETERMINISTIC_CALCULATION",
         },
     )
     conversion_path = root / "output" / "conversion_manifest.json"
