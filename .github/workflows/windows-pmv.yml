@@ -8,6 +8,7 @@ on:
       - agent/windows-pmv-fea-core
       - agent/windows-step-to-solve-v0.2
       - agent/windows-offline-viewer-v0.8
+      - agent/windows-evidence-package-v0.9
 
 jobs:
   verify-fea-core:
@@ -36,4 +37,12 @@ jobs:
         with:
           name: astermax-offline-viewer-windows
           path: astermax_demo
+          if-no-files-found: error
+      - name: Generate analysis evidence package
+        run: python benchmarks/generate_evidence_package.py
+      - name: Upload analysis evidence package
+        uses: actions/upload-artifact@v4
+        with:
+          name: astermax-analysis-evidence-windows
+          path: astermax_evidence_package
           if-no-files-found: error
