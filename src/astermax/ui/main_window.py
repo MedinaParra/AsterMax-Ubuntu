@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
+import vtkmodules.vtkInteractionStyle  # noqa: F401 - registers interaction styles
+import vtkmodules.vtkRenderingOpenGL2  # noqa: F401 - registers OpenGL backend
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 from vtkmodules.vtkFiltersSources import vtkCylinderSource
 from vtkmodules.vtkRenderingCore import vtkActor, vtkPolyDataMapper, vtkRenderer
@@ -68,6 +70,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.machine = self._new_machine(self.project.state)
         self.thread_pool = QtCore.QThreadPool.globalInstance()
+        self._active_workers: set[MockWorkflowWorker] = set()
 
         self.setWindowTitle("AsterMax Mechanical — Future Simulation PMV")
         self.resize(1500, 900)
@@ -212,14 +215,25 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         worker = MockWorkflowWorker()
+        self._active_workers.add(worker)
         worker.signals.progress.connect(self._apply_mock_transition)
         worker.signals.completed.connect(
-            lambda: self.statusBar().showMessage(
-                "Mock workflow reached MODEL_REVIEW with audited transitions."
-            )
+            lambda worker=worker: self._worker_completed(worker)
         )
-        worker.signals.failed.connect(self._show_error)
+        worker.signals.failed.connect(
+            lambda message, worker=worker: self._worker_failed(worker, message)
+        )
         self.thread_pool.start(worker)
+
+    def _worker_completed(self, worker: MockWorkflowWorker) -> None:
+        self._active_workers.discard(worker)
+        self.statusBar().showMessage(
+            "Mock workflow reached MODEL_REVIEW with audited transitions."
+        )
+
+    def _worker_failed(self, worker: MockWorkflowWorker, message: str) -> None:
+        self._active_workers.discard(worker)
+        self._show_error(message)
 
     @QtCore.Slot(object)
     def _apply_mock_transition(self, item: object) -> None:
