@@ -1,0 +1,72 @@
+schema_version: WorkPackageV1
+workpackage_id: W2C-HUB-SPROCKET-BASELINE-001
+title: Hub/sprocket evidence baseline and fail-closed solve readiness
+issue: 34
+objective: >-
+  Encode the OT1613 hub/sprocket baseline from verified report evidence and the
+  user-supplied STEP geometry, preserve the STEP metadata/unit discrepancy while
+  recording the user's explicit millimetre confirmation, and prevent an
+  authentic critical solver job from being authorized until required load,
+  assembly, material and contact inputs have provenance.
+allowed_files:
+  - "examples/hub_sprocket/ot1613_baseline.json"
+  - "harness/workpackages/W2C_hub_sprocket_baseline.yaml"
+  - "src/astermax/domain/hub_sprocket.py"
+  - "src/astermax/domain/hub_sprocket_readiness.py"
+  - "tests/test_hub_sprocket_baseline.py"
+forbidden_paths:
+  - "tests/benchmarks/**"
+  - "src/astermax/solver/**"
+  - ".github/workflows/**"
+  - "harness/evals/**"
+max_files_changed: 5
+prohibited_actions:
+  - run or claim an authentic OT1613 FEA result from incomplete evidence
+  - invent jam torque, start torque, chain loads, material, friction or bolt preload
+  - silently rescale the STEP despite its METRE declaration; preserve that metadata conflict and require explicit normalization provenance
+  - treat nominal CAD touching geometry as the measured 0.10-0.40 mm GAP state
+  - replace the measured GAP range with an unlabelled midpoint
+  - relabel Ø792, Ø795 or Ø796.87 as an OEM posterior-seat specification
+  - silently normalize the conflicting OT identifiers
+  - accept a generic/default steel or arbitrary friction coefficient as authentic baseline evidence
+acceptance_criteria:
+  - HubSprocketBaselineV1 records source provenance for every populated engineering fact.
+  - The uploaded STEP is represented by SHA-256, byte size, AP214 metadata, six-solid inventory and deterministic CAD inspection facts.
+  - The STEP METRE declaration remains preserved as conflicting metadata while analysis coordinates are confirmed as millimetres only through explicit USER_INPUT plus drawing evidence.
+  - Confirmed CAD millimetre normalization requires a non-empty human_confirmation_source_ids provenance link.
+  - Baseline preserves one hub plus five equal-volume segment solids and identifies nominal CAD contact as distinct from measured GAP evidence.
+  - Current baseline evaluates BLOCKED and reports exact missing input/model/identity blockers; CAD unit normalization is no longer a blocker after explicit user confirmation.
+  - require_ready_for_solver raises while readiness is BLOCKED.
+  - All mandatory inputs plus derived friction/preload with provenance can transition the measured-GAP critical case to READY.
+  - PROPOSED_MODELING_ASSUMPTION does not count as authentic ready evidence for friction or critical physical inputs.
+  - Ø792/Ø795/Ø796.87 cannot be represented as OEM posterior seating diameter while the report states that specification is unavailable.
+  - Measured GAP remains a 0.10-0.40 mm range and a single midpoint is rejected.
+  - The OT-1613 / OT-SKM-1613 / OT-SKM-1713 discrepancy remains surfaced until confirmed.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - unit_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - evidence_provenance_confusion
+  - cad_unit_misinterpretation
+  - measured_vs_nominal_gap_confusion
+  - assumed_material_or_friction
+  - identifier_silent_normalization
+evaluation_budget:
+  max_agent_turns: 12
+  max_tool_calls: 60
+  max_retries: 4
+  max_wall_clock_seconds: 2400
+metadata:
+  methodology: evidence_driven_autonomous_engineering
+  baseline_source_report: SKM-ING-IT-001 Rev.3
+  cad_sha256: ed305386f592943aaf4df6dbbca420808ec032c503e4e3456e15db0ecc19ca88
+  cad_raw_file_committed: false
+  cad_analysis_unit: mm
+  cad_analysis_unit_confirmation: USER_INPUT_2026-08-26
+  solve_case: OT1613_MEASURED_GAP_CRITICAL
+  authentic_fea_result_claimed: false

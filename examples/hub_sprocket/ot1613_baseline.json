@@ -1,0 +1,104 @@
+{
+  "schema_version": "HubSprocketBaselineV1",
+  "baseline_id": "OT1613-HUB-SPROCKET-EVIDENCE-BASELINE-001",
+  "client": "MINERA ANTUCOYA",
+  "component": "CUBO SPROCKET Y SEGMENTOS PARTIDOS",
+  "sources": {
+    "report_rev3_p1": {"source_id":"report_rev3_p1","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":1,"section":"Cover / identification","external_ref":null,"notes":null},
+    "report_rev3_p3": {"source_id":"report_rev3_p3","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":3,"section":"1.1 Complemento tecnico ITM","external_ref":null,"notes":null},
+    "report_rev3_p5": {"source_id":"report_rev3_p5","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":5,"section":"2. Revision geometrica del asiento","external_ref":null,"notes":null},
+    "report_rev3_p7": {"source_id":"report_rev3_p7","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":7,"section":"2.1 Antecedente historico OT-SKM-1491","external_ref":null,"notes":null},
+    "report_rev3_p9": {"source_id":"report_rev3_p9","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":9,"section":"2.2 Metodologia de ingenieria reversa","external_ref":null,"notes":null},
+    "report_rev3_p11": {"source_id":"report_rev3_p11","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":11,"section":"4. Simulacion requerida en SolidWorks","external_ref":null,"notes":null},
+    "report_rev3_p12": {"source_id":"report_rev3_p12","title":"Informe SKM Analisis Cubo Segmentos ITM Rev3","source_kind":"engineering_report","document_code":"SKM-ING-IT-001","revision":"3","document_date":"2026-08-11","page":12,"section":"5. Datos y condiciones faltantes del cliente","external_ref":null,"notes":null},
+    "cad_step": {"source_id":"cad_step","title":"CONJUNTO A MODELAR.stp","source_kind":"user_supplied_cad","document_code":null,"revision":null,"document_date":"2026-08-05","page":null,"section":null,"external_ref":"sha256:ed305386f592943aaf4df6dbbca420808ec032c503e4e3456e15db0ecc19ca88","notes":"Uploaded STEP AP214 inspected with CadQuery 2.8.0 / OCP 7.9.3.1. STEP metadata declares METRE while numeric geometry reproduces the report drawing diameter 795."},
+    "user_cad_units_2026_08_26": {"source_id":"user_cad_units_2026_08_26","title":"User confirmation of STEP modelling units","source_kind":"USER_INPUT","document_code":null,"revision":null,"document_date":"2026-08-26","page":null,"section":"Chat confirmation for CONJUNTO A MODELAR.stp","external_ref":null,"notes":"User explicitly confirmed that the supplied STEP is in millimetres: 'Esta en mm'. This resolves the intended analysis-unit interpretation without silently rescaling the numeric geometry."}
+  },
+  "identifiers": {
+    "observations": [
+      {"value":"OT-1613","context":"report title/header","source_ids":["report_rev3_p1"]},
+      {"value":"OT-SKM-1713","context":"cover-table OT Interna field","source_ids":["report_rev3_p1"]},
+      {"value":"OT-SKM-1613","context":"test-flange reference in geometry review","source_ids":["report_rev3_p5"]}
+    ],
+    "confirmed_value": null,
+    "confirmation_source_ids": []
+  },
+  "segment": {
+    "reference":{"value":"S01092N0M05","status":"KNOWN_FACT","unit":null,"source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "teeth_per_segment":{"value":5,"status":"KNOWN_FACT","unit":"count","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "bolts_per_segment":{"value":6,"status":"KNOWN_FACT","unit":"count","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "segments_per_sprocket":{"value":5,"status":"KNOWN_FACT","unit":"count","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "mass_kg":{"value":26.0,"status":"KNOWN_FACT","unit":"kg","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "pitch_mm":{"value":240.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "width_mm":{"value":98.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "diameter_a_mm":{"value":976.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "diameter_c_mm":{"value":876.86,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "diameter_d_mm":{"value":682.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":"General diameter D; explicitly not the posterior pad seat diameter."},
+    "bolt_circle_mm":{"value":732.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":null},
+    "hole_diameter_mm":{"value":24.5,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p3"],"derivation":null,"notes":null}
+  },
+  "hub": {
+    "current_drawing_reference_diameter_mm":{"value":795.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p5"],"derivation":null,"notes":"Drawing reference only; not OEM posterior-seat specification."},
+    "bolt_circle_mm":{"value":732.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p5"],"derivation":null,"notes":null},
+    "hole_count":{"value":30,"status":"KNOWN_FACT","unit":"count","source_ids":["report_rev3_p5"],"derivation":null,"notes":null},
+    "hole_diameter_mm":{"value":25.0,"status":"KNOWN_FACT","unit":"mm","source_ids":["report_rev3_p5"],"derivation":null,"notes":null},
+    "oem_posterior_seat_spec_available":{"value":false,"status":"KNOWN_FACT","unit":null,"source_ids":["report_rev3_p5"],"derivation":null,"notes":null}
+  },
+  "geometry": {
+    "file_name":"CONJUNTO A MODELAR.stp",
+    "sha256":"ed305386f592943aaf4df6dbbca420808ec032c503e4e3456e15db0ecc19ca88",
+    "byte_size":3117839,
+    "media_type":"model/step",
+    "step_schema":"AP214 / AUTOMOTIVE_DESIGN",
+    "exporter":"Spatial InterOp 3D",
+    "declared_length_unit":"METRE",
+    "intended_analysis_length_unit":"mm",
+    "unit_normalization_status":"CONFIRMED_MM_FROM_DRAWING",
+    "normalization_basis_source_ids":["cad_step","report_rev3_p5","user_cad_units_2026_08_26"],
+    "human_confirmation_source_ids":["user_cad_units_2026_08_26"],
+    "solid_count":6,
+    "hub_solid_index_1based":3,
+    "segment_solid_indices_1based":[1,2,4,5,6],
+    "hub_bbox_numeric":{"x_length":370.00000020000857,"y_length":795.0000002,"z_length":795.0000002000012},
+    "segment_axial_extent_numeric":99.40000000000123,
+    "segment_volume_numeric":3163413.8127938365,
+    "segment_count_with_identical_volume":5,
+    "nominal_segment_hub_min_distance_numeric":[2.8421709430404007e-12,1.2179125326989509e-12,1.1368683772161603e-13,1.1368683772161603e-13,2.8421709430404007e-12],
+    "inspection_tool":"CadQuery 2.8.0 / OCP 7.9.3.1",
+    "inspection_source_ids":["cad_step"],
+    "notes":"One hub solid plus five equal-volume segment solids. User confirmed the CAD modelling coordinates are millimetres; no 1000x geometric rescale is applied. The conflicting STEP METRE declaration remains preserved as metadata. CAD minimum separation is numerically zero, so this file represents nominal touching geometry and must not replace the measured 0.10-0.40 mm GAP evidence."
+  },
+  "diameter_references": [
+    {"diameter_mm":792.0,"role":"HISTORICAL_REFERENCE","status":"KNOWN_FACT","source_ids":["report_rev3_p7"],"notes":"OT-SKM-1491 historical L1 reference associated with fractured hubs; not OEM seat tolerance."},
+    {"diameter_mm":795.0,"role":"CURRENT_DRAWING_REFERENCE","status":"KNOWN_FACT","source_ids":["report_rev3_p5"],"notes":"Current drawing geometry reference; not OEM seat tolerance."},
+    {"diameter_mm":796.87,"role":"TEST_FLANGE","status":"MEASURED","source_ids":["report_rev3_p5"],"notes":"OT-SKM-1613 test flange used when local GAP 0.10-0.40 mm was measured."}
+  ],
+  "measured_gap": {"minimum_mm":0.1,"maximum_mm":0.4,"status":"MEASURED","source_ids":["report_rev3_p5"],"test_flange_diameter_mm":796.87,"representation":"RANGE","notes":"Measured local GAP range; do not replace with a midpoint."},
+  "model_intent": {
+    "segment_count":{"value":5,"status":"KNOWN_FACT","unit":"count","source_ids":["report_rev3_p11"],"derivation":null,"notes":null},
+    "bolt_connector_count":{"value":30,"status":"KNOWN_FACT","unit":"count","source_ids":["report_rev3_p11"],"derivation":null,"notes":null},
+    "contact_mode":{"value":"NO_PENETRATION_WITH_FRICTION","status":"PROPOSED_MODELING_ASSUMPTION","unit":null,"source_ids":["report_rev3_p11"],"derivation":null,"notes":null},
+    "allow_opening":{"value":true,"status":"PROPOSED_MODELING_ASSUMPTION","unit":null,"source_ids":["report_rev3_p11"],"derivation":null,"notes":null},
+    "allow_sliding":{"value":true,"status":"PROPOSED_MODELING_ASSUMPTION","unit":null,"source_ids":["report_rev3_p11"],"derivation":null,"notes":null},
+    "friction_coefficient":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p11","report_rev3_p12"],"derivation":null,"notes":"Friction is required by the selected contact model but no coefficient is supported yet."},
+    "nominal_bolt_preload_n":{"value":null,"status":"MISSING_REQUIRED","unit":"N","source_ids":["report_rev3_p11","report_rev3_p12"],"derivation":null,"notes":null},
+    "minimum_probable_bolt_preload_n":{"value":null,"status":"MISSING_REQUIRED","unit":"N","source_ids":["report_rev3_p11","report_rev3_p12"],"derivation":null,"notes":null},
+    "optimized_seating_diameter_mm":{"value":null,"status":"PENDING_METROLOGY","unit":"mm","source_ids":["report_rev3_p9","report_rev3_p12"],"derivation":null,"notes":null},
+    "primary_load_mode":{"value":"MAXIMUM_JAM_TORQUE_AS_EQUIVALENT_TOOTH_LOAD","status":"PROPOSED_MODELING_ASSUMPTION","unit":null,"source_ids":["report_rev3_p11"],"derivation":null,"notes":null},
+    "required_outputs":{"value":["von_mises","principal_stress","contact_pressure","contact_opening","contact_sliding","bolt_force","safety_evidence"],"status":"PROPOSED_MODELING_ASSUMPTION","unit":null,"source_ids":["report_rev3_p11"],"derivation":null,"notes":null}
+  },
+  "required_inputs": {
+    "jam_torque_knm":{"value":null,"status":"MISSING_REQUIRED","unit":"kN*m","source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "loaded_start_torque_knm":{"value":null,"status":"MISSING_REQUIRED","unit":"kN*m","source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "sprocket_speed_rpm":{"value":null,"status":"MISSING_REQUIRED","unit":"rpm","source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "chain_branch_tensions_kn":{"value":null,"status":"MISSING_REQUIRED","unit":"kN","source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "wrap_angle_and_loaded_teeth":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "right_left_load_split_percent":{"value":null,"status":"MISSING_REQUIRED","unit":"percent","source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "axial_thrust_or_misalignment":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "bolt_tightening_torque_sequence":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "bolt_lubricant":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "hub_material_and_properties":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p12"],"derivation":null,"notes":null},
+    "service_history":{"value":null,"status":"MISSING_REQUIRED","unit":null,"source_ids":["report_rev3_p12"],"derivation":null,"notes":null}
+  },
+  "metadata": {"evidence_policy":"No solver execution is authorized from this baseline while readiness is BLOCKED.","cad_geometry_role":"NOMINAL_GEOMETRY_ONLY","measured_gap_role":"SEPARATE_MEASURED_EVIDENCE_TO_BE_PARAMETERIZED","cad_unit_confirmation":"USER_CONFIRMED_MM_2026-08-26"}
+}
