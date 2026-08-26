@@ -1,0 +1,65 @@
+schema_version: WorkPackageV1
+workpackage_id: W2G-EVIDENCE-READINESS-001
+title: Evidence readiness ledger and torque-angle kinematics
+issue: 44
+objective: >-
+  Add a generic fail-closed evidence ledger that distinguishes CLOSED, PARTIAL
+  and BLOCKED engineering inputs, and permits deterministic thread-angle
+  kinematics without misrepresenting ideal nut advance as bolt preload.
+allowed_files:
+  - "harness/workpackages/W2G_evidence_readiness.yaml"
+  - "src/astermax/domain/evidence_readiness.py"
+  - "tests/test_evidence_readiness.py"
+forbidden_paths:
+  - "assets/**"
+  - "**/*.stp"
+  - "**/*.step"
+  - "**/*.pdf"
+  - "**/*.docx"
+  - "tests/benchmarks/**"
+  - "src/astermax/solver/**"
+  - ".github/workflows/**"
+  - "harness/evals/**"
+max_files_changed: 3
+prohibited_actions:
+  - commit confidential client source documents or email contents
+  - let ASSUMPTION close a solver-required evidence field
+  - let historical evidence alone silently close a current order-specific field
+  - convert tightening torque or turn angle directly to preload without an accepted physical basis
+  - label ideal thread advance as bolt elongation, clamp force or preload
+  - weaken W2F FEA authorization requirements to obtain a solver PASS
+  - claim an authentic OT1613 FEA result from this evidence-management slice
+acceptance_criteria:
+  - CLOSED evidence requires CURRENT_AUTHORITATIVE or PUBLIC_MANUFACTURER support.
+  - ASSUMPTION cannot participate in a CLOSED evidence item.
+  - Historical authoritative evidence may remain PARTIAL but cannot close a current requirement by itself.
+  - Thread pitch and ideal nut advance are deterministic kinematic derivations only.
+  - Thread-angle derivation always leaves preload_n unset.
+  - A documented tightening procedure can be CLOSED while the preload model remains PARTIAL.
+  - Readiness decisions enumerate closed, partial, blocked and missing required fields deterministically.
+  - Only a ledger with every required field CLOSED recommends solver authorization.
+  - No confidential source content is committed.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - unit_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - evidence_strength_inflation
+  - historical_to_current_provenance_leak
+  - torque_to_preload_overclaim
+  - confidential_source_exposure
+  - solver_authorization_bypass
+evaluation_budget:
+  max_agent_turns: 8
+  max_tool_calls: 35
+  max_retries: 3
+  max_wall_clock_seconds: 1200
+metadata:
+  methodology: evidence_driven_autonomous_engineering
+  parent_slice: W2F-FEA-AUTHORIZATION
+  confidential_sources_committed: false
+  authentic_fea_result_claimed: false
