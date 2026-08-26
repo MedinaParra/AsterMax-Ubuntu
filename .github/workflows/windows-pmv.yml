@@ -1,0 +1,21 @@
+name: Windows PMV Core
+
+on:
+  push:
+    branches:
+      - main
+      - "pmv/**"
+  pull_request:
+
+jobs:
+  core-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install core and test dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Run deterministic core tests
+        run: python -m pytest
