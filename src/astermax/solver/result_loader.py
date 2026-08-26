@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from astermax.solver.bridge import verify_artifact
 from astermax.solver.contracts import (
@@ -204,9 +204,12 @@ def load_converted_solver_result(
         raise SolverEvidenceError("conversion manifest escapes run directory") from exc
     if not conversion_path.is_file():
         raise SolverEvidenceError("missing conversion manifest")
-    conversion = ResultConversionManifestV1.model_validate_json(
-        conversion_path.read_text(encoding="utf-8")
-    )
+    try:
+        conversion = ResultConversionManifestV1.model_validate_json(
+            conversion_path.read_text(encoding="utf-8")
+        )
+    except ValidationError as exc:
+        raise SolverEvidenceError("invalid conversion manifest") from exc
     if conversion.converter_id != "astermax.med_to_vtu" or conversion.converter_version != "astermax-med3-v1":
         raise SolverEvidenceError("untrusted conversion identity")
     if conversion.run_id != request.run_id or conversion.request_id != request.request_id:
@@ -235,9 +238,12 @@ def load_converted_solver_result(
     descriptor_artifact = converted_by_path.get("output/result_descriptor.json")
     if descriptor_artifact is None:
         raise SolverEvidenceError("conversion manifest does not declare output/result_descriptor.json")
-    descriptor = ResultDescriptorV1.model_validate_json(
-        (run_directory / descriptor_artifact.relative_path).read_text(encoding="utf-8")
-    )
+    try:
+        descriptor = ResultDescriptorV1.model_validate_json(
+            (run_directory / descriptor_artifact.relative_path).read_text(encoding="utf-8")
+        )
+    except ValidationError as exc:
+        raise SolverEvidenceError("invalid result descriptor") from exc
     if (
         descriptor.source_manifest_sha256 != manifest_hash
         or descriptor.source_artifact_sha256 != conversion.source_artifact.sha256
