@@ -1,0 +1,61 @@
+schema_version: WorkPackageV1
+workpackage_id: W2M-MESH-CONVERGENCE-POST-001
+title: Mesh convergence and ANSYS-style result postprocessor
+objective: >-
+  Preserve complete finite-element topology and implement deterministic mesh-convergence
+  evidence plus a standard engineering VTK postprocessor that separates raw elemental
+  results from display-only nodal averaging.
+issue: 65
+allowed_files:
+  - src/astermax/solver/result_post.py
+  - src/astermax/ui/ansys_post.py
+  - tests/benchmarks/test_result_post_convergence.py
+  - tests/test_ansys_post.py
+  - harness/workpackages/W2M_mesh_convergence_post.yaml
+forbidden_paths:
+  - .github/workflows/**
+  - harness/evals/**
+  - src/astermax/solver/local_tet4.py
+  - src/astermax/solver/code_aster_wsl.py
+max_files_changed: 5
+prohibited_actions:
+  - commit OT1613 CAD or private result artifacts
+  - fabricate Tet4 or Tet10 connectivity for legacy SIM-008 centroid data
+  - present nodal-averaged display stress as raw solver stress
+  - use singular maximum stress as the sole convergence gate
+  - compare Tet4 and Tet10 as equivalent mesh-convergence evidence
+  - color unsolved CAD bodies with numerical stress
+  - promote exploratory OT1613 results to acceptance evidence
+acceptance_criteria:
+  - complete topology preservation is mandatory in result manifests
+  - M0/M1/M2 convergence checks displacement, reaction, contact resultant and active area
+  - von Mises and contact-pressure p95/p99 are convergence gate metrics
+  - raw maxima remain diagnostic and cannot independently pass or fail convergence
+  - Tet4 and Tet10 convergence comparisons fail closed
+  - VTK postprocessor supports raw elemental and deterministic nodal-averaged display modes
+  - deformation uses an actual three-component displacement field and an explicit scale factor
+  - section/clipping planes and min/max probes operate deterministically on real result grids
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+  - numerical_validation
+numerical_impact: true
+human_merge_required: true
+metadata:
+  parent_slice: W2L-local-tet4-kernel
+  private_follow_on: SIM-009 M0/M1/M2 convergence study
+  initial_mesh_ladder:
+    M0: {global_mm: 8.0, contact_mm: 3.0}
+    M1: {global_mm: 6.0, contact_mm: 2.0}
+    M2: {global_mm: 4.0, contact_mm: 1.5}
+    M3_optional: {critical_local_mm: 1.0}
+  initial_convergence_thresholds:
+    displacement: 0.02
+    reaction: 0.02
+    contact_resultant: 0.02
+    active_contact_area: 0.05
+    von_mises_p95_p99: 0.05
+    contact_pressure_p95_p99: 0.05
