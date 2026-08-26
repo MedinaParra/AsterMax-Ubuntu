@@ -52,8 +52,30 @@ def test_scope_enforces_change_budget() -> None:
 
 def test_numerical_work_requires_numerical_gate() -> None:
     item = package(numerical_impact=True)
-    errors = validate_workpackage(item, {"scope_policy", "unit_tests", "numerical_validation"})
+    errors = validate_workpackage(
+        item,
+        {"scope_policy", "unit_tests", "numerical_validation", "frontier_validity"},
+    )
     assert "numerical_impact requires numerical_validation gate" in errors
+
+
+def test_validity_risks_require_frozen_frontier_gate() -> None:
+    item = package(validity_risks=["reward_hacking"])
+    errors = validate_workpackage(
+        item,
+        {"scope_policy", "unit_tests", "frontier_validity"},
+    )
+    assert "validity_risks require frontier_validity gate" in errors
+
+
+def test_scope_evidence_records_budget_and_validity_risks() -> None:
+    item = package(
+        validity_risks=["scope_escape"],
+        evaluation_budget={"max_tool_calls": 20, "max_retries": 2},
+    )
+    result = evaluate_scope(item, ["src/astermax/solver/bridge.py"])
+    assert result.evidence["validity_risks"] == ["scope_escape"]
+    assert result.evidence["evaluation_budget"]["max_tool_calls"] == 20
 
 
 def test_unknown_gate_is_rejected() -> None:
