@@ -25,3 +25,11 @@ jobs:
           name: connected-scaling-windows
           path: connected_scaling_report.json
           if-no-files-found: error
+      - name: Generate offline result viewer demo
+        run: python benchmarks/generate_offline_viewer.py
+      - name: Upload offline result viewer demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: astermax-offline-viewer-windows
+          path: astermax_demo
+          if-no-files-found: error
