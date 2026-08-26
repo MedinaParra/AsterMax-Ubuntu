@@ -46,26 +46,39 @@ jobs:
       - name: Probe Code_Aster validation tooling
         shell: bash
         run: |
-          set -euo pipefail
-          docker run --rm --entrypoint bash "$ASTER_IMAGE" -lc '
+          set -o pipefail
+          docker run --rm --entrypoint bash "$ASTER_IMAGE" -ic '
             set -euo pipefail
-            command -v run_aster
-            command -v run_ctest
-            run_aster --help >/dev/null
-            run_ctest --help >/dev/null
-          ' | tee code_aster_probe.log
+            echo "PATH=${PATH}"
+            run_aster_path="$(command -v run_aster || true)"
+            run_ctest_path="$(command -v run_ctest || true)"
+            if [ -z "$run_ctest_path" ]; then
+              run_ctest_path="$(find /opt /usr/local /home -type f -name run_ctest -perm -111 -print -quit 2>/dev/null || true)"
+            fi
+            echo "RUN_ASTER_PATH=${run_aster_path:-MISSING}"
+            echo "RUN_CTEST_PATH=${run_ctest_path:-MISSING}"
+            test -n "$run_aster_path"
+            test -n "$run_ctest_path"
+            "$run_ctest_path" --help 2>&1 | head -40 || true
+          ' 2>&1 | tee code_aster_probe.log
 
       - name: Run pinned analytical reference testcase
         shell: bash
         run: |
-          set -euo pipefail
+          set -o pipefail
           docker run --rm --entrypoint bash \
             -e ASTER_REFERENCE_TEST="$ASTER_REFERENCE_TEST" \
-            "$ASTER_IMAGE" -lc '
+            "$ASTER_IMAGE" -ic '
               set -euo pipefail
+              run_ctest_path="$(command -v run_ctest || true)"
+              if [ -z "$run_ctest_path" ]; then
+                run_ctest_path="$(find /opt /usr/local /home -type f -name run_ctest -perm -111 -print -quit 2>/dev/null || true)"
+              fi
+              test -n "$run_ctest_path"
               mkdir -p /tmp/astermax-resutest
               echo "ASTERMAX_REFERENCE_TEST=${ASTER_REFERENCE_TEST}"
-              run_ctest --resutest=/tmp/astermax-resutest -j 1 -R "^${ASTER_REFERENCE_TEST}$"
+              echo "ASTERMAX_RUN_CTEST=${run_ctest_path}"
+              "$run_ctest_path" --resutest=/tmp/astermax-resutest -j 1 -R "^${ASTER_REFERENCE_TEST}$"
             ' 2>&1 | tee code_aster_reference.log
           if grep -Fq "No tests were found" code_aster_reference.log; then
             echo "Pinned Code_Aster testcase was not discovered." >&2
