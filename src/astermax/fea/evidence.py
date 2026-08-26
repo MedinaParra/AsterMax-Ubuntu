@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+import shutil
 from typing import Any
 
 import numpy as np
@@ -60,6 +61,32 @@ def mesh_fingerprint(nodes_mm: np.ndarray, elements: np.ndarray) -> str:
     return sha256_bytes(header + b"\0" + nodes.tobytes(order="C") + b"\0" + elems.tobytes(order="C"))
 
 
+def stage_source_file(
+    package_dir: str | Path,
+    source_path: str | Path,
+    *,
+    target_name: str | None = None,
+) -> Path:
+    """Copy an immutable input snapshot into the evidence package.
+
+    The staged file is the source that the evidence manifest subsequently hashes
+    and verifies.  This prevents a manifest from pointing at an external CAD file
+    whose bytes can change independently of the published package.
+    """
+    root = Path(package_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    source = Path(source_path)
+    if not source.is_file():
+        raise ValueError("source_path must reference an existing file")
+    name = target_name or source.name
+    if Path(name).name != name or not name:
+        raise ValueError("target_name must be a plain file name")
+    target = root / name
+    if source.resolve() != target.resolve():
+        shutil.copyfile(source, target)
+    return target
+
+
 @dataclass(frozen=True)
 class EvidenceArtifact:
     role: str
@@ -100,6 +127,24 @@ def _artifact(package_dir: Path, path: Path, role: str) -> EvidenceArtifact:
     )
 
 
+def _source_record(root: Path, source_path: str | Path | None, source_kind: str) -> dict[str, Any]:
+    if source_path is None:
+        return {"kind": str(source_kind), "path": None, "sha256": None, "size_bytes": None}
+    source_file = Path(source_path).resolve()
+    try:
+        relative = source_file.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError("source_path must be staged inside package_dir before manifest generation") from exc
+    if not source_file.is_file():
+        raise ValueError("source_path must reference an existing file")
+    return {
+        "kind": str(source_kind),
+        "path": relative.as_posix(),
+        "sha256": sha256_file(source_file),
+        "size_bytes": int(source_file.stat().st_size),
+    }
+
+
 def write_analysis_evidence_manifest(
     package_dir: str | Path,
     *,
@@ -114,32 +159,18 @@ def write_analysis_evidence_manifest(
     converged_claim: bool = False,
     industrial_validation_claim: bool = False,
 ) -> AnalysisEvidenceManifest:
-    """Write a deterministic, hash-chained evidence manifest.
+    """Write a deterministic, tamper-evident analysis manifest.
 
-    The chain is tamper-evident, not cryptographically signed. A future release may
-    attach a digital signature to the manifest hash without changing solver output.
+    Source CAD must be staged inside ``package_dir``.  The source bytes, mesh,
+    analysis definition, solver identity and result artifacts are all covered by
+    the root chain hash.  This is integrity evidence, not a digital signature.
     """
     root = Path(package_dir)
     root.mkdir(parents=True, exist_ok=True)
     nodes = np.asarray(nodes_mm, dtype=float)
     elems = np.asarray(elements, dtype=int)
     mesh_hash = mesh_fingerprint(nodes, elems)
-
-    if source_path is None:
-        source = {
-            "kind": str(source_kind),
-            "path": None,
-            "sha256": None,
-        }
-    else:
-        source_file = Path(source_path)
-        if not source_file.is_file():
-            raise ValueError("source_path must reference an existing file")
-        source = {
-            "kind": str(source_kind),
-            "path": source_file.name,
-            "sha256": sha256_file(source_file),
-        }
+    source = _source_record(root, source_path, source_kind)
 
     artifact_records = [_artifact(root, root / Path(path), role) for path, role in artifacts]
     if len({a.relative_path for a in artifact_records}) != len(artifact_records):
@@ -154,7 +185,7 @@ def write_analysis_evidence_manifest(
         "industrial_validation": bool(industrial_validation_claim),
     }
     chain_payload = {
-        "schema_version": "AsterMaxAnalysisEvidenceV1",
+        "schema_version": "AsterMaxAnalysisEvidenceV2",
         "classification": str(classification),
         "analysis_type": "LINEAR_STATIC_3D_TET4",
         "units": {"length": "mm", "force": "N", "stress": "MPa", "moment": "N*mm"},
@@ -213,13 +244,30 @@ def verify_analysis_evidence_manifest(package_dir: str | Path) -> dict[str, Any]
         if int(path.stat().st_size) != int(item["size_bytes"]):
             artifact_errors.append(f"size:{item['relative_path']}")
 
+    source_errors: list[str] = []
+    source = payload.get("source", {})
+    source_path = source.get("path")
+    if source_path is not None:
+        path = root / source_path
+        if not path.is_file():
+            source_errors.append(f"missing:{source_path}")
+        else:
+            if sha256_file(path) != source.get("sha256"):
+                source_errors.append(f"sha256:{source_path}")
+            expected_size = source.get("size_bytes")
+            if expected_size is not None and int(path.stat().st_size) != int(expected_size):
+                source_errors.append(f"size:{source_path}")
+
     chain_payload = {key: value for key, value in payload.items() if key != "chain_sha256"}
     chain_ok = canonical_sha256(chain_payload) == payload.get("chain_sha256")
+    valid = bool(chain_ok and not artifact_errors and not source_errors)
     return {
         "schema_version": payload.get("schema_version"),
         "chain_ok": bool(chain_ok),
         "artifacts_ok": not artifact_errors,
+        "source_ok": not source_errors,
         "artifact_errors": artifact_errors,
-        "valid": bool(chain_ok and not artifact_errors),
+        "source_errors": source_errors,
+        "valid": valid,
         "chain_sha256": payload.get("chain_sha256"),
     }
