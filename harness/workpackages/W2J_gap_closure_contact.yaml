@@ -1,0 +1,58 @@
+schema_version: WorkPackageV1
+workpackage_id: W2J-GAP-CLOSURE-CONTACT-001
+title: Exploratory GAP closure contact pack for Code_Aster
+objective: >-
+  Generate a quarantined nonlinear Code_Aster case pack for posterior GAP closure under
+  equivalent clamp loading, while preserving the distinction between exploratory
+  assumptions and authenticated engineering evidence.
+issue: 54
+allowed_files:
+  - src/astermax/solver/private_meshing.py
+  - src/astermax/solver/exploratory_gap_closure.py
+  - tests/test_exploratory_gap_closure.py
+  - harness/workpackages/W2J_gap_closure_contact.yaml
+forbidden_paths:
+  - .github/**
+  - tests/benchmarks/**
+  - src/astermax/harness/**
+  - src/astermax/solver/wsl_worker.py
+  - '**/*.step'
+  - '**/*.stp'
+  - '**/*.med'
+  - '**/*.mmed'
+max_files_changed: 4
+prohibited_actions:
+  - commit private CAD or MED bytes
+  - present equivalent uniform clamp traction as individual bolt pretension
+  - introduce operational chain torque into the first GAP-closure case
+  - promote solver convergence to authoritative evidence
+  - silently change topology, scale geometry or bypass mesh SHA verification
+  - use arbitrary mesh entity order as support or contact identity
+  - remove EXPLORATORY_NOT_FOR_ACCEPTANCE quarantine
+acceptance_criteria:
+  - W2I private mesh job adds geometric HUB_INNER_BORE and SEGMENT_OUTER_CLAMP groups without entity-order assumptions
+  - clamp surface area is recorded in mesh-execution evidence
+  - Code_Aster pack verifies MED hash, mesh evidence, unit system and required physical groups before generation
+  - equivalent clamp traction exactly preserves 30-times-per-bolt assumed resultant over the recorded clamp area
+  - hub and segment materials are explicit exploratory assumptions
+  - posterior contact uses Code_Aster nonlinear contact with Coulomb friction and a ramped clamp load
+  - hub inner bore is the only support boundary in this first case
+  - output request includes DEPL, SIGM_ELNO and CONT_NOEU when the chosen Code_Aster formulation provides it
+  - no operational torque or chain load is present
+  - all generated manifests remain EXPLORATORY_NOT_FOR_ACCEPTANCE and authentic_solver_authorized=false
+  - tests prove tamper detection, group completeness, quarantine and equivalent-force preservation
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+numerical_impact: false
+human_merge_required: true
+metadata:
+  target_solver: Code_Aster 18.1.0
+  study: GAP closure under equivalent clamp traction
+  evidence_boundary: >-
+    W2J validates deterministic case-pack generation only. Until the private MED is created
+    and this exact case is executed by a verified Code_Aster worker, no numerical GAP closure,
+    stress or contact result is claimed.
