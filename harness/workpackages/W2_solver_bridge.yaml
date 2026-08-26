@@ -25,6 +25,7 @@ prohibited_actions:
   - silently downgrade unsupported contact or nonlinear physics
   - weaken verification tolerances to make a test pass
   - bypass SolverRunManifestV1 provenance
+  - edit frozen evaluation material to improve the score
 acceptance_criteria:
   - Solver request and result use versioned contracts.
   - Backend capability mismatch fails explicitly.
@@ -32,15 +33,31 @@ acceptance_criteria:
   - Authentic returned fields can be loaded by the Windows result path.
   - Missing or malformed solver artifacts fail closed.
   - A benchmark or reference case establishes numerical evidence for the implemented path.
+  - Release-relevant claims have machine-checkable evidence lineage.
+  - Frontier validity suite passes without modifying the frozen suite.
 required_gates:
   - scope_policy
   - syntax_compile
   - harness_tests
+  - frontier_validity
   - unit_tests
   - numerical_validation
 numerical_impact: true
 human_merge_required: true
+validity_risks:
+  - reward_hacking
+  - scope_escape
+  - evidence_fabrication
+  - provenance_loss
+  - unsupported_numerical_claim
+  - silent_fallback
+evaluation_budget:
+  max_agent_turns: 24
+  max_tool_calls: 80
+  max_retries: 4
+  max_wall_clock_seconds: 7200
 metadata:
   target_backend: code_aster_wsl2
   future_adapter: pyansys
   evidence_rule: solver_truth_only
+  methodology: evidence_driven_autonomous_engineering
