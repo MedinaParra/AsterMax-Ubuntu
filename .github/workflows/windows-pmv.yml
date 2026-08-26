@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "pmv/**"
+      - "infra/**"
   pull_request:
 
 jobs:
@@ -17,5 +18,13 @@ jobs:
           python-version: "3.11"
       - name: Install core and test dependencies
         run: python -m pip install -e ".[dev]"
-      - name: Run deterministic core tests
-        run: python -m pytest
+      - name: Run deterministic core tests only
+        run: python -m pytest --ignore=tests/benchmarks
+      - name: Assert numerical benchmarks remain present
+        shell: pwsh
+        run: |
+          $benchmarks = Get-ChildItem tests/benchmarks -Filter "test_*.py" -File
+          if (-not $benchmarks) {
+            throw "Numerical benchmark suite is missing. Windows core must not pass by deleting the numerical gate."
+          }
+          $benchmarks | ForEach-Object { Write-Host "NUMERICAL_GATE_OWNED_BY_CODE_ASTER=$($_.FullName)" }
