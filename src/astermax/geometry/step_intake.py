@@ -52,6 +52,16 @@ class CylindricalFaceCandidateV1(BaseModel):
     radius_mm: float = Field(gt=0)
     area_mm2: float = Field(gt=0)
     axis_alignment_x_abs: float = Field(ge=0, le=1)
+    x_min_mm: float | None = None
+    x_max_mm: float | None = None
+
+    @model_validator(mode="after")
+    def validate_axial_extent(self) -> "CylindricalFaceCandidateV1":
+        if (self.x_min_mm is None) != (self.x_max_mm is None):
+            raise ValueError("candidate axial extent requires both x_min_mm and x_max_mm")
+        if self.x_min_mm is not None and self.x_max_mm < self.x_min_mm:
+            raise ValueError("candidate x_max_mm must not be below x_min_mm")
+        return self
 
 
 class StepInspectionV1(BaseModel):
@@ -94,8 +104,21 @@ class InterfaceSelectionV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     hub_face_index_1based: int = Field(gt=0)
-    segment_face_indices_1based: dict[int, int] = Field(min_length=1)
+    segment_face_indices_1based: dict[int, list[int]] = Field(min_length=1)
     source_ids: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_segment_face_lists(self) -> "InterfaceSelectionV1":
+        for solid_index, face_indices in self.segment_face_indices_1based.items():
+            if solid_index <= 0:
+                raise ValueError("segment solid indices must be positive")
+            if not face_indices:
+                raise ValueError("each selected segment must contain at least one face")
+            if any(face_index <= 0 for face_index in face_indices):
+                raise ValueError("selected face indices must be positive")
+            if len(set(face_indices)) != len(face_indices):
+                raise ValueError("selected face indices must be unique per segment")
+        return self
 
 
 class GeometryPreparationV1(BaseModel):
@@ -225,8 +248,7 @@ def validate_gap_sensitivity_plan(
         for scenario in scenarios
         if scenario.kind == GapScenarioKind.MEASURED_ENDPOINT
     )
-    expected_measured = sorted([minimum_mm, maximum_mm])
-    if measured != expected_measured:
+    if measured != sorted([minimum_mm, maximum_mm]):
         raise ValueError(
             "measured GAP scenarios must be exactly the reported range endpoints"
         )
@@ -242,11 +264,11 @@ def validate_gap_sensitivity_plan(
         raise ValueError("GAP midpoint must exist exactly once as DERIVED_SENSITIVITY")
 
 
-def _candidate_keys(
+def _candidate_map(
     candidates: Iterable[CylindricalFaceCandidateV1],
-) -> set[tuple[int, int]]:
+) -> dict[tuple[int, int], CylindricalFaceCandidateV1]:
     return {
-        (item.solid_index_1based, item.face_index_1based)
+        (item.solid_index_1based, item.face_index_1based): item
         for item in candidates
     }
 
@@ -255,28 +277,44 @@ def evaluate_geometry_preparation(
     inspection: StepInspectionV1,
     scenarios: list[GapScenarioV1],
     selection: InterfaceSelectionV1 | None = None,
+    *,
+    test_flange_diameter_mm: float | None = None,
 ) -> GeometryPreparationV1:
     blockers: list[str] = []
 
     if selection is None:
         blockers.append("interface:seat_faces_unconfirmed")
     else:
-        hub_keys = _candidate_keys(inspection.hub_cylindrical_candidates)
+        hub_map = _candidate_map(inspection.hub_cylindrical_candidates)
         if (
             inspection.hub_solid_index_1based,
             selection.hub_face_index_1based,
-        ) not in hub_keys:
+        ) not in hub_map:
             blockers.append("interface:selected_hub_face_not_candidate")
 
-        segment_keys = _candidate_keys(inspection.segment_cylindrical_candidates)
+        segment_map = _candidate_map(inspection.segment_cylindrical_candidates)
         for solid_index in inspection.segment_solid_indices_1based:
-            face_index = selection.segment_face_indices_1based.get(solid_index)
-            if face_index is None:
-                blockers.append(f"interface:segment_{solid_index}_face_missing")
-            elif (solid_index, face_index) not in segment_keys:
-                blockers.append(
-                    f"interface:segment_{solid_index}_face_not_candidate"
-                )
+            face_indices = selection.segment_face_indices_1based.get(solid_index)
+            if not face_indices:
+                blockers.append(f"interface:segment_{solid_index}_faces_missing")
+                continue
+
+            for face_index in face_indices:
+                key = (solid_index, face_index)
+                candidate = segment_map.get(key)
+                if candidate is None:
+                    blockers.append(
+                        f"interface:segment_{solid_index}_face_{face_index}_not_candidate"
+                    )
+                    continue
+                if (
+                    test_flange_diameter_mm is not None
+                    and (2.0 * candidate.radius_mm) + 1e-9
+                    < test_flange_diameter_mm
+                ):
+                    blockers.append(
+                        f"interface:segment_{solid_index}_face_{face_index}_diameter_below_test_flange"
+                    )
 
     status = (
         GeometryPreparationStatus.BLOCKED_INTERFACE_SELECTION
@@ -321,10 +359,7 @@ def inspect_local_step(
             f"unexpected STEP solid count: expected={expected_solid_count} actual={len(solids)}"
         )
 
-    configured_indices = [
-        hub_solid_index_1based,
-        *segment_solid_indices_1based,
-    ]
+    configured_indices = [hub_solid_index_1based, *segment_solid_indices_1based]
     if max(configured_indices) > len(solids):
         raise StepEvidenceError("configured solid index exceeds STEP solid count")
     if len(set(configured_indices)) != len(configured_indices):
@@ -352,6 +387,7 @@ def inspect_local_step(
                 radius = cylinder.Radius()
                 if radius < 50.0:
                     continue
+                bbox = face.BoundingBox()
                 candidates.append(
                     CylindricalFaceCandidateV1(
                         solid_index_1based=solid_index,
@@ -359,6 +395,8 @@ def inspect_local_step(
                         radius_mm=radius,
                         area_mm2=face.Area(),
                         axis_alignment_x_abs=alignment,
+                        x_min_mm=bbox.xmin,
+                        x_max_mm=bbox.xmax,
                     )
                 )
         return candidates
@@ -371,8 +409,6 @@ def inspect_local_step(
         segment_solid_indices_1based=segment_solid_indices_1based,
         segment_frames=frames,
         hub_cylindrical_candidates=collect_candidates([hub_solid_index_1based]),
-        segment_cylindrical_candidates=collect_candidates(
-            segment_solid_indices_1based
-        ),
+        segment_cylindrical_candidates=collect_candidates(segment_solid_indices_1based),
         spacing_deviation_max_deg=spacing_deviation,
     )
