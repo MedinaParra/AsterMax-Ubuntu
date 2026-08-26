@@ -16,6 +16,7 @@ on:
       - agent/windows-gap-seating-kinematics-v1.6
       - agent/windows-gap-five-segment-poses-v1.7
       - agent/windows-unilateral-contact-law-v1.8
+      - agent/windows-tet10-unilateral-contact-v1.9
 
 jobs:
   verify-fea-core:
@@ -101,4 +102,12 @@ jobs:
         with:
           name: unilateral-contact-law-windows
           path: unilateral_contact_law.json
+          if-no-files-found: error
+      - name: Verify deformable TET10 unilateral contact
+        run: python benchmarks/tet10_unilateral_contact.py
+      - name: Upload deformable TET10 unilateral contact evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet10-unilateral-contact-windows
+          path: tet10_unilateral_contact.json
           if-no-files-found: error
