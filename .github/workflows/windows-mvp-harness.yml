@@ -14,7 +14,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run portable contract tests
+      - name: Install pinned meshing dependency
+        run: python -m pip install gmsh==4.13.1
+      - name: Run portable contract and STEP meshing tests
         run: python -m unittest discover -s tests -v
       - name: Run analytical reference harness
         run: python -m src.astermax_harness examples/cantilever_mm.astermax.json --reference
