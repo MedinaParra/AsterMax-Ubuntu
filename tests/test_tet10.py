@@ -58,7 +58,7 @@ def test_tet10_gauss_rule_integrates_reference_volume():
 
 def test_tet10_rigid_translation_has_zero_strain_energy():
     coords = _straight_tet10()
-    mat = IsotropicMaterial(youngs_modulus_mpa=210000.0, poisson_ratio=0.3)
+    mat = IsotropicMaterial(young_modulus_mpa=210000.0, poisson_ratio=0.3)
     k = tet10_stiffness(coords, mat)
     u = np.tile([0.8, -1.2, 2.1], (10, 1)).reshape(-1)
     energy = float(u @ k @ u)
@@ -90,7 +90,7 @@ def test_tet10_linear_patch_reproduces_constant_strain():
 
 def test_tet10_stiffness_is_symmetric_and_psd_up_to_rigid_modes():
     coords = _straight_tet10()
-    mat = IsotropicMaterial(youngs_modulus_mpa=210000.0, poisson_ratio=0.3)
+    mat = IsotropicMaterial(young_modulus_mpa=210000.0, poisson_ratio=0.3)
     k = tet10_stiffness(coords, mat)
     assert np.allclose(k, k.T, atol=1e-9)
     eig = np.linalg.eigvalsh(k)
@@ -101,7 +101,7 @@ def test_tet10_stiffness_is_symmetric_and_psd_up_to_rigid_modes():
 
 def test_tet10_centroid_stress_matches_affine_constitutive_response():
     coords = _straight_tet10()
-    mat = IsotropicMaterial(youngs_modulus_mpa=210000.0, poisson_ratio=0.3)
+    mat = IsotropicMaterial(young_modulus_mpa=210000.0, poisson_ratio=0.3)
     a = np.array([[0.001, 0.0, 0.0], [0.0, -0.0002, 0.0], [0.0, 0.0, 0.0004]])
     u = coords @ a.T
     stress, vm = tet10_stress_at_centroid(coords, u, mat)
