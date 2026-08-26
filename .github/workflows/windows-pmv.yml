@@ -12,6 +12,7 @@ on:
       - agent/windows-tet4-refinement-envelope-v1.1
       - agent/windows-cad-preflight-v1.2
       - agent/windows-tet10-global-v1.4
+      - agent/windows-tet10-viewer-evidence-v1.5
 
 jobs:
   verify-fea-core:
@@ -65,4 +66,12 @@ jobs:
         with:
           name: tet10-convergence-windows
           path: tet10_convergence.json
+          if-no-files-found: error
+      - name: Generate converged TET10 viewer evidence package
+        run: python benchmarks/generate_tet10_evidence_package.py
+      - name: Upload converged TET10 viewer evidence package
+        uses: actions/upload-artifact@v4
+        with:
+          name: astermax-tet10-evidence-windows
+          path: astermax_tet10_evidence_package
           if-no-files-found: error
