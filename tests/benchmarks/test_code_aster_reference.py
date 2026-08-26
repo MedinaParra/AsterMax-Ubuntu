@@ -25,13 +25,14 @@ def test_code_aster_reference_case_is_numerically_validated(tmp_path: Path) -> N
         )
 
     result_dir = tmp_path / "resutest"
+    selector = rf"(^|_){re.escape(reference_test)}$"
     command = [
         run_ctest,
         f"--resutest={result_dir}",
         "-j",
         "1",
         "-R",
-        f"^{re.escape(reference_test)}$",
+        selector,
     ]
     completed = subprocess.run(
         command,
