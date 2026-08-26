@@ -1,0 +1,47 @@
+schema_version: WorkPackageV1
+workpackage_id: INFRA-SPLIT-VALIDATION-GATES-001
+title: Split deterministic Windows and numerical validation gates
+issue: 28
+objective: >-
+  Separate Windows deterministic/unit validation from external Code_Aster numerical
+  validation so each gate fails only for the class of evidence it owns, without
+  deleting, skipping, xfail-marking or relaxing any numerical benchmark.
+allowed_files:
+  - ".github/workflows/windows-pmv.yml"
+  - "harness/workpackages/INFRA_split_validation_gates.yaml"
+  - "docs/VALIDATION_GATE_SEPARATION.md"
+forbidden_paths:
+  - "src/astermax/solver/**"
+  - "tests/benchmarks/**"
+  - "harness/evals/**"
+max_files_changed: 3
+prohibited_actions:
+  - delete or skip numerical benchmarks
+  - weaken numerical tolerances
+  - mark fail-closed benchmarks as xfail
+  - let W2 feature code modify this gate split
+acceptance_criteria:
+  - Windows PMV Core explicitly ignores tests/benchmarks when running deterministic tests.
+  - Windows PMV Core fails if the numerical benchmark suite disappears.
+  - Numerical benchmarks remain unchanged and are owned by the pinned Code_Aster validation path.
+  - The split is documented as gate separation, not a reduction in validation rigor.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - false_negative_ci
+  - hidden_benchmark_removal
+  - evaluation_contamination
+agent_budget:
+  max_agent_turns: 8
+  max_tool_calls: 30
+  max_retries: 3
+  max_wall_clock_seconds: 1800
+metadata:
+  deterministic_gate: windows-pmv
+  numerical_gate: code-aster-validation
+  methodology: evidence_driven_autonomous_engineering
