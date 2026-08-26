@@ -67,14 +67,14 @@ def test_load_derivation_preserves_geometry_provenance_but_not_load_authority() 
         case_id="jam_sensitivity",
         shaft_torque_knm=600.0,
         selected_sprocket_load_share_percent=60.0,
-        chain_speed_mps=0.15,
+        chain_speed_mps=0.0,
         loaded_teeth_count=2,
         wrap_angle_deg=180.0,
         axial_thrust_kn=0.0,
     )
     result = derive_load_case(geometry, case)
 
-    assert result.sprocket_speed_rpm == pytest.approx(1.5)
+    assert result.sprocket_speed_rpm == pytest.approx(0.0)
     assert result.selected_sprocket_torque_knm == pytest.approx(360.0)
     assert result.chain_tangential_force_kn == pytest.approx(375.999, rel=1e-3)
     assert result.force_per_loaded_tooth_kn == pytest.approx(187.999, rel=1e-3)
