@@ -1,0 +1,57 @@
+schema_version: WorkPackageV1
+workpackage_id: W2I-PRIVATE-MESHING-001
+title: Private STEP meshing job and exploratory solver pack
+objective: >-
+  Generate a reproducible private-input meshing job for a six-solid hub/sprocket STEP
+  without committing proprietary geometry and without allowing exploratory output to
+  become authenticated engineering evidence.
+issue: 52
+allowed_files:
+  - src/astermax/solver/private_meshing.py
+  - tests/test_private_meshing.py
+  - harness/workpackages/W2I_private_meshing.yaml
+forbidden_paths:
+  - .github/**
+  - tests/benchmarks/**
+  - src/astermax/harness/**
+  - src/astermax/solver/wsl_worker.py
+  - '**/*.step'
+  - '**/*.stp'
+  - '**/*.med'
+  - '**/*.mmed'
+max_files_changed: 3
+prohibited_actions:
+  - commit private CAD or generated mesh bytes
+  - scale coordinates implicitly
+  - heal, fuse, fragment, defeature or otherwise change topology silently
+  - classify arbitrary volume or face order as engineering identity
+  - treat successful meshing as solver validation
+  - promote exploratory mesh or solver output to authentic engineering evidence
+  - bypass the source STEP SHA-256 check
+acceptance_criteria:
+  - source STEP path and SHA-256 are required and verified before pack generation
+  - coordinate units are explicitly millimetres
+  - generated Gmsh job requires exactly six solids and identifies the hub by unique largest-volume signature
+  - the five remaining solids must match an equal-volume segment signature within declared tolerance
+  - posterior interface selection uses the authenticated X-plane selector and fails closed when absent
+  - local interface refinement is explicit while topology healing/fusing/scaling are absent
+  - generated MED output is not created by the pack generator itself and must be produced on an approved private execution host
+  - execution evidence must record STEP hash, MED hash, mesher version, volume identity and interface surface groups
+  - every generated pack remains EXPLORATORY_NOT_FOR_ACCEPTANCE with authentic_solver_authorized=false
+  - tests prove hash mismatch, unit, scope and quarantine behavior
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+numerical_impact: false
+human_merge_required: true
+metadata:
+  target_mesher: Gmsh
+  target_mesh_format: MED
+  target_solver: Code_Aster
+  evidence_boundary: >-
+    W2I validates deterministic private meshing job generation only. It does not claim that
+    Gmsh exists in the current ChatGPT runtime, that a mesh was produced, or that OT1613 FEA
+    has been authenticated.
