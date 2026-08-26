@@ -1,0 +1,32 @@
+name: W2B Windows VTK Smoke
+
+on:
+  pull_request:
+    branches:
+      - integration/W2A-split-validation-gates
+  workflow_dispatch:
+
+jobs:
+  windows-vtk-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONFAULTHANDLER: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Windows GUI and test dependencies
+        run: python -m pip install --disable-pip-version-check -e ".[windows,dev]"
+
+      - name: Import VTK and PySide6 runtime
+        shell: pwsh
+        run: |
+          python -c "import PySide6, vtkmodules; print('ASTERMAX_W2B_WINDOWS_GUI_IMPORT=PASS')"
+
+      - name: Initialize AsterMax QVTK viewport offscreen
+        run: python scripts/smoke_windows_result_view.py
