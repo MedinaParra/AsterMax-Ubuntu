@@ -1,0 +1,44 @@
+schema_version: WorkPackageV1
+workpackage_id: W2L-LOCAL-TET4-001
+title: Verified Tet4 numerical kernel
+objective: >-
+  Formalize deterministic Tet4 elasticity and unilateral normal penalty-contact
+  primitives with analytical numerical benchmarks before private local submodels
+  are treated as engineering screening evidence.
+issue: 63
+allowed_files:
+  - src/astermax/solver/local_tet4.py
+  - tests/benchmarks/test_local_tet4_analytic.py
+  - harness/workpackages/W2L_local_tet4.yaml
+forbidden_paths:
+  - .github/workflows/**
+  - harness/evals/**
+  - src/astermax/ui/**
+max_files_changed: 3
+prohibited_actions:
+  - commit OT1613 CAD or private simulation results
+  - label the local Tet4 kernel as Code_Aster output
+  - weaken benchmark tolerances to fit implementation
+  - accept inverted or degenerate tetrahedra
+  - promote local-submodel results to engineering acceptance
+acceptance_criteria:
+  - constant-strain Tet4 patch is reproduced to tight tolerance
+  - axial block reproduces u=FL/(AE) and sigma=F/A
+  - normal penalty contact reproduces closed-form force, pressure and closure decomposition
+  - inverted and degenerate Tet4 fail closed
+  - stress and von Mises remain deterministic
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+  - numerical_validation
+numerical_impact: true
+human_merge_required: true
+metadata:
+  parent_slice: W2K-friction-screening
+  benchmark_type: closed_form_analytical
+  private_follow_on:
+    - SIM-007 local 3D contact submodel
+    - SIM-008 six-bolt-pattern local 3D submodel
