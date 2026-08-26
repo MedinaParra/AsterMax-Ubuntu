@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -30,6 +32,28 @@ def _request(path: Path, *, sha256: str | None = None) -> PrivateStepMeshRequest
     )
 
 
+def _embedded_cfg(script: str) -> dict:
+    tree = ast.parse(script)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "CFG" for target in node.targets):
+            continue
+        call = node.value
+        if (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "json"
+            and call.func.attr == "loads"
+            and len(call.args) == 1
+            and isinstance(call.args[0], ast.Constant)
+            and isinstance(call.args[0].value, str)
+        ):
+            return json.loads(call.args[0].value)
+    raise AssertionError("generated script does not contain a statically auditable CFG payload")
+
+
 def test_private_step_hash_must_match(tmp_path: Path) -> None:
     step = tmp_path / "private.step"
     step.write_bytes(b"PRIVATE STEP FIXTURE")
@@ -52,19 +76,19 @@ def test_rendered_job_is_fail_closed_and_never_scales_or_heals(tmp_path: Path) -
     step.write_bytes(b"PRIVATE STEP FIXTURE")
     script = render_gmsh_python_job(_request(step))
 
-    assert 'expected_solid_count' in script
-    assert 'segment volume signature mismatch' in script
-    assert 'authenticated hub posterior interface plane not found' in script
-    assert 'gmsh.model.occ.getMass' in script
-    assert 'HUB_POSTERIOR_INTERFACE' in script
-    assert 'SEGMENT_POSTERIOR_INTERFACE' in script
-    assert 'gmsh.model.mesh.generate(3)' in script
-    assert 'gmsh.model.mesh.setOrder(2)' in script
-    assert 'EXPLORATORY_NOT_FOR_ACCEPTANCE' in script
-    assert 'authentic_solver_authorized' in script
-    assert 'gmsh.model.occ.fragment' not in script
-    assert 'gmsh.model.occ.fuse' not in script
-    assert 'OCCScaling' not in script
+    assert "expected_solid_count" in script
+    assert "segment volume signature mismatch" in script
+    assert "authenticated hub posterior interface plane not found" in script
+    assert "gmsh.model.occ.getMass" in script
+    assert "HUB_POSTERIOR_INTERFACE" in script
+    assert "SEGMENT_POSTERIOR_INTERFACE" in script
+    assert "gmsh.model.mesh.generate(3)" in script
+    assert "gmsh.model.mesh.setOrder(2)" in script
+    assert "EXPLORATORY_NOT_FOR_ACCEPTANCE" in script
+    assert "authentic_solver_authorized" in script
+    assert "gmsh.model.occ.fragment" not in script
+    assert "gmsh.model.occ.fuse" not in script
+    assert "OCCScaling" not in script
 
 
 def test_pack_generation_preserves_hash_and_quarantine(tmp_path: Path) -> None:
@@ -89,8 +113,11 @@ def test_generated_job_does_not_embed_private_step_bytes(tmp_path: Path) -> None
     private_bytes = b"CONFIDENTIAL_GEOMETRY_BYTES_SHOULD_NEVER_BE_IN_SCRIPT"
     step.write_bytes(private_bytes)
     script = render_gmsh_python_job(_request(step))
+
     assert private_bytes.decode() not in script
-    assert str(step) in script
+    cfg = _embedded_cfg(script)
+    assert cfg["step_path"] == str(step)
+    assert cfg["step_sha256"] == hashlib.sha256(private_bytes).hexdigest()
 
 
 def test_coordinate_units_are_explicitly_mm(tmp_path: Path) -> None:
@@ -99,4 +126,4 @@ def test_coordinate_units_are_explicitly_mm(tmp_path: Path) -> None:
     request = _request(step)
     assert request.coordinate_unit == "mm"
     script = render_gmsh_python_job(request)
-    assert '"coordinate_unit": "mm"' in script
+    assert _embedded_cfg(script)["coordinate_unit"] == "mm"
