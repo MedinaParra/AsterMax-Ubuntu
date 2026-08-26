@@ -12,7 +12,7 @@ from astermax.fea.tet10 import straight_sided_tet10_from_vertices
 from astermax.fea.tet4 import IsotropicMaterial
 
 
-MATERIAL = IsotropicMaterial(young_mpa=200_000.0, poisson_ratio=0.30)
+MATERIAL = IsotropicMaterial(young_modulus_mpa=200_000.0, poisson_ratio=0.30)
 INITIAL_GAP_MM = 0.01
 CONTACT_DOF = 3 * 3 + 2  # apex node 3, +Z closing direction
 BASE_NODES = np.asarray([0, 1, 2, 4, 5, 6], dtype=int)
