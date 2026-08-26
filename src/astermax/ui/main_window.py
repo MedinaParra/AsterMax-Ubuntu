@@ -85,6 +85,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._validated_result = None
         self._validated_manifest: SolverRunManifestV1 | None = None
         self._validated_vtu_artifact = None
+        self._vtk_initialized = False
 
         self.setWindowTitle("AsterMax Mechanical — Future Simulation PMV")
         self.resize(1500, 900)
@@ -183,8 +184,19 @@ class MainWindow(QtWidgets.QMainWindow):
             self.renderer.AddActor(actor)
 
         self.renderer.ResetCamera()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        super().showEvent(event)
+        if self._vtk_initialized:
+            return
         self.vtk_widget.Initialize()
         self.vtk_widget.Start()
+        self._vtk_initialized = True
+        self.vtk_widget.GetRenderWindow().Render()
+
+    def _render_if_initialized(self) -> None:
+        if self._vtk_initialized:
+            self.vtk_widget.GetRenderWindow().Render()
 
     def _refresh_views(self) -> None:
         self.outline.clear()
@@ -329,7 +341,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.renderer.ResetCamera()
         self._apply_render_field(0)
-        self.vtk_widget.GetRenderWindow().Render()
+        self._render_if_initialized()
         self.statusBar().showMessage("Validated solver result loaded; provenance chain verified.")
 
     @QtCore.Slot(int)
@@ -362,7 +374,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.result_field_info.setText(
             f"{field.derived_evidence_class} | range {value_range[0]:.6g} … {value_range[1]:.6g} | {unit}"
         )
-        self.vtk_widget.GetRenderWindow().Render()
+        self._render_if_initialized()
 
     @QtCore.Slot()
     def run_mock_workflow(self) -> None:
