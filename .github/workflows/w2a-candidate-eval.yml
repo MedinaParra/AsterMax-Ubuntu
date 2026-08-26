@@ -136,9 +136,6 @@ jobs:
           cat > .eval/worker-run/input/code_aster_capabilities.json <<'EOF'
           {"schema_version":"SolverCapabilityV1","backend_id":"code_aster_wsl2","backend_version":"18.1.0","capabilities":["linear_static"],"result_field_names":["displacement","stress"],"metadata":{"image":"simvia/code_aster:18.1.0"}}
           EOF
-          cat > .eval/worker-run/input/job.json <<'EOF'
-          {"schema_version":"CodeAsterJobV1","export_file":"input/ssls120c_worker.export","produced_files":["output/ssls120c_results.rmed"]}
-          EOF
           python - <<'PY'
           from datetime import datetime, timezone
           from hashlib import sha256
@@ -148,6 +145,19 @@ jobs:
           def artifact(rel):
               data = (root / rel).read_bytes()
               return {"relative_path": rel, "sha256": sha256(data).hexdigest(), "byte_size": len(data), "media_type": None}
+          support = [
+              artifact('input/ssls120c_worker.export'),
+              artifact('input/ssls120c_worker.comm'),
+              artifact('input/ssls120c.datg'),
+              artifact('input/ssls120c.mmed'),
+          ]
+          job = {
+              "schema_version": "CodeAsterJobV1",
+              "export_file": "input/ssls120c_worker.export",
+              "input_artifacts": support,
+              "produced_files": ["output/ssls120c_results.rmed"],
+          }
+          (root / 'input/job.json').write_text(json.dumps(job, sort_keys=True), encoding='utf-8')
           request = {
               "schema_version": "SolverRequestV1",
               "request_id": "eval-ssls120c-request",
