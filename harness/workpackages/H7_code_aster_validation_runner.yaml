@@ -1,0 +1,53 @@
+schema_version: WorkPackageV1
+workpackage_id: H7-CODE-ASTER-VALIDATION-001
+title: Pinned Code_Aster numerical validation runner
+issue: 25
+objective: >-
+  Provision an independent CI environment that executes one pinned Code_Aster
+  reference testcase and preserves machine-checkable numerical validation evidence
+  without allowing W2 feature code to alter the judging mechanism.
+allowed_files:
+  - ".github/workflows/code-aster-validation.yml"
+  - "harness/workpackages/H7_code_aster_validation_runner.yaml"
+  - "docs/H7_CODE_ASTER_VALIDATION_RUNNER.md"
+forbidden_paths:
+  - "src/astermax/solver/**"
+  - "tests/benchmarks/**"
+  - "harness/evals/**"
+max_files_changed: 3
+prohibited_actions:
+  - weaken or remove the W2 numerical validation gate
+  - treat missing Code_Aster or zero discovered tests as PASS
+  - allow W2 feature code to choose the image or reference testcase
+  - silently accept a changed container digest
+acceptance_criteria:
+  - Code_Aster image version is explicit and its runtime RepoDigest is checked against a reviewed prefix.
+  - run_ctest must exist in the container.
+  - Exactly one pinned reference testcase selector is used.
+  - The pinned testcase is ssls120c, selected because its source contains MECA_STATIQUE and TEST_RESU analytical references.
+  - Zero discovered tests fails.
+  - Any Code_Aster testcase failure fails the job.
+  - Solver/version/digest/test logs are retained as CI artifacts.
+  - Infrastructure remains separate from work/W2-solver-bridge.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - evaluation_contamination
+  - mutable_container_tag
+  - zero_test_false_pass
+  - judge_modified_by_feature
+agent_budget:
+  max_agent_turns: 8
+  max_tool_calls: 35
+  max_retries: 3
+  max_wall_clock_seconds: 1800
+metadata:
+  code_aster_image: simvia/code_aster:18.1.0
+  reviewed_digest_prefix: sha256:4629a21a1093
+  pinned_reference_test: ssls120c
+  judge_owner: H7
