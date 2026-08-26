@@ -10,6 +10,7 @@ on:
       - agent/windows-offline-viewer-v0.8
       - agent/windows-evidence-package-v0.9
       - agent/windows-tet4-refinement-envelope-v1.1
+      - agent/windows-cad-preflight-v1.2
 
 jobs:
   verify-fea-core:
