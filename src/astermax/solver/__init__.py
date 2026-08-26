@@ -12,12 +12,15 @@ from astermax.solver.contracts import (
     SolverTermination,
 )
 from astermax.solver.errors import SolverBridgeError, SolverEvidenceError, UnsupportedSolverCapability
+from astermax.solver.result_loader import ResultDescriptorV1, ResultFieldDescriptorV1, load_solver_result
 
 __all__ = [
     "ArtifactDigestV1",
     "CodeAsterWSL2Adapter",
     "FieldLocation",
     "ProcessOutcome",
+    "ResultDescriptorV1",
+    "ResultFieldDescriptorV1",
     "SolverBridge",
     "SolverBridgeError",
     "SolverCapabilityV1",
@@ -30,5 +33,6 @@ __all__ = [
     "SolverTermination",
     "UnsupportedSolverCapability",
     "WorkerReceiptV1",
+    "load_solver_result",
     "verify_artifact",
 ]
