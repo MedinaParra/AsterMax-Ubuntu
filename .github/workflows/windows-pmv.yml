@@ -3,7 +3,7 @@ name: Windows PMV FEA Harness
 on:
   pull_request:
   push:
-    branches: [main, agent/windows-pmv-fea-core]
+    branches: [main, agent/windows-pmv-fea-core, agent/windows-step-to-solve-v0.2]
 
 jobs:
   verify-fea-core:
