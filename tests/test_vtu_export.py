@@ -39,6 +39,21 @@ def test_vtu_preserves_raw_nodal_and_element_nodal_values_exactly(tmp_path: Path
     assert evidence.fields[1].raw_shape == (1, 7, 6)
 
 
+def test_displacement_magnitude_is_explicitly_derived(tmp_path: Path) -> None:
+    source = tmp_path / "structural.rmed"
+    expected_depl, _ = build_structural_med(source)
+    result = read_code_aster_rmed(source)
+    output = tmp_path / "result.vtu"
+    evidence = write_vtu(result, output)
+    root = ElementTree.parse(output).getroot()
+    magnitude_name = "ASTERMAX_DERIVED__ELAS1___DEPL__TRANSLATION_MAGNITUDE"
+    magnitude = _array(root, "PointData", magnitude_name)
+    expected = np.linalg.norm(expected_depl[:, :3], axis=1)
+    assert np.array_equal(magnitude, expected)
+    displacement_evidence = next(field for field in evidence.fields if field.source_field_name == "ELAS1___DEPL")
+    assert magnitude_name in displacement_evidence.derived_vtk_array_names
+
+
 def test_von_mises_array_is_explicitly_derived_and_masked(tmp_path: Path) -> None:
     source = tmp_path / "structural.rmed"
     build_structural_med(source)
