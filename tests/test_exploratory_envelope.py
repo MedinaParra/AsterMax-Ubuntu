@@ -37,20 +37,31 @@ def test_joint_estimates_cannot_claim_authoritative_source() -> None:
         )
 
 
-def test_pitch_diameter_is_deterministic_from_pitch_and_tooth_count() -> None:
+def test_pitch_diameter_is_deterministic_from_authoritative_geometry() -> None:
     geometry = ExploratoryDriveGeometryV1(
         chain_pitch_mm=240.0,
         sprocket_tooth_count=25,
+        source_class=EvidenceSourceClass.CURRENT_AUTHORITATIVE,
     )
     expected = 0.240 / math.sin(math.pi / 25.0)
     assert pitch_diameter_m(geometry) == pytest.approx(expected)
     assert pitch_diameter_m(geometry) == pytest.approx(1.9148951413)
 
 
-def test_load_derivation_preserves_assumption_boundary() -> None:
+def test_weak_geometry_provenance_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="drive geometry requires"):
+        ExploratoryDriveGeometryV1(
+            chain_pitch_mm=240.0,
+            sprocket_tooth_count=25,
+            source_class=EvidenceSourceClass.OBSERVATION,
+        )
+
+
+def test_load_derivation_preserves_geometry_provenance_but_not_load_authority() -> None:
     geometry = ExploratoryDriveGeometryV1(
         chain_pitch_mm=240.0,
         sprocket_tooth_count=25,
+        source_class=EvidenceSourceClass.CURRENT_AUTHORITATIVE,
     )
     case = ExploratoryLoadCaseV1(
         case_id="jam_sensitivity",
@@ -67,6 +78,7 @@ def test_load_derivation_preserves_assumption_boundary() -> None:
     assert result.selected_sprocket_torque_knm == pytest.approx(360.0)
     assert result.chain_tangential_force_kn == pytest.approx(375.999, rel=1e-3)
     assert result.force_per_loaded_tooth_kn == pytest.approx(187.999, rel=1e-3)
+    assert result.geometry_source_class == EvidenceSourceClass.CURRENT_AUTHORITATIVE
     assert result.result_class.value == "ASSUMPTION_DERIVATION"
     assert result.authentic_solver_authorized is False
     assert "sensitivity" in result.disclaimer.lower()
