@@ -1,0 +1,59 @@
+schema_version: WorkPackageV1
+workpackage_id: W2K-REACTION-TARGET-CLOSURE-001
+title: Reaction-targeted nonlinear gap closure controller
+objective: >-
+  Add a bounded, fail-closed controller that drives exploratory nonlinear contact
+  trials by imposed closure displacement until the measured reaction reaches an
+  explicitly estimated clamp-force target. The controller must never relabel the
+  imposed displacement as bolt elongation, nut advance, or authoritative assembly data.
+issue: 57
+allowed_files:
+  - src/astermax/solver/reaction_target_closure.py
+  - tests/test_reaction_target_closure.py
+  - harness/workpackages/W2K_reaction_target_closure.yaml
+forbidden_paths:
+  - src/astermax/harness/**
+  - harness/evals/**
+  - tests/benchmarks/**
+  - .github/workflows/**
+  - '**/*.step'
+  - '**/*.stp'
+  - '**/*.med'
+  - '**/*.rmed'
+max_files_changed: 3
+prohibited_actions:
+  - upload private CAD or derived private meshes
+  - use CONTACT_INIT=OUI as a hidden preload substitute
+  - label imposed closure displacement as bolt elongation or nut advance
+  - promote exploratory trial output to authoritative solver evidence
+  - silently continue after a non-monotone reaction history
+  - silently expand the displacement bracket after the target is not bracketed
+acceptance_criteria:
+  - controller starts from a frozen displacement bracket that cannot begin below the preserved GAP
+  - lower and upper bracket trials are explicitly evaluated before bisection
+  - converged target requires reaction error inside an explicit tolerance
+  - nonconverged trials fail closed
+  - non-monotone reaction histories fail closed
+  - target outside the frozen bracket fails closed
+  - duplicate displacement trials fail closed
+  - result class is permanently EXPLORATORY_NOT_FOR_ACCEPTANCE
+  - no private geometry or numerical solver output is committed
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - reward_hacking
+  - evidence_fabrication
+  - provenance_loss
+  - unsupported_numerical_claim
+  - silent_fallback
+metadata:
+  baseline_branch: work/W2J-gap-closure-contact
+  result_class: EXPLORATORY_NOT_FOR_ACCEPTANCE
+  solver_execution_in_scope: false
+  private_input_execution_in_scope: false
