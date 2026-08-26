@@ -24,11 +24,13 @@ GAP_FACTORS = np.asarray([0.55, 1.40, 0.75, 1.25, 0.65, 1.50], dtype=float)
 
 
 def _fixture() -> tuple[np.ndarray, np.ndarray]:
+    # Vertex order is deliberately positive for the TET10 Jacobian while the
+    # complete quadratic face 0-1-2/4-5-6 remains on the z=10 contact plane.
     vertices = np.asarray(
         [
             [-5.0, -5.0, 10.0],
-            [5.0, -5.0, 10.0],
             [0.0, 5.0, 10.0],
+            [5.0, -5.0, 10.0],
             [0.0, 0.0, 0.0],
         ],
         dtype=float,
