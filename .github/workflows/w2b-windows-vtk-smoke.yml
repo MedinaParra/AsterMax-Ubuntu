@@ -13,12 +13,29 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONFAULTHANDLER: '1'
+      GALLIUM_DRIVER: llvmpipe
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Provision Mesa llvmpipe for headless OpenGL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $mesaVersion = '23.3.5'
+          $archive = Join-Path $env:RUNNER_TEMP "mesa3d-$mesaVersion.7z"
+          $extract = Join-Path $env:RUNNER_TEMP "mesa3d-$mesaVersion"
+          Invoke-WebRequest -Uri "https://github.com/pal1000/mesa-dist-win/releases/download/$mesaVersion/mesa3d-$mesaVersion-release-msvc.7z" -OutFile $archive
+          & 'C:\Program Files\7-Zip\7z.exe' x $archive "-o$extract" -y | Out-Host
+          foreach ($dll in @('opengl32.dll', 'libglapi.dll', 'libgallium_wgl.dll')) {
+            $source = Join-Path $extract "x64\$dll"
+            if (-not (Test-Path $source)) { throw "Missing Mesa runtime: $source" }
+            Copy-Item $source -Destination $env:pythonLocation -Force
+          }
+          Get-ChildItem $env:pythonLocation -Filter '*.dll' | Where-Object Name -in @('opengl32.dll', 'libglapi.dll', 'libgallium_wgl.dll') | Select-Object Name, Length
 
       - name: Install Windows GUI and test dependencies
         run: python -m pip install --disable-pip-version-check -e ".[windows,dev]"
