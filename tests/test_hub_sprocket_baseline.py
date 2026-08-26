@@ -40,8 +40,6 @@ def make_ready_baseline() -> HubSprocketBaselineV1:
     baseline.sources["test_confirmation"] = SourceReferenceV1(source_id="test_confirmation", title="Test-only confirmed engineering inputs", source_kind="test_fixture_only", notes="Structural test fixture; not OT1613 engineering evidence.")
     baseline.identifiers.confirmed_value = "OT-SKM-1613"
     baseline.identifiers.confirmation_source_ids = ["test_confirmation"]
-    baseline.geometry.unit_normalization_status = CadUnitNormalizationStatus.CONFIRMED_MM_FROM_DRAWING
-    baseline.geometry.human_confirmation_source_ids = ["test_confirmation"]
     for key in baseline.required_inputs:
         baseline.required_inputs[key] = authentic({"confirmed": True, "input_id": key})
     baseline.model_intent.friction_coefficient = derived(0.15, "test-only derivation from confirmed contact/material/lubricant evidence")
@@ -57,7 +55,7 @@ def test_current_ot1613_baseline_is_blocked_fail_closed() -> None:
     assert "required_input:hub_material_and_properties" in report.blockers
     assert "model_input:friction_coefficient" in report.blockers
     assert "model_input:minimum_probable_bolt_preload_n" in report.blockers
-    assert "geometry:unit_normalization_unconfirmed" in report.blockers
+    assert "geometry:unit_normalization_unconfirmed" not in report.blockers
     assert "identity:ot_identifier_unconfirmed" in report.blockers
     assert any("cad_geometry_is_nominal_touching" in warning for warning in report.warnings)
 
@@ -97,11 +95,20 @@ def test_measured_gap_midpoint_cannot_replace_reported_range() -> None:
         HubSprocketBaselineV1.model_validate(payload)
 
 
-def test_step_unit_conflict_remains_explicit_until_human_confirmation() -> None:
+def test_step_unit_metadata_conflict_is_preserved_after_human_mm_confirmation() -> None:
     baseline = load_baseline()
     assert baseline.geometry.declared_length_unit == "METRE"
     assert baseline.geometry.intended_analysis_length_unit == "mm"
-    assert baseline.geometry.unit_normalization_status == CadUnitNormalizationStatus.UNRESOLVED
+    assert baseline.geometry.unit_normalization_status == CadUnitNormalizationStatus.CONFIRMED_MM_FROM_DRAWING
+    assert baseline.geometry.human_confirmation_source_ids == ["user_cad_units_2026_08_26"]
+    assert baseline.sources["user_cad_units_2026_08_26"].source_kind == "USER_INPUT"
     assert baseline.geometry.hub_bbox_numeric.y_length == pytest.approx(795.0000002)
     assert baseline.geometry.solid_count == 6
     assert baseline.geometry.segment_count_with_identical_volume == 5
+
+
+def test_confirmed_mm_status_requires_human_confirmation_source() -> None:
+    payload = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    payload["geometry"]["human_confirmation_source_ids"] = []
+    with pytest.raises(ValidationError):
+        HubSprocketBaselineV1.model_validate(payload)
