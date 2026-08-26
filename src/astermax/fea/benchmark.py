@@ -41,6 +41,24 @@ class ConvergenceSample:
     moment_balance_norm_nmm: float
 
 
+@dataclass(frozen=True)
+class ConvergencePolicy:
+    min_samples: int = 3
+    max_final_tip_error_percent: float = 10.0
+    max_last_refinement_change_percent: float = 5.0
+    max_force_balance_norm_n: float = 1.0e-5
+    max_moment_balance_norm_nmm: float = 1.0e-3
+    require_nonincreasing_tip_error: bool = True
+
+
+@dataclass(frozen=True)
+class ConvergenceDecision:
+    converged: bool
+    checks: dict[str, bool]
+    metrics: dict[str, float | int | None]
+    policy: dict[str, float | int | bool]
+
+
 def analytical_cantilever_reference(
     *,
     length_mm: float = 100.0,
@@ -81,9 +99,9 @@ def run_cantilever_convergence(
 ) -> tuple[CantileverReference, list[ConvergenceSample]]:
     """Run the same STEP cantilever over several mesh sizes.
 
-    Acceptance is deliberately based on raw numerical evidence.  The function
-    reports error and equilibrium residuals but does not relabel the solution as
-    validated or converged on its own.
+    Acceptance is deliberately separate from execution.  This function records
+    raw numerical evidence only; ``evaluate_convergence`` is the sole gate that
+    may produce a convergence claim.
     """
     ref = analytical_cantilever_reference()
     samples: list[ConvergenceSample] = []
@@ -131,11 +149,101 @@ def run_cantilever_convergence(
     return ref, samples
 
 
-def benchmark_manifest(reference: CantileverReference, samples: list[ConvergenceSample]) -> dict:
-    return {
+def evaluate_convergence(
+    samples: list[ConvergenceSample],
+    policy: ConvergencePolicy = ConvergencePolicy(),
+) -> ConvergenceDecision:
+    """Evaluate a declared numerical convergence policy, failing closed.
+
+    The decision is intentionally independent of result export.  A caller may set
+    ``converged=true`` in provenance only when this function returns true using a
+    policy that is itself stored in the evidence package.
+    """
+    if policy.min_samples < 2:
+        raise ValueError("min_samples must be at least 2")
+    thresholds = (
+        policy.max_final_tip_error_percent,
+        policy.max_last_refinement_change_percent,
+        policy.max_force_balance_norm_n,
+        policy.max_moment_balance_norm_nmm,
+    )
+    if any(value < 0.0 for value in thresholds):
+        raise ValueError("convergence tolerances must be non-negative")
+
+    enough = len(samples) >= policy.min_samples
+    finite = all(
+        np.isfinite(
+            [
+                sample.mesh_size_mm,
+                sample.tip_displacement_y_mm,
+                sample.tip_error_percent,
+                sample.force_balance_norm_n,
+                sample.moment_balance_norm_nmm,
+            ]
+        ).all()
+        for sample in samples
+    )
+    strictly_refined = all(
+        samples[i].mesh_size_mm < samples[i - 1].mesh_size_mm for i in range(1, len(samples))
+    )
+    nonincreasing_error = all(
+        samples[i].tip_error_percent <= samples[i - 1].tip_error_percent + 1.0e-12
+        for i in range(1, len(samples))
+    )
+
+    final_error = samples[-1].tip_error_percent if samples else None
+    max_force = max((sample.force_balance_norm_n for sample in samples), default=None)
+    max_moment = max((sample.moment_balance_norm_nmm for sample in samples), default=None)
+    last_change = None
+    if len(samples) >= 2:
+        previous = samples[-2].tip_displacement_y_mm
+        current = samples[-1].tip_displacement_y_mm
+        denominator = max(abs(current), abs(previous), 1.0e-30)
+        last_change = abs(current - previous) / denominator * 100.0
+
+    checks = {
+        "minimum_sample_count": enough,
+        "finite_metrics": finite,
+        "strict_mesh_refinement": strictly_refined,
+        "final_tip_error": bool(final_error is not None and final_error <= policy.max_final_tip_error_percent),
+        "last_refinement_change": bool(
+            last_change is not None and last_change <= policy.max_last_refinement_change_percent
+        ),
+        "global_force_balance": bool(max_force is not None and max_force <= policy.max_force_balance_norm_n),
+        "global_moment_balance": bool(
+            max_moment is not None and max_moment <= policy.max_moment_balance_norm_nmm
+        ),
+        "nonincreasing_tip_error": bool(nonincreasing_error or not policy.require_nonincreasing_tip_error),
+    }
+    return ConvergenceDecision(
+        converged=all(checks.values()),
+        checks=checks,
+        metrics={
+            "sample_count": len(samples),
+            "final_tip_error_percent": final_error,
+            "last_refinement_change_percent": last_change,
+            "max_force_balance_norm_n": max_force,
+            "max_moment_balance_norm_nmm": max_moment,
+        },
+        policy=asdict(policy),
+    )
+
+
+def benchmark_manifest(
+    reference: CantileverReference,
+    samples: list[ConvergenceSample],
+    *,
+    policy: ConvergencePolicy | None = None,
+) -> dict:
+    manifest = {
         "result_class": "VERIFICATION_BENCHMARK_NOT_INDUSTRIAL_RESULT",
         "units": {"length": "mm", "force": "N", "stress": "MPa"},
         "analytical_reference": asdict(reference),
         "samples": [asdict(sample) for sample in samples],
         "converged_claim": False,
     }
+    if policy is not None:
+        decision = evaluate_convergence(samples, policy)
+        manifest["convergence_decision"] = asdict(decision)
+        manifest["converged_claim"] = decision.converged
+    return manifest
