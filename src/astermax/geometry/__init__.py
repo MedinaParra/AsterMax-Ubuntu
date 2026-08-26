@@ -1,3 +1,14 @@
+from .five_segment_poses import (
+    FiveSegmentPoseDecision,
+    FiveSegmentPoseStatus,
+    SegmentPoseCheck,
+    SegmentSeatingPose,
+    evaluate_five_segment_poses,
+    evaluate_segment_pose,
+    pad_point_cross_section_mm,
+    radial_translation_vector_mm,
+    radial_unit_vector,
+)
 from .seating_kinematics import (
     BoltHoleFit,
     CylindricalPadArc,
@@ -14,12 +25,21 @@ from .seating_kinematics import (
 __all__ = [
     "BoltHoleFit",
     "CylindricalPadArc",
+    "FiveSegmentPoseDecision",
+    "FiveSegmentPoseStatus",
     "GapBand",
     "SeatingCompatibilityDecision",
     "SeatingCompatibilityStatus",
+    "SegmentPoseCheck",
+    "SegmentSeatingPose",
     "bolt_relative_offset_limit_mm",
     "cylindrical_pad_gap_mm",
+    "evaluate_five_segment_poses",
     "evaluate_seating_compatibility",
+    "evaluate_segment_pose",
+    "pad_point_cross_section_mm",
+    "radial_translation_vector_mm",
+    "radial_unit_vector",
     "translation_for_gap_mm",
     "translation_interval_for_gap_band",
 ]
