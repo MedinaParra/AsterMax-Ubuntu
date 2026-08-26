@@ -1,0 +1,20 @@
+name: Windows MVP Harness
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  windows-contract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run portable contract tests
+        run: python -m unittest discover -s tests -v
+      - name: Run analytical reference harness
+        run: python -m src.astermax_harness examples/cantilever_mm.astermax.json --reference
