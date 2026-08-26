@@ -38,7 +38,10 @@ def tet10_shape_functions(natural_coordinates: np.ndarray) -> np.ndarray:
 
     Natural coordinates are ``(r, s, t)`` with barycentric coordinates
     ``L1=1-r-s-t, L2=r, L3=s, L4=t``. Gmsh element type 11 uses vertices
-    1..4 followed by edges (1-2, 2-3, 3-1, 1-4, 2-4, 3-4).
+    1..4 followed by edges (1-2, 2-3, 3-1, 1-4, 3-4, 2-4).
+
+    The final two edge nodes are intentionally ordered 3-4 then 2-4 to match
+    Gmsh's Tetrahedron10 node-numbering convention exactly.
     """
     r, s, t = np.asarray(natural_coordinates, dtype=float)
     l = np.asarray([1.0 - r - s - t, r, s, t], dtype=float)
@@ -53,15 +56,15 @@ def tet10_shape_functions(natural_coordinates: np.ndarray) -> np.ndarray:
             4.0 * l2 * l3,
             4.0 * l3 * l1,
             4.0 * l1 * l4,
-            4.0 * l2 * l4,
             4.0 * l3 * l4,
+            4.0 * l2 * l4,
         ],
         dtype=float,
     )
 
 
 def tet10_shape_derivatives(natural_coordinates: np.ndarray) -> np.ndarray:
-    """Return ``dN/d(r,s,t)`` with shape ``(10, 3)``."""
+    """Return ``dN/d(r,s,t)`` with shape ``(10, 3)`` in Gmsh order."""
     r, s, t = np.asarray(natural_coordinates, dtype=float)
     l = np.asarray([1.0 - r - s - t, r, s, t], dtype=float)
     # Rows are barycentric coordinates L1..L4; columns are r,s,t.
@@ -77,7 +80,7 @@ def tet10_shape_derivatives(natural_coordinates: np.ndarray) -> np.ndarray:
     out = np.empty((10, 3), dtype=float)
     for i in range(4):
         out[i] = (4.0 * l[i] - 1.0) * dl[i]
-    edge_pairs = ((0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3))
+    edge_pairs = ((0, 1), (1, 2), (2, 0), (0, 3), (2, 3), (1, 3))
     for row, (i, j) in enumerate(edge_pairs, start=4):
         out[row] = 4.0 * (dl[i] * l[j] + l[i] * dl[j])
     return out
@@ -177,7 +180,7 @@ def straight_sided_tet10_from_vertices(vertices_mm: np.ndarray) -> np.ndarray:
             0.5 * (v2 + v3),
             0.5 * (v3 + v1),
             0.5 * (v1 + v4),
-            0.5 * (v2 + v4),
             0.5 * (v3 + v4),
+            0.5 * (v2 + v4),
         ]
     )
