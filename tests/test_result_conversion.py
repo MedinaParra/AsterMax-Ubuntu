@@ -90,12 +90,21 @@ def test_conversion_manifest_links_solver_rmed_descriptor_and_vtu(tmp_path: Path
         "output/result.vtu",
         "output/result_descriptor.json",
     }
+    assert conversion.metadata["source_evidence_class"] == "SOLVER_RESULT"
+    assert conversion.metadata["artifact_evidence_class"] == "DETERMINISTIC_CALCULATION"
 
     result = load_converted_solver_result(tmp_path, request, manifest)
     assert result.manifest_sha256 == conversion.source_run_manifest_sha256
     assert [field.location.value for field in result.fields] == ["NODAL", "ELEMENT_NODAL"]
     assert all(field.artifact.relative_path == "output/result.vtu" for field in result.fields)
+    assert all(field.metadata["source_evidence_class"] == "SOLVER_RESULT" for field in result.fields)
+    assert all(
+        field.metadata["artifact_evidence_class"] == "DETERMINISTIC_CALCULATION"
+        for field in result.fields
+    )
     assert result.metadata["converter_version"] == "astermax-med3-v1"
+    assert result.metadata["source_evidence_class"] == "SOLVER_RESULT"
+    assert result.metadata["artifact_evidence_class"] == "DETERMINISTIC_CALCULATION"
 
 
 def test_converted_loader_rejects_vtu_mutation(tmp_path: Path) -> None:
@@ -116,3 +125,85 @@ def test_converted_loader_rejects_vtu_mutation(tmp_path: Path) -> None:
     (output / "result.vtu").write_text("tampered", encoding="utf-8")
     with pytest.raises(SolverEvidenceError, match="artifact digest mismatch"):
         load_converted_solver_result(tmp_path, request, manifest)
+
+
+def test_converted_loader_rejects_coordinated_descriptor_digest_tampering(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    rmed = output / "solver.rmed"
+    build_structural_med(rmed)
+    source = artifact(rmed, tmp_path)
+    manifest = persist_manifest(tmp_path, source)
+    request = make_request()
+
+    convert_rmed_result(
+        tmp_path,
+        request,
+        manifest,
+        source_relative_path="output/solver.rmed",
+    )
+
+    descriptor_path = output / "result_descriptor.json"
+    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    descriptor["fields"][0]["metadata"]["vtk_scope"] = "CellData"
+    descriptor_path.write_text(
+        json.dumps(descriptor, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    conversion_path = output / "conversion_manifest.json"
+    conversion = json.loads(conversion_path.read_text(encoding="utf-8"))
+    descriptor_bytes = descriptor_path.read_bytes()
+    for item in conversion["output_artifacts"]:
+        if item["relative_path"] == "output/result_descriptor.json":
+            item["sha256"] = hashlib.sha256(descriptor_bytes).hexdigest()
+            item["byte_size"] = len(descriptor_bytes)
+    conversion_path.write_text(
+        json.dumps(conversion, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SolverEvidenceError, match="conversion metadata mismatch"):
+        load_converted_solver_result(tmp_path, request, manifest)
+
+
+def test_converted_loader_rejects_untrusted_converter_identity(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    rmed = output / "solver.rmed"
+    build_structural_med(rmed)
+    source = artifact(rmed, tmp_path)
+    manifest = persist_manifest(tmp_path, source)
+    request = make_request()
+
+    convert_rmed_result(
+        tmp_path,
+        request,
+        manifest,
+        source_relative_path="output/solver.rmed",
+    )
+    conversion_path = output / "conversion_manifest.json"
+    conversion = json.loads(conversion_path.read_text(encoding="utf-8"))
+    conversion["converter_id"] = "untrusted.converter"
+    conversion_path.write_text(json.dumps(conversion), encoding="utf-8")
+
+    with pytest.raises(SolverEvidenceError, match="invalid conversion manifest"):
+        load_converted_solver_result(tmp_path, request, manifest)
+
+
+def test_converter_rejects_overwriting_solver_source_rmed(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    output.mkdir()
+    rmed = output / "solver.rmed"
+    build_structural_med(rmed)
+    source = artifact(rmed, tmp_path)
+    manifest = persist_manifest(tmp_path, source)
+
+    with pytest.raises(SolverEvidenceError, match="must not overwrite"):
+        convert_rmed_result(
+            tmp_path,
+            make_request(),
+            manifest,
+            source_relative_path="output/solver.rmed",
+            vtu_relative_path="output/solver.rmed",
+        )
