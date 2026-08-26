@@ -71,14 +71,16 @@ def _assert_straight_sided_tet10(coords_mm: np.ndarray) -> None:
     coords = np.asarray(coords_mm, dtype=float)
     if coords.shape != (10, 3):
         raise ValueError("TET10 coordinates must have shape (10, 3)")
+    # Exact Gmsh Tetrahedron10 order after vertices 0..3:
+    # edges 0-1, 1-2, 2-0, 0-3, 2-3, 1-3.
     expected = np.asarray(
         [
             0.5 * (coords[0] + coords[1]),
             0.5 * (coords[1] + coords[2]),
             0.5 * (coords[2] + coords[0]),
             0.5 * (coords[0] + coords[3]),
-            0.5 * (coords[1] + coords[3]),
             0.5 * (coords[2] + coords[3]),
+            0.5 * (coords[1] + coords[3]),
         ]
     )
     scale = max(float(np.linalg.norm(coords[:4].max(axis=0) - coords[:4].min(axis=0))), 1.0)
