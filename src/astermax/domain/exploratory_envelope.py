@@ -76,12 +76,19 @@ class ExploratoryDriveGeometryV1(BaseModel):
 
     chain_pitch_mm: float = Field(gt=0)
     sprocket_tooth_count: int = Field(gt=2)
-    source_class: EvidenceSourceClass = EvidenceSourceClass.ASSUMPTION
+    source_class: EvidenceSourceClass
 
     @model_validator(mode="after")
-    def assumption_only(self) -> "ExploratoryDriveGeometryV1":
-        if self.source_class != EvidenceSourceClass.ASSUMPTION:
-            raise ValueError("exploratory drive geometry must remain ASSUMPTION")
+    def accepted_geometry_provenance(self) -> "ExploratoryDriveGeometryV1":
+        accepted = {
+            EvidenceSourceClass.CURRENT_AUTHORITATIVE,
+            EvidenceSourceClass.PUBLIC_MANUFACTURER,
+            EvidenceSourceClass.ASSUMPTION,
+        }
+        if self.source_class not in accepted:
+            raise ValueError(
+                "drive geometry requires current authoritative, public manufacturer, or explicit assumption provenance"
+            )
         return self
 
 
@@ -118,6 +125,7 @@ class DerivedLoadCaseV1(BaseModel):
     force_per_loaded_tooth_kn: float = Field(gt=0)
     wrap_angle_deg: float
     axial_thrust_kn: float
+    geometry_source_class: EvidenceSourceClass
     result_class: ExploratoryResultClass = ExploratoryResultClass.ASSUMPTION_DERIVATION
     authentic_solver_authorized: bool = False
     disclaimer: str = Field(min_length=1)
@@ -161,11 +169,12 @@ def derive_load_case(
         force_per_loaded_tooth_kn=chain_force_kn / case.loaded_teeth_count,
         wrap_angle_deg=case.wrap_angle_deg,
         axial_thrust_kn=case.axial_thrust_kn,
+        geometry_source_class=geometry.source_class,
         authentic_solver_authorized=False,
         disclaimer=(
-            "Derived from an exploratory assumption set. Values are suitable only for "
-            "sensitivity studies and must not be promoted to USER_INPUT, SOLVER_RESULT, "
-            "or authentic engineering evidence."
+            "Load and force are derived from an exploratory assumption set. Geometry may retain "
+            "stronger provenance, but the derived load remains sensitivity-only and must not be "
+            "promoted to USER_INPUT, SOLVER_RESULT, or authentic engineering evidence."
         ),
     )
 
