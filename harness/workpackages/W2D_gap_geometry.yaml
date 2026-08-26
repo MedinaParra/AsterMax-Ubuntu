@@ -6,7 +6,8 @@ objective: >-
   Verify the confidential local OT1613 STEP by digest, inspect its solid/radial
   topology and coaxial cylindrical face candidates, construct a provenance-safe
   GAP sensitivity plan, and block any geometry transformation until the actual
-  segment-to-hub seating interface is explicitly confirmed.
+  multi-pad segment-to-hub seating interface is explicitly confirmed and is
+  geometrically consistent with the physical test flange evidence.
 allowed_files:
   - "harness/workpackages/W2D_gap_geometry.yaml"
   - "scripts/inspect_hub_sprocket_step.py"
@@ -27,6 +28,8 @@ prohibited_actions:
   - inspect a local STEP whose SHA-256 or byte size does not match W2C provenance
   - label the derived 0.25 mm midpoint as measured GAP evidence
   - choose a seating/contact face solely from nearest radius without explicit confirmation
+  - assume exactly one posterior pad face per segment
+  - accept a selected cylindrical pad whose implied diameter is smaller than the physically installed Ø796.87 test flange
   - move segment solids radially while the seating interface is ambiguous
   - create a mesh, contact pair, material, load or solver job from an unconfirmed interface
   - claim any OT1613 FEA result from this geometry-preparation slice
@@ -35,12 +38,14 @@ acceptance_criteria:
   - CadQuery/OCP is loaded lazily so deterministic core tests do not require a heavy CAD backend.
   - Exact local inspection can identify the configured 1 hub plus 5 segment solids and radial frames.
   - Five segment radial frames reproduce 72-degree periodicity within deterministic tolerance.
-  - Coaxial cylindrical face candidates are inventoried by solid, face index, radius, area and axis alignment.
+  - Coaxial cylindrical face candidates are inventoried by solid, face index, radius, area, axis alignment and axial X extent.
+  - Interface selection supports one or more candidate pad faces per segment and requires at least one confirmed face for every segment.
   - GAP 0.10 and 0.40 mm remain MEASURED_ENDPOINT scenarios.
   - GAP 0.25 mm is DERIVED_SENSITIVITY only and carries an explicit derivation stating it is not measured evidence.
   - A malicious plan that adds 0.25 mm as measured evidence is rejected.
   - Current geometry preparation evaluates BLOCKED_INTERFACE_SELECTION without a provenance-backed face selection.
-  - Only a complete selection drawn from inspected candidates can transition to READY_FOR_PARAMETERIZATION.
+  - A selected cylindrical face with diameter below the Ø796.87 physical test flange keeps geometry preparation BLOCKED.
+  - Only a complete multi-pad selection drawn from inspected candidates and consistent with physical flange evidence can transition to READY_FOR_PARAMETERIZATION.
   - No CAD bytes, mesh or OT1613 FEA results are committed or claimed.
 required_gates:
   - scope_policy
@@ -53,6 +58,8 @@ human_merge_required: true
 validity_risks:
   - confidential_cad_exposure
   - interface_misidentification
+  - multi_pad_topology_loss
+  - cad_vs_physical_flange_conflict
   - measured_vs_derived_gap_confusion
   - geometry_transform_without_evidence
   - evidence_provenance_confusion
@@ -67,5 +74,6 @@ metadata:
   cad_sha256: ed305386f592943aaf4df6dbbca420808ec032c503e4e3456e15db0ecc19ca88
   cad_byte_size: 3117839
   cad_analysis_unit: mm
+  physical_test_flange_diameter_mm: 796.87
   cad_bytes_committed: false
   authentic_fea_result_claimed: false
