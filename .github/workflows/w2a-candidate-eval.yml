@@ -197,8 +197,9 @@ jobs:
               set -euo pipefail
               rm -rf /tmp/astermax-python-deps
               python3 -m pip install --disable-pip-version-check --target /tmp/astermax-python-deps "pydantic>=2.8,<3"
-              export PYTHONPATH=/tmp/astermax-python-deps:/workspace/src
+              export PYTHONPATH=/tmp/astermax-python-deps:/workspace/src${PYTHONPATH:+:$PYTHONPATH}
               python3 -c "import pydantic; print(\"ASTERMAX_PYDANTIC_VERSION=\" + pydantic.__version__)"
+              python3 -c "import mpi4py; print(\"ASTERMAX_MPI4PY_IMPORT=PASS\")"
               export ASTERMAX_CODE_ASTER_CAPABILITY_FILE=/run/input/code_aster_capabilities.json
               export ASTERMAX_RUN_ASTER=run_aster
               python3 -m astermax.solver.wsl_worker \
