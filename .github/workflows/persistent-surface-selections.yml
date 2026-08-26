@@ -1,0 +1,30 @@
+name: Windows Persistent Surface Selection Gate
+
+on:
+  push:
+    branches:
+      - agent/persistent-surface-selections-v0.3
+  pull_request:
+    branches:
+      - agent/windows-exe-v0.2
+
+jobs:
+  verify-persistent-selections:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Verify persistent CAD selections through TET10 remeshing
+        run: python benchmarks/persistent_surface_selections.py
+      - name: Upload persistent selection evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: persistent-surface-selections-windows
+          path: persistent_surface_selections.json
+          if-no-files-found: error
