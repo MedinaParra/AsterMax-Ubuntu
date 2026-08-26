@@ -129,10 +129,10 @@ jobs:
           P ncpus 1
           P mpi_nbcpu 1
           P mpi_nbnoeud 1
-          F comm input/ssls120c_worker.comm D 1
-          F datg input/ssls120c.datg D 16
-          F mmed input/ssls120c.mmed D 20
-          F rmed output/ssls120c_results.rmed R 80
+          F comm ssls120c_worker.comm D 1
+          F datg ssls120c.datg D 16
+          F mmed ssls120c.mmed D 20
+          F rmed ../output/ssls120c_results.rmed R 80
           EOF
           cat > .eval/worker-run/input/code_aster_capabilities.json <<'EOF'
           {"schema_version":"SolverCapabilityV1","backend_id":"code_aster_wsl2","backend_version":"18.1.0","capabilities":["linear_static"],"result_field_names":["displacement","stress"],"metadata":{"image":"simvia/code_aster:18.1.0"}}
