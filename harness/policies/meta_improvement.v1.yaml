@@ -1,0 +1,17 @@
+version: 1
+policy_id: ASTERMAX-META-IMPROVEMENT-001
+protected_paths:
+  - harness/evals/**
+  - harness/policies/**
+  - tests/benchmarks/**
+requirements:
+  same_frozen_eval_suite: true
+  no_mandatory_regression: true
+  min_score_gain: 0.01
+  max_wall_clock_budget_ratio: 1.25
+  human_merge_required: true
+  rollback_on_failure: true
+notes:
+  - A candidate harness may propose changes but cannot edit the frozen suite used to judge that candidate.
+  - A higher aggregate score never compensates for a mandatory validity failure.
+  - Resource use is part of the evaluated system and must be reported.

@@ -1,0 +1,90 @@
+version: 1
+protocol_id: ASTERMAX-CHATGPT-FRONTIER-001
+purpose: evidence_driven_autonomous_engineering
+
+source_of_truth:
+  primary: repository
+  rules:
+    - read_current_state_before_write
+    - do_not_treat_chat_memory_as_repository_truth
+    - cite_or_record_external_claims_when_they_affect_design
+
+execution_cycle:
+  - frame_claim
+  - retrieve_current_state
+  - create_or_select_workpackage
+  - enumerate_validity_risks
+  - set_evaluation_budget
+  - architect_bounded_change
+  - implement_within_scope
+  - run_adversarial_tests
+  - run_numerical_validation_when_applicable
+  - run_frozen_frontier_eval
+  - build_evidence_lineage
+  - critic_review
+  - release_judge
+  - human_merge_gate
+
+agent_roles:
+  H0: coding_supervisor
+  H1: architect
+  H2: implementation
+  H3: adversarial_test_engineer
+  H4: numerical_validator
+  H5: critic
+  H6: release_judge
+  H7: meta_harness
+
+claim_classes:
+  software_claim:
+    minimum_evidence: [tests_or_static_check]
+  numerical_claim:
+    minimum_evidence: [real_computation, benchmark_or_reference, provenance]
+  solver_claim:
+    minimum_evidence: [solver_manifest, authentic_artifact, termination_evidence]
+  engineering_claim:
+    minimum_evidence: [accepted_solver_or_measurement_evidence, traceable_assumptions]
+  surrogate_claim:
+    minimum_evidence: [validated_training_cases, error_metric, domain_status]
+
+validity_checks:
+  - reward_hacking
+  - test_weakening
+  - scope_escape
+  - evidence_fabrication
+  - provenance_loss
+  - silent_fallback
+  - evaluation_contamination
+  - unsupported_numerical_claim
+  - budget_inflation
+
+stop_conditions:
+  PASS:
+    - all_required_gates_pass
+    - no_orphan_release_claims
+    - human_gate_preserved
+  REWORK:
+    - any_required_gate_fails_but_scope_remains_repairable
+  REJECT:
+    - contract_invalid
+    - prohibited_action_detected
+    - evidence_cannot_support_claim
+
+meta_improvement:
+  enabled: true
+  rules:
+    - candidate_cannot_edit_frozen_eval_used_for_judgment
+    - compare_on_same_suite_hash
+    - no_mandatory_regression
+    - budget_ratio_must_remain_within_policy
+    - human_merge_required
+
+communication:
+  progress_updates: evidence_based
+  never_claim_done_before_gates: true
+  explicitly_distinguish:
+    - agent_proposal
+    - deterministic_calculation
+    - solver_result
+    - surrogate_prediction
+    - human_decision
