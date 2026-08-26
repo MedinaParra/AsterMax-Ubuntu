@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "pmv/**"
+      - "infra/**"
   pull_request:
 
 jobs:
@@ -12,10 +13,37 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install core and test dependencies
         run: python -m pip install -e ".[dev]"
-      - name: Run deterministic core tests
-        run: python -m pytest
+      - name: Run deterministic core tests only
+        run: python -m pytest --ignore=tests/benchmarks
+      - name: Reject numerical benchmark deletion
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          $deleted = git diff --diff-filter=D --name-only $env:BASE_SHA HEAD -- tests/benchmarks
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not compare numerical benchmark ownership against PR base."
+          }
+          if ($deleted) {
+            Write-Host $deleted
+            throw "Numerical benchmark deletion detected. Windows core cannot become green by removing the Code_Aster numerical gate."
+          }
+          Write-Host "NUMERICAL_BENCHMARK_DELETIONS=0"
+      - name: Record numerical gate ownership
+        shell: pwsh
+        run: |
+          if (Test-Path tests/benchmarks) {
+            Get-ChildItem tests/benchmarks -Filter "test_*.py" -File | ForEach-Object {
+              Write-Host "NUMERICAL_GATE_OWNED_BY_CODE_ASTER=$($_.FullName)"
+            }
+          } else {
+            Write-Host "NUMERICAL_GATE_NOT_YET_PRESENT_IN_THIS_BASELINE"
+          }
