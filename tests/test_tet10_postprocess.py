@@ -12,7 +12,10 @@ from astermax.fea.evidence_tet10 import (
     mesh_fingerprint_tet10,
     write_tet10_analysis_evidence_manifest,
 )
-from astermax.fea.postprocess_tet10 import write_tet10_linear_static_vtu
+from astermax.fea.postprocess_tet10 import (
+    gmsh_tet10_to_vtk_connectivity,
+    write_tet10_linear_static_vtu,
+)
 from astermax.fea.solver import Tet10LinearStaticResult
 from astermax.fea.viewer_tet10 import (
     build_tet10_viewer_payload,
@@ -68,6 +71,13 @@ def test_tet10_boundary_uses_quadratic_midside_nodes() -> None:
     assert set(display.reshape(-1)) == set(range(10))
 
 
+def test_gmsh_to_vtk_quadratic_tetra_swaps_final_edge_nodes_only() -> None:
+    gmsh = np.arange(10, dtype=np.int64).reshape((1, 10))
+    vtk = gmsh_tet10_to_vtk_connectivity(gmsh)
+    assert vtk.tolist() == [[0, 1, 2, 3, 4, 5, 6, 7, 9, 8]]
+    assert gmsh.tolist() == [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]
+
+
 def test_tet10_viewer_preserves_ip_stress_without_nodal_smoothing(tmp_path: Path) -> None:
     nodes, elements, result = _single_tet10()
     payload = build_tet10_viewer_payload(nodes, elements, result, converged_claim=True)
@@ -104,13 +114,16 @@ def test_tet10_vtu_uses_quadratic_tetra_and_keeps_four_ip_values(tmp_path: Path)
     tree = ElementTree.parse(path)
     arrays = {item.attrib.get("Name"): item for item in tree.findall(".//DataArray")}
     assert arrays["types"].text.strip() == "24"
+    assert arrays["connectivity"].text.strip() == "0 1 2 3 4 5 6 7 9 8"
     assert arrays["VON_MISES_IP4_MPa"].attrib["NumberOfComponents"] == "4"
     assert arrays["STRESS_IP4_MPa"].attrib["NumberOfComponents"] == "24"
     assert arrays["VON_MISES_IP_MAX_MPa"].text.strip() == "40"
     assert arrays["ASTERMAX_STRESS_IS_NODAL"].text.strip() == "0"
+    assert arrays["ASTERMAX_GMSH_TO_VTK_LOCAL_SWAP_8_9"].text.strip() == "1"
     assert manifest.tet10_count == 1
     assert manifest.von_mises_ip_max_mpa == 40.0
     assert manifest.stress_representation.endswith("NO_NODAL_SMOOTHING")
+    assert "SWAP_LOCAL_POSITIONS_8_9" in manifest.connectivity_mapping
 
 
 def test_tet10_mesh_fingerprint_changes_with_midside_geometry() -> None:
@@ -163,7 +176,7 @@ def test_tet10_evidence_requires_real_convergence_gate(tmp_path: Path) -> None:
 
 
 def test_tet10_evidence_refuses_industrial_or_ansys_equivalence_claim(tmp_path: Path) -> None:
-    nodes, elements, result = _single_tet10()
+    nodes, elements, _ = _single_tet10()
     package = tmp_path / "pkg"
     package.mkdir()
     source = package / "source.step"
