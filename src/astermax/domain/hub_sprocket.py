@@ -95,6 +95,7 @@ class GapRangeV1(BaseModel):
     status: EvidenceStatus = EvidenceStatus.MEASURED
     source_ids: list[str] = Field(min_length=1)
     test_flange_diameter_mm: float = Field(gt=0)
+    representation: str = Field(default="RANGE", pattern=r"^RANGE$")
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -161,6 +162,71 @@ class HubGeometryBaselineV1(BaseModel):
     oem_posterior_seat_spec_available: EvidenceValueV1
 
 
+class BoundingBoxV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    x_length: float = Field(gt=0)
+    y_length: float = Field(gt=0)
+    z_length: float = Field(gt=0)
+
+
+class CadUnitNormalizationStatus(StrEnum):
+    UNRESOLVED = "UNRESOLVED"
+    CONFIRMED_MM_FROM_DRAWING = "CONFIRMED_MM_FROM_DRAWING"
+
+
+class CadGeometryArtifactV1(BaseModel):
+    """Identity and deterministic inspection facts for the uploaded STEP geometry.
+
+    The STEP file currently declares METRE while its numeric hub diameter is 795,
+    matching the verified drawing dimension in millimetres. That conflict is
+    intentionally represented instead of silently rescaling the model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_name: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_size: int = Field(gt=0)
+    media_type: str = Field(default="model/step", min_length=1)
+    step_schema: str = Field(min_length=1)
+    exporter: str | None = None
+    declared_length_unit: str = Field(min_length=1)
+    intended_analysis_length_unit: str = Field(default="mm", pattern=r"^mm$")
+    unit_normalization_status: CadUnitNormalizationStatus
+    normalization_basis_source_ids: list[str] = Field(min_length=1)
+    human_confirmation_source_ids: list[str] = Field(default_factory=list)
+    solid_count: int = Field(gt=0)
+    hub_solid_index_1based: int = Field(gt=0)
+    segment_solid_indices_1based: list[int] = Field(min_length=1)
+    hub_bbox_numeric: BoundingBoxV1
+    segment_axial_extent_numeric: float = Field(gt=0)
+    segment_volume_numeric: float = Field(gt=0)
+    segment_count_with_identical_volume: int = Field(gt=0)
+    nominal_segment_hub_min_distance_numeric: list[float] = Field(default_factory=list)
+    inspection_tool: str = Field(min_length=1)
+    inspection_source_ids: list[str] = Field(min_length=1)
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_geometry_identity(self) -> "CadGeometryArtifactV1":
+        indices = [self.hub_solid_index_1based, *self.segment_solid_indices_1based]
+        if any(index > self.solid_count for index in indices):
+            raise ValueError("solid index exceeds declared solid_count")
+        if self.hub_solid_index_1based in self.segment_solid_indices_1based:
+            raise ValueError("hub solid cannot also be a segment solid")
+        if len(set(self.segment_solid_indices_1based)) != len(self.segment_solid_indices_1based):
+            raise ValueError("segment solid indices must be unique")
+        if self.segment_count_with_identical_volume > len(self.segment_solid_indices_1based):
+            raise ValueError("identical-volume count cannot exceed segment count")
+        if self.unit_normalization_status == CadUnitNormalizationStatus.CONFIRMED_MM_FROM_DRAWING:
+            if not self.human_confirmation_source_ids:
+                raise ValueError("confirmed CAD unit normalization requires human_confirmation_source_ids")
+        elif self.human_confirmation_source_ids:
+            raise ValueError("human confirmation sources require confirmed CAD unit normalization")
+        return self
+
+
 class ModelIntentV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -203,6 +269,7 @@ class HubSprocketBaselineV1(BaseModel):
     identifiers: IdentificationDiscrepancyV1
     segment: SegmentBaselineV1
     hub: HubGeometryBaselineV1
+    geometry: CadGeometryArtifactV1
     diameter_references: list[DiameterReferenceV1] = Field(min_length=1)
     measured_gap: GapRangeV1
     model_intent: ModelIntentV1
@@ -223,6 +290,9 @@ class HubSprocketBaselineV1(BaseModel):
         if any(item.role == DiameterReferenceRole.OEM_POSTERIOR_SEAT for item in self.diameter_references):
             raise ValueError("cannot label a diameter as OEM posterior seat when the source states that specification is unavailable")
 
+        if abs(self.measured_gap.minimum_mm - self.measured_gap.maximum_mm) < 1e-12:
+            raise ValueError("measured GAP evidence must preserve the reported range; a single midpoint/value is not equivalent")
+
         source_keys = set(self.sources)
         if any(source.source_id != key for key, source in self.sources.items()):
             raise ValueError("source dictionary keys must equal SourceReferenceV1.source_id")
@@ -231,11 +301,12 @@ class HubSprocketBaselineV1(BaseModel):
 
         def collect(value: Any) -> None:
             if isinstance(value, BaseModel):
-                source_ids = getattr(value, "source_ids", None)
-                if isinstance(source_ids, list):
-                    referenced.update(source_ids)
                 for field_name in value.__class__.model_fields:
-                    collect(getattr(value, field_name))
+                    field_value = getattr(value, field_name)
+                    if field_name == "source_ids" or field_name.endswith("_source_ids"):
+                        if isinstance(field_value, list):
+                            referenced.update(field_value)
+                    collect(field_value)
             elif isinstance(value, dict):
                 for item in value.values():
                     collect(item)
@@ -246,6 +317,7 @@ class HubSprocketBaselineV1(BaseModel):
         collect(self.identifiers)
         collect(self.segment)
         collect(self.hub)
+        collect(self.geometry)
         collect(self.diameter_references)
         collect(self.measured_gap)
         collect(self.model_intent)
