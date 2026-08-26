@@ -17,6 +17,7 @@ class SolverTermination(StrEnum):
 class FieldLocation(StrEnum):
     NODAL = "NODAL"
     ELEMENTAL = "ELEMENTAL"
+    ELEMENT_NODAL = "ELEMENT_NODAL"
     INTEGRATION_POINT = "INTEGRATION_POINT"
     GLOBAL = "GLOBAL"
 

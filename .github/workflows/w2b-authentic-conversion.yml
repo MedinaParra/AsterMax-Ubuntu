@@ -1,0 +1,306 @@
+name: W2B Authentic Result Conversion
+
+on:
+  pull_request:
+    branches:
+      - integration/W2A-split-validation-gates
+  workflow_dispatch:
+
+env:
+  ASTER_IMAGE: simvia/code_aster:18.1.0
+  ASTER_DIGEST: sha256:4629a21a109309bb97fbdc27d750445cc869e151e2e2ed6290f69539614e4435
+  ASTER_REFERENCE_TEST: ssls120c
+
+jobs:
+  authentic-conversion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Pull and verify pinned Code_Aster image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$ASTER_IMAGE"
+          actual="$(docker inspect "$ASTER_IMAGE" --format='{{index .RepoDigests 0}}')"
+          echo "$actual" | tee w2b_image_digest.txt
+          test "$actual" = "simvia/code_aster@${ASTER_DIGEST}"
+
+      - name: Copy pinned Code_Aster reference case
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .eval/ssls120c
+          cid="$(docker create --entrypoint bash "$ASTER_IMAGE" -ic 'sleep infinity')"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker start "$cid" >/dev/null
+          export_path="$(docker exec "$cid" bash -ic 'find /opt -type f -name "ssls120c.export" -print -quit 2>/dev/null')"
+          test -n "$export_path"
+          case_dir="$(dirname "$export_path")"
+          for ext in export comm datg mmed; do
+            docker cp "$cid:$case_dir/ssls120c.$ext" ".eval/ssls120c/ssls120c.$ext"
+          done
+          docker rm -f "$cid" >/dev/null
+          trap - EXIT
+
+      - name: Build authentic AsterMax worker package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .eval/worker-run/input .eval/worker-run/output
+          chmod 0777 .eval/worker-run/output
+          cp .eval/ssls120c/ssls120c.comm .eval/worker-run/input/ssls120c_worker.comm
+          cp .eval/ssls120c/ssls120c.datg .eval/worker-run/input/ssls120c.datg
+          cp .eval/ssls120c/ssls120c.mmed .eval/worker-run/input/ssls120c.mmed
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.eval/worker-run/input/ssls120c_worker.comm')
+          text = p.read_text(encoding='utf-8')
+          marker = 'FIN()'
+          idx = text.rfind(marker)
+          if idx < 0:
+              raise SystemExit('FIN() marker not found in ssls120c.comm')
+          export_block = '''IMPR_RESU(
+              FORMAT="MED",
+              UNITE=80,
+              RESU=_F(
+                  RESULTAT=ELAS1,
+                  NOM_CHAM=("DEPL", "SIGM_ELNO"),
+              ),
+          )
+
+          '''
+          p.write_text(text[:idx] + export_block + text[idx:], encoding='utf-8')
+          PY
+          cat > .eval/worker-run/input/ssls120c_worker.export <<'EOF'
+          P time_limit 60
+          P memory_limit 512
+          P ncpus 1
+          P mpi_nbcpu 1
+          P mpi_nbnoeud 1
+          F comm ssls120c_worker.comm D 1
+          F datg ssls120c.datg D 16
+          F mmed ssls120c.mmed D 20
+          F rmed ../output/ssls120c_results.rmed R 80
+          EOF
+          cat > .eval/worker-run/input/code_aster_capabilities.json <<'EOF'
+          {"schema_version":"SolverCapabilityV1","backend_id":"code_aster_wsl2","backend_version":"18.1.0","capabilities":["linear_static"],"result_field_names":["displacement","stress"],"metadata":{"image":"simvia/code_aster:18.1.0"}}
+          EOF
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from hashlib import sha256
+          import json
+          from pathlib import Path
+          root = Path('.eval/worker-run')
+          def artifact(rel):
+              data = (root / rel).read_bytes()
+              return {"relative_path": rel, "sha256": sha256(data).hexdigest(), "byte_size": len(data), "media_type": None}
+          support = [
+              artifact('input/ssls120c_worker.export'),
+              artifact('input/ssls120c_worker.comm'),
+              artifact('input/ssls120c.datg'),
+              artifact('input/ssls120c.mmed'),
+          ]
+          job = {
+              "schema_version": "CodeAsterJobV1",
+              "export_file": "input/ssls120c_worker.export",
+              "input_artifacts": support,
+              "produced_files": ["output/ssls120c_results.rmed"],
+          }
+          (root / 'input/job.json').write_text(json.dumps(job, sort_keys=True), encoding='utf-8')
+          request = {
+              "schema_version": "SolverRequestV1",
+              "request_id": "w2b-ssls120c-request",
+              "run_id": "w2b-ssls120c-run",
+              "project_id": "astermax-w2b-authentic-conversion",
+              "backend_id": "code_aster_wsl2",
+              "model": {
+                  "schema_version": "SolverModelV1",
+                  "model_id": "ssls120c-meshed-geometry",
+                  "project_id": "astermax-w2b-authentic-conversion",
+                  "analysis_type": "linear_static",
+                  "unit_system": "SI",
+                  "geometry": artifact("input/ssls120c.mmed"),
+                  "mesh": artifact("input/ssls120c.mmed"),
+                  "model_definition": artifact("input/job.json"),
+                  "required_capabilities": ["linear_static"],
+                  "metadata": {"benchmark": "ssls120c", "reference_only": True}
+              },
+              "requested_fields": ["displacement", "stress"],
+              "created_at": datetime.now(timezone.utc).isoformat(),
+              "metadata": {"evaluation_only": True}
+          }
+          (root / 'input/solver_request.json').write_text(json.dumps(request, sort_keys=True), encoding='utf-8')
+          PY
+
+      - name: Execute AsterMax worker against authentic Code_Aster
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/workspace:ro" \
+            -v "$PWD/.eval/worker-run:/run" \
+            -w /run \
+            --entrypoint bash \
+            "$ASTER_IMAGE" -ic '
+              set -euo pipefail
+              rm -rf /tmp/astermax-python-deps
+              python3 -m pip install --disable-pip-version-check --target /tmp/astermax-python-deps "pydantic>=2.8,<3"
+              export PYTHONPATH=/tmp/astermax-python-deps:/workspace/src${PYTHONPATH:+:$PYTHONPATH}
+              python3 -c "import mpi4py; print(\"ASTERMAX_MPI4PY_IMPORT=PASS\")"
+              export ASTERMAX_CODE_ASTER_CAPABILITY_FILE=/run/input/code_aster_capabilities.json
+              export ASTERMAX_RUN_ASTER=run_aster
+              python3 -m astermax.solver.wsl_worker \
+                --request /run/input/solver_request.json \
+                --run-dir /run
+            ' 2>&1 | tee w2b_worker.log
+          test -s .eval/worker-run/output/ssls120c_results.rmed
+          test -s .eval/worker-run/output/worker_receipt.json
+          sha256sum .eval/worker-run/output/ssls120c_results.rmed | tee w2b_rmed_sha256.txt
+
+      - name: Install AsterMax postprocess and VTK dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -e ".[dev]" "vtk>=9.3,<10"
+
+      - name: Convert authentic RMED and verify VTK round-trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee w2b_conversion.log
+          from datetime import datetime, timezone
+          from hashlib import sha256
+          import json
+          from pathlib import Path
+
+          import numpy as np
+          from vtkmodules.vtkIOXML import vtkXMLUnstructuredGridReader
+          from vtkmodules.util.numpy_support import vtk_to_numpy
+
+          from astermax.solver.contracts import (
+              ArtifactDigestV1,
+              SolverRequestV1,
+              SolverRunManifestV1,
+              SolverTermination,
+          )
+          from astermax.solver.med_result import read_code_aster_rmed
+          from astermax.solver.result_conversion import convert_rmed_result
+          from astermax.solver.result_loader import load_converted_solver_result
+
+          root = Path('.eval/worker-run').resolve()
+          output = root / 'output'
+          request = SolverRequestV1.model_validate_json((root / 'input/solver_request.json').read_text(encoding='utf-8'))
+          receipt = json.loads((output / 'worker_receipt.json').read_text(encoding='utf-8'))
+          assert receipt['schema_version'] == 'WorkerReceiptV1'
+          assert receipt['backend_id'] == 'code_aster_wsl2'
+          assert receipt['backend_version'] == '18.1.0'
+          assert receipt['produced_files'] == ['output/ssls120c_results.rmed']
+
+          rmed = output / 'ssls120c_results.rmed'
+          payload = rmed.read_bytes()
+          source = ArtifactDigestV1(
+              relative_path='output/ssls120c_results.rmed',
+              sha256=sha256(payload).hexdigest(),
+              byte_size=len(payload),
+              media_type='application/x-med',
+          )
+          now = datetime.now(timezone.utc)
+          manifest = SolverRunManifestV1(
+              run_id=request.run_id,
+              request_id=request.request_id,
+              backend_id='code_aster_wsl2',
+              backend_version='18.1.0',
+              worker_id='w2b-authentic-github-actions',
+              started_at=now,
+              finished_at=now,
+              termination=SolverTermination.SUCCEEDED,
+              output_artifacts=[source],
+              metadata={
+                  'worker_receipt_backend': receipt['backend_id'],
+                  'worker_receipt_backend_version': receipt['backend_version'],
+                  'reference_case': 'ssls120c',
+                  'reference_only': True,
+              },
+          )
+          manifest_path = output / 'manifest.json'
+          manifest_path.write_text(
+              json.dumps(manifest.model_dump(mode='json'), sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8',
+          )
+
+          source_result = read_code_aster_rmed(rmed, expected_sha256=source.sha256)
+          conversion = convert_rmed_result(
+              root,
+              request,
+              manifest,
+              source_relative_path='output/ssls120c_results.rmed',
+          )
+          result = load_converted_solver_result(root, request, manifest)
+
+          reader = vtkXMLUnstructuredGridReader()
+          reader.SetFileName(str(output / 'result.vtu'))
+          reader.Update()
+          grid = reader.GetOutput()
+          assert grid.GetNumberOfPoints() == source_result.points.shape[0]
+          assert grid.GetNumberOfCells() == source_result.number_of_cells
+
+          descriptor = json.loads((output / 'result_descriptor.json').read_text(encoding='utf-8'))
+          checked = []
+          for declared in descriptor['fields']:
+              source_field = source_result.fields[declared['name']]
+              meta = declared['metadata']
+              if meta['vtk_scope'] == 'PointData':
+                  vtk_array = grid.GetPointData().GetArray(meta['vtk_array_name'])
+                  expected = source_field.values
+              elif meta['vtk_scope'] == 'FieldData':
+                  vtk_array = grid.GetFieldData().GetArray(meta['vtk_array_name'])
+                  expected = source_field.values.reshape(source_field.values.shape[0], -1)
+              else:
+                  raise AssertionError(f"unsupported VTK scope {meta['vtk_scope']}")
+              assert vtk_array is not None
+              actual = vtk_to_numpy(vtk_array)
+              assert actual.shape == expected.shape
+              assert np.array_equal(actual, expected)
+              checked.append((declared['name'], expected.shape))
+
+              for derived_name in meta['derived_vtk_array_names']:
+                  derived = grid.GetCellData().GetArray(derived_name) or grid.GetPointData().GetArray(derived_name)
+                  assert derived is not None
+
+          assert len(checked) >= 2
+          assert result.metadata['source_solver_artifact_sha256'] == source.sha256
+          assert result.metadata['source_evidence_class'] == 'SOLVER_RESULT'
+          assert result.metadata['artifact_evidence_class'] == 'DETERMINISTIC_CALCULATION'
+          assert conversion.source_artifact.sha256 == source.sha256
+
+          print('ASTERMAX_W2B_AUTHENTIC_RMED_SHA256=' + source.sha256)
+          print('ASTERMAX_W2B_POINTS=' + str(grid.GetNumberOfPoints()))
+          print('ASTERMAX_W2B_CELLS=' + str(grid.GetNumberOfCells()))
+          print('ASTERMAX_W2B_EXACT_RAW_ARRAY_ROUNDTRIP=PASS')
+          print('ASTERMAX_W2B_FIELDS=' + repr(checked))
+          PY
+
+      - name: Preserve authentic conversion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: w2b-authentic-conversion-evidence
+          path: |
+            w2b_image_digest.txt
+            w2b_worker.log
+            w2b_rmed_sha256.txt
+            w2b_conversion.log
+            .eval/worker-run/output/worker_receipt.json
+            .eval/worker-run/output/ssls120c_results.rmed
+            .eval/worker-run/output/manifest.json
+            .eval/worker-run/output/conversion_manifest.json
+            .eval/worker-run/output/result_descriptor.json
+            .eval/worker-run/output/result.json
+            .eval/worker-run/output/result.vtu
+          if-no-files-found: warn

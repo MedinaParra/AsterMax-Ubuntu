@@ -1,0 +1,80 @@
+schema_version: WorkPackageV1
+workpackage_id: W2B-AUTHENTIC-RESULT-CONVERSION-001
+title: Authentic MED result import, provenance and Windows VTK rendering
+issue: 30
+objective: >-
+  Convert cryptographically verified Code_Aster MED/RMED solver outputs into
+  lossless VTK artifacts, preserve raw solver fields, record deterministic
+  postprocess provenance, construct SolverResultV1 only after evidence linkage
+  checks pass, and render only validated derived result fields in the Windows
+  VTK viewport.
+allowed_files:
+  - ".github/workflows/w2b-authentic-conversion.yml"
+  - ".github/workflows/w2b-windows-vtk-smoke.yml"
+  - "contracts/ResultConversionManifestV1.schema.json"
+  - "contracts/SolverResultV1.schema.json"
+  - "harness/workpackages/W2B_authentic_result_conversion.yaml"
+  - "pyproject.toml"
+  - "scripts/smoke_windows_result_view.py"
+  - "src/astermax/solver/contracts.py"
+  - "src/astermax/solver/conversion_contracts.py"
+  - "src/astermax/solver/med_result.py"
+  - "src/astermax/solver/result_conversion.py"
+  - "src/astermax/solver/result_loader.py"
+  - "src/astermax/solver/vtu_export.py"
+  - "src/astermax/ui/main_window.py"
+  - "src/astermax/ui/result_view.py"
+  - "tests/test_med_result.py"
+  - "tests/test_result_conversion.py"
+  - "tests/test_vtu_export.py"
+forbidden_paths:
+  - "tests/benchmarks/**"
+  - ".github/workflows/code-aster-validation.yml"
+  - "src/astermax/solver/wsl_worker.py"
+  - "src/astermax/solver/code_aster_wsl2.py"
+  - "harness/evals/**"
+max_files_changed: 18
+prohibited_actions:
+  - fabricate or relabel fixture fields as authentic FEA evidence
+  - alter W2A solver execution behavior from this slice
+  - weaken numerical benchmarks or validation tolerances
+  - infer physical units that are not deterministically present in MED evidence
+  - silently drop requested MED fields or unsupported layouts
+  - overwrite the source RMED during postprocessing
+  - label AsterMax-generated VTU or derived scalars as solver-authored artifacts
+  - display an unverified VTU in the validated-result viewport
+acceptance_criteria:
+  - Source RMED SHA-256 is verified against SolverRunManifestV1 before parsing.
+  - Actual MED field names, components and associations are discovered from the source file.
+  - Raw nodal and element-nodal arrays survive RMED to VTU with exact value equality.
+  - ResultConversionManifestV1 links the validated solver manifest, source RMED and generated artifacts by digest.
+  - Result descriptor inventory is cross-checked against the independent conversion inventory.
+  - SolverResultV1 records both solver-source and deterministic-postprocess evidence classes.
+  - Displacement magnitude and von Mises visualization scalars are explicitly marked DERIVED.
+  - Authentic Code_Aster 18.1.0 to RMED to VTU to VTK CI passes using the pinned solver image digest.
+  - Windows PySide6 and QVTK viewport smoke validation passes.
+  - The Windows viewport rejects unvalidated run directories and never presents reference geometry as FEA evidence.
+required_gates:
+  - scope_policy
+  - windows_core
+  - authentic_code_aster_conversion
+  - windows_vtk_smoke
+numerical_impact: true
+human_merge_required: true
+validity_risks:
+  - field_value_corruption
+  - provenance_confusion
+  - unit_inference
+  - unsupported_med_layout
+  - derived_field_mislabelling
+  - ui_evidence_bypass
+agent_budget:
+  max_agent_turns: 18
+  max_tool_calls: 90
+  max_retries: 5
+  max_wall_clock_seconds: 3600
+metadata:
+  methodology: evidence_driven_autonomous_engineering
+  source_solver: Code_Aster
+  reference_case: ssls120c
+  reference_case_is_not_product_baseline: true
