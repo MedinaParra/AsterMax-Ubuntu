@@ -17,6 +17,7 @@ on:
       - agent/windows-gap-five-segment-poses-v1.7
       - agent/windows-unilateral-contact-law-v1.8
       - agent/windows-tet10-unilateral-contact-v1.9
+      - agent/windows-tet10-contact-patch-v1.10
 
 jobs:
   verify-fea-core:
@@ -110,4 +111,12 @@ jobs:
         with:
           name: tet10-unilateral-contact-windows
           path: tet10_unilateral_contact.json
+          if-no-files-found: error
+      - name: Verify multipoint TRI6 TET10 contact patch
+        run: python benchmarks/tet10_multipoint_contact_patch.py
+      - name: Upload multipoint TRI6 TET10 contact patch evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet10-multipoint-contact-patch-windows
+          path: tet10_multipoint_contact_patch.json
           if-no-files-found: error
