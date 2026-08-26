@@ -1,0 +1,130 @@
+version: 1
+product: AsterMax Windows
+orchestrator:
+  mode: deterministic_state_machine
+  concurrency: bounded_async
+  human_gate_on_inferred_physics: true
+  prohibit_gate_bypass: true
+
+agents:
+  - id: A0
+    name: supervisor
+    role: engineering_conductor
+    may_write:
+      - task_plan
+      - workflow_transition_request
+    may_not:
+      - solver_result
+      - verification_pass
+
+  - id: A1
+    name: intent
+    role: structure_engineering_question
+    output_contract: SimulationIntentV1
+
+  - id: A2
+    name: geometry
+    role: inspect_and_parameterize_geometry
+    deterministic_tools:
+      - geometry_query
+      - topology_inventory
+      - dimension_measurement
+
+  - id: A3
+    name: physics
+    role: propose_physical_model
+    requires_provenance_for:
+      - material
+      - contact
+      - friction
+      - support
+      - load
+
+  - id: A4
+    name: mesh
+    role: propose_mesh_strategy
+    may_not:
+      - declare_convergence_passed
+
+  - id: A5
+    name: solver_router
+    role: choose_capable_backend
+    backends:
+      - internal
+      - code_aster_wsl2
+      - pyansys_future
+    must_reject_missing_capability: true
+
+  - id: A6
+    name: solver_worker
+    role: execute_solver
+    type: deterministic_worker
+    output_contracts:
+      - SolverRunManifestV1
+      - SolverResultV1
+
+  - id: A7
+    name: verification
+    role: interpret_verification_and_choose_next_action
+    deterministic_gate: VerificationV1
+    allowed_decisions:
+      - ACCEPT
+      - REJECT
+      - RETRY_WITH_REFINEMENT
+      - REQUEST_ENGINEER_INPUT
+
+  - id: A8
+    name: results
+    role: explain_accepted_result_fields
+    evidence_required: true
+
+  - id: A9
+    name: experiment
+    role: design_parametric_experiments
+    dataset_requires_verification_accept: true
+
+  - id: A10
+    name: surrogate
+    role: train_and_evaluate_surrogate
+    output_label: AI_PREDICTION
+    prohibit_label_as_fea_truth: true
+
+  - id: A11
+    name: rca
+    role: evidence_linked_mechanical_reasoning
+    separate:
+      - observation
+      - numerical_evidence
+      - inference
+      - hypothesis
+      - uncertainty
+
+  - id: A12
+    name: report
+    role: generate_traceable_engineering_package
+    evidence_required: true
+
+states:
+  - NEW
+  - INTENT_STRUCTURED
+  - GEOMETRY_READY
+  - PHYSICS_PROPOSED
+  - MODEL_REVIEW
+  - MESH_READY
+  - SOLVER_READY
+  - SOLVING
+  - VERIFYING
+  - REJECTED
+  - ACCEPTED
+  - EXPERIMENTING
+  - DATASET_READY
+  - SURROGATE_READY
+  - RCA_READY
+  - REPORT_READY
+
+evidence_classes:
+  - USER_INPUT
+  - AGENT_PROPOSAL
+  - DETERMINISTIC_CALCULATION
+  - SOLVER_RESULT
+  - SURROGATE_PREDICTION
