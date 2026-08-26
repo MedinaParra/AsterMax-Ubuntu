@@ -42,11 +42,16 @@ def main() -> int:
         baseline.measured_gap.maximum_mm,
         source_id=baseline.measured_gap.source_ids[0],
     )
-    preparation = evaluate_geometry_preparation(inspection, scenarios)
+    preparation = evaluate_geometry_preparation(
+        inspection,
+        scenarios,
+        test_flange_diameter_mm=baseline.measured_gap.test_flange_diameter_mm,
+    )
 
     payload = {
         "inspection": inspection.model_dump(mode="json"),
         "geometry_preparation": preparation.model_dump(mode="json"),
+        "physical_test_flange_diameter_mm": baseline.measured_gap.test_flange_diameter_mm,
         "cad_bytes_uploaded": False,
         "authentic_fea_result_claimed": False,
     }
