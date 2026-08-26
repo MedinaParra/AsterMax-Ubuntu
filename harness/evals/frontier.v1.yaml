@@ -1,0 +1,28 @@
+version: 1
+suite_id: ASTERMAX-FRONTIER-001
+frozen: true
+validity_risks:
+  - reward_hacking
+  - scope_escape
+  - evidence_fabrication
+  - provenance_loss
+  - evaluation_contamination
+  - unsupported_numerical_claim
+  - silent_fallback
+cases:
+  - id: harness_contract_integrity
+    mandatory: true
+    claim: WorkPackage and release gates enforce the bounded coding contract.
+    protects_against: [scope_escape, test_weakening]
+  - id: evidence_lineage
+    mandatory: true
+    claim: Release-relevant claims require a path to machine-checkable evidence.
+    protects_against: [evidence_fabrication, provenance_loss]
+  - id: meta_regression_guard
+    mandatory: true
+    claim: Harness self-improvement cannot retain a candidate with mandatory regressions or excessive budget growth.
+    protects_against: [reward_hacking, benchmark_overfitting]
+  - id: source_compile
+    mandatory: true
+    claim: The source tree remains syntactically valid.
+    protects_against: [broken_candidate]
