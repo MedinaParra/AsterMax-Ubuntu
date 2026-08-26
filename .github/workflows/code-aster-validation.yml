@@ -1,0 +1,85 @@
+name: Code_Aster Numerical Validation
+
+on:
+  pull_request:
+    branches:
+      - pmv/future-simulation-ansys-demo
+  push:
+    branches:
+      - "infra/**"
+  workflow_dispatch:
+
+env:
+  ASTER_IMAGE: simvia/code_aster:18.1.0
+  ASTER_DIGEST_PREFIX: sha256:4629a21a1093
+  ASTER_REFERENCE_TEST: ssls120c
+
+jobs:
+  reference-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull pinned Code_Aster image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$ASTER_IMAGE"
+          docker inspect "$ASTER_IMAGE" --format='{{index .RepoDigests 0}}' | tee code_aster_image_digest.txt
+
+      - name: Verify reviewed image digest prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest="$(cat code_aster_image_digest.txt)"
+          expected="simvia/code_aster@${ASTER_DIGEST_PREFIX}"
+          case "$digest" in
+            "$expected"*) ;;
+            *)
+              echo "Unexpected Code_Aster image digest: $digest" >&2
+              echo "Expected reviewed prefix: $expected" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Probe Code_Aster validation tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash "$ASTER_IMAGE" -lc '
+            set -euo pipefail
+            command -v run_aster
+            command -v run_ctest
+            run_aster --help >/dev/null
+            run_ctest --help >/dev/null
+          ' | tee code_aster_probe.log
+
+      - name: Run pinned analytical reference testcase
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash \
+            -e ASTER_REFERENCE_TEST="$ASTER_REFERENCE_TEST" \
+            "$ASTER_IMAGE" -lc '
+              set -euo pipefail
+              mkdir -p /tmp/astermax-resutest
+              echo "ASTERMAX_REFERENCE_TEST=${ASTER_REFERENCE_TEST}"
+              run_ctest --resutest=/tmp/astermax-resutest -j 1 -R "^${ASTER_REFERENCE_TEST}$"
+            ' 2>&1 | tee code_aster_reference.log
+          if grep -Fq "No tests were found" code_aster_reference.log; then
+            echo "Pinned Code_Aster testcase was not discovered." >&2
+            exit 1
+          fi
+          grep -F "ASTERMAX_REFERENCE_TEST=${ASTER_REFERENCE_TEST}" code_aster_reference.log >/dev/null
+
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-aster-validation-evidence
+          path: |
+            code_aster_image_digest.txt
+            code_aster_probe.log
+            code_aster_reference.log
+          if-no-files-found: error
