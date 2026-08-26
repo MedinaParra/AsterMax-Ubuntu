@@ -75,10 +75,9 @@ jobs:
                 run_ctest_path="$(find /opt /usr/local /home -type f -name run_ctest -perm -111 -print -quit 2>/dev/null || true)"
               fi
               test -n "$run_ctest_path"
-              mkdir -p /tmp/astermax-resutest
               echo "ASTERMAX_REFERENCE_TEST=${ASTER_REFERENCE_TEST}"
               echo "ASTERMAX_RUN_CTEST=${run_ctest_path}"
-              "$run_ctest_path" --resutest=/tmp/astermax-resutest -j 1 -R "^${ASTER_REFERENCE_TEST}$"
+              "$run_ctest_path" --clean --resutest=/tmp/astermax-resutest -j 1 -R "^${ASTER_REFERENCE_TEST}$"
             ' 2>&1 | tee code_aster_reference.log
           if grep -Fq "No tests were found" code_aster_reference.log; then
             echo "Pinned Code_Aster testcase was not discovered." >&2
