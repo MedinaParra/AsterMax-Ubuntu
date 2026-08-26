@@ -194,7 +194,8 @@ jobs:
             --entrypoint bash \
             "$ASTER_IMAGE" -ic '
               set -euo pipefail
-              python3 -c "import pydantic" || python3 -m pip install --user "pydantic>=2.8,<3"
+              python3 -c "import pydantic" || python3 -m pip install "pydantic>=2.8,<3"
+              python3 -c "import pydantic; print(\"ASTERMAX_PYDANTIC_VERSION=\" + pydantic.__version__)"
               export PYTHONPATH=/workspace/src
               export ASTERMAX_CODE_ASTER_CAPABILITY_FILE=/run/input/code_aster_capabilities.json
               export ASTERMAX_RUN_ASTER=run_aster
