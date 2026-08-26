@@ -1,11 +1,11 @@
 # AsterMax Mechanical 2.0 beta
 
-AsterMax is a GPL-3.0 finite-element pre/postprocessor for Ubuntu and Xubuntu. It preserves the approved Mechanical-style Ribbon, Outline, Graphics, Details and Worksheet layout while providing two solver paths:
+AsterMax is a GPL-3.0 finite-element pre/postprocessor for Ubuntu and Xubuntu. It uses an AsterMax-designed desktop CAE workspace with a command ribbon, model outline, graphics viewport, property/details editor and worksheet views while providing two solver paths:
 
 1. **AsterMax Internal Linear Solver** for a verified minimum single-part static workflow.
 2. **Code_Aster** for advanced and nonlinear analyses.
 
-No proprietary Ansys code, icons, screenshots or documentation are redistributed.
+AsterMax is independently developed. No proprietary third-party code, icons, screenshots or documentation are redistributed. See `docs/CLEAN_ROOM_POLICY.md` for the project engineering boundary.
 
 ## Certified minimum Static Structural workflow
 
@@ -15,7 +15,7 @@ Version 2.0 can complete this path locally without Code_Aster:
 Geometry → Material → Named Selections → TET4 Mesh → Mesh Quality
 → Fixed/Displacement Support → Force/Pressure/Traction/Gravity
 → Solve → Displacement/Stress/Strain → Reactions
-→ Stress Tool → Traceable certification report
+→ Stress Assessment → Traceable certification report
 ```
 
 The internal solver supports:
@@ -60,7 +60,7 @@ astermax-cli run-static-reference reference
 
 The reference is a solid TET4 cantilever. It checks displacement and stress against Euler–Bernoulli values and verifies force and moment equilibrium to numerical precision.
 
-## Mechanical roadmap features
+## CAE roadmap features
 
 The application also includes:
 
@@ -70,12 +70,12 @@ The application also includes:
 - Code_Aster static, nonlinear, modal, thermal, buckling and submodel input;
 - contacts, joints, remote points and constraint equations;
 - deformation, stress, strain, reaction and contact-result processing;
-- Solution Information, probes and Named Selection scoping;
+- solution information, probes and Named Selection scoping;
 - stress linearization through a Path;
 - project mesh convergence;
 - Design Points;
 - multistep load histories;
-- Mechanical-style failure-theory Stress Tool.
+- failure-theory stress assessment.
 
 ## Install
 
@@ -94,9 +94,17 @@ The bootstrap package installs the GUI, VTK, SciPy, Gmsh and result-processing d
 pytest -q
 ```
 
+## Engineering governance
+
+Material implementation inputs and dependencies must be traceable before release:
+
+- `docs/CLEAN_ROOM_POLICY.md` — independent-development and IP boundary;
+- `docs/DEPENDENCY_REGISTER.md` — dependencies, integration modes and license review;
+- `docs/SOURCE_PROVENANCE.md` — implementation-source and benchmark provenance.
+
 ## Validation boundary
 
-“Certified” means the exact saved project passed the defined AsterMax certification scope and generated authentic numerical fields. It does not mean complete equivalence to every Ansys Mechanical feature, element formulation or design-code requirement. Advanced Code_Aster workflows require their own benchmark and target-system validation.
+“Certified” means the exact saved project passed the defined AsterMax certification scope and generated authentic numerical fields. It does not mean complete equivalence to any third-party CAE product, element formulation or design-code requirement. Advanced Code_Aster workflows require their own benchmark and target-system validation.
 
 ## License
 
