@@ -21,7 +21,13 @@ def assemble_global_stiffness_sparse(
     elements: np.ndarray,
     material: IsotropicMaterial,
 ) -> csr_matrix:
-    """Assemble the global TET4 stiffness matrix directly as sparse CSR."""
+    """Assemble the global TET4 stiffness matrix directly as sparse CSR.
+
+    Explicit numerical zeros are removed after COO->CSR conversion so ``nnz``
+    reflects actually stored stiffness coefficients rather than the dense 12x12
+    element insertion pattern. This matters for both memory telemetry and the
+    practical scalability envelope of the PMV.
+    """
     nodes = np.asarray(nodes_mm, dtype=float)
     elems = np.asarray(elements, dtype=int)
     if nodes.ndim != 2 or nodes.shape[1] != 3:
@@ -44,7 +50,11 @@ def assemble_global_stiffness_sparse(
         cols.extend(cc.ravel().tolist())
         data.extend(ke.ravel().tolist())
 
-    return coo_matrix((data, (rows, cols)), shape=(ndof, ndof), dtype=float).tocsr()
+    stiffness = coo_matrix(
+        (data, (rows, cols)), shape=(ndof, ndof), dtype=float
+    ).tocsr()
+    stiffness.eliminate_zeros()
+    return stiffness
 
 
 def solve_linear_static(
