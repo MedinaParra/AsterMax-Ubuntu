@@ -1,0 +1,73 @@
+name: W2M Mesh Convergence and Postprocessor Validation
+
+on:
+  push:
+    branches:
+      - "validation/W2M-mesh-convergence-post"
+  workflow_dispatch:
+
+jobs:
+  validate-w2m:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Windows, core and dev dependencies
+        run: python -m pip install -e ".[windows,dev]"
+      - name: Fetch frozen W2L baseline
+        run: git fetch origin work/W2L-local-tet4-kernel:refs/remotes/origin/work/W2L-local-tet4-kernel
+      - name: Validate W2M WorkPackage contract
+        run: astermax-harness validate harness/workpackages/W2M_mesh_convergence_post.yaml
+      - name: Verify exact W2M scope budget against W2L
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.harness.policy import evaluate_scope
+          from astermax.harness.runner import get_changed_files, load_workpackage
+          package, _ = load_workpackage('harness/workpackages/W2M_mesh_convergence_post.yaml')
+          files = get_changed_files(Path('.').resolve(), 'origin/work/W2L-local-tet4-kernel')
+          validation_only = '.github/workflows/w2m-validation.yml'
+          if validation_only not in files:
+              raise SystemExit('Expected validation-only workflow is absent from validation branch diff.')
+          unexpected = sorted(path for path in files if path != validation_only and path not in package.allowed_files)
+          if unexpected:
+              raise SystemExit(f'Unexpected out-of-WorkPackage files: {unexpected}')
+          candidate_files = [path for path in files if path != validation_only]
+          if sorted(candidate_files) != sorted(package.allowed_files):
+              raise SystemExit(f'Candidate diff must exactly equal W2M allowlist; candidate={sorted(candidate_files)}, allowed={sorted(package.allowed_files)}')
+          result = evaluate_scope(package, candidate_files)
+          print(result.model_dump_json(indent=2))
+          raise SystemExit(0 if result.status.value == 'PASS' else 1)
+          '@ | python -
+      - name: Run W2M convergence numerical benchmarks
+        run: python -m pytest -q tests/benchmarks/test_result_post_convergence.py
+      - name: Run W2M deterministic VTK postprocessor tests
+        run: python -m pytest -q tests/test_ansys_post.py
+      - name: Run all non-Code-Aster software tests
+        run: python -m pytest -q --ignore=tests/benchmarks
+      - name: Run coding harness tests
+        run: python -m pytest -q tests/test_coding_harness.py
+      - name: Run frontier methodology tests
+        run: python -m pytest -q tests/test_frontier_methodology.py
+      - name: Run frozen frontier validity suite
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.harness.evals import run_frozen_eval_suite
+          result = run_frozen_eval_suite(Path('.').resolve(), Path('harness/evals/frontier.v1.yaml'), 'frontier_validity')
+          print(result.model_dump_json(indent=2))
+          raise SystemExit(0 if result.status.value == 'PASS' else 1)
+          '@ | python -
+      - name: Compile source tree
+        run: python -m compileall -q src
+      - name: Record evidence boundary
+        shell: pwsh
+        run: |
+          Write-Host "W2M validates topology contracts, mesh-convergence gates and deterministic VTK postprocessing."
+          Write-Host "No private OT1613 CAD, mesh or stress result is generated or committed by this workflow."
