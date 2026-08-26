@@ -11,6 +11,7 @@ on:
       - agent/windows-evidence-package-v0.9
       - agent/windows-tet4-refinement-envelope-v1.1
       - agent/windows-cad-preflight-v1.2
+      - agent/windows-tet10-global-v1.4
 
 jobs:
   verify-fea-core:
@@ -55,4 +56,13 @@ jobs:
         with:
           name: tet4-refinement-envelope-windows
           path: tet4_refinement_envelope.json
+          if-no-files-found: error
+      - name: Measure TET10 convergence gate
+        run: python benchmarks/tet10_convergence.py
+      - name: Upload TET10 convergence evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet10-convergence-windows
+          path: tet10_convergence.json
           if-no-files-found: error

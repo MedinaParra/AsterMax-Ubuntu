@@ -20,6 +20,16 @@ class GmshTet4Mesh:
     gmsh_version: str
 
 
+@dataclass(frozen=True)
+class GmshTet10Mesh:
+    nodes_mm: np.ndarray
+    elements: np.ndarray
+    surface_triangles: dict[str, np.ndarray]
+    bbox_mm: tuple[float, float, float, float, float, float]
+    dimensions_mm: tuple[float, float, float]
+    gmsh_version: str
+
+
 def _gmsh():
     try:
         import gmsh  # type: ignore
@@ -54,6 +64,36 @@ def _axis_surface_entities(gmsh, surfaces, bbox):
     return grouped
 
 
+def _prepare_single_step_solid(gmsh, path: Path):
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.model.add("astermax_windows_step_to_solve")
+    imported = gmsh.model.occ.importShapes(str(path))
+    gmsh.model.occ.synchronize()
+    volumes = gmsh.model.getEntities(3)
+    if len(volumes) != 1 or not any(dim == 3 for dim, _ in imported):
+        raise GmshBridgeError(f"PMV requires exactly one imported 3-D solid; found {len(volumes)}")
+
+    bbox = tuple(float(v) for v in gmsh.model.getBoundingBox(3, volumes[0][1]))
+    xmin, ymin, zmin, xmax, ymax, zmax = bbox
+    dimensions = (xmax - xmin, ymax - ymin, zmax - zmin)
+    if not all(value > 0 for value in dimensions):
+        raise GmshBridgeError(f"invalid STEP dimensions: {dimensions}")
+    surface_entities = _axis_surface_entities(gmsh, gmsh.model.getEntities(2), bbox)
+    return bbox, dimensions, surface_entities
+
+
+def _node_table(gmsh):
+    node_tags, coords, _ = gmsh.model.mesh.getNodes()
+    nodes = np.asarray(coords, dtype=float).reshape((-1, 3))
+    if nodes.size == 0:
+        raise GmshBridgeError("Gmsh produced no nodes")
+    return nodes, {int(tag): index for index, tag in enumerate(node_tags)}
+
+
+def _remap_connectivity(raw_tags: np.ndarray, tag_to_index: dict[int, int]) -> np.ndarray:
+    return np.vectorize(lambda tag: tag_to_index[int(tag)], otypes=[np.int64])(raw_tags)
+
+
 def mesh_step_tet4(step_path: str | Path, mesh_size_mm: float) -> GmshTet4Mesh:
     """Import exactly one STEP solid in mm and expose solver-ready TET4 data."""
     path = Path(step_path)
@@ -65,31 +105,14 @@ def mesh_step_tet4(step_path: str | Path, mesh_size_mm: float) -> GmshTet4Mesh:
     gmsh = _gmsh()
     gmsh.initialize()
     try:
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("astermax_windows_step_to_solve")
-        imported = gmsh.model.occ.importShapes(str(path))
-        gmsh.model.occ.synchronize()
-        volumes = gmsh.model.getEntities(3)
-        if len(volumes) != 1 or not any(dim == 3 for dim, _ in imported):
-            raise GmshBridgeError(f"PMV requires exactly one imported 3-D solid; found {len(volumes)}")
-
-        bbox = tuple(float(v) for v in gmsh.model.getBoundingBox(3, volumes[0][1]))
-        xmin, ymin, zmin, xmax, ymax, zmax = bbox
-        dimensions = (xmax - xmin, ymax - ymin, zmax - zmin)
-        if not all(value > 0 for value in dimensions):
-            raise GmshBridgeError(f"invalid STEP dimensions: {dimensions}")
-        surface_entities = _axis_surface_entities(gmsh, gmsh.model.getEntities(2), bbox)
+        bbox, dimensions, surface_entities = _prepare_single_step_solid(gmsh, path)
 
         gmsh.option.setNumber("Mesh.MeshSizeMin", float(mesh_size_mm))
         gmsh.option.setNumber("Mesh.MeshSizeMax", float(mesh_size_mm))
         gmsh.option.setNumber("Mesh.ElementOrder", 1)
         gmsh.model.mesh.generate(3)
 
-        node_tags, coords, _ = gmsh.model.mesh.getNodes()
-        nodes = np.asarray(coords, dtype=float).reshape((-1, 3))
-        if nodes.size == 0:
-            raise GmshBridgeError("Gmsh produced no nodes")
-        tag_to_index = {int(tag): index for index, tag in enumerate(node_tags)}
+        nodes, tag_to_index = _node_table(gmsh)
 
         volume_types, _, volume_nodes = gmsh.model.mesh.getElements(3)
         tetra_blocks = []
@@ -106,7 +129,7 @@ def mesh_step_tet4(step_path: str | Path, mesh_size_mm: float) -> GmshTet4Mesh:
         if not tetra_blocks:
             raise GmshBridgeError("Gmsh produced no TET4 elements")
         tet_tags = np.vstack(tetra_blocks)
-        elements = np.vectorize(lambda tag: tag_to_index[int(tag)], otypes=[np.int64])(tet_tags)
+        elements = _remap_connectivity(tet_tags, tag_to_index)
 
         triangle_groups: dict[str, np.ndarray] = {}
         for name, entity_tags in surface_entities.items():
@@ -124,9 +147,7 @@ def mesh_step_tet4(step_path: str | Path, mesh_size_mm: float) -> GmshTet4Mesh:
             if not blocks:
                 raise GmshBridgeError(f"surface {name} contains no TRI3 elements")
             tri_tags = np.vstack(blocks)
-            triangle_groups[name] = np.vectorize(
-                lambda tag: tag_to_index[int(tag)], otypes=[np.int64]
-            )(tri_tags)
+            triangle_groups[name] = _remap_connectivity(tri_tags, tag_to_index)
 
         return GmshTet4Mesh(
             nodes_mm=nodes,
@@ -140,10 +161,82 @@ def mesh_step_tet4(step_path: str | Path, mesh_size_mm: float) -> GmshTet4Mesh:
         gmsh.finalize()
 
 
+def mesh_step_tet10(step_path: str | Path, mesh_size_mm: float) -> GmshTet10Mesh:
+    """Import one STEP solid and expose Gmsh type-11 TET10 / type-9 TRI6 data.
+
+    This is the T10-B verification route. The current TET10 kernel is accepted
+    only for straight-sided quadratic elements; the solver performs that
+    fail-closed geometry check before assembly.
+    """
+    path = Path(step_path)
+    if path.suffix.lower() not in {".step", ".stp"} or not path.is_file():
+        raise GmshBridgeError("certified input must be an existing STEP/STP file")
+    if mesh_size_mm <= 0:
+        raise GmshBridgeError("mesh_size_mm must be positive")
+
+    gmsh = _gmsh()
+    gmsh.initialize()
+    try:
+        bbox, dimensions, surface_entities = _prepare_single_step_solid(gmsh, path)
+
+        gmsh.option.setNumber("Mesh.MeshSizeMin", float(mesh_size_mm))
+        gmsh.option.setNumber("Mesh.MeshSizeMax", float(mesh_size_mm))
+        gmsh.option.setNumber("Mesh.ElementOrder", 2)
+        gmsh.model.mesh.generate(3)
+
+        nodes, tag_to_index = _node_table(gmsh)
+
+        volume_types, _, volume_nodes = gmsh.model.mesh.getElements(3)
+        tetra_blocks = []
+        unsupported = []
+        for element_type, connectivity in zip(volume_types, volume_nodes):
+            element_type = int(element_type)
+            raw = np.asarray(connectivity, dtype=np.int64)
+            if element_type == 11:
+                tetra_blocks.append(raw.reshape((-1, 10)))
+            elif raw.size:
+                unsupported.append(element_type)
+        if unsupported:
+            raise GmshBridgeError(f"non-TET10 volume element types: {sorted(set(unsupported))}")
+        if not tetra_blocks:
+            raise GmshBridgeError("Gmsh produced no TET10 elements")
+        tet_tags = np.vstack(tetra_blocks)
+        elements = _remap_connectivity(tet_tags, tag_to_index)
+
+        triangle_groups: dict[str, np.ndarray] = {}
+        for name, entity_tags in surface_entities.items():
+            blocks = []
+            for entity_tag in entity_tags:
+                surface_types, _, surface_nodes = gmsh.model.mesh.getElements(2, entity_tag)
+                for element_type, connectivity in zip(surface_types, surface_nodes):
+                    raw = np.asarray(connectivity, dtype=np.int64)
+                    if int(element_type) == 9:
+                        blocks.append(raw.reshape((-1, 6)))
+                    elif raw.size:
+                        raise GmshBridgeError(
+                            f"surface {name} contains unsupported element type {int(element_type)}"
+                        )
+            if not blocks:
+                raise GmshBridgeError(f"surface {name} contains no TRI6 elements")
+            tri_tags = np.vstack(blocks)
+            triangle_groups[name] = _remap_connectivity(tri_tags, tag_to_index)
+
+        return GmshTet10Mesh(
+            nodes_mm=nodes,
+            elements=np.asarray(elements, dtype=np.int64),
+            surface_triangles=triangle_groups,
+            bbox_mm=bbox,
+            dimensions_mm=tuple(float(value) for value in dimensions),
+            gmsh_version=str(getattr(gmsh, "__version__", "unknown")),
+        )
+    finally:
+        gmsh.finalize()
+
+
 def unique_surface_nodes(triangles: np.ndarray) -> np.ndarray:
     tri = np.asarray(triangles, dtype=np.int64)
-    if tri.ndim != 2 or tri.shape[1] != 3:
-        raise ValueError("surface triangles must have shape (n, 3)")
+    if tri.ndim != 2 or tri.shape[1] < 3:
+        raise ValueError("surface triangles must have shape (n, 3+)")
     return np.unique(tri.reshape(-1))
 
 
@@ -177,6 +270,60 @@ def distribute_resultant_on_triangles(
     for conn, area in zip(tri, areas):
         triangle_force = resultant * (area / total_area)
         loads[conn] += triangle_force / 3.0
+    return loads
+
+
+def distribute_resultant_on_tri6(
+    nodes_mm: np.ndarray,
+    triangles6: np.ndarray,
+    resultant_n: np.ndarray | list[float] | tuple[float, float, float],
+) -> np.ndarray:
+    """Apply uniform traction to straight-sided Gmsh TRI6 faces consistently.
+
+    For a quadratic straight-sided triangle, the exact integrals of the corner
+    shape functions are zero and the three midside shape functions are A/3.
+    The resulting nodal load preserves both the requested resultant and its
+    centroidal moment without silently reducing the surface to TRI3.
+    """
+    nodes = np.asarray(nodes_mm, dtype=float)
+    tri = np.asarray(triangles6, dtype=np.int64)
+    resultant = np.asarray(resultant_n, dtype=float)
+    if tri.ndim != 2 or tri.shape[1] != 6:
+        raise ValueError("triangles6 must have shape (n, 6)")
+    if resultant.shape != (3,):
+        raise ValueError("resultant_n must contain exactly 3 components")
+    if tri.size and (np.any(tri < 0) or np.any(tri >= nodes.shape[0])):
+        raise ValueError("triangles6 contains an out-of-range node index")
+
+    loads = np.zeros_like(nodes)
+    areas: list[float] = []
+    for conn in tri:
+        corners = nodes[conn[:3]]
+        mids = nodes[conn[3:]]
+        expected_mids = np.asarray(
+            [
+                0.5 * (corners[0] + corners[1]),
+                0.5 * (corners[1] + corners[2]),
+                0.5 * (corners[2] + corners[0]),
+            ]
+        )
+        scale = max(float(np.linalg.norm(corners.max(axis=0) - corners.min(axis=0))), 1.0)
+        if not np.allclose(mids, expected_mids, rtol=0.0, atol=scale * 1.0e-10):
+            raise ValueError("curved TRI6 traction integration is outside the T10-B verification scope")
+        area = 0.5 * np.linalg.norm(np.cross(corners[1] - corners[0], corners[2] - corners[0]))
+        if area <= 0.0:
+            raise ValueError("degenerate TRI6 surface triangle")
+        areas.append(float(area))
+
+    total_area = float(np.sum(areas))
+    if total_area <= 0.0:
+        raise ValueError("surface area must be positive")
+
+    for conn, area in zip(tri, areas):
+        triangle_force = resultant * (area / total_area)
+        loads[conn[3]] += triangle_force / 3.0
+        loads[conn[4]] += triangle_force / 3.0
+        loads[conn[5]] += triangle_force / 3.0
     return loads
 
 
