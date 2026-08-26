@@ -13,6 +13,7 @@ on:
       - agent/windows-cad-preflight-v1.2
       - agent/windows-tet10-global-v1.4
       - agent/windows-tet10-viewer-evidence-v1.5
+      - agent/tet4-vs-tet10-efficiency-v1.6
 
 jobs:
   verify-fea-core:
@@ -74,4 +75,13 @@ jobs:
         with:
           name: astermax-tet10-evidence-windows
           path: astermax_tet10_evidence_package
+          if-no-files-found: error
+      - name: Compare TET4 vs TET10 accuracy at comparable DOF
+        run: python benchmarks/tet4_vs_tet10_efficiency.py
+      - name: Upload TET4 vs TET10 comparable-DOF evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet4-vs-tet10-efficiency-windows
+          path: tet4_vs_tet10_efficiency.json
           if-no-files-found: error
