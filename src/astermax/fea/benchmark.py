@@ -7,13 +7,15 @@ from typing import Iterable
 import numpy as np
 
 from .gmsh_bridge import (
+    distribute_resultant_on_tri6,
     distribute_resultant_on_triangles,
     fixed_dofs_for_nodes,
     force_and_moment,
+    mesh_step_tet10,
     mesh_step_tet4,
     unique_surface_nodes,
 )
-from .solver import solve_linear_static
+from .solver import solve_linear_static, solve_linear_static_tet10
 from .tet4 import IsotropicMaterial
 
 
@@ -93,27 +95,26 @@ def analytical_cantilever_reference(
     )
 
 
-def run_cantilever_convergence(
-    step_path: str | Path,
-    mesh_sizes_mm: Iterable[float] = (25.0, 20.0, 15.0),
-) -> tuple[CantileverReference, list[ConvergenceSample]]:
-    """Run the same STEP cantilever over several mesh sizes.
-
-    Acceptance is deliberately separate from execution.  This function records
-    raw numerical evidence only; ``evaluate_convergence`` is the sole gate that
-    may produce a convergence claim.
-    """
-    ref = analytical_cantilever_reference()
-    samples: list[ConvergenceSample] = []
+def _validate_mesh_sizes(mesh_sizes_mm: Iterable[float]) -> list[float]:
+    sizes = [float(raw) for raw in mesh_sizes_mm]
     previous = None
-    for raw_size in mesh_sizes_mm:
-        size = float(raw_size)
+    for size in sizes:
         if size <= 0.0:
             raise ValueError("mesh sizes must be positive")
         if previous is not None and size >= previous:
             raise ValueError("mesh sizes must be strictly decreasing")
         previous = size
+    return sizes
 
+
+def run_cantilever_convergence(
+    step_path: str | Path,
+    mesh_sizes_mm: Iterable[float] = (25.0, 20.0, 15.0),
+) -> tuple[CantileverReference, list[ConvergenceSample]]:
+    """Run the same STEP cantilever over several first-order TET4 meshes."""
+    ref = analytical_cantilever_reference()
+    samples: list[ConvergenceSample] = []
+    for size in _validate_mesh_sizes(mesh_sizes_mm):
         mesh = mesh_step_tet4(step_path, size)
         fixed_nodes = unique_surface_nodes(mesh.surface_triangles["X_MIN"])
         fixed_dofs = fixed_dofs_for_nodes(fixed_nodes)
@@ -124,6 +125,54 @@ def run_cantilever_convergence(
         )
         applied_force, applied_moment = force_and_moment(mesh.nodes_mm, loads)
         result = solve_linear_static(
+            mesh.nodes_mm,
+            mesh.elements,
+            IsotropicMaterial(ref.young_mpa, 0.30),
+            loads,
+            fixed_dofs,
+        )
+        reaction_force, reaction_moment = force_and_moment(mesh.nodes_mm, result.reactions_n)
+
+        tip_nodes = unique_surface_nodes(mesh.surface_triangles["X_MAX"])
+        tip_y = float(np.mean(result.displacement_mm[tip_nodes, 1]))
+        error = abs((tip_y - ref.tip_displacement_y_mm) / ref.tip_displacement_y_mm) * 100.0
+        samples.append(
+            ConvergenceSample(
+                mesh_size_mm=size,
+                node_count=int(mesh.nodes_mm.shape[0]),
+                tet_count=int(mesh.elements.shape[0]),
+                tip_displacement_y_mm=tip_y,
+                tip_error_percent=error,
+                force_balance_norm_n=float(np.linalg.norm(reaction_force + applied_force)),
+                moment_balance_norm_nmm=float(np.linalg.norm(reaction_moment + applied_moment)),
+            )
+        )
+    return ref, samples
+
+
+def run_cantilever_convergence_tet10(
+    step_path: str | Path,
+    mesh_sizes_mm: Iterable[float] = (20.0, 15.0, 10.0, 8.0, 6.0),
+) -> tuple[CantileverReference, list[ConvergenceSample]]:
+    """Run the unchanged cantilever benchmark through the T10-B quadratic path.
+
+    This function changes only element order and the mathematically consistent
+    TRI6 loading/solver path. The analytical reference and acceptance policy are
+    exactly the same as TET4.
+    """
+    ref = analytical_cantilever_reference()
+    samples: list[ConvergenceSample] = []
+    for size in _validate_mesh_sizes(mesh_sizes_mm):
+        mesh = mesh_step_tet10(step_path, size)
+        fixed_nodes = unique_surface_nodes(mesh.surface_triangles["X_MIN"])
+        fixed_dofs = fixed_dofs_for_nodes(fixed_nodes)
+        loads = distribute_resultant_on_tri6(
+            mesh.nodes_mm,
+            mesh.surface_triangles["X_MAX"],
+            [0.0, ref.force_y_n, 0.0],
+        )
+        applied_force, applied_moment = force_and_moment(mesh.nodes_mm, loads)
+        result = solve_linear_static_tet10(
             mesh.nodes_mm,
             mesh.elements,
             IsotropicMaterial(ref.young_mpa, 0.30),
