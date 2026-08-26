@@ -113,9 +113,7 @@ def test_tet10_centroid_stress_matches_affine_constitutive_response():
 
 def test_tet10_rejects_inverted_mapping():
     coords = _straight_tet10().copy()
-    coords[[1, 2]] = coords[[2, 1]]
-    # Midside nodes are no longer consistent after the vertex swap, but the
-    # critical requirement here is that a negative/invalid Jacobian fails closed.
+    coords[:, 0] *= -1.0
     try:
         tet10_B_matrix(coords, (0.25, 0.25, 0.25))
     except ValueError as exc:
