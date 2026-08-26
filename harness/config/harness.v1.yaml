@@ -1,0 +1,64 @@
+version: 1
+product: AsterMax Coding Harness
+
+roles:
+  - id: H0
+    name: coding_supervisor
+    responsibilities: [decompose_work, assign_roles, track_gates]
+    may_not: [approve_release]
+  - id: H1
+    name: architect
+    responsibilities: [interfaces, contracts, dependency_boundaries]
+    may_not: [approve_own_architecture]
+  - id: H2
+    name: implementation
+    responsibilities: [implement_scoped_change]
+    may_not: [approve_release, weaken_tests, fabricate_solver_data]
+  - id: H3
+    name: test_engineer
+    responsibilities: [adversarial_tests, regression_tests]
+    may_not: [change_acceptance_to_fit_implementation]
+  - id: H4
+    name: numerical_validator
+    responsibilities: [analytical_benchmarks, solver_regression, tolerance_review]
+    required_when: numerical_impact
+    may_not: [replace_failed_benchmark_with_mock]
+  - id: H5
+    name: critic
+    responsibilities: [failure_modes, shortcut_detection, evidence_review]
+    may_not: [approve_without_evidence]
+  - id: H6
+    name: release_judge
+    responsibilities: [evaluate_gate_evidence, decide_pass_rework_reject]
+    may_not: [modify_implementation]
+
+gates:
+  scope_policy:
+    kind: builtin_scope
+    mandatory: true
+  unit_tests:
+    kind: command
+    command: ["python", "-m", "pytest", "-q"]
+    mandatory: true
+  harness_tests:
+    kind: command
+    command: ["python", "-m", "pytest", "-q", "tests/test_coding_harness.py"]
+    mandatory: true
+  numerical_validation:
+    kind: command
+    command: ["python", "-m", "pytest", "-q", "tests/benchmarks"]
+    mandatory_when: numerical_impact
+  syntax_compile:
+    kind: command
+    command: ["python", "-m", "compileall", "-q", "src"]
+    mandatory: true
+
+release_policy:
+  all_mandatory_gates_must_pass: true
+  human_merge_required: true
+  unknown_gate_is_error: true
+  implementation_role_cannot_release: true
+  numerical_impact_requires_numerical_validation: true
+  prohibited_evidence_patterns:
+    - "fabricated FEA"
+    - "synthetic solver result presented as real"

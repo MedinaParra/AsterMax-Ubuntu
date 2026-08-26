@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 astermax = "astermax.app:main"
+astermax-harness = "astermax.harness.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
