@@ -133,8 +133,11 @@ def write_vtu(result: MedResult, output_path: Path, *, relative_path: str | None
             derived: list[str] = []
             if field.components[:3] == ("DX", "DY", "DZ") and field.values.shape[1] >= 3:
                 translation_name = f"ASTERMAX_VIEW__{safe_name}__TRANSLATION"
-                _data_array(point_data, "Float64", translation_name, field.values[:, :3], components=3)
-                derived.append(translation_name)
+                translation = field.values[:, :3]
+                _data_array(point_data, "Float64", translation_name, translation, components=3)
+                magnitude_name = f"ASTERMAX_DERIVED__{safe_name}__TRANSLATION_MAGNITUDE"
+                _data_array(point_data, "Float64", magnitude_name, np.linalg.norm(translation, axis=1))
+                derived.extend((translation_name, magnitude_name))
                 if field.values.shape[1] >= 6 and field.components[3:6] == ("DRX", "DRY", "DRZ"):
                     rotation_name = f"ASTERMAX_VIEW__{safe_name}__ROTATION"
                     _data_array(point_data, "Float64", rotation_name, field.values[:, 3:6], components=3)
