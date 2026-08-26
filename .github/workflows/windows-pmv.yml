@@ -9,6 +9,7 @@ on:
       - agent/windows-step-to-solve-v0.2
       - agent/windows-offline-viewer-v0.8
       - agent/windows-evidence-package-v0.9
+      - agent/windows-tet4-refinement-envelope-v1.1
 
 jobs:
   verify-fea-core:
@@ -45,4 +46,12 @@ jobs:
         with:
           name: astermax-analysis-evidence-windows
           path: astermax_evidence_package
+          if-no-files-found: error
+      - name: Measure fine TET4 refinement envelope
+        run: python benchmarks/tet4_refinement_envelope.py
+      - name: Upload TET4 refinement envelope
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet4-refinement-envelope-windows
+          path: tet4_refinement_envelope.json
           if-no-files-found: error
