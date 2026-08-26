@@ -12,6 +12,8 @@ license = {text = "GPL-3.0-only"}
 dependencies = [
   "pydantic>=2.8,<3",
   "PyYAML>=6.0,<7",
+  "numpy>=2.0,<3",
+  "h5py>=3.11,<4",
 ]
 
 [project.optional-dependencies]
