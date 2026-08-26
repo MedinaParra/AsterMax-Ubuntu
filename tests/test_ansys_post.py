@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-import vtk
+
+vtk = pytest.importorskip("vtk")
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 from astermax.ui.ansys_post import (
