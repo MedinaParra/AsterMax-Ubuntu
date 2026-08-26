@@ -98,7 +98,7 @@ class ExploratoryLoadCaseV1(BaseModel):
     case_id: str = Field(min_length=1)
     shaft_torque_knm: float = Field(gt=0)
     selected_sprocket_load_share_percent: float = Field(gt=0, le=100)
-    chain_speed_mps: float = Field(gt=0)
+    chain_speed_mps: float = Field(ge=0)
     loaded_teeth_count: int = Field(gt=0)
     wrap_angle_deg: float = Field(gt=0, le=360)
     axial_thrust_kn: float = 0.0
@@ -119,7 +119,7 @@ class DerivedLoadCaseV1(BaseModel):
     )
     case_id: str
     pitch_diameter_m: float = Field(gt=0)
-    sprocket_speed_rpm: float = Field(gt=0)
+    sprocket_speed_rpm: float = Field(ge=0)
     selected_sprocket_torque_knm: float = Field(gt=0)
     chain_tangential_force_kn: float = Field(gt=0)
     force_per_loaded_tooth_kn: float = Field(gt=0)
