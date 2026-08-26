@@ -67,7 +67,8 @@ class UnilateralSpringContactResult:
 def solve_unilateral_spring_contact(
     problem: UnilateralSpringContactProblem,
     *,
-    tolerance: float = 1.0e-12,
+    force_tolerance_n: float = 1.0e-9,
+    gap_tolerance_mm: float = 1.0e-12,
 ) -> UnilateralSpringContactResult:
     """Solve the scalar Signorini problem exactly by an active-set decision.
 
@@ -76,52 +77,53 @@ def solve_unilateral_spring_contact(
     not a finite-element contact implementation.
     """
 
-    if not math.isfinite(tolerance) or tolerance < 0.0:
-        raise ValueError("tolerance must be finite and non-negative")
+    if not math.isfinite(force_tolerance_n) or force_tolerance_n < 0.0:
+        raise ValueError("force_tolerance_n must be finite and non-negative")
+    if not math.isfinite(gap_tolerance_mm) or gap_tolerance_mm < 0.0:
+        raise ValueError("gap_tolerance_mm must be finite and non-negative")
 
     k = problem.stiffness_n_per_mm
     g0 = problem.initial_gap_mm
     load = problem.applied_load_n
     free_u = load / k
     activation_load = k * g0
+    load_delta = load - activation_load
 
-    if free_u < g0 - tolerance:
+    if load_delta < -force_tolerance_n:
         displacement = free_u
         reaction = 0.0
         state = ContactState.OPEN
-    elif free_u <= g0 + tolerance:
-        # At the activation threshold the constraint is exactly touching but
-        # carries no reaction. Clamp to g0 to remove round-off-only gap signs.
+    elif abs(load_delta) <= force_tolerance_n:
         displacement = g0
-        reaction = max(load - k * displacement, 0.0)
-        if reaction <= tolerance:
-            reaction = 0.0
-            state = ContactState.TOUCHING_ZERO_REACTION
-        else:
-            state = ContactState.ACTIVE
+        reaction = 0.0
+        state = ContactState.TOUCHING_ZERO_REACTION
     else:
         displacement = g0
-        reaction = load - k * displacement
-        if reaction < -tolerance:
+        reaction = load_delta
+        if reaction < -force_tolerance_n:
             raise ArithmeticError("active-set solution produced a tensile contact reaction")
         reaction = max(reaction, 0.0)
         state = ContactState.ACTIVE
 
     gap = g0 - displacement
-    if abs(gap) <= tolerance:
+    if abs(gap) <= gap_tolerance_mm:
         gap = 0.0
     spring_force = k * displacement
     force_residual = spring_force + reaction - load
-    if abs(force_residual) <= tolerance * max(1.0, abs(load), abs(spring_force), abs(reaction)):
+    if abs(force_residual) <= force_tolerance_n:
         force_residual = 0.0
     complementarity = gap * reaction
     penetration = max(-gap, 0.0)
 
-    if gap < -tolerance:
+    if gap < -gap_tolerance_mm:
         raise ArithmeticError("Signorini solution violated the no-penetration constraint")
-    if reaction < -tolerance:
+    if reaction < -force_tolerance_n:
         raise ArithmeticError("Signorini solution produced a tensile contact reaction")
-    if abs(complementarity) > tolerance * max(1.0, abs(load * max(g0, 1.0))):
+    complementarity_tolerance = max(
+        force_tolerance_n * max(g0, gap_tolerance_mm),
+        gap_tolerance_mm * max(abs(load), abs(reaction), 1.0),
+    )
+    if abs(complementarity) > complementarity_tolerance:
         raise ArithmeticError("Signorini complementarity residual exceeded tolerance")
 
     return UnilateralSpringContactResult(
@@ -138,7 +140,7 @@ def solve_unilateral_spring_contact(
         unconstrained_displacement_mm=free_u,
         activation_load_n=activation_load,
         penetration_mm=penetration,
-        exact_no_penetration=penetration <= tolerance,
+        exact_no_penetration=penetration <= gap_tolerance_mm,
         friction_solved=False,
         contact_fea_executed=False,
         industrial_validation_claimed=False,
@@ -150,7 +152,8 @@ def solve_unilateral_spring_contact_sweep(
     stiffness_n_per_mm: float,
     initial_gap_mm: float,
     applied_loads_n: Iterable[float],
-    tolerance: float = 1.0e-12,
+    force_tolerance_n: float = 1.0e-9,
+    gap_tolerance_mm: float = 1.0e-12,
 ) -> tuple[UnilateralSpringContactResult, ...]:
     loads = tuple(float(load) for load in applied_loads_n)
     if not loads:
@@ -162,7 +165,8 @@ def solve_unilateral_spring_contact_sweep(
                 initial_gap_mm=initial_gap_mm,
                 applied_load_n=load,
             ),
-            tolerance=tolerance,
+            force_tolerance_n=force_tolerance_n,
+            gap_tolerance_mm=gap_tolerance_mm,
         )
         for load in loads
     )
