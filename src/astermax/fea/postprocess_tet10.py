@@ -22,6 +22,7 @@ class Tet10VtuEvidenceManifest:
     displacement_max_mm: float
     von_mises_ip_max_mpa: float
     stress_representation: str
+    connectivity_mapping: str
     vtu_sha256: str
     converged_claim: bool
     industrial_validation_claim: bool
@@ -42,6 +43,19 @@ def _fmt(values: np.ndarray) -> str:
     return " ".join(f"{float(value):.17g}" for value in arr.reshape(-1))
 
 
+def gmsh_tet10_to_vtk_connectivity(elements: np.ndarray) -> np.ndarray:
+    """Convert Gmsh type-11 ordering to VTK_QUADRATIC_TETRA ordering.
+
+    Both formats use vertices 0..3 and midside nodes on edges 01,12,20,03.
+    Gmsh then stores edges 23,13 while VTK stores 13,23, so only the final
+    two local connectivity positions are swapped for export.
+    """
+    elems = np.asarray(elements, dtype=np.int64)
+    if elems.ndim != 2 or elems.shape[1] != 10:
+        raise ValueError("elements must have shape (m, 10) for TET10")
+    return elems[:, [0, 1, 2, 3, 4, 5, 6, 7, 9, 8]].copy()
+
+
 def write_tet10_linear_static_vtu(
     path: str | Path,
     nodes_mm: np.ndarray,
@@ -54,9 +68,9 @@ def write_tet10_linear_static_vtu(
 ) -> Tet10VtuEvidenceManifest:
     """Write quadratic TET10 solver output without inventing nodal stress.
 
-    VTK cell type 24 (VTK_QUADRATIC_TETRA) is used.  Displacement is genuine
-    nodal data.  Stress stays at the four TET10 integration points and is stored
-    as 4-component von-Mises and 24-component stress arrays per cell.  The only
+    VTK cell type 24 (VTK_QUADRATIC_TETRA) is used. Displacement is genuine
+    nodal data. Stress stays at the four TET10 integration points and is stored
+    as 4-component von-Mises and 24-component stress arrays per cell. The only
     scalar stress contour emitted is the explicit maximum over those four
     integration points; no nodal averaging or extrapolation is performed.
     """
@@ -81,6 +95,8 @@ def write_tet10_linear_static_vtu(
         raise ValueError("integration-point von Mises must have shape (m, 4)")
     if not all(np.all(np.isfinite(value)) for value in (nodes, u, ip_stress, ip_vm)):
         raise ValueError("TET10 VTU export refuses non-finite geometry or solver fields")
+
+    vtk_elems = gmsh_tet10_to_vtk_connectivity(elems)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     root = Element("VTKFile", type="UnstructuredGrid", version="0.1", byte_order="LittleEndian")
@@ -125,6 +141,14 @@ def write_tet10_linear_static_vtu(
         NumberOfTuples="1",
         format="ascii",
     ).text = "2"
+    SubElement(
+        field_data,
+        "DataArray",
+        type="Int32",
+        Name="ASTERMAX_GMSH_TO_VTK_LOCAL_SWAP_8_9",
+        NumberOfTuples="1",
+        format="ascii",
+    ).text = "1"
 
     points = SubElement(piece, "Points")
     SubElement(
@@ -137,7 +161,7 @@ def write_tet10_linear_static_vtu(
     ).text = _fmt(nodes)
 
     cells = SubElement(piece, "Cells")
-    SubElement(cells, "DataArray", type="Int64", Name="connectivity", format="ascii").text = _fmt(elems)
+    SubElement(cells, "DataArray", type="Int64", Name="connectivity", format="ascii").text = _fmt(vtk_elems)
     SubElement(cells, "DataArray", type="Int64", Name="offsets", format="ascii").text = _fmt(
         np.arange(1, elems.shape[0] + 1, dtype=np.int64) * 10
     )
@@ -204,6 +228,7 @@ def write_tet10_linear_static_vtu(
         displacement_max_mm=float(np.max(u_mag)) if u_mag.size else 0.0,
         von_mises_ip_max_mpa=float(np.max(ip_vm)) if ip_vm.size else 0.0,
         stress_representation="FOUR_INTEGRATION_POINTS_PLUS_EXPLICIT_ELEMENT_MAX_NO_NODAL_SMOOTHING",
+        connectivity_mapping="GMSH_TYPE_11_TO_VTK_QUADRATIC_TETRA_SWAP_LOCAL_POSITIONS_8_9",
         vtu_sha256=digest,
         converged_claim=bool(converged_claim),
         industrial_validation_claim=bool(industrial_validation_claim),
