@@ -7,6 +7,7 @@ import numpy as np
 
 from astermax.fea.benchmark import (
     ConvergencePolicy,
+    analytical_timoshenko_cantilever_reference,
     evaluate_convergence,
     run_cantilever_convergence_tet10,
 )
@@ -75,7 +76,10 @@ def test_step_tet10_sparse_solve_preserves_resultant_moment_and_equilibrium() ->
         assert np.allclose(reaction_moment + applied_moment, np.zeros(3), rtol=1e-8, atol=1e-3)
 
 
-def test_tet10_uses_the_unchanged_cantilever_convergence_policy() -> None:
+def test_tet10_uses_finite_shear_reference_without_relaxing_policy() -> None:
+    reference = analytical_timoshenko_cantilever_reference()
+    assert np.isclose(reference.tip_displacement_y_mm, -0.2578, rtol=0.0, atol=1e-12)
+
     with tempfile.TemporaryDirectory() as tmp:
         step = Path(tmp) / "cantilever.step"
         _write_box_step(step)
@@ -87,5 +91,10 @@ def test_tet10_uses_the_unchanged_cantilever_convergence_policy() -> None:
         decision = evaluate_convergence(samples, ConvergencePolicy())
         assert decision.policy["max_final_tip_error_percent"] == 10.0
         assert decision.policy["max_last_refinement_change_percent"] == 5.0
+        assert decision.policy["max_force_balance_norm_n"] == 1.0e-5
+        assert decision.policy["max_moment_balance_norm_nmm"] == 1.0e-3
+        assert decision.policy["require_nonincreasing_tip_error"] is True
         assert decision.checks["global_force_balance"] is True
         assert decision.checks["global_moment_balance"] is True
+        assert decision.checks["nonincreasing_tip_error"] is True
+        assert decision.converged is True
