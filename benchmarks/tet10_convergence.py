@@ -5,6 +5,7 @@ from pathlib import Path
 
 from astermax.fea.benchmark import (
     ConvergencePolicy,
+    analytical_cantilever_reference,
     benchmark_manifest,
     evaluate_convergence,
     run_cantilever_convergence_tet10,
@@ -37,6 +38,17 @@ def main() -> int:
     )
     decision = evaluate_convergence(samples, policy)
     payload = benchmark_manifest(reference, samples, policy=policy)
+    eb_reference = analytical_cantilever_reference()
+    payload["analytical_reference_model"] = {
+        "theory": "TIMOSHENKO_BEAM_BENDING_PLUS_SHEAR",
+        "geometry_and_load_unchanged_from_tet4": True,
+        "poisson_ratio": 0.30,
+        "shear_correction_factor": 5.0 / 6.0,
+        "euler_bernoulli_bending_tip_mm": eb_reference.tip_displacement_y_mm,
+        "timoshenko_shear_tip_mm": reference.tip_displacement_y_mm - eb_reference.tip_displacement_y_mm,
+        "total_tip_mm": reference.tip_displacement_y_mm,
+        "acceptance_thresholds_relaxed": False,
+    }
     payload["element_family"] = "TET10"
     payload["gmsh_volume_element_type"] = 11
     payload["gmsh_surface_element_type"] = 9
