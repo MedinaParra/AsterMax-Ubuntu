@@ -69,6 +69,30 @@ jobs:
             find "$case_dir" -maxdepth 1 -type f -name "ssls120c*" -printf "%f\n" | sort
           ' 2>&1 | tee w2a_case_inventory.log
 
+      - name: Execute copied reference case through run_aster
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .eval/ssls120c
+          cid="$(docker create --entrypoint bash "$ASTER_IMAGE" -ic 'sleep infinity')"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker start "$cid" >/dev/null
+          export_path="$(docker exec "$cid" bash -ic 'find /opt -type f -name "ssls120c.export" -print -quit 2>/dev/null')"
+          test -n "$export_path"
+          case_dir="$(dirname "$export_path")"
+          for ext in export comm datg mmed; do
+            docker cp "$cid:$case_dir/ssls120c.$ext" ".eval/ssls120c/ssls120c.$ext"
+          done
+          docker rm -f "$cid" >/dev/null
+          trap - EXIT
+          docker run --rm \
+            -v "$PWD/.eval/ssls120c:/case" \
+            -w /case \
+            --entrypoint bash \
+            "$ASTER_IMAGE" -ic 'set -euo pipefail; run_aster /case/ssls120c.export' \
+            2>&1 | tee w2a_run_aster.log
+          find .eval/ssls120c -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort | tee w2a_run_aster_files.log
+
       - name: Preserve candidate evaluation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,4 +102,6 @@ jobs:
             w2a_image_digest.txt
             w2a_benchmark.log
             w2a_case_inventory.log
+            w2a_run_aster.log
+            w2a_run_aster_files.log
           if-no-files-found: error
