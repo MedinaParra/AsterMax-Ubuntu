@@ -26,6 +26,8 @@ def _reference_vertices():
 
 
 def test_tet10_shape_functions_are_kronecker_and_partition_unity():
+    # Exact Gmsh Tetrahedron10 order: vertices 0..3, then edges
+    # 0-1, 1-2, 2-0, 0-3, 2-3, 1-3.
     node_natural_coordinates = np.asarray(
         [
             [0.0, 0.0, 0.0],
@@ -36,8 +38,8 @@ def test_tet10_shape_functions_are_kronecker_and_partition_unity():
             [0.5, 0.5, 0.0],
             [0.0, 0.5, 0.0],
             [0.0, 0.0, 0.5],
-            [0.5, 0.0, 0.5],
             [0.0, 0.5, 0.5],
+            [0.5, 0.0, 0.5],
         ]
     )
     interpolation = np.vstack([tet10_shape_functions(p) for p in node_natural_coordinates])
