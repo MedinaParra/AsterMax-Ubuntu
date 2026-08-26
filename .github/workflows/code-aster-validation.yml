@@ -1,0 +1,99 @@
+name: Code_Aster Numerical Validation
+
+on:
+  pull_request:
+    branches:
+      - pmv/future-simulation-ansys-demo
+  push:
+    branches:
+      - "infra/**"
+  workflow_dispatch:
+
+env:
+  ASTER_IMAGE: simvia/code_aster:18.1.0
+  ASTER_DIGEST_PREFIX: sha256:4629a21a1093
+  ASTER_REFERENCE_TEST: ssls120c
+
+jobs:
+  reference-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull pinned Code_Aster image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$ASTER_IMAGE"
+          docker inspect "$ASTER_IMAGE" --format='{{index .RepoDigests 0}}' | tee code_aster_image_digest.txt
+
+      - name: Verify reviewed image digest prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest="$(cat code_aster_image_digest.txt)"
+          expected="simvia/code_aster@${ASTER_DIGEST_PREFIX}"
+          case "$digest" in
+            "$expected"*) ;;
+            *)
+              echo "Unexpected Code_Aster image digest: $digest" >&2
+              echo "Expected reviewed prefix: $expected" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Probe Code_Aster validation tooling
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm --entrypoint bash "$ASTER_IMAGE" -ic '
+            set -euo pipefail
+            echo "PATH=${PATH}"
+            run_aster_path="$(command -v run_aster || true)"
+            run_ctest_path="$(command -v run_ctest || true)"
+            if [ -z "$run_ctest_path" ]; then
+              run_ctest_path="$(find /opt /usr/local /home -type f -name run_ctest -perm -111 -print -quit 2>/dev/null || true)"
+            fi
+            echo "RUN_ASTER_PATH=${run_aster_path:-MISSING}"
+            echo "RUN_CTEST_PATH=${run_ctest_path:-MISSING}"
+            test -n "$run_aster_path"
+            test -n "$run_ctest_path"
+            "$run_ctest_path" --help 2>&1 | head -40 || true
+          ' 2>&1 | tee code_aster_probe.log
+
+      - name: Run pinned analytical reference testcase
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm --entrypoint bash \
+            -e ASTER_REFERENCE_TEST="$ASTER_REFERENCE_TEST" \
+            "$ASTER_IMAGE" -ic '
+              set -euo pipefail
+              run_ctest_path="$(command -v run_ctest || true)"
+              if [ -z "$run_ctest_path" ]; then
+                run_ctest_path="$(find /opt /usr/local /home -type f -name run_ctest -perm -111 -print -quit 2>/dev/null || true)"
+              fi
+              test -n "$run_ctest_path"
+              selector="(^|_)${ASTER_REFERENCE_TEST}$"
+              echo "ASTERMAX_REFERENCE_TEST=${ASTER_REFERENCE_TEST}"
+              echo "ASTERMAX_CTEST_SELECTOR=${selector}"
+              echo "ASTERMAX_RUN_CTEST=${run_ctest_path}"
+              "$run_ctest_path" --clean --resutest=/tmp/astermax-resutest -j 1 -R "$selector"
+            ' 2>&1 | tee code_aster_reference.log
+          if grep -Fq "No tests were found" code_aster_reference.log; then
+            echo "Pinned Code_Aster testcase was not discovered." >&2
+            exit 1
+          fi
+          grep -F "ASTERMAX_REFERENCE_TEST=${ASTER_REFERENCE_TEST}" code_aster_reference.log >/dev/null
+
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-aster-validation-evidence
+          path: |
+            code_aster_image_digest.txt
+            code_aster_probe.log
+            code_aster_reference.log
+          if-no-files-found: error

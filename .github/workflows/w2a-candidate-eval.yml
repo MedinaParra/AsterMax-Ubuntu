@@ -1,0 +1,239 @@
+name: W2A Candidate Evaluation
+
+on:
+  pull_request:
+    branches:
+      - pmv/future-simulation-ansys-demo
+  workflow_dispatch:
+
+env:
+  ASTER_IMAGE: simvia/code_aster:18.1.0
+  ASTER_DIGEST: sha256:4629a21a109309bb97fbdc27d750445cc869e151e2e2ed6290f69539614e4435
+  ASTER_REFERENCE_TEST: ssls120c
+
+jobs:
+  candidate-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Pull and verify independent Code_Aster image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$ASTER_IMAGE"
+          actual="$(docker inspect "$ASTER_IMAGE" --format='{{index .RepoDigests 0}}')"
+          echo "$actual" | tee w2a_image_digest.txt
+          test "$actual" = "simvia/code_aster@${ASTER_DIGEST}"
+
+      - name: Build host wrapper for container run_ctest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .eval
+          cat > .eval/run_ctest <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --entrypoint bash "$ASTER_IMAGE" -ic 'exec run_ctest "$@"' bash "$@"
+          EOF
+          chmod +x .eval/run_ctest
+
+      - name: Execute exact W2 numerical benchmark contract
+        shell: bash
+        env:
+          ASTERMAX_RUN_CTEST: ${{ github.workspace }}/.eval/run_ctest
+          ASTERMAX_CODE_ASTER_REFERENCE_TEST: ssls120c
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest tests/benchmarks/test_code_aster_reference.py -q | tee w2a_benchmark.log
+
+      - name: Capture installed ssls120c export and case inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash "$ASTER_IMAGE" -ic '
+            set -euo pipefail
+            export_path="$(find /opt -type f -name "ssls120c.export" -print -quit 2>/dev/null)"
+            test -n "$export_path"
+            echo "ASTERMAX_EXPORT_PATH=$export_path"
+            echo "--- EXPORT ---"
+            cat "$export_path"
+            echo "--- CASE DIRECTORY ---"
+            case_dir="$(dirname "$export_path")"
+            find "$case_dir" -maxdepth 1 -type f -name "ssls120c*" -printf "%f\n" | sort
+          ' 2>&1 | tee w2a_case_inventory.log
+
+      - name: Execute copied reference case through run_aster
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .eval/ssls120c
+          cid="$(docker create --entrypoint bash "$ASTER_IMAGE" -ic 'sleep infinity')"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker start "$cid" >/dev/null
+          export_path="$(docker exec "$cid" bash -ic 'find /opt -type f -name "ssls120c.export" -print -quit 2>/dev/null')"
+          test -n "$export_path"
+          case_dir="$(dirname "$export_path")"
+          for ext in export comm datg mmed; do
+            docker cp "$cid:$case_dir/ssls120c.$ext" ".eval/ssls120c/ssls120c.$ext"
+          done
+          docker rm -f "$cid" >/dev/null
+          trap - EXIT
+          docker run --rm \
+            -v "$PWD/.eval/ssls120c:/case" \
+            -w /case \
+            --entrypoint bash \
+            "$ASTER_IMAGE" -ic 'set -euo pipefail; run_aster /case/ssls120c.export' \
+            2>&1 | tee w2a_run_aster.log
+          find .eval/ssls120c -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort | tee w2a_run_aster_files.log
+
+      - name: Build authentic worker run package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .eval/worker-run
+          mkdir -p .eval/worker-run/input .eval/worker-run/output
+          chmod 0777 .eval/worker-run/output
+          cp .eval/ssls120c/ssls120c.comm .eval/worker-run/input/ssls120c_worker.comm
+          cp .eval/ssls120c/ssls120c.datg .eval/worker-run/input/ssls120c.datg
+          cp .eval/ssls120c/ssls120c.mmed .eval/worker-run/input/ssls120c.mmed
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.eval/worker-run/input/ssls120c_worker.comm')
+          text = p.read_text(encoding='utf-8')
+          marker = 'FIN()'
+          idx = text.rfind(marker)
+          if idx < 0:
+              raise SystemExit('FIN() marker not found in ssls120c.comm')
+          export_block = '''IMPR_RESU(
+              FORMAT="MED",
+              UNITE=80,
+              RESU=_F(
+                  RESULTAT=ELAS1,
+                  NOM_CHAM=("DEPL", "SIGM_ELNO"),
+              ),
+          )
+
+          '''
+          p.write_text(text[:idx] + export_block + text[idx:], encoding='utf-8')
+          PY
+          cat > .eval/worker-run/input/ssls120c_worker.export <<'EOF'
+          P time_limit 60
+          P memory_limit 512
+          P ncpus 1
+          P mpi_nbcpu 1
+          P mpi_nbnoeud 1
+          F comm ssls120c_worker.comm D 1
+          F datg ssls120c.datg D 16
+          F mmed ssls120c.mmed D 20
+          F rmed ../output/ssls120c_results.rmed R 80
+          EOF
+          cat > .eval/worker-run/input/code_aster_capabilities.json <<'EOF'
+          {"schema_version":"SolverCapabilityV1","backend_id":"code_aster_wsl2","backend_version":"18.1.0","capabilities":["linear_static"],"result_field_names":["displacement","stress"],"metadata":{"image":"simvia/code_aster:18.1.0"}}
+          EOF
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from hashlib import sha256
+          import json
+          from pathlib import Path
+          root = Path('.eval/worker-run')
+          def artifact(rel):
+              data = (root / rel).read_bytes()
+              return {"relative_path": rel, "sha256": sha256(data).hexdigest(), "byte_size": len(data), "media_type": None}
+          support = [
+              artifact('input/ssls120c_worker.export'),
+              artifact('input/ssls120c_worker.comm'),
+              artifact('input/ssls120c.datg'),
+              artifact('input/ssls120c.mmed'),
+          ]
+          job = {
+              "schema_version": "CodeAsterJobV1",
+              "export_file": "input/ssls120c_worker.export",
+              "input_artifacts": support,
+              "produced_files": ["output/ssls120c_results.rmed"],
+          }
+          (root / 'input/job.json').write_text(json.dumps(job, sort_keys=True), encoding='utf-8')
+          request = {
+              "schema_version": "SolverRequestV1",
+              "request_id": "eval-ssls120c-request",
+              "run_id": "eval-ssls120c-run",
+              "project_id": "astermax-w2a-eval",
+              "backend_id": "code_aster_wsl2",
+              "model": {
+                  "schema_version": "SolverModelV1",
+                  "model_id": "ssls120c-meshed-geometry",
+                  "project_id": "astermax-w2a-eval",
+                  "analysis_type": "linear_static",
+                  "unit_system": "SI",
+                  "geometry": artifact("input/ssls120c.mmed"),
+                  "mesh": artifact("input/ssls120c.mmed"),
+                  "model_definition": artifact("input/job.json"),
+                  "required_capabilities": ["linear_static"],
+                  "metadata": {"benchmark": "ssls120c", "geometry_mesh_note": "The installed MED testcase is the meshed geometry for this validation run."}
+              },
+              "requested_fields": ["displacement", "stress"],
+              "created_at": datetime.now(timezone.utc).isoformat(),
+              "metadata": {"evaluation_only": True}
+          }
+          (root / 'input/solver_request.json').write_text(json.dumps(request, sort_keys=True), encoding='utf-8')
+          PY
+
+      - name: Execute candidate wsl_worker against pinned Code_Aster
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/workspace:ro" \
+            -v "$PWD/.eval/worker-run:/run" \
+            -w /run \
+            --entrypoint bash \
+            "$ASTER_IMAGE" -ic '
+              set -euo pipefail
+              rm -rf /tmp/astermax-python-deps
+              python3 -m pip install --disable-pip-version-check --target /tmp/astermax-python-deps "pydantic>=2.8,<3"
+              export PYTHONPATH=/tmp/astermax-python-deps:/workspace/src${PYTHONPATH:+:$PYTHONPATH}
+              python3 -c "import pydantic; print(\"ASTERMAX_PYDANTIC_VERSION=\" + pydantic.__version__)"
+              python3 -c "import mpi4py; print(\"ASTERMAX_MPI4PY_IMPORT=PASS\")"
+              export ASTERMAX_CODE_ASTER_CAPABILITY_FILE=/run/input/code_aster_capabilities.json
+              export ASTERMAX_RUN_ASTER=run_aster
+              python3 -m astermax.solver.wsl_worker \
+                --request /run/input/solver_request.json \
+                --run-dir /run
+            ' 2>&1 | tee w2a_worker.log
+          test -s .eval/worker-run/output/ssls120c_results.rmed
+          test -s .eval/worker-run/output/worker_receipt.json
+          sha256sum .eval/worker-run/output/ssls120c_results.rmed | tee w2a_worker_result_sha256.txt
+          cat .eval/worker-run/output/worker_receipt.json | tee w2a_worker_receipt.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          receipt = json.loads(Path('.eval/worker-run/output/worker_receipt.json').read_text(encoding='utf-8'))
+          assert receipt['schema_version'] == 'WorkerReceiptV1'
+          assert receipt['backend_id'] == 'code_aster_wsl2'
+          assert receipt['backend_version'] == '18.1.0'
+          assert receipt['produced_files'] == ['output/ssls120c_results.rmed']
+          print('ASTERMAX_AUTHENTIC_WORKER_RECEIPT=PASS')
+          PY
+
+      - name: Preserve candidate evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: w2a-candidate-evidence
+          path: |
+            w2a_image_digest.txt
+            w2a_benchmark.log
+            w2a_case_inventory.log
+            w2a_run_aster.log
+            w2a_run_aster_files.log
+            w2a_worker.log
+            w2a_worker_result_sha256.txt
+            w2a_worker_receipt.json
+            .eval/worker-run/output/ssls120c_results.rmed
+          if-no-files-found: error
