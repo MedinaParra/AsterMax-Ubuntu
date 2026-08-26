@@ -27,16 +27,38 @@ jobs:
       - name: Validate W2C WorkPackage contract
         run: astermax-harness validate harness/workpackages/W2C_hub_sprocket_baseline.yaml
 
-      - name: Verify W2C scope budget against W2B
+      - name: Verify exact W2C scope budget against W2B
         shell: pwsh
         run: |
           @'
           from pathlib import Path
           from astermax.harness.policy import evaluate_scope
           from astermax.harness.runner import get_changed_files, load_workpackage
+
           package, _ = load_workpackage('harness/workpackages/W2C_hub_sprocket_baseline.yaml')
           files = get_changed_files(Path('.').resolve(), 'origin/work/W2B-authentic-results')
-          result = evaluate_scope(package, files)
+          validation_only = '.github/workflows/w2c-validation.yml'
+
+          if validation_only not in files:
+              raise SystemExit('Expected validation-only workflow is absent from validation branch diff.')
+
+          unexpected = sorted(
+              path for path in files
+              if path != validation_only and path not in package.allowed_files
+          )
+          if unexpected:
+              raise SystemExit(f'Unexpected out-of-WorkPackage files before scope evaluation: {unexpected}')
+
+          candidate_files = [path for path in files if path != validation_only]
+          if sorted(candidate_files) != sorted(package.allowed_files):
+              raise SystemExit(
+                  'Validation branch candidate diff must exactly equal the frozen W2C allowlist; '
+                  f'candidate={sorted(candidate_files)}, allowed={sorted(package.allowed_files)}'
+              )
+
+          print(f'VALIDATION_ONLY_EXCLUSION={validation_only}')
+          print(f'W2C_CANDIDATE_CHANGED_FILES={candidate_files}')
+          result = evaluate_scope(package, candidate_files)
           print(result.model_dump_json(indent=2))
           raise SystemExit(0 if result.status.value == 'PASS' else 1)
           '@ | python -
