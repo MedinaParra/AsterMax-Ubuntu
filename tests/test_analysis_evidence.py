@@ -5,6 +5,7 @@ import numpy as np
 from astermax.fea.evidence import (
     canonical_sha256,
     mesh_fingerprint,
+    stage_source_file,
     verify_analysis_evidence_manifest,
     write_analysis_evidence_manifest,
 )
@@ -62,6 +63,7 @@ def test_evidence_manifest_verifies_and_detects_artifact_tamper(tmp_path):
     assert status["valid"] is True
     assert status["chain_ok"] is True
     assert status["artifacts_ok"] is True
+    assert status["source_ok"] is True
 
     viewer.write_text("<html>tampered</html>\n", encoding="utf-8")
     status = verify_analysis_evidence_manifest(package)
@@ -92,3 +94,36 @@ def test_manifest_chain_detects_metadata_tamper(tmp_path):
     status = verify_analysis_evidence_manifest(package)
     assert status["valid"] is False
     assert status["chain_ok"] is False
+
+
+def test_staged_source_is_hashed_and_tamper_detected(tmp_path):
+    nodes, elements = _mesh()
+    package = tmp_path / "package"
+    package.mkdir()
+    external_step = tmp_path / "input.step"
+    external_step.write_bytes(b"ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;\n")
+    staged = stage_source_file(package, external_step, target_name="source.step")
+    result = package / "result.vtu"
+    result.write_text("fixture\n", encoding="utf-8")
+
+    manifest = write_analysis_evidence_manifest(
+        package,
+        nodes_mm=nodes,
+        elements=elements,
+        analysis_definition={"units": "N-mm-MPa"},
+        solver_identity={"name": "AsterMax PMV"},
+        artifacts=[("result.vtu", "FEA_RESULT_VTU")],
+        source_path=staged,
+        source_kind="STEP_AP242_OR_AP214_CAD",
+    )
+    assert manifest.schema_version == "AsterMaxAnalysisEvidenceV2"
+    assert manifest.source["path"] == "source.step"
+    assert manifest.source["size_bytes"] == staged.stat().st_size
+    assert verify_analysis_evidence_manifest(package)["valid"] is True
+
+    staged.write_bytes(staged.read_bytes() + b"tamper")
+    status = verify_analysis_evidence_manifest(package)
+    assert status["valid"] is False
+    assert status["chain_ok"] is True
+    assert status["source_ok"] is False
+    assert "sha256:source.step" in status["source_errors"]

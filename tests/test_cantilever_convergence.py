@@ -6,8 +6,11 @@ from pathlib import Path
 import numpy as np
 
 from astermax.fea.benchmark import (
+    ConvergencePolicy,
+    ConvergenceSample,
     analytical_cantilever_reference,
     benchmark_manifest,
+    evaluate_convergence,
     run_cantilever_convergence,
 )
 
@@ -48,7 +51,35 @@ def test_step_cantilever_mesh_refinement_emits_raw_error_and_equilibrium_evidenc
         assert all(s.force_balance_norm_n < 1e-5 for s in samples)
         assert all(s.moment_balance_norm_nmm < 1e-3 for s in samples)
 
-        manifest = benchmark_manifest(ref, samples)
+        policy = ConvergencePolicy()
+        decision = evaluate_convergence(samples, policy)
+        assert decision.checks["minimum_sample_count"] is True
+        assert decision.checks["finite_metrics"] is True
+        assert decision.checks["strict_mesh_refinement"] is True
+        assert decision.checks["global_force_balance"] is True
+        assert decision.checks["global_moment_balance"] is True
+        assert decision.converged == all(decision.checks.values())
+
+        manifest = benchmark_manifest(ref, samples, policy=policy)
         assert manifest["result_class"] == "VERIFICATION_BENCHMARK_NOT_INDUSTRIAL_RESULT"
-        assert manifest["converged_claim"] is False
+        assert manifest["converged_claim"] == decision.converged
+        assert manifest["convergence_decision"]["policy"]["max_final_tip_error_percent"] == 10.0
         assert manifest["units"] == {"length": "mm", "force": "N", "stress": "MPa"}
+
+
+def test_convergence_gate_passes_only_when_every_declared_check_passes() -> None:
+    samples = [
+        ConvergenceSample(30.0, 10, 20, -0.2200, 12.0, 1e-9, 1e-7),
+        ConvergenceSample(20.0, 20, 50, -0.2380, 4.8, 1e-9, 1e-7),
+        ConvergenceSample(10.0, 40, 100, -0.2470, 1.2, 1e-9, 1e-7),
+    ]
+    policy = ConvergencePolicy(max_last_refinement_change_percent=5.0)
+    decision = evaluate_convergence(samples, policy)
+    assert decision.converged is True
+
+    failed = list(samples)
+    failed[-1] = ConvergenceSample(10.0, 40, 100, -0.2200, 12.0, 1e-9, 1e-7)
+    decision = evaluate_convergence(failed, policy)
+    assert decision.converged is False
+    assert decision.checks["final_tip_error"] is False
+    assert decision.checks["nonincreasing_tip_error"] is False
