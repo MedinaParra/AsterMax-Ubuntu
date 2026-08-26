@@ -1,0 +1,59 @@
+name: Windows AsterMax PMV EXE
+
+on:
+  push:
+    branches:
+      - agent/windows-exe-v0.2
+  pull_request:
+    paths:
+      - 'src/astermax/**'
+      - 'packaging/**'
+      - 'pyproject.toml'
+      - '.github/workflows/windows-exe.yml'
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV and build tooling
+        run: python -m pip install -e .[test] "pyinstaller>=6,<7"
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Locate Gmsh runtime DLL
+        shell: pwsh
+        run: |
+          $dll = python -c "import gmsh,pathlib; root=pathlib.Path(gmsh.__file__).resolve().parent; xs=list(root.glob('gmsh*.dll'))+list(root.parent.glob('gmsh*.dll')); print(xs[0] if xs else '')"
+          if (-not $dll) { throw 'Gmsh runtime DLL not found' }
+          "GMSH_DLL=$dll" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Gmsh runtime: $dll"
+      - name: Build AsterMaxPMV.exe
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name AsterMaxPMV --add-binary "$env:GMSH_DLL;." packaging/windows_entry.py
+      - name: Execute packaged self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\AsterMaxPMV.exe" -ArgumentList "--self-test", "exe_smoke" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "AsterMaxPMV.exe self-test exited $($p.ExitCode)" }
+          python -c "import json,pathlib; p=pathlib.Path('exe_smoke/exe_self_test.json'); d=json.loads(p.read_text()); assert d['passed'] is True; print(json.dumps(d, indent=2))"
+      - name: Record executable SHA-256 and self-test evidence
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "dist\AsterMaxPMV.exe" -Algorithm SHA256).Hash.ToLower()
+          "sha256:$hash  AsterMaxPMV.exe" | Out-File "dist\AsterMaxPMV.sha256.txt" -Encoding ascii
+          Copy-Item "exe_smoke\exe_self_test.json" "dist\AsterMaxPMV.self-test.json"
+          Get-Item "dist\AsterMaxPMV.exe" | Select-Object Name,Length
+          Get-Content "dist\AsterMaxPMV.sha256.txt"
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMaxPMV-Windows-x64
+          path: |
+            dist/AsterMaxPMV.exe
+            dist/AsterMaxPMV.sha256.txt
+            dist/AsterMaxPMV.self-test.json
+          if-no-files-found: error
