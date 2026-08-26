@@ -1,4 +1,4 @@
-version: 1
+version: 2
 product: AsterMax Coding Harness
 
 roles:
@@ -31,6 +31,10 @@ roles:
     name: release_judge
     responsibilities: [evaluate_gate_evidence, decide_pass_rework_reject]
     may_not: [modify_implementation]
+  - id: H7
+    name: meta_harness
+    responsibilities: [compare_baseline_candidate, propose_harness_improvements]
+    may_not: [edit_frozen_eval_used_for_own_judgment, self_merge]
 
 gates:
   scope_policy:
@@ -44,6 +48,10 @@ gates:
     kind: command
     command: ["python", "-m", "pytest", "-q", "tests/test_coding_harness.py"]
     mandatory: true
+  frontier_validity:
+    kind: frozen_eval_suite
+    suite: "harness/evals/frontier.v1.yaml"
+    mandatory_when: validity_risks
   numerical_validation:
     kind: command
     command: ["python", "-m", "pytest", "-q", "tests/benchmarks"]
@@ -59,6 +67,10 @@ release_policy:
   unknown_gate_is_error: true
   implementation_role_cannot_release: true
   numerical_impact_requires_numerical_validation: true
+  validity_risks_require_frozen_eval_suite: true
+  self_improvement_requires_same_frozen_suite: true
+  self_improvement_requires_no_mandatory_regression: true
   prohibited_evidence_patterns:
     - "fabricated FEA"
     - "synthetic solver result presented as real"
+    - "LLM assertion used as machine evidence"
