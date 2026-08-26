@@ -22,7 +22,8 @@ prohibited_actions:
   - let W2 feature code modify this gate split
 acceptance_criteria:
   - Windows PMV Core explicitly ignores tests/benchmarks when running deterministic tests.
-  - Windows PMV Core fails if the numerical benchmark suite disappears.
+  - On pull requests, Windows PMV Core rejects deletion of any numerical benchmark relative to the PR base.
+  - A baseline that predates the numerical suite is not falsely rejected merely because tests/benchmarks does not yet exist.
   - Numerical benchmarks remain unchanged and are owned by the pinned Code_Aster validation path.
   - The split is documented as gate separation, not a reduction in validation rigor.
 required_gates:
