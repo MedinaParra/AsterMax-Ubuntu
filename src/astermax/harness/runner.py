@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from astermax.harness.evals import run_frozen_eval_suite
 from astermax.harness.models import (
     GateResultV1,
     GateStatus,
@@ -122,6 +123,21 @@ def run_harness(
                 )
             else:
                 results.append(_run_command_gate(repo_root, gate_id, command))
+        elif kind == "frozen_eval_suite":
+            suite_path = gate_cfg.get("suite")
+            if not isinstance(suite_path, str) or not suite_path:
+                results.append(
+                    GateResultV1(
+                        gate_id=gate_id,
+                        status=GateStatus.ERROR,
+                        evidence_type="frozen_eval_suite",
+                        summary="Frozen eval suite path is malformed.",
+                    )
+                )
+            else:
+                results.append(
+                    run_frozen_eval_suite(repo_root, repo_root / suite_path, gate_id)
+                )
         else:
             results.append(
                 GateResultV1(
