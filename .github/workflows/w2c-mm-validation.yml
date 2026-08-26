@@ -1,0 +1,93 @@
+name: W2C Millimetre Confirmation Validation
+
+on:
+  push:
+    branches:
+      - "validation/W2C-mm-confirmation"
+  workflow_dispatch:
+
+jobs:
+  validate-w2c-mm:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install core and dev dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Fetch frozen W2B baseline
+        run: git fetch origin work/W2B-authentic-results:refs/remotes/origin/work/W2B-authentic-results
+
+      - name: Validate W2C WorkPackage contract
+        run: astermax-harness validate harness/workpackages/W2C_hub_sprocket_baseline.yaml
+
+      - name: Verify exact W2C scope budget against W2B
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.harness.policy import evaluate_scope
+          from astermax.harness.runner import get_changed_files, load_workpackage
+
+          package, _ = load_workpackage('harness/workpackages/W2C_hub_sprocket_baseline.yaml')
+          files = get_changed_files(Path('.').resolve(), 'origin/work/W2B-authentic-results')
+          validation_only = '.github/workflows/w2c-mm-validation.yml'
+
+          if validation_only not in files:
+              raise SystemExit('Expected validation-only workflow is absent from validation branch diff.')
+          unexpected = sorted(
+              path for path in files
+              if path != validation_only and path not in package.allowed_files
+          )
+          if unexpected:
+              raise SystemExit(f'Unexpected out-of-WorkPackage files before scope evaluation: {unexpected}')
+          candidate_files = [path for path in files if path != validation_only]
+          if sorted(candidate_files) != sorted(package.allowed_files):
+              raise SystemExit(
+                  'Validation branch candidate diff must exactly equal the frozen W2C allowlist; '
+                  f'candidate={sorted(candidate_files)}, allowed={sorted(package.allowed_files)}'
+              )
+          print(f'VALIDATION_ONLY_EXCLUSION={validation_only}')
+          print(f'W2C_CANDIDATE_CHANGED_FILES={candidate_files}')
+          result = evaluate_scope(package, candidate_files)
+          print(result.model_dump_json(indent=2))
+          raise SystemExit(0 if result.status.value == 'PASS' else 1)
+          '@ | python -
+
+      - name: Run W2C adversarial tests
+        run: python -m pytest -q tests/test_hub_sprocket_baseline.py
+
+      - name: Run all non-numerical software tests
+        run: python -m pytest -q --ignore=tests/benchmarks
+
+      - name: Run coding harness tests
+        run: python -m pytest -q tests/test_coding_harness.py
+
+      - name: Run frontier methodology tests
+        run: python -m pytest -q tests/test_frontier_methodology.py
+
+      - name: Run frozen frontier validity suite
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.harness.evals import run_frozen_eval_suite
+          result = run_frozen_eval_suite(Path('.').resolve(), Path('harness/evals/frontier.v1.yaml'), 'frontier_validity')
+          print(result.model_dump_json(indent=2))
+          raise SystemExit(0 if result.status.value == 'PASS' else 1)
+          '@ | python -
+
+      - name: Compile source tree
+        run: python -m compileall -q src
+
+      - name: Record numerical ownership boundary
+        shell: pwsh
+        run: |
+          Write-Host "W2C numerical_impact=false: no OT1613 numerical PASS is claimed here."
+          Write-Host "The user-confirmed CAD unit is mm; critical solve remains blocked by unresolved engineering inputs."
