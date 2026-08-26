@@ -21,6 +21,8 @@ def validate_workpackage(package: WorkPackageV1, known_gates: set[str]) -> list[
         errors.append(f"Unknown gates: {', '.join(unknown)}")
     if package.numerical_impact and "numerical_validation" not in package.required_gates:
         errors.append("numerical_impact requires numerical_validation gate")
+    if package.validity_risks and "frontier_validity" not in package.required_gates:
+        errors.append("validity_risks require frontier_validity gate")
     if not package.human_merge_required:
         errors.append("PMV policy requires human_merge_required=true")
     return errors
@@ -47,5 +49,10 @@ def evaluate_scope(package: WorkPackageV1, changed_files: list[str]) -> GateResu
         status=status,
         evidence_type="scope_check",
         summary=summary,
-        evidence={"changed_files": normalized, "issues": issues},
+        evidence={
+            "changed_files": normalized,
+            "issues": issues,
+            "validity_risks": package.validity_risks,
+            "evaluation_budget": package.evaluation_budget.model_dump(mode="json"),
+        },
     )
