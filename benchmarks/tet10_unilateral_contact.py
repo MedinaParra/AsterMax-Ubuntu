@@ -12,7 +12,7 @@ from astermax.fea.tet4 import IsotropicMaterial
 
 
 OUTPUT = Path("tet10_unilateral_contact.json")
-MATERIAL = IsotropicMaterial(young_mpa=200_000.0, poisson_ratio=0.30)
+MATERIAL = IsotropicMaterial(young_modulus_mpa=200_000.0, poisson_ratio=0.30)
 INITIAL_GAP_MM = 0.01
 CONTACT_NODE = 3
 CONTACT_COMPONENT = 2
@@ -151,7 +151,7 @@ def main() -> None:
             "contact_node": CONTACT_NODE,
             "contact_component": "+Z",
             "initial_gap_mm": INITIAL_GAP_MM,
-            "young_mpa": MATERIAL.young_mpa,
+            "young_modulus_mpa": MATERIAL.young_modulus_mpa,
             "poisson_ratio": MATERIAL.poisson_ratio,
         },
         "condensed_reference": {
