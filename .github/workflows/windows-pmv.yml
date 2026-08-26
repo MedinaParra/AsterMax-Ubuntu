@@ -18,6 +18,7 @@ on:
       - agent/windows-unilateral-contact-law-v1.8
       - agent/windows-tet10-unilateral-contact-v1.9
       - agent/windows-tet10-contact-patch-v1.10
+      - agent/windows-tri6-pressure-provenance-v1.11
 
 jobs:
   verify-fea-core:
@@ -119,4 +120,12 @@ jobs:
         with:
           name: tet10-multipoint-contact-patch-windows
           path: tet10_multipoint_contact_patch.json
+          if-no-files-found: error
+      - name: Verify TRI6 pressure provenance gate
+        run: python benchmarks/tri6_pressure_provenance.py
+      - name: Upload TRI6 pressure provenance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tri6-pressure-provenance-windows
+          path: tri6_pressure_provenance
           if-no-files-found: error
