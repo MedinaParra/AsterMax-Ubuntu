@@ -19,6 +19,7 @@ class CodeAsterJobV1(BaseModel):
 
     schema_version: str = Field(default="CodeAsterJobV1", pattern=r"^CodeAsterJobV1$")
     export_file: str = Field(min_length=1)
+    input_artifacts: list[ArtifactDigestV1] = Field(min_length=1)
     produced_files: list[str] = Field(min_length=1)
 
 
@@ -56,9 +57,14 @@ def _run(request_path: Path, run_dir: Path) -> int:
 
     job_path = _inside(run_dir, request.model.model_definition.relative_path)
     job = CodeAsterJobV1.model_validate_json(job_path.read_text(encoding="utf-8"))
+    for artifact in job.input_artifacts:
+        _verify(run_dir, artifact)
+
     export_path = _inside(run_dir, job.export_file)
     if not export_path.is_file():
         raise ValueError(f"missing Code_Aster export file: {job.export_file}")
+    if job.export_file not in {artifact.relative_path for artifact in job.input_artifacts}:
+        raise ValueError("Code_Aster export file must be present in job input_artifacts")
 
     run_aster = os.environ.get("ASTERMAX_RUN_ASTER", "run_aster")
     completed = subprocess.run(
