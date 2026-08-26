@@ -34,11 +34,14 @@ class EvidenceClass(StrEnum):
     SURROGATE_PREDICTION = "SURROGATE_PREDICTION"
 
 
+class AgentResultStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+
+
 class AgentTaskV1(BaseModel):
-    """Runtime representation of contracts/AgentTaskV1.schema.json."""
-
     model_config = ConfigDict(extra="forbid")
-
     schema_version: str = Field(default="AgentTaskV1", pattern=r"^AgentTaskV1$")
     task_id: str = Field(min_length=1)
     project_id: str = Field(min_length=1)
@@ -55,9 +58,36 @@ class AgentTaskV1(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentResultV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: str = Field(default="AgentResultV1", pattern=r"^AgentResultV1$")
+    task_id: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
+    agent_id: str = Field(pattern=r"^A([0-9]|1[0-2])$")
+    status: AgentResultStatus
+    output_contract: str = Field(min_length=1)
+    evidence_class: EvidenceClass
+    summary: str = Field(min_length=1)
+    artifact_ids: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ArtifactRecordV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: str = Field(default="ArtifactRecordV1", pattern=r"^ArtifactRecordV1$")
+    artifact_id: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
+    task_id: str | None = None
+    evidence_class: EvidenceClass
+    uri: str = Field(min_length=1)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkflowEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     project_id: str = Field(min_length=1)
     from_state: WorkflowState
     to_state: WorkflowState
@@ -70,7 +100,6 @@ class WorkflowEvent(BaseModel):
 
 class ProjectSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     schema_version: str = Field(default="ProjectSnapshotV1", pattern=r"^ProjectSnapshotV1$")
     project_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
