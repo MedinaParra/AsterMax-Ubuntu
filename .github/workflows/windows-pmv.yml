@@ -17,3 +17,11 @@ jobs:
         run: python -m pip install -e .[test]
       - name: Run deterministic FEA harness
         run: python -m pytest -q
+      - name: Generate connected scaling evidence
+        run: python benchmarks/connected_scaling.py
+      - name: Upload connected scaling evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-scaling-windows
+          path: connected_scaling_report.json
+          if-no-files-found: error
