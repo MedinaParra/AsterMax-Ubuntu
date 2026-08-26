@@ -1,0 +1,70 @@
+schema_version: WorkPackageV1
+workpackage_id: W2E-PLANAR-GAP-VARIANTS-001
+title: Authenticated planar mounting interface and local GAP geometry variants
+issue: 39
+objective: >-
+  Promote the unique posterior planar hub-to-segment mounting interface found in
+  the authenticated local OT1613 STEP into a provenance-backed geometry contract,
+  then generate local derivative STEP variants for the measured 0.10/0.40 mm GAP
+  endpoints and the derived 0.25 mm sensitivity midpoint without committing CAD
+  bytes or producing FEA claims.
+allowed_files:
+  - "harness/workpackages/W2E_planar_gap_variants.yaml"
+  - "scripts/generate_hub_sprocket_gap_variants.py"
+  - "src/astermax/geometry/planar_gap.py"
+  - "tests/test_planar_gap_variants.py"
+forbidden_paths:
+  - "assets/**"
+  - "**/*.stp"
+  - "**/*.step"
+  - "tests/benchmarks/**"
+  - "src/astermax/solver/**"
+  - ".github/workflows/**"
+  - "harness/evals/**"
+max_files_changed: 4
+prohibited_actions:
+  - commit or upload source or derivative OT1613 CAD bytes to the public repository
+  - parse a local CAD file whose SHA-256 or byte size differs from W2C provenance
+  - infer a mounting plane unless one unique large X-normal hub plane has nonzero coplanar overlap with all five segment faces
+  - label the 0.25 mm midpoint as measured evidence
+  - move the hub when generating GAP variants
+  - move segment solids in any direction other than the authenticated outward interface normal
+  - accept a generated STEP that does not reopen with the expected six solids
+  - create mesh, contact definitions, materials, loads or solver jobs in this slice
+  - claim any OT1613 FEA result from geometry variants
+acceptance_criteria:
+  - Local source STEP identity is verified before CAD parsing.
+  - Exactly one shared large X-normal mounting plane must satisfy nonzero planar overlap for hub and all five segments.
+  - Interface evidence records exact hub and segment face indices, plane coordinate, outward normal and per-segment support areas.
+  - Exact local evidence reproduces hub F112 and segment faces 13/41/8/26/33 at x=-951 mm.
+  - Exact local support area at the nominal Ø795 hub is approximately 22840.358 mm2 per segment within CAD tolerance.
+  - GAP 0.10 and 0.40 mm remain MEASURED_ENDPOINT scenarios.
+  - GAP 0.25 mm remains DERIVED_SENSITIVITY only.
+  - GAP variants translate only the five segments along the authenticated outward normal while the hub remains fixed.
+  - Every generated derivative STEP reopens with six solids and is recorded by SHA-256/byte size.
+  - Output manifest explicitly states fea=false and solver_result_claimed=false.
+  - No source or derivative CAD bytes are committed.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - unit_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - confidential_cad_exposure
+  - interface_misidentification
+  - gap_direction_error
+  - measured_vs_derived_gap_confusion
+  - generated_geometry_provenance_loss
+  - geometry_claim_mislabeled_as_fea
+metadata:
+  methodology: evidence_driven_autonomous_engineering
+  parent_slice: W2D-GAP-GEOMETRY-001
+  cad_sha256: ed305386f592943aaf4df6dbbca420808ec032c503e4e3456e15db0ecc19ca88
+  cad_byte_size: 3117839
+  cad_analysis_unit: mm
+  interface_plane_x_mm: -951.0
+  cad_bytes_committed: false
+  authentic_fea_result_claimed: false
