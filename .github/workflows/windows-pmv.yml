@@ -13,6 +13,7 @@ on:
       - agent/windows-cad-preflight-v1.2
       - agent/windows-tet10-global-v1.4
       - agent/windows-tet10-evidence-v1.5
+      - agent/windows-gap-seating-kinematics-v1.6
 
 jobs:
   verify-fea-core:
@@ -74,4 +75,12 @@ jobs:
         with:
           name: astermax-tet10-analysis-evidence-windows
           path: astermax_tet10_evidence_package
+          if-no-files-found: error
+      - name: Evaluate OT1613 seating kinematics gate
+        run: python benchmarks/ot1613_gap_seating_kinematics.py
+      - name: Upload OT1613 seating kinematics evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ot1613-gap-seating-kinematics-windows
+          path: ot1613_gap_seating_kinematics.json
           if-no-files-found: error
