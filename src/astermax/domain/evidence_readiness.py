@@ -42,6 +42,8 @@ class EvidenceLedgerItemV1(BaseModel):
         if not self.sources:
             raise ValueError("CLOSED evidence requires at least one source")
         source_classes = {source.source_class for source in self.sources}
+        if EvidenceSourceClass.ASSUMPTION in source_classes:
+            raise ValueError("ASSUMPTION cannot participate in a CLOSED evidence item")
         accepted = {
             EvidenceSourceClass.CURRENT_AUTHORITATIVE,
             EvidenceSourceClass.PUBLIC_MANUFACTURER,
@@ -50,8 +52,6 @@ class EvidenceLedgerItemV1(BaseModel):
             raise ValueError(
                 "CLOSED evidence requires CURRENT_AUTHORITATIVE or PUBLIC_MANUFACTURER support"
             )
-        if EvidenceSourceClass.ASSUMPTION in source_classes:
-            raise ValueError("ASSUMPTION cannot participate in a CLOSED evidence item")
         return self
 
 
