@@ -166,7 +166,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _populate_reference_geometry(self) -> None:
         self.renderer = vtkRenderer()
-        self.vtk_widget.GetRenderWindow().AddRenderer(self.renderer)
 
         for radius, height, opacity in ((1.7, 0.8, 0.45), (0.9, 1.4, 0.85)):
             source = vtkCylinderSource()
@@ -189,10 +188,12 @@ class MainWindow(QtWidgets.QMainWindow):
         super().showEvent(event)
         if self._vtk_initialized:
             return
+        render_window = self.vtk_widget.GetRenderWindow()
+        render_window.AddRenderer(self.renderer)
         self.vtk_widget.Initialize()
         self.vtk_widget.Start()
         self._vtk_initialized = True
-        self.vtk_widget.GetRenderWindow().Render()
+        render_window.Render()
 
     def _render_if_initialized(self) -> None:
         if self._vtk_initialized:
