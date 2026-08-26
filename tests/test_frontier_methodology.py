@@ -9,6 +9,7 @@ from astermax.harness.meta import (
     MetaDecision,
     compare_harness_candidate,
 )
+from astermax.harness.system_manifest import EvaluationRunManifestV1, SystemUnderTestV1
 
 
 SUITE_HASH = "a" * 64
@@ -32,6 +33,28 @@ def test_evidence_claim_with_benchmark_path_is_release_eligible():
     graph.add_edge(EvidenceEdgeV1(source="test:1", target="benchmark:1", relation="corroborated_by"))
     assert graph.orphan_claims() == []
     assert graph.release_ready() is True
+
+
+def test_system_manifest_records_full_evaluated_system():
+    system = SystemUnderTestV1(
+        model_provider="OpenAI",
+        model_id="test-model",
+        reasoning_setting="test",
+        tool_access=["github", "shell"],
+        harness_commit="abcdef1234567",
+        safeguards=["bounded_scope", "human_merge_gate"],
+        evaluation_budget={"max_tool_calls": 20, "max_retries": 2},
+    )
+    manifest = EvaluationRunManifestV1(
+        run_id="eval-001",
+        workpackage_id="W2-SOLVER-BRIDGE-001",
+        suite_id="ASTERMAX-FRONTIER-001",
+        suite_sha256=SUITE_HASH,
+        system=system,
+    )
+    assert manifest.system.tool_access == ["github", "shell"]
+    assert manifest.system.evaluation_budget.max_tool_calls == 20
+    assert manifest.suite_sha256 == SUITE_HASH
 
 
 def test_meta_candidate_rolls_back_on_mandatory_regression():
