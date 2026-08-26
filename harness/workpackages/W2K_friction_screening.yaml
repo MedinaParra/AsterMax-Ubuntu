@@ -1,0 +1,44 @@
+schema_version: WorkPackageV1
+workpackage_id: W2K-FRICTION-SCREENING-001
+title: Reduced-order friction screening
+objective: >-
+  Add a deterministic exploratory Coulomb capacity screen for nonuniform contact
+  pressure fields without promoting reduced-order results to solver truth or acceptance.
+issue: 59
+allowed_files:
+  - src/astermax/domain/friction_screening.py
+  - tests/test_friction_screening.py
+  - harness/workpackages/W2K_friction_screening.yaml
+forbidden_paths:
+  - src/astermax/solver/**
+  - tests/benchmarks/**
+  - .github/workflows/**
+  - harness/evals/**
+max_files_changed: 3
+prohibited_actions:
+  - label reduced-order screening as FEA solver evidence
+  - return SAFE or ACCEPTED from a no-gross-slip screening result
+  - commit OT1613 proprietary geometry or private simulation artifacts
+  - infer friction coefficient from lubrication or torque procedure without evidence
+  - weaken W2J nonlinear contact requirements
+acceptance_criteria:
+  - integrate scalar Coulomb torque capacity over nonuniform pressure patches
+  - report utilization and required friction coefficient
+  - fail closed on invalid pressure/contact geometry
+  - preserve EXPLORATORY evidence classification
+  - no result may authorize solver truth or engineering acceptance
+  - tests prove linear scaling with friction coefficient and normal pressure
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+numerical_impact: false
+human_merge_required: true
+metadata:
+  parent_slice: W2J-gap-closure-contact
+  result_class: EXPLORATORY_NOT_FOR_ACCEPTANCE
+  private_validation_artifacts:
+    - SIM-004 reduced contact field
+    - SIM-005 torque/friction screening
