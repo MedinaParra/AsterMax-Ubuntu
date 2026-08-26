@@ -1,0 +1,67 @@
+schema_version: WorkPackageV1
+workpackage_id: W2H-EXPLORATORY-ENVELOPE-001
+title: Exploratory FEA assumption envelope
+issue: 47
+objective: >-
+  Add a bounded sensitivity-only assumption envelope for incomplete FEA inputs,
+  with deterministic drive and friction-screen derivations that can support
+  exploratory studies without authorizing or masquerading as authentic solver evidence.
+allowed_files:
+  - "harness/workpackages/W2H_exploratory_envelope.yaml"
+  - "src/astermax/domain/exploratory_envelope.py"
+  - "tests/test_exploratory_envelope.py"
+forbidden_paths:
+  - "assets/**"
+  - "**/*.stp"
+  - "**/*.step"
+  - "**/*.pdf"
+  - "**/*.docx"
+  - "tests/benchmarks/**"
+  - "src/astermax/solver/**"
+  - ".github/workflows/**"
+  - "harness/evals/**"
+max_files_changed: 3
+prohibited_actions:
+  - commit confidential client source documents or email contents
+  - promote an estimated value to CURRENT_AUTHORITATIVE, USER_INPUT or SOLVER_RESULT
+  - let exploratory estimates satisfy W2F authentic FEA authorization
+  - label a Coulomb friction screen as nonlinear-contact verification
+  - infer bolt preload directly from torque-angle kinematics without an accepted joint model
+  - weaken W2F or W2G evidence requirements to obtain a solver PASS
+  - claim an authentic OT1613 FEA result from sensitivity-only calculations
+acceptance_criteria:
+  - Estimated material, joint and load values are explicitly ASSUMPTION.
+  - Bounded values require low <= nominal <= high.
+  - Pitch diameter is derived deterministically from chain pitch and sprocket tooth count.
+  - Sprocket speed is derived deterministically from chain speed and pitch travel per revolution.
+  - Selected sprocket torque is derived from shaft torque and explicit load share.
+  - Chain tangential force is derived from selected sprocket torque and pitch radius.
+  - Friction torque capacity is labelled screening-only and remains non-authoritative.
+  - Every derived exploratory result has authentic_solver_authorized=false.
+  - Adversarial tests reject relabelling estimated joint or load values as authoritative evidence.
+  - No confidential source content is committed.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - unit_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - assumption_to_evidence_promotion
+  - load_envelope_overconfidence
+  - preload_overclaim
+  - friction_capacity_overclaim
+  - confidential_source_exposure
+  - solver_authorization_bypass
+evaluation_budget:
+  max_agent_turns: 8
+  max_tool_calls: 35
+  max_retries: 3
+  max_wall_clock_seconds: 1200
+metadata:
+  methodology: evidence_driven_autonomous_engineering
+  parent_slice: W2G-EVIDENCE-READINESS
+  confidential_sources_committed: false
+  authentic_fea_result_claimed: false
