@@ -13,7 +13,7 @@ Owns deterministic software evidence:
 - artifact hashing and identity checks;
 - unit/regression tests that do not require an external FEA installation.
 
-It runs on Windows and explicitly excludes `tests/benchmarks/**` from its pytest invocation. It also asserts that numerical benchmark files still exist, so the core gate cannot be made green by deleting the numerical gate.
+It runs on Windows and explicitly excludes `tests/benchmarks/**` from its pytest invocation. On pull requests it also compares the candidate against the PR base and fails if any numerical benchmark is deleted. A baseline that predates the numerical suite is therefore not falsely rejected, while a candidate cannot make the core gate green by removing an existing numerical test.
 
 ## Code_Aster Numerical Validation
 
