@@ -1,0 +1,66 @@
+schema_version: WorkPackageV1
+workpackage_id: W2F-FEA-AUTHORIZATION-001
+title: Evidence-gated authorization for first authentic OT1613 FEA
+issue: 41
+objective: >-
+  Define a versioned, fail-closed authorization contract for authentic OT1613
+  stress/contact simulation. Geometry may be ready from W2E, but no solver job may
+  be authorized until material, segment-bolt identity/preload, contact friction and
+  critical load-envelope evidence are authoritative and internally consistent.
+allowed_files:
+  - "harness/workpackages/W2F_fea_authorization.yaml"
+  - "src/astermax/domain/fea_authorization.py"
+  - "tests/test_fea_authorization.py"
+forbidden_paths:
+  - "src/astermax/solver/**"
+  - "src/astermax/geometry/**"
+  - "tests/benchmarks/**"
+  - ".github/workflows/**"
+  - "harness/evals/**"
+  - "**/*.stp"
+  - "**/*.step"
+max_files_changed: 3
+prohibited_actions:
+  - insert generic steel properties as authentic hub or segment material
+  - infer segment-bolt identity from unrelated procurement hardware
+  - treat a procured lubricant product name as a verified friction coefficient
+  - assume jam torque, chain load, load split, loaded teeth or axial load to make the gate pass
+  - derive preload from tightening torque without a documented installation/lubrication basis and explicit torque-to-preload relation
+  - authorize a solver job with observation-only or assumption evidence in any critical domain
+  - weaken W2E geometry provenance requirements
+  - create a mesh, contact solve or OT1613 numerical stress result in this slice
+acceptance_criteria:
+  - Missing critical domains produce named blockers and status BLOCKED.
+  - Geometry authorization requires provenance-backed source and variant STEP hashes and the expected six solids.
+  - Hub and segment materials are separate required evidence domains.
+  - Material evidence requires E, Poisson ratio, density and yield strength; optional ultimate strength cannot be below yield.
+  - Segment-bolt evidence is rejected when count differs from 30 or hole pattern differs from Ø24.5 mm.
+  - Procurement-only 14x M12 grade 8.8 hardware cannot authorize the 30 segment fasteners.
+  - Direct preload or documented tightening torque is required; torque-only evidence additionally requires an explicit torque-to-preload basis.
+  - Contact friction requires an explicit coefficient, surface pair, surface condition and AUTHORITATIVE evidence.
+  - Procurement of DRI LUBE alone is insufficient to authorize friction.
+  - Load envelope requires an authoritative jam torque plus speed, loaded teeth, wrap, right/left load share and axial condition.
+  - Generic material or load assumptions remain BLOCKED.
+  - A complete authoritative and internally consistent synthetic contract test transitions to READY.
+  - READY is the only state that sets authentic_solver_job_authorized=true.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - unit_tests
+  - frontier_validity
+numerical_impact: false
+human_merge_required: true
+validity_risks:
+  - fabricated_physical_inputs
+  - procurement_evidence_overreach
+  - bolt_identity_mismatch
+  - friction_assumption_promoted_to_fact
+  - material_assumption_promoted_to_fact
+  - load_assumption_promoted_to_fact
+  - premature_solver_authorization
+metadata:
+  methodology: evidence_driven_autonomous_engineering
+  parent_slice: W2E-PLANAR-GAP-VARIANTS-001
+  authentic_fea_current_state: BLOCKED
+  authentic_fea_result_claimed: false
