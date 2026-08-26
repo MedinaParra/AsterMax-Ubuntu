@@ -1,0 +1,81 @@
+name: W2A Candidate Evaluation
+
+on:
+  pull_request:
+    branches:
+      - pmv/future-simulation-ansys-demo
+  workflow_dispatch:
+
+env:
+  ASTER_IMAGE: simvia/code_aster:18.1.0
+  ASTER_DIGEST: sha256:4629a21a109309bb97fbdc27d750445cc869e151e2e2ed6290f69539614e4435
+  ASTER_REFERENCE_TEST: ssls120c
+
+jobs:
+  candidate-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Pull and verify independent Code_Aster image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull "$ASTER_IMAGE"
+          actual="$(docker inspect "$ASTER_IMAGE" --format='{{index .RepoDigests 0}}')"
+          echo "$actual" | tee w2a_image_digest.txt
+          test "$actual" = "simvia/code_aster@${ASTER_DIGEST}"
+
+      - name: Build host wrapper for container run_ctest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .eval
+          cat > .eval/run_ctest <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --entrypoint bash "$ASTER_IMAGE" -ic 'exec run_ctest "$@"' bash "$@"
+          EOF
+          chmod +x .eval/run_ctest
+
+      - name: Execute exact W2 numerical benchmark contract
+        shell: bash
+        env:
+          ASTERMAX_RUN_CTEST: ${{ github.workspace }}/.eval/run_ctest
+          ASTERMAX_CODE_ASTER_REFERENCE_TEST: ssls120c
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest tests/benchmarks/test_code_aster_reference.py -q | tee w2a_benchmark.log
+
+      - name: Capture installed ssls120c export and case inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash "$ASTER_IMAGE" -ic '
+            set -euo pipefail
+            export_path="$(find /opt -type f -name "ssls120c.export" -print -quit 2>/dev/null)"
+            test -n "$export_path"
+            echo "ASTERMAX_EXPORT_PATH=$export_path"
+            echo "--- EXPORT ---"
+            cat "$export_path"
+            echo "--- CASE DIRECTORY ---"
+            case_dir="$(dirname "$export_path")"
+            find "$case_dir" -maxdepth 1 -type f -name "ssls120c*" -printf "%f\n" | sort
+          ' 2>&1 | tee w2a_case_inventory.log
+
+      - name: Preserve candidate evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: w2a-candidate-evidence
+          path: |
+            w2a_image_digest.txt
+            w2a_benchmark.log
+            w2a_case_inventory.log
+          if-no-files-found: error
