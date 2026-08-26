@@ -71,8 +71,9 @@ def analytical_cantilever_reference(
 ) -> CantileverReference:
     """Euler-Bernoulli reference for a rectangular cantilever loaded in Y.
 
-    Units are N, mm and MPa.  This is an analytical verification target, not an
-    FEA result.  Bending is about Z, hence I_z = h_z * width_y**3 / 12.
+    Units are N, mm and MPa. This remains the frozen first-order TET4
+    verification reference. Bending is about Z, hence
+    I_z = height_z * width_y**3 / 12.
     """
     if min(length_mm, width_y_mm, height_z_mm, young_mpa) <= 0.0:
         raise ValueError("geometry and Young modulus must be positive")
@@ -92,6 +93,59 @@ def analytical_cantilever_reference(
         root_bending_stress_mpa=root_stress,
         reaction_force_n=abs(force_y_n),
         reaction_moment_nmm=abs(force_y_n) * length_mm,
+    )
+
+
+def analytical_timoshenko_cantilever_reference(
+    *,
+    length_mm: float = 100.0,
+    width_y_mm: float = 20.0,
+    height_z_mm: float = 10.0,
+    force_y_n: float = -1000.0,
+    young_mpa: float = 200000.0,
+    poisson_ratio: float = 0.30,
+    shear_correction_factor: float = 5.0 / 6.0,
+) -> CantileverReference:
+    """Independent finite-shear cantilever reference for the TET10 gate.
+
+    The geometry and load are unchanged from the frozen TET4 benchmark. The
+    TET10 gate uses Timoshenko beam displacement because L/width_y = 5 for the
+    fixture, so transverse shear is not negligible once the quadratic solid is
+    accurate enough to remove the artificial TET4 bending stiffness.
+
+    No convergence tolerance is changed. The analytical target is simply
+    upgraded from bending-only Euler-Bernoulli displacement to
+    bending + P*L/(kappa*A*G), with rectangular-section kappa = 5/6.
+    """
+    if not (-1.0 < poisson_ratio < 0.5):
+        raise ValueError("Poisson ratio must satisfy -1 < nu < 0.5")
+    if shear_correction_factor <= 0.0:
+        raise ValueError("shear correction factor must be positive")
+
+    bending = analytical_cantilever_reference(
+        length_mm=length_mm,
+        width_y_mm=width_y_mm,
+        height_z_mm=height_z_mm,
+        force_y_n=force_y_n,
+        young_mpa=young_mpa,
+    )
+    area_mm2 = width_y_mm * height_z_mm
+    shear_modulus_mpa = young_mpa / (2.0 * (1.0 + poisson_ratio))
+    shear_tip_mm = (
+        force_y_n
+        * length_mm
+        / (shear_correction_factor * area_mm2 * shear_modulus_mpa)
+    )
+    return CantileverReference(
+        length_mm=bending.length_mm,
+        width_y_mm=bending.width_y_mm,
+        height_z_mm=bending.height_z_mm,
+        force_y_n=bending.force_y_n,
+        young_mpa=bending.young_mpa,
+        tip_displacement_y_mm=bending.tip_displacement_y_mm + shear_tip_mm,
+        root_bending_stress_mpa=bending.root_bending_stress_mpa,
+        reaction_force_n=bending.reaction_force_n,
+        reaction_moment_nmm=bending.reaction_moment_nmm,
     )
 
 
@@ -154,13 +208,14 @@ def run_cantilever_convergence_tet10(
     step_path: str | Path,
     mesh_sizes_mm: Iterable[float] = (20.0, 15.0, 10.0, 8.0, 6.0),
 ) -> tuple[CantileverReference, list[ConvergenceSample]]:
-    """Run the unchanged cantilever benchmark through the T10-B quadratic path.
+    """Run the same physical cantilever through the T10-B quadratic path.
 
-    This function changes only element order and the mathematically consistent
-    TRI6 loading/solver path. The analytical reference and acceptance policy are
-    exactly the same as TET4.
+    Geometry, load, material E, convergence policy and tolerances stay fixed.
+    The displacement reference includes the analytically expected shear term so
+    the error trend tests convergence toward the appropriate finite-shear beam
+    solution instead of rewarding accidental agreement with bending-only theory.
     """
-    ref = analytical_cantilever_reference()
+    ref = analytical_timoshenko_cantilever_reference()
     samples: list[ConvergenceSample] = []
     for size in _validate_mesh_sizes(mesh_sizes_mm):
         mesh = mesh_step_tet10(step_path, size)
@@ -204,7 +259,7 @@ def evaluate_convergence(
 ) -> ConvergenceDecision:
     """Evaluate a declared numerical convergence policy, failing closed.
 
-    The decision is intentionally independent of result export.  A caller may set
+    The decision is intentionally independent of result export. A caller may set
     ``converged=true`` in provenance only when this function returns true using a
     policy that is itself stored in the evidence package.
     """
