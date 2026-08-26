@@ -14,6 +14,7 @@ on:
       - agent/windows-tet10-global-v1.4
       - agent/windows-tet10-evidence-v1.5
       - agent/windows-gap-seating-kinematics-v1.6
+      - agent/windows-gap-five-segment-poses-v1.7
 
 jobs:
   verify-fea-core:
@@ -83,4 +84,12 @@ jobs:
         with:
           name: ot1613-gap-seating-kinematics-windows
           path: ot1613_gap_seating_kinematics.json
+          if-no-files-found: error
+      - name: Build five-segment contact preprocessing seed
+        run: python benchmarks/ot1613_five_segment_pose_seed.py
+      - name: Upload five-segment contact preprocessing seed
+        uses: actions/upload-artifact@v4
+        with:
+          name: ot1613-five-segment-contact-seed-windows
+          path: ot1613_five_segment_pose_seed.json
           if-no-files-found: error
