@@ -19,6 +19,16 @@ class HarnessDecision(StrEnum):
     REJECT = "REJECT"
 
 
+class EvaluationBudgetV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_agent_turns: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=1)
+    max_retries: int | None = Field(default=None, ge=0)
+    max_wall_clock_seconds: float | None = Field(default=None, gt=0)
+    max_cost_usd: float | None = Field(default=None, ge=0)
+
+
 class WorkPackageV1(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -35,6 +45,8 @@ class WorkPackageV1(BaseModel):
     required_gates: list[str] = Field(min_length=1)
     numerical_impact: bool = False
     human_merge_required: bool = True
+    validity_risks: list[str] = Field(default_factory=list)
+    evaluation_budget: EvaluationBudgetV1 = Field(default_factory=EvaluationBudgetV1)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
