@@ -85,6 +85,13 @@ def _artifact(path: Path, root: Path, media_type: str | None = None) -> Artifact
     )
 
 
+def _verified_declared_artifact(declared: ArtifactDigestV1, root: Path) -> ArtifactDigestV1:
+    actual = _artifact(root / declared.relative_path, root, declared.media_type)
+    if actual.sha256 != declared.sha256 or actual.byte_size != declared.byte_size:
+        raise SolverEvidenceError(f"declared input artifact digest mismatch: {declared.relative_path}")
+    return actual
+
+
 def _write_json(path: Path, payload: dict) -> bytes:
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,15 +156,16 @@ class CodeAsterWSL2Adapter:
         for directory in (input_dir, output_dir, logs_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
+        verified_model_inputs = [
+            _verified_declared_artifact(request.model.geometry, run_directory),
+            _verified_declared_artifact(request.model.mesh, run_directory),
+            _verified_declared_artifact(request.model.model_definition, run_directory),
+        ]
+
         request_path = input_dir / "solver_request.json"
         _write_json(request_path, request.model_dump(mode="json"))
         request_artifact = _artifact(request_path, run_directory, "application/json")
-        input_artifacts = [
-            request_artifact,
-            request.model.geometry,
-            request.model.mesh,
-            request.model.model_definition,
-        ]
+        input_artifacts = [request_artifact, *verified_model_inputs]
 
         wsl_run_directory = self.path_converter(run_directory)
         started_at = datetime.now(timezone.utc)
