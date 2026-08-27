@@ -53,15 +53,16 @@ def target_from_source(
     gap_mm: float,
     face_id: str,
     xy_shift: tuple[float, float] = (0.0, 0.0),
-    reverse_orientation: bool = True,
+    reverse_orientation: bool = False,
 ) -> RigidTri6TargetFace:
     source_xyz = nodes[source_nodes].copy()
     source_xyz[:, 0] += xy_shift[0]
     source_xyz[:, 1] += xy_shift[1]
     source_xyz[:, 2] += gap_mm
+    # The fixture's original corner order has geometric normal -Z, which is
+    # correctly opposed to the declared +Z closing direction. Reversing it is
+    # used only for the explicit wrong-normal negative control.
     if reverse_orientation:
-        # Old order: c0,c1,c2,m01,m12,m20. Reversed corners c0,c2,c1
-        # require mids m20,m12,m01 to preserve a straight TRI6 face.
         order = np.asarray([0, 2, 1, 5, 4, 3], dtype=int)
         source_xyz = source_xyz[order]
     return RigidTri6TargetFace(face_id, source_xyz)
@@ -114,7 +115,7 @@ def test_same_orientation_target_is_not_admissible() -> None:
         sources[0].node_indices,
         gap_mm=0.0002,
         face_id="WRONG_NORMAL",
-        reverse_orientation=False,
+        reverse_orientation=True,
     )
     with pytest.raises(ValueError, match="no admissible target"):
         find_tri6_surface_pairs(
