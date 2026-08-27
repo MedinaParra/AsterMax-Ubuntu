@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .analysis_passport import write_analysis_passport
 from .fea.gmsh_bridge import distribute_resultant_on_tri6, fixed_dofs_for_nodes, force_and_moment, unique_surface_nodes
 from .fea.mesh_quality import require_mesh_quality, tetra_mesh_quality
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
@@ -108,7 +109,8 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV8",
+        "schema": "AsterMaxProjectRunResultV9",
+        "result_class": RESULT_CLASS,
         "project": str(project_file),
         "geometry": str(geometry),
         "selection_mode": "PERSISTENT_CAD_SURFACE_SIGNATURES",
@@ -183,6 +185,19 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
             "viewer_sha256": viewer_manifest.html_sha256,
         },
     }
+
+    passport_path = output / "astermax_analysis_passport.html"
+    passport_manifest = write_analysis_passport(passport_path, summary)
+    summary["analysis_passport"] = {
+        "schema": passport_manifest["schema"],
+        "highest_demonstrated_stage": passport_manifest["highest_demonstrated_stage"],
+        "evidence_vector": passport_manifest["evidence_vector"],
+        "claim_guards": passport_manifest["claim_guards"],
+        "evidence_boundary": passport_manifest["evidence_boundary"],
+    }
+    summary["artifacts"]["analysis_passport"] = str(passport_path)
+    summary["artifacts"]["analysis_passport_sha256"] = passport_manifest["html_sha256"]
+
     summary_path = output / "astermax_project_run.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary["artifacts"]["summary"] = str(summary_path)
