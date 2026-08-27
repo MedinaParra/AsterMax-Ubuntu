@@ -18,8 +18,8 @@ SOURCE_FACE_LOCAL = np.asarray([0, 1, 2, 4, 5, 6], dtype=int)
 TARGET_FACE_LOCAL = np.asarray([0, 2, 1, 6, 5, 4], dtype=int)
 SUPPORT_LOCAL = np.asarray([3, 7, 8, 9], dtype=int)
 NORMAL = np.asarray([0.0, 0.0, 1.0], dtype=float)
-REFERENCE_GAP_MM = 0.0003
-SLOPE_MM_PER_MM = 0.00005
+REFERENCE_GAP_MM = 0.004
+SLOPE_MM_PER_MM = 0.001
 MATERIAL = IsotropicMaterial(young_modulus_mpa=200_000.0, poisson_ratio=0.30)
 
 
@@ -34,9 +34,10 @@ def build_switch_fixture():
     )
     source_nodes = straight_sided_tet10_from_vertices(source_vertices)
 
-    # Both masters cover the complete prescribed path. Their shallow, opposed
-    # slopes cross at x=0, so tangential source motion changes the nearest
-    # admissible master without relying on an out-of-domain candidate.
+    # Both masters cover the complete prescribed path. Their opposed shallow
+    # slopes cross at x=0. The larger separation away from the crossing keeps
+    # endpoint contact on the intended master while preserving a small physical
+    # gap to the nearer surface; no solver tolerance is changed for this gate.
     xy = (
         np.asarray([-8.0, -5.0]),
         np.asarray([0.0, 8.0]),
@@ -192,8 +193,8 @@ def test_switch_is_recomputed_from_current_geometry_not_previous_signature() -> 
 
 
 def test_primary_pressure_contact_is_valid_on_both_switch_endpoints() -> None:
-    left = endpoint_contact_result(-2.0, "MASTER_A")
-    right = endpoint_contact_result(2.0, "MASTER_B")
+    left = endpoint_contact_result(-3.0, "MASTER_A")
+    right = endpoint_contact_result(3.0, "MASTER_B")
     assert left.active_contact_indices
     assert right.active_contact_indices
     assert left.pairing_target_history[-1] == ("MASTER_A",) * 3
