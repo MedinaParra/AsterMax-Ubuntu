@@ -150,12 +150,12 @@ def verify_scalar_stress_neighborhood(
 
 
 def neighborhood_verification_evidence(report: NeighborhoodVerificationReport) -> EvidenceRecord:
-    status = EvidenceStatus.VERIFIED if report.status == "PASS" else EvidenceStatus.FAILED
+    status = EvidenceStatus.VERIFIED if report.status == "PASS" else EvidenceStatus.CONTRADICTED
     return EvidenceRecord(
         evidence_id=f"FEA_NEIGHBORHOOD:{report.report_sha256[:24]}",
         kind="FEA_ANALYTICAL_NEIGHBORHOOD_COMPARISON",
         status=status,
-        source=EvidenceSource.NUMERICAL_VERIFICATION,
+        source=EvidenceSource.DETERMINISTIC_CHECK,
         description="TET10 integration-point stress compared with an analytical reference inside a declared interior neighborhood.",
         payload_sha256=report.report_sha256,
         metadata={
