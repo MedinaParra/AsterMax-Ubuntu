@@ -1,0 +1,35 @@
+name: Windows AsterMax Project Gate
+
+on:
+  push:
+    branches:
+      - agent/astermax-project-v0.4
+  pull_request:
+    branches:
+      - agent/persistent-surface-selections-v0.3
+
+jobs:
+  verify-project:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run regression harness
+        run: python -m pytest -q
+      - name: Verify .astermax project roundtrip
+        run: python benchmarks/astermax_project_roundtrip.py
+      - name: Upload project evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: astermax-project-roundtrip-windows
+          path: |
+            astermax_project_roundtrip.json
+            astermax_project_gate/rotated_cantilever.astermax
+            astermax_project_gate/results/astermax_project_run.json
+            astermax_project_gate/results/astermax_project_viewer.html
+            astermax_project_gate/results/astermax_project_result.vtu
+          if-no-files-found: error
