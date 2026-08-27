@@ -8,6 +8,7 @@ import pytest
 import astermax.project_runner as runner
 from astermax.fea.mesh_quality import MeshQualityError, MeshQualityReport
 from astermax.fea.tet10_geometry import Tet10GeometryScopeReport
+from astermax.fea.tet10_jacobian import Tet10JacobianReport
 
 
 def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch, tmp_path):
@@ -27,6 +28,19 @@ def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch
         ),
         elements=np.array([[0, 1, 2, 3]], dtype=np.int64),
         surface_triangles={"SUPPORT": np.array([[0, 1, 2]]), "LOAD": np.array([[0, 1, 2]])},
+    )
+    passing_jacobian = Tet10JacobianReport(
+        schema="AsterMaxTet10SampledJacobianReportV1",
+        status="PASS",
+        element_count=1,
+        sample_count_per_element=15,
+        nonpositive_sample_count=0,
+        minimum_determinant=1.0,
+        worst_element_index=0,
+        worst_sample_index=0,
+        worst_natural_coordinates=(0.0, 0.0, 0.0),
+        policy={"determinant_epsilon": 1.0e-12, "sample_schema": "TET10_JACOBIAN_SAMPLE_POINTS_V1"},
+        evidence_boundary="SAMPLED_ONLY",
     )
     passing_geometry = Tet10GeometryScopeReport(
         element_count=1,
@@ -53,6 +67,7 @@ def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch
     monkeypatch.setattr(runner, "read_project", lambda path: project)
     monkeypatch.setattr(runner, "resolve_project_geometry", lambda project_file, p: tmp_path / "fixture.step")
     monkeypatch.setattr(runner, "mesh_step_tet10_with_selections", lambda *args, **kwargs: bad_mesh)
+    monkeypatch.setattr(runner, "tet10_sampled_jacobian_report", lambda *args, **kwargs: passing_jacobian)
     monkeypatch.setattr(runner, "tet10_geometry_scope", lambda *args, **kwargs: passing_geometry)
     monkeypatch.setattr(runner, "tetra_mesh_quality", lambda *args, **kwargs: failed_report)
 
