@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 import hashlib
 import json
 import re
+from types import MappingProxyType
 from typing import Any, Iterable
 
 
@@ -80,6 +82,35 @@ def _text_tuple(name: str, values: Iterable[str], *, allow_empty: bool = False) 
     return result
 
 
+def _json_snapshot(value: Any) -> Any:
+    """Validate and deep-copy JSON evidence so caller-owned objects cannot mutate it."""
+    return json.loads(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+    )
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class ContextOfUse:
     context_id: str
@@ -140,7 +171,7 @@ class EvidenceRecord:
     source: EvidenceSource
     description: str
     payload_sha256: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidence_id", _require_id("evidence_id", self.evidence_id))
@@ -157,8 +188,9 @@ class EvidenceRecord:
             if not _SHA256_RE.fullmatch(digest):
                 raise ValueError("payload_sha256 must be a lowercase SHA-256 hex digest")
             object.__setattr__(self, "payload_sha256", digest)
-        # Force metadata to be canonical-JSON serializable at construction time.
-        canonical_sha256(self.metadata)
+
+        snapshot = _json_snapshot(dict(self.metadata))
+        object.__setattr__(self, "metadata", _freeze_json(snapshot))
 
     @property
     def claim_grade(self) -> bool:
@@ -172,7 +204,7 @@ class EvidenceRecord:
             "source": self.source.value,
             "description": self.description,
             "payload_sha256": self.payload_sha256,
-            "metadata": self.metadata,
+            "metadata": _thaw_json(self.metadata),
         }
 
 
@@ -191,7 +223,7 @@ class EvidenceEdge:
 
 
 class EvidenceGraph:
-    """Deterministic evidence graph scoped to one ContextOfUse.
+    """Deterministic acyclic evidence graph scoped to one ContextOfUse.
 
     The graph records provenance and dependency. It intentionally does not assign
     a scalar trust score. Evidence status is categorical and claims are evaluated
@@ -208,10 +240,28 @@ class EvidenceGraph:
             raise ValueError(f"duplicate evidence_id: {record.evidence_id}")
         self._records[record.evidence_id] = record
 
+    def _has_path(self, start_id: str, target_id: str) -> bool:
+        parents: dict[str, set[str]] = {}
+        for edge in self._edges:
+            parents.setdefault(edge.child_id, set()).add(edge.parent_id)
+        pending = [start_id]
+        visited: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == target_id:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(parents.get(current, ()))
+        return False
+
     def link(self, child_id: str, parent_id: str, relation: str = "DERIVED_FROM") -> None:
         edge = EvidenceEdge(child_id, parent_id, relation)
         if edge.child_id not in self._records or edge.parent_id not in self._records:
             raise ValueError("both evidence edge endpoints must already exist")
+        if self._has_path(edge.parent_id, edge.child_id):
+            raise ValueError("evidence provenance must be acyclic")
         self._edges.add(edge)
 
     def get(self, evidence_id: str) -> EvidenceRecord:
