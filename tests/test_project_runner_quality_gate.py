@@ -7,6 +7,7 @@ import pytest
 
 import astermax.project_runner as runner
 from astermax.fea.mesh_quality import MeshQualityError, MeshQualityReport
+from astermax.fea.tet10_geometry import Tet10GeometryScopeReport
 
 
 def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch, tmp_path):
@@ -27,6 +28,16 @@ def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch
         elements=np.array([[0, 1, 2, 3]], dtype=np.int64),
         surface_triangles={"SUPPORT": np.array([[0, 1, 2]]), "LOAD": np.array([[0, 1, 2]])},
     )
+    passing_geometry = Tet10GeometryScopeReport(
+        element_count=1,
+        non_straight_sided_elements=0,
+        max_midpoint_deviation_mm=0.0,
+        max_relative_midpoint_deviation=0.0,
+        worst_element_index=0,
+        status="PASS",
+        solver_scope="STRAIGHT_SIDED_TET10_FOUR_POINT_VERIFICATION",
+        policy={"relative_midpoint_tolerance": 1.0e-10, "absolute_floor_mm": 1.0e-12},
+    )
     failed_report = MeshQualityReport(
         element_count=1,
         min_scaled_jacobian=-1.0,
@@ -42,6 +53,7 @@ def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch
     monkeypatch.setattr(runner, "read_project", lambda path: project)
     monkeypatch.setattr(runner, "resolve_project_geometry", lambda project_file, p: tmp_path / "fixture.step")
     monkeypatch.setattr(runner, "mesh_step_tet10_with_selections", lambda *args, **kwargs: bad_mesh)
+    monkeypatch.setattr(runner, "tet10_geometry_scope", lambda *args, **kwargs: passing_geometry)
     monkeypatch.setattr(runner, "tetra_mesh_quality", lambda *args, **kwargs: failed_report)
 
     solver_called = False
