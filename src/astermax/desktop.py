@@ -8,6 +8,7 @@ from .face_picker import write_face_picker_html
 from .project import read_project, resolve_project_geometry
 from .project_runner import run_project
 from .project_tree import assert_tree_does_not_upgrade_claims, build_project_tree
+from .workspace_widget import create_workspace_widget
 
 
 def main() -> int:
@@ -16,8 +17,8 @@ def main() -> int:
 
     root = tk.Tk()
     root.title("AsterMax PMV · Evidence-first CAE Workspace")
-    root.geometry("1040x640")
-    root.minsize(900, 560)
+    root.geometry("1180x760")
+    root.minsize(980, 640)
 
     step_var = tk.StringVar()
     project_var = tk.StringVar()
@@ -56,6 +57,10 @@ def main() -> int:
     work.columnconfigure(1, weight=1)
     ttk.Label(work, text="Model preparation", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
+    workspace_host, workspace_update = create_workspace_widget(work, ttk)
+    workspace_host.grid(row=11, column=0, columnspan=3, sticky="nsew", pady=(14, 0))
+    work.rowconfigure(11, weight=1)
+
     def refresh_tree(summary: dict | None = None) -> None:
         nonlocal current_summary
         current_summary = summary
@@ -68,6 +73,7 @@ def main() -> int:
             tree.insert("", "end", iid=node.key, text=node.label, values=(node.state,))
             if node.artifact:
                 tree_artifacts[node.key] = node.artifact
+        workspace_update(summary)
         detail_var.set("Select Results, Mesh or Evidence and double-click to open the verified artifact.")
 
     def on_tree_select(_event=None) -> None:
@@ -147,7 +153,7 @@ def main() -> int:
 
     progress = ttk.Progressbar(work, mode="indeterminate")
     progress.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(18, 8))
-    ttk.Label(work, textvariable=status, wraplength=650).grid(row=6, column=0, columnspan=3, sticky="w")
+    ttk.Label(work, textvariable=status, wraplength=760).grid(row=6, column=0, columnspan=3, sticky="w")
     solve = ttk.Button(work, text="Solve named-support TET10 project")
     solve.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(18, 8))
 
@@ -156,11 +162,12 @@ def main() -> int:
     ttk.Label(
         work,
         text=(
-            "The native tree is a navigation and evidence surface only. Arbitrary projects remain "
-            "CONVERGED=false, INDUSTRIAL_VALIDATION=false, ANSYS_EQUIVALENCE=false and CURVED_TET10=false "
-            "until separate verification/validation gates demonstrate those claims."
+            "The native project tree and engineering tabs are presentation/evidence surfaces only. "
+            "Results remain externally rendered verified artifacts; native 3D embedding is not claimed. "
+            "Arbitrary projects remain CONVERGED=false, INDUSTRIAL_VALIDATION=false, "
+            "ANSYS_EQUIVALENCE=false and CURVED_TET10=false until separate gates demonstrate those claims."
         ),
-        wraplength=650,
+        wraplength=760,
         foreground="#7a5b32",
     ).grid(row=10, column=0, columnspan=3, sticky="w", pady=(5, 0))
 
@@ -194,11 +201,8 @@ def main() -> int:
                 refresh_tree(result)
                 status.set(
                     f"Completed · {m['nodes']} nodes / {m['elements']} TET10 · SUPPORT {m['support_tri6']} TRI6 · "
-                    f"LOAD {m['load_tri6']} TRI6 · |ΣF| {c['force_residual_n']:.3e} N · open Results/Evidence from the project tree"
+                    f"LOAD {m['load_tri6']} TRI6 · |ΣF| {c['force_residual_n']:.3e} N · inspect Results/Evidence in the integrated workspace"
                 )
-                evidence = result["artifacts"].get("results_evidence_workspace")
-                if evidence and Path(evidence).is_file():
-                    webbrowser.open(Path(evidence).resolve().as_uri())
             root.after(0, done)
 
         threading.Thread(target=worker, daemon=True).start()
