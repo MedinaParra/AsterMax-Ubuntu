@@ -4,10 +4,12 @@ import numpy as np
 import pytest
 
 from astermax.contact import (
+    TRI6_GAUSS_BARYCENTRIC,
     DeformableTri6TargetFace,
     Tri6SourceFace,
     find_deformable_tri6_surface_pairs,
     solve_tet10_deformable_surface_contact,
+    tri6_shape_functions,
     tri6_surface_pressure_generalized_force,
 )
 from astermax.fea.tet10 import straight_sided_tet10_from_vertices
@@ -52,6 +54,30 @@ def build_deformable_pair_fixture(gap_mm: float = 0.0003):
     return nodes, elements, source, target, fixed
 
 
+def consistent_tri6_traction_load(
+    nodes: np.ndarray,
+    face_nodes: np.ndarray,
+    traction_mpa: np.ndarray,
+) -> np.ndarray:
+    """Independent constant-traction assembly for a straight reference TRI6 face."""
+    face = np.asarray(face_nodes, dtype=int)
+    xyz = np.asarray(nodes, dtype=float)[face]
+    corners = xyz[:3]
+    area = 0.5 * float(
+        np.linalg.norm(np.cross(corners[1] - corners[0], corners[2] - corners[0]))
+    )
+    traction = np.asarray(traction_mpa, dtype=float).reshape(3)
+    force = np.zeros(nodes.shape[0] * 3, dtype=float)
+    weight = area / 3.0
+    for bary in TRI6_GAUSS_BARYCENTRIC:
+        shape = tri6_shape_functions(bary)
+        for local_index, node in enumerate(face):
+            force[3 * int(node) : 3 * int(node) + 3] += (
+                shape[local_index] * weight * traction
+            )
+    return force
+
+
 def driving_loads(nodes: np.ndarray, source: Tri6SourceFace, target: DeformableTri6TargetFace):
     loads = np.zeros(nodes.shape[0] * 3, dtype=float)
     loads += tri6_surface_pressure_generalized_force(
@@ -67,12 +93,11 @@ def driving_loads(nodes: np.ndarray, source: Tri6SourceFace, target: DeformableT
         pressure_mpa=np.full(3, 10.0),
     )
     # A small tangential traction deliberately changes master barycentric
-    # coordinates. Friction is not solved; this only exercises pair-map update.
-    loads += tri6_surface_pressure_generalized_force(
-        nodes_mm=nodes,
-        face_nodes=target.node_indices,
-        contact_normal=np.asarray([1.0, 0.0, 0.0]),
-        pressure_mpa=np.full(3, 0.5),
+    # coordinates. It is assembled as N^T*t*w, not mislabeled as normal pressure.
+    loads += consistent_tri6_traction_load(
+        nodes,
+        target.node_indices,
+        np.asarray([0.5, 0.0, 0.0]),
     )
     return loads
 
