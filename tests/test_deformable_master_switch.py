@@ -18,7 +18,7 @@ SOURCE_FACE_LOCAL = np.asarray([0, 1, 2, 4, 5, 6], dtype=int)
 TARGET_FACE_LOCAL = np.asarray([0, 2, 1, 6, 5, 4], dtype=int)
 SUPPORT_LOCAL = np.asarray([3, 7, 8, 9], dtype=int)
 NORMAL = np.asarray([0.0, 0.0, 1.0], dtype=float)
-REFERENCE_GAP_MM = 0.004
+REFERENCE_GAP_MM = 0.0036
 SLOPE_MM_PER_MM = 0.001
 MATERIAL = IsotropicMaterial(young_modulus_mpa=200_000.0, poisson_ratio=0.30)
 
