@@ -13,6 +13,7 @@ from .fea.selected_mesh import mesh_step_tet10_with_selections
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
+from .mesh_inspector import write_mesh_inspector
 from .project import read_project, resolve_project_geometry
 
 RESULT_CLASS = "ASTERMAX_PROJECT_UNCONVERGED_NOT_INDUSTRIAL_RESULT"
@@ -31,9 +32,11 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         {"SUPPORT": project.support, "LOAD": project.load_surface},
     )
 
-    # Professional fail-closed order: geometry -> mesh -> quality gate -> BC/load -> assembly/solve.
-    # No sparse matrix is assembled when the tetra mesh fails the declared geometric policy.
+    # Diagnostic evidence is emitted before the fail-closed acceptance gate so a rejected
+    # mesh remains inspectable. The inspector ranking never changes acceptance thresholds.
     mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements)
+    inspector = output / "astermax_mesh_inspector.html"
+    inspector_manifest = write_mesh_inspector(inspector, mesh.nodes_mm, mesh.elements)
     require_mesh_quality(mesh_quality)
 
     support_nodes = unique_surface_nodes(mesh.surface_triangles["SUPPORT"])
@@ -58,7 +61,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         result_class=RESULT_CLASS, converged_claim=False, industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV2",
+        "schema": "AsterMaxProjectRunResultV3",
         "project": str(project_file),
         "geometry": str(geometry),
         "selection_mode": "PERSISTENT_CAD_SURFACE_SIGNATURES",
@@ -72,8 +75,9 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         "mesh_quality": {
             **asdict(mesh_quality),
             "policy_scope": "STRAIGHT_SIDED_TET10_CORNER_GEOMETRY",
-            "gate_order": "BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "INSPECTOR_THEN_FAIL_CLOSED_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
+            "inspector_worst_element_index": inspector_manifest["worst_element_index"],
         },
         "checks": {"force_residual_n": force_residual, "moment_residual_nmm": moment_residual},
         "claims": {"converged": False, "industrial_validation": False, "ansys_equivalence": False},
@@ -83,6 +87,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
             "load_surface_sha256": project.load_surface.fingerprint_sha256,
         },
         "artifacts": {
+            "mesh_inspector": str(inspector), "mesh_inspector_sha256": inspector_manifest["html_sha256"],
             "vtu": str(vtu), "viewer": str(viewer),
             "vtu_sha256": vtu_manifest.vtu_sha256,
             "viewer_sha256": viewer_manifest.html_sha256,
