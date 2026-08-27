@@ -199,6 +199,33 @@ def test_context_mismatch_blocks_claim():
     assert "CONTEXT_MISMATCH" in decision.blockers
 
 
+def test_analysis_passport_rejects_stale_claim_decision_after_graph_changes():
+    graph = EvidenceGraph(_context())
+    graph.add(_verified("EV_CAD", "CAD_PROVENANCE", EvidenceSource.DOCUMENT))
+    graph.add(_verified("EV_LOAD", "LOAD_PROVENANCE", EvidenceSource.HUMAN_CONFIRMED))
+    graph.add(_verified("EV_SOLVER", "SOLUTION_VERIFICATION"))
+    permitted = ClaimEngine.evaluate(_claim(), graph)
+    assert permitted.state is ClaimState.PERMITTED
+
+    graph.add(
+        EvidenceRecord(
+            evidence_id="EV_LATE_CONFLICT",
+            kind="LOAD_PROVENANCE",
+            status=EvidenceStatus.CONTRADICTED,
+            source=EvidenceSource.DOCUMENT,
+            description="New controlled evidence contradicts the previously accepted load.",
+        )
+    )
+
+    with pytest.raises(ValueError, match="stale"):
+        build_analysis_passport(graph, [permitted])
+
+    reevaluated = ClaimEngine.evaluate(_claim(), graph)
+    assert reevaluated.state is ClaimState.BLOCKED
+    passport = build_analysis_passport(graph, [reevaluated])
+    assert passport["claims"][0]["state"] == "BLOCKED"
+
+
 def test_analysis_passport_is_vector_based_and_contains_no_trust_score():
     graph = EvidenceGraph(_context())
     graph.add(_verified("EV_CAD", "CAD_PROVENANCE", EvidenceSource.DOCUMENT))
