@@ -53,6 +53,7 @@ def _self_test(root: Path) -> int:
 
     force_residual = float(summary["checks"]["force_residual_n"])
     moment_residual = float(summary["checks"]["moment_residual_nmm"])
+    sampled_jacobian = summary["tet10_sampled_jacobian"]
     geometry_scope = summary["tet10_geometry_scope"]
     mesh_quality = summary["mesh_quality"]
     quality_policy = mesh_quality["policy"]
@@ -69,9 +70,15 @@ def _self_test(root: Path) -> int:
         "named_load": summary["scope_contract"]["load"] == "LOAD",
         "support_tri6_present": summary["mesh"]["support_tri6"] > 0,
         "load_tri6_present": summary["mesh"]["load_tri6"] > 0,
+        "tet10_sampled_jacobian_pass": sampled_jacobian["status"] == "PASS",
+        "tet10_sampled_jacobian_zero_nonpositive": sampled_jacobian["nonpositive_sample_count"] == 0,
+        "tet10_sampled_jacobian_all_nodes": sampled_jacobian["sample_count_per_element"] == 15,
+        "tet10_sampled_jacobian_pre_scope": sampled_jacobian["gate_order"] == "BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "tet10_sampled_jacobian_not_global_proof": sampled_jacobian["global_positivity_proof"] is False,
+        "tet10_sampled_jacobian_curved_solver_disabled": sampled_jacobian["curved_tet10_solver_enabled"] is False,
         "tet10_geometry_scope_pass": geometry_scope["status"] == "PASS",
         "tet10_geometry_scope_zero_outside": geometry_scope["non_straight_sided_elements"] == 0,
-        "tet10_geometry_scope_preassembly": geometry_scope["gate_order"] == "BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "tet10_geometry_scope_preassembly": geometry_scope["gate_order"] == "AFTER_SAMPLED_JACOBIAN_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
         "curved_tet10_disabled": geometry_scope["curved_tet10_solver_enabled"] is False,
         "mesh_quality_not_fail": mesh_quality["status"] != "FAIL",
         "mesh_quality_policy_serialized": isinstance(quality_policy, dict) and len(quality_policy) >= 7,
@@ -88,11 +95,12 @@ def _self_test(root: Path) -> int:
     }
     passed = all(checks.values())
     report = {
-        "schema": "AsterMaxWindowsExeSelfTestV3",
+        "schema": "AsterMaxWindowsExeSelfTestV4",
         "passed": passed,
         "checks": checks,
         "picker": picker,
         "mesh": summary["mesh"],
+        "tet10_sampled_jacobian": sampled_jacobian,
         "tet10_geometry_scope": geometry_scope,
         "mesh_quality": mesh_quality,
         "force_residual_n": force_residual,
