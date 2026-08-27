@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from astermax.credibility import EvidenceSource, EvidenceStatus
 from astermax.fea.neighborhood_verification import (
     NeighborhoodVerificationError,
     NeighborhoodVerificationPolicy,
@@ -79,7 +80,8 @@ def test_neighborhood_gate_fails_when_one_interior_ip_is_materially_wrong() -> N
     assert report.maximum_absolute_error_mpa == pytest.approx(25.0)
     assert report.maximum_relative_error == pytest.approx(0.25)
     evidence = neighborhood_verification_evidence(report)
-    assert evidence.status.value == "FAILED"
+    assert evidence.status is EvidenceStatus.CONTRADICTED
+    assert evidence.source is EvidenceSource.DETERMINISTIC_CHECK
     assert evidence.metadata["singular_peak_used"] is False
     assert evidence.metadata["ansys_equivalence"] is False
     assert evidence.metadata["industrial_validation"] is False
@@ -118,6 +120,8 @@ def test_report_hash_is_deterministic_and_evidence_is_claim_bounded() -> None:
     b = verify_scalar_stress_neighborhood(positions, stresses[:, :, 0], 80.0, policy=policy)
     assert a.report_sha256 == b.report_sha256
     evidence = neighborhood_verification_evidence(a)
+    assert evidence.status is EvidenceStatus.VERIFIED
+    assert evidence.source is EvidenceSource.DETERMINISTIC_CHECK
     assert evidence.metadata["stress_representation"] == "TET10_INTEGRATION_POINT_STRESS_NO_NODAL_SMOOTHING"
     assert evidence.metadata["ansys_equivalence"] is False
     assert evidence.metadata["industrial_validation"] is False
