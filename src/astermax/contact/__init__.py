@@ -1,3 +1,10 @@
+from .deformable_surface_contact import (
+    DeformableSurfacePairingRecord,
+    DeformableTri6TargetFace,
+    Tet10DeformableSurfaceContactResult,
+    find_deformable_tri6_surface_pairs,
+    solve_tet10_deformable_surface_contact,
+)
 from .multiface_surface_contact import (
     RigidTri6TargetFace,
     SurfacePairingRecord,
@@ -41,9 +48,12 @@ from .unilateral import (
 
 __all__ = [
     "ContactState",
+    "DeformableSurfacePairingRecord",
+    "DeformableTri6TargetFace",
     "RigidTri6TargetFace",
     "SurfacePairingRecord",
     "TRI6_GAUSS_BARYCENTRIC",
+    "Tet10DeformableSurfaceContactResult",
     "Tet10MultifaceSurfaceContactResult",
     "Tet10MultipointContactResult",
     "Tet10SingleDofContactResult",
@@ -53,8 +63,10 @@ __all__ = [
     "Tri6SourceFace",
     "UnilateralSpringContactProblem",
     "UnilateralSpringContactResult",
+    "find_deformable_tri6_surface_pairs",
     "find_tri6_surface_pairs",
     "recover_consistent_tri6_pressure",
+    "solve_tet10_deformable_surface_contact",
     "solve_tet10_multiface_surface_contact",
     "solve_tet10_multipoint_unilateral_contact",
     "solve_tet10_single_dof_unilateral_contact",
