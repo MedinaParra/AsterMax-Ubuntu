@@ -5,7 +5,8 @@ import math
 from pathlib import Path
 import sys
 
-from astermax.app import main as desktop_main, run_step_analysis
+from astermax.app import run_step_analysis
+from astermax.desktop import main as desktop_main
 
 
 def _write_fixture_step(path: Path) -> None:
@@ -61,6 +62,7 @@ def _self_test(root: Path) -> int:
         "force_residual_n": force_residual,
         "moment_residual_nmm": moment_residual,
         "result_class": summary["result_class"],
+        "desktop_entry": "PROJECT_CENTRIC_CAD_FACE_PICKER",
     }
     (root / "exe_self_test.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0 if passed else 2
