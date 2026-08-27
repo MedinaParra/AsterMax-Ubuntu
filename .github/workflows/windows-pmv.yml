@@ -21,6 +21,7 @@ on:
       - agent/windows-tri6-pressure-provenance-v1.11
       - agent/windows-surface-pressure-contact-v1.12
       - agent/windows-multiface-surface-search-v1.13
+      - agent/windows-deformable-pair-update-v1.14
 
 jobs:
   verify-fea-core:
@@ -147,4 +148,13 @@ jobs:
         with:
           name: multiface-tri6-surface-search-windows
           path: multiface_surface_search
+          if-no-files-found: error
+      - name: Verify deformable TRI6 master pair update
+        run: python benchmarks/tet10_deformable_master_pair_update.py
+      - name: Upload deformable TRI6 master pair update evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deformable-master-pair-update-windows
+          path: deformable_master_pair_update
           if-no-files-found: error
