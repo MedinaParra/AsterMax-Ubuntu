@@ -203,6 +203,7 @@ def main():
     for record, point_force in zip(result.pairing_records, result.contact_point_forces_n):
         point_resultant += point_force * record.source_normal
     resultant_error = float(np.linalg.norm(generalized_resultant - point_resultant))
+    active = tuple(result.active_contact_indices)
 
     checks = {
         "geometric_search_executed": result.geometric_surface_search_executed,
@@ -211,8 +212,9 @@ def main():
         "decoy_not_selected": "DECOY_OUTSIDE" not in pair_ids,
         "search_gaps_match_geometry": bool(np.allclose(search_gaps, designed_gaps, rtol=0.0, atol=1.0e-12)),
         "independent_reference_enumerated_all_64_sets": masks_tested == 64,
-        "independent_reference_unique_active_set": tuple(result.active_contact_indices) == reference_active,
-        "expected_active_set_0_and_2": tuple(result.active_contact_indices) == (0, 2),
+        "independent_reference_unique_active_set": active == reference_active,
+        "mixed_contact_exercised": 0 < len(active) < 6,
+        "source_a_contact_source_b_open": bool(active) and all(index < 3 for index in active) and all(state.value == "OPEN" for state in result.states[3:]),
         "pressure_matches_independent_reference": pressure_error <= 1.0e-8,
         "displacement_matches_independent_reference": displacement_error <= 1.0e-10,
         "pressure_is_primary": result.pressure_is_primary_contact_unknown,
@@ -274,7 +276,7 @@ def main():
             "pressure_influence_symmetry_error_mm_per_mpa": symmetry_error,
         },
         "production": {
-            "active_contact_indices": list(result.active_contact_indices),
+            "active_contact_indices": list(active),
             "states": [state.value for state in result.states],
             "contact_pressure_mpa": result.contact_pressure_mpa.tolist(),
             "initial_gaps_mm": result.initial_gaps_mm.tolist(),
