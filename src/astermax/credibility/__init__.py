@@ -13,8 +13,20 @@ from .core import (
     build_analysis_passport,
     canonical_sha256,
 )
+from .geometry import (
+    CadArtifact,
+    FaceMatchPolicy,
+    FaceSignature,
+    SectionProperties,
+    cad_artifact_evidence,
+    face_signature_matches,
+    persistent_face_evidence,
+    resolve_persistent_face,
+    section_properties_evidence,
+)
 
 __all__ = [
+    "CadArtifact",
     "ClaimDecision",
     "ClaimDefinition",
     "ClaimEngine",
@@ -26,6 +38,14 @@ __all__ = [
     "EvidenceRecord",
     "EvidenceSource",
     "EvidenceStatus",
+    "FaceMatchPolicy",
+    "FaceSignature",
+    "SectionProperties",
     "build_analysis_passport",
+    "cad_artifact_evidence",
     "canonical_sha256",
+    "face_signature_matches",
+    "persistent_face_evidence",
+    "resolve_persistent_face",
+    "section_properties_evidence",
 ]
