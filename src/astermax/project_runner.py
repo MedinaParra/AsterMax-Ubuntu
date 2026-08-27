@@ -9,6 +9,7 @@ import numpy as np
 from .fea.gmsh_bridge import distribute_resultant_on_tri6, fixed_dofs_for_nodes, force_and_moment, unique_surface_nodes
 from .fea.mesh_quality import require_mesh_quality, tetra_mesh_quality
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
+from .fea.quality_policy import DEFAULT_TETRA_QUALITY_POLICY
 from .fea.selected_mesh import mesh_step_tet10_with_selections
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet10_geometry import require_tet10_geometry_scope, tet10_geometry_scope
@@ -36,14 +37,34 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
     # Geometry scope and mesh quality are both evaluated before BC/load creation or
     # sparse assembly. The current verified TET10 solver scope remains straight-sided.
     geometry_scope = tet10_geometry_scope(mesh.nodes_mm, mesh.elements)
-    mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements)
+    quality_policy = DEFAULT_TETRA_QUALITY_POLICY
+    mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements, policy=quality_policy)
 
-    # Diagnostic evidence is emitted before fail-closed acceptance so rejected corner-
-    # quality meshes remain inspectable. Curved/high-order quality is not claimed here.
+    # Diagnostic evidence is emitted before fail-closed acceptance so rejected meshes
+    # remain inspectable. The authoritative geometry/quality gates are deliberately
+    # evaluated before the secondary inspector-policy consistency assertion so that a
+    # diagnostic artifact can never mask the primary engineering rejection reason.
     inspector = output / "astermax_mesh_inspector.html"
-    inspector_manifest = write_mesh_inspector(inspector, mesh.nodes_mm, mesh.elements)
+    inspector_manifest = write_mesh_inspector(
+        inspector,
+        mesh.nodes_mm,
+        mesh.elements,
+        policy=quality_policy,
+    )
     require_tet10_geometry_scope(geometry_scope)
     require_mesh_quality(mesh_quality)
+
+    expected_policy = quality_policy.to_dict()
+    if mesh_quality.policy != expected_policy:
+        raise RuntimeError("mesh quality report policy drifted from the declared quality policy")
+    inspector_policy = inspector_manifest.get("policy")
+    inspector_policy_matches_gate = inspector_policy == expected_policy
+    if not inspector_policy_matches_gate:
+        raise RuntimeError("mesh inspector policy drifted from the fail-closed quality gate")
+    inspector_claims = inspector_manifest.get("claims", {})
+    inspector_uses_shared_classifier = inspector_claims.get("status_derived_from_shared_classifier") is True
+    if not inspector_uses_shared_classifier:
+        raise RuntimeError("mesh inspector status is not derived from the shared quality classifier")
 
     support_nodes = unique_surface_nodes(mesh.surface_triangles["SUPPORT"])
     fixed_dofs = fixed_dofs_for_nodes(support_nodes)
@@ -59,22 +80,34 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
     vtu = output / "astermax_project_result.vtu"
     viewer = output / "astermax_project_viewer.html"
     vtu_manifest = write_tet10_linear_static_vtu(
-        vtu, mesh.nodes_mm, mesh.elements, result,
-        result_class=RESULT_CLASS, converged_claim=False, industrial_validation_claim=False,
+        vtu,
+        mesh.nodes_mm,
+        mesh.elements,
+        result,
+        result_class=RESULT_CLASS,
+        converged_claim=False,
+        industrial_validation_claim=False,
     )
     viewer_manifest = write_tet10_offline_viewer(
-        viewer, mesh.nodes_mm, mesh.elements, result,
-        result_class=RESULT_CLASS, converged_claim=False, industrial_validation_claim=False,
+        viewer,
+        mesh.nodes_mm,
+        mesh.elements,
+        result,
+        result_class=RESULT_CLASS,
+        converged_claim=False,
+        industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV4",
+        "schema": "AsterMaxProjectRunResultV5",
         "project": str(project_file),
         "geometry": str(geometry),
         "selection_mode": "PERSISTENT_CAD_SURFACE_SIGNATURES",
         "scope_contract": {"constraint": "SUPPORT", "load": "LOAD"},
         "mesh": {
-            "family": "TET10", "target_size_mm": project.mesh_size_mm,
-            "nodes": int(mesh.nodes_mm.shape[0]), "elements": int(mesh.elements.shape[0]),
+            "family": "TET10",
+            "target_size_mm": project.mesh_size_mm,
+            "nodes": int(mesh.nodes_mm.shape[0]),
+            "elements": int(mesh.elements.shape[0]),
             "support_tri6": int(mesh.surface_triangles["SUPPORT"].shape[0]),
             "load_tri6": int(mesh.surface_triangles["LOAD"].shape[0]),
         },
@@ -87,9 +120,12 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         "mesh_quality": {
             **asdict(mesh_quality),
             "policy_scope": "STRAIGHT_SIDED_TET10_CORNER_GEOMETRY",
-            "gate_order": "INSPECTOR_THEN_FAIL_CLOSED_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "INSPECTOR_THEN_PRIMARY_GATES_THEN_POLICY_CONSISTENCY_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "inspector_worst_element_index": inspector_manifest["worst_element_index"],
+            "inspector_policy": inspector_policy,
+            "inspector_policy_matches_gate": inspector_policy_matches_gate,
+            "inspector_status_uses_shared_classifier": inspector_uses_shared_classifier,
         },
         "checks": {"force_residual_n": force_residual, "moment_residual_nmm": moment_residual},
         "claims": {
@@ -104,8 +140,10 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
             "load_surface_sha256": project.load_surface.fingerprint_sha256,
         },
         "artifacts": {
-            "mesh_inspector": str(inspector), "mesh_inspector_sha256": inspector_manifest["html_sha256"],
-            "vtu": str(vtu), "viewer": str(viewer),
+            "mesh_inspector": str(inspector),
+            "mesh_inspector_sha256": inspector_manifest["html_sha256"],
+            "vtu": str(vtu),
+            "viewer": str(viewer),
             "vtu_sha256": vtu_manifest.vtu_sha256,
             "viewer_sha256": viewer_manifest.html_sha256,
         },
