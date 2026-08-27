@@ -9,6 +9,7 @@ import astermax.project_runner as runner
 from astermax.fea.mesh_quality import MeshQualityError, MeshQualityReport
 from astermax.fea.tet10_geometry import Tet10GeometryScopeReport
 from astermax.fea.tet10_jacobian import Tet10JacobianReport
+from astermax.fea.tet10_jacobian_adaptive import Tet10JacobianAdaptiveReport
 from astermax.fea.tet10_jacobian_reference import Tet10JacobianReferenceReport
 
 
@@ -56,6 +57,19 @@ def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch
         policy={"subdivisions": 10, "determinant_epsilon": 1.0e-12, "schema": "TET10_BARYCENTRIC_LATTICE_REFERENCE_V1"},
         evidence_boundary="DENSE_REFERENCE_ONLY",
     )
+    passing_adaptive = Tet10JacobianAdaptiveReport(
+        schema="AsterMaxTet10JacobianAdaptiveReportV1",
+        status="PASS",
+        element_count=1,
+        evaluated_points=11,
+        nonpositive_sample_count=0,
+        minimum_determinant=1.0,
+        worst_element_index=0,
+        worst_natural_coordinates=(0.0, 0.0, 0.0),
+        maximum_depth_reached=0,
+        policy={"max_depth": 5, "determinant_epsilon": 1.0e-12, "schema": "TET10_ADAPTIVE_BARYCENTRIC_CERTIFICATION_V1"},
+        evidence_boundary="ADAPTIVE_REFERENCE_ONLY",
+    )
     passing_geometry = Tet10GeometryScopeReport(
         element_count=1,
         non_straight_sided_elements=0,
@@ -83,6 +97,7 @@ def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch
     monkeypatch.setattr(runner, "mesh_step_tet10_with_selections", lambda *args, **kwargs: bad_mesh)
     monkeypatch.setattr(runner, "tet10_sampled_jacobian_report", lambda *args, **kwargs: passing_jacobian)
     monkeypatch.setattr(runner, "tet10_reference_jacobian_report", lambda *args, **kwargs: passing_reference)
+    monkeypatch.setattr(runner, "tet10_adaptive_jacobian_report", lambda *args, **kwargs: passing_adaptive)
     monkeypatch.setattr(runner, "tet10_geometry_scope", lambda *args, **kwargs: passing_geometry)
     monkeypatch.setattr(runner, "tetra_mesh_quality", lambda *args, **kwargs: failed_report)
 
