@@ -22,7 +22,7 @@ class MeshQualityReport:
     warn_elements: int
     fail_elements: int
     status: str
-    policy: dict[str, float]
+    policy: dict[str, float] | None = None
 
     @property
     def passed(self) -> bool:
