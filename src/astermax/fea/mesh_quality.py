@@ -45,8 +45,8 @@ def tetra_element_metrics(nodes_mm: np.ndarray, elements: np.ndarray) -> dict[st
     det = np.einsum("ij,ij->i", e01, np.cross(e02, e03))
     denom = np.linalg.norm(e01, axis=1) * np.linalg.norm(e02, axis=1) * np.linalg.norm(e03, axis=1)
     scaled_jac = np.divide(det, denom, out=np.zeros_like(det), where=denom > 0.0)
-    pairs = ((0,1),(0,2),(0,3),(1,2),(1,3),(2,3))
-    lengths = np.stack([np.linalg.norm(xyz[:, j] - xyz[:, i], axis=1) for i,j in pairs], axis=1)
+    pairs = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
+    lengths = np.stack([np.linalg.norm(xyz[:, j] - xyz[:, i], axis=1) for i, j in pairs], axis=1)
     shortest, longest = lengths.min(axis=1), lengths.max(axis=1)
     aspect = np.divide(longest, shortest, out=np.full_like(longest, np.inf), where=shortest > 0.0)
     volume = det / 6.0
@@ -54,10 +54,20 @@ def tetra_element_metrics(nodes_mm: np.ndarray, elements: np.ndarray) -> dict[st
     mean_ratio = np.zeros_like(volume)
     valid = (volume > 0.0) & (sum_l2 > 0.0)
     mean_ratio[valid] = 12.0 * np.power(3.0 * volume[valid], 2.0 / 3.0) / sum_l2[valid]
-    return {"determinant": det, "denominator": denom, "shortest_edge": shortest, "scaled_jacobian": scaled_jac, "mean_ratio": mean_ratio, "edge_aspect_ratio": aspect}
+    return {
+        "determinant": det,
+        "denominator": denom,
+        "shortest_edge": shortest,
+        "scaled_jacobian": scaled_jac,
+        "mean_ratio": mean_ratio,
+        "edge_aspect_ratio": aspect,
+    }
 
 
-def classify_tetra_metrics(metrics: dict[str, np.ndarray], policy: TetraQualityPolicy = DEFAULT_TETRA_QUALITY_POLICY) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def classify_tetra_metrics(
+    metrics: dict[str, np.ndarray],
+    policy: TetraQualityPolicy = DEFAULT_TETRA_QUALITY_POLICY,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     policy.validate()
     det, denom, shortest = metrics["determinant"], metrics["denominator"], metrics["shortest_edge"]
     sj, mr, aspect = metrics["scaled_jacobian"], metrics["mean_ratio"], metrics["edge_aspect_ratio"]
@@ -69,7 +79,55 @@ def classify_tetra_metrics(metrics: dict[str, np.ndarray], policy: TetraQualityP
     return status, inverted, degenerate
 
 
-def tetra_mesh_quality(nodes_mm: np.ndarray, elements: np.ndarray, *, policy: TetraQualityPolicy = DEFAULT_TETRA_QUALITY_POLICY) -> MeshQualityReport:
+def tetra_quality_severity(
+    metrics: dict[str, np.ndarray],
+    policy: TetraQualityPolicy = DEFAULT_TETRA_QUALITY_POLICY,
+) -> np.ndarray:
+    """Return a policy-derived diagnostic ranking without driving acceptance.
+
+    A value of zero means all warning thresholds are satisfied. Values at or above
+    one indicate at least one fail threshold is reached/exceeded. Inverted or
+    degenerate tetrahedra receive an explicit severity floor above one. The status
+    returned by ``classify_tetra_metrics`` remains the acceptance authority.
+    """
+    policy.validate()
+    sj = np.asarray(metrics["scaled_jacobian"], dtype=float)
+    mr = np.asarray(metrics["mean_ratio"], dtype=float)
+    aspect = np.asarray(metrics["edge_aspect_ratio"], dtype=float)
+    det = np.asarray(metrics["determinant"], dtype=float)
+    denom = np.asarray(metrics["denominator"], dtype=float)
+    shortest = np.asarray(metrics["shortest_edge"], dtype=float)
+
+    def low_bad(value: np.ndarray, warn: float, fail: float) -> np.ndarray:
+        span = warn - fail
+        if span <= 0.0:
+            raise ValueError("low-bad severity thresholds require warn > fail")
+        return np.maximum(0.0, (warn - value) / span)
+
+    def high_bad(value: np.ndarray, warn: float, fail: float) -> np.ndarray:
+        span = fail - warn
+        if span <= 0.0:
+            raise ValueError("high-bad severity thresholds require fail > warn")
+        return np.maximum(0.0, (value - warn) / span)
+
+    severity = np.maximum.reduce(
+        [
+            low_bad(sj, policy.warn_scaled_jacobian, policy.fail_scaled_jacobian),
+            low_bad(mr, policy.warn_mean_ratio, policy.fail_mean_ratio),
+            high_bad(aspect, policy.warn_edge_aspect_ratio, policy.fail_edge_aspect_ratio),
+        ]
+    )
+    invalid = (denom <= 0.0) | (shortest <= 0.0) | (np.abs(det) <= policy.determinant_epsilon) | (det < -policy.determinant_epsilon)
+    severity = np.where(invalid, np.maximum(severity, 2.0), severity)
+    return severity
+
+
+def tetra_mesh_quality(
+    nodes_mm: np.ndarray,
+    elements: np.ndarray,
+    *,
+    policy: TetraQualityPolicy = DEFAULT_TETRA_QUALITY_POLICY,
+) -> MeshQualityReport:
     """Evaluate auditable corner-geometry quality for TET4/TET10 meshes."""
     metrics = tetra_element_metrics(nodes_mm, elements)
     status_by_element, inverted, degenerate = classify_tetra_metrics(metrics, policy)
