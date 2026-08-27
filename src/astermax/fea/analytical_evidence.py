@@ -142,6 +142,13 @@ def combined_principal_bending_circular_torsion_witness(
     )
     sigma = axial + bending
     vm = von_mises_from_normal_and_shear_mpa(sigma, tau)
+    assumptions = (
+        "small_deformation_linear_elastic_mechanics",
+        "section_axes_are_principal",
+        "solid_circular_section_for_torsion",
+        "stress_point_uses_declared_local_section_coordinates",
+        "no_stress_concentration_or_notch_factor",
+    )
     payload = {
         "schema": "AsterMaxAnalyticalStressWitnessV1",
         "section_sha256": section.section_sha256,
@@ -158,17 +165,17 @@ def combined_principal_bending_circular_torsion_witness(
             "torque_nmm": float(torque_nmm),
             "circularity_relative_residual": circularity_residual,
         },
-        "assumptions": [
-            "small_deformation_linear_elastic_mechanics",
-            "section_axes_are_principal",
-            "solid_circular_section_for_torsion",
-            "stress_point_uses_declared_local_section_coordinates",
-            "no_stress_concentration_or_notch_factor",
-        ],
+        "assumptions": list(assumptions),
     }
     return AnalyticalStressWitness(
-        **payload,
-        assumptions=tuple(payload["assumptions"]),
+        schema=payload["schema"],
+        section_sha256=payload["section_sha256"],
+        method=payload["method"],
+        normal_stress_mpa=payload["normal_stress_mpa"],
+        shear_stress_mpa=payload["shear_stress_mpa"],
+        von_mises_mpa=payload["von_mises_mpa"],
+        inputs=payload["inputs"],
+        assumptions=assumptions,
         witness_sha256=canonical_sha256(payload),
     )
 
