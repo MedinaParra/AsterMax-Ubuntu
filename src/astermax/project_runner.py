@@ -21,6 +21,7 @@ from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
 from .mesh_inspector import write_mesh_inspector
 from .project import read_project, resolve_project_geometry
+from .results_workspace import write_results_workspace
 
 RESULT_CLASS = "ASTERMAX_PROJECT_UNCONVERGED_NOT_INDUSTRIAL_RESULT"
 
@@ -38,11 +39,6 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         {"SUPPORT": project.support, "LOAD": project.load_surface},
     )
 
-    # V1 is the cheap 15-point screen. V2 is the deterministic 286-point lattice.
-    # V3 is an adaptive recursive search validated against V2 on the declared
-    # 500-fixture adversarial harness. V2 and V3 are both fail-closed authorities:
-    # neither finite search is represented as a global positivity proof, and the
-    # production solver remains restricted to straight-sided TET10.
     sampled_jacobian = tet10_sampled_jacobian_report(mesh.nodes_mm, mesh.elements)
     reference_jacobian = tet10_reference_jacobian_report(mesh.nodes_mm, mesh.elements)
     adaptive_jacobian = tet10_adaptive_jacobian_report(mesh.nodes_mm, mesh.elements)
@@ -50,8 +46,6 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
     quality_policy = DEFAULT_TETRA_QUALITY_POLICY
     mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements, policy=quality_policy)
 
-    # Diagnostic evidence is emitted before fail-closed acceptance so rejected meshes
-    # remain inspectable. Geometry gates precede BC/load creation and sparse assembly.
     inspector = output / "astermax_mesh_inspector.html"
     inspector_manifest = write_mesh_inspector(
         inspector,
@@ -109,7 +103,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV9",
+        "schema": "AsterMaxProjectRunResultV10",
         "result_class": RESULT_CLASS,
         "project": str(project_file),
         "geometry": str(geometry),
@@ -197,6 +191,20 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
     }
     summary["artifacts"]["analysis_passport"] = str(passport_path)
     summary["artifacts"]["analysis_passport_sha256"] = passport_manifest["html_sha256"]
+
+    workspace_path = output / "astermax_results_evidence_workspace.html"
+    workspace_manifest = write_results_workspace(workspace_path, summary)
+    if workspace_manifest["claims"] != summary["claims"]:
+        raise RuntimeError("results workspace modified the project claim vector")
+    summary["results_evidence_workspace"] = {
+        "schema": workspace_manifest["schema"],
+        "highest_demonstrated_stage": workspace_manifest["highest_demonstrated_stage"],
+        "panels": workspace_manifest["panels"],
+        "workspace_contract": workspace_manifest["workspace_contract"],
+        "evidence_boundary": workspace_manifest["evidence_boundary"],
+    }
+    summary["artifacts"]["results_evidence_workspace"] = str(workspace_path)
+    summary["artifacts"]["results_evidence_workspace_sha256"] = workspace_manifest["html_sha256"]
 
     summary_path = output / "astermax_project_run.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
