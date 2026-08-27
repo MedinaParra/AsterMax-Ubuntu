@@ -1,3 +1,11 @@
+from .multiface_surface_contact import (
+    RigidTri6TargetFace,
+    SurfacePairingRecord,
+    Tet10MultifaceSurfaceContactResult,
+    Tri6SourceFace,
+    find_tri6_surface_pairs,
+    solve_tet10_multiface_surface_contact,
+)
 from .tet10_multipoint import (
     Tet10MultipointContactResult,
     solve_tet10_multipoint_unilateral_contact,
@@ -33,15 +41,21 @@ from .unilateral import (
 
 __all__ = [
     "ContactState",
+    "RigidTri6TargetFace",
+    "SurfacePairingRecord",
     "TRI6_GAUSS_BARYCENTRIC",
+    "Tet10MultifaceSurfaceContactResult",
     "Tet10MultipointContactResult",
     "Tet10SingleDofContactResult",
     "Tet10Tri6SurfacePressureContactResult",
     "Tri6PressureRecoveryResult",
     "Tri6PressureRecoveryStatus",
+    "Tri6SourceFace",
     "UnilateralSpringContactProblem",
     "UnilateralSpringContactResult",
+    "find_tri6_surface_pairs",
     "recover_consistent_tri6_pressure",
+    "solve_tet10_multiface_surface_contact",
     "solve_tet10_multipoint_unilateral_contact",
     "solve_tet10_single_dof_unilateral_contact",
     "solve_tet10_tri6_surface_pressure_contact",

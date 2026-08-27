@@ -20,6 +20,7 @@ on:
       - agent/windows-tet10-contact-patch-v1.10
       - agent/windows-tri6-pressure-provenance-v1.11
       - agent/windows-surface-pressure-contact-v1.12
+      - agent/windows-multiface-surface-search-v1.13
 
 jobs:
   verify-fea-core:
@@ -137,4 +138,13 @@ jobs:
         with:
           name: tri6-surface-pressure-contact-windows
           path: tri6_surface_pressure_contact
+          if-no-files-found: error
+      - name: Verify multiface TRI6 geometric surface search
+        run: python benchmarks/tet10_multiface_surface_search.py
+      - name: Upload multiface TRI6 geometric surface search evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiface-tri6-surface-search-windows
+          path: multiface_surface_search
           if-no-files-found: error
