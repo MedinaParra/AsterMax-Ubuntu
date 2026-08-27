@@ -58,11 +58,17 @@ def main() -> int:
     )
     project_file = write_project(root / "rotated_cantilever.astermax", project)
     result = run_project(project_file, root / "results")
+    quality = result["mesh_quality"]
 
     checks = {
         "persistent_selection_mode": result["selection_mode"] == "PERSISTENT_CAD_SURFACE_SIGNATURES",
         "named_support": result["scope_contract"]["constraint"] == "SUPPORT",
         "named_load": result["scope_contract"]["load"] == "LOAD",
+        "mesh_quality_not_fail": quality["status"] in {"PASS", "WARN"},
+        "mesh_quality_fail_closed": quality["fail_closed"] is True,
+        "mesh_quality_before_solve": quality["gate_order"] == "BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "mesh_quality_no_inverted": quality["inverted_elements"] == 0,
+        "mesh_quality_no_degenerate": quality["degenerate_elements"] == 0,
         "force_balance": result["checks"]["force_residual_n"] <= 1.0e-5,
         "moment_balance": result["checks"]["moment_residual_nmm"] <= 1.0e-3,
         "support_tri6_present": result["mesh"]["support_tri6"] > 0,
@@ -74,9 +80,7 @@ def main() -> int:
 
     tampered = root / "tampered.step"
     tampered.write_bytes(step.read_bytes() + b"\n# deliberate provenance tamper\n")
-    tampered_project = AsterMaxProject(
-        **{**project.__dict__, "geometry_step": "tampered.step"}
-    )
+    tampered_project = AsterMaxProject(**{**project.__dict__, "geometry_step": "tampered.step"})
     tampered_file = write_project(root / "tampered.astermax", tampered_project)
     tamper_blocked = False
     try:
@@ -86,12 +90,13 @@ def main() -> int:
     checks["geometry_tamper_blocked"] = tamper_blocked
 
     evidence = {
-        "schema": "AsterMaxProjectRoundtripGateV1",
+        "schema": "AsterMaxProjectRoundtripGateV2",
         "classification": "PROJECT_MODEL_PREPARATION_VERIFICATION_NOT_INDUSTRIAL_RESULT",
         "checks": checks,
         "passed": all(checks.values()),
         "project_file": str(project_file),
         "mesh": result["mesh"],
+        "mesh_quality": quality,
         "force_residual_n": result["checks"]["force_residual_n"],
         "moment_residual_nmm": result["checks"]["moment_residual_nmm"],
         "provenance": result["provenance"],
