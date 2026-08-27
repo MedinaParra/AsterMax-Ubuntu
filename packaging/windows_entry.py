@@ -61,6 +61,8 @@ def _self_test(root: Path) -> int:
     quality_policy = mesh_quality["policy"]
     passport = summary["analysis_passport"]
     evidence_vector = passport["evidence_vector"]
+    workspace = summary["results_evidence_workspace"]
+    workspace_contract = workspace["workspace_contract"]
     checks = {
         "finite_force_residual": math.isfinite(force_residual),
         "finite_moment_residual": math.isfinite(moment_residual),
@@ -119,6 +121,14 @@ def _self_test(root: Path) -> int:
         "analysis_passport_industrial_not_demonstrated": evidence_vector["industrial_validation"]["status"] == "NOT_DEMONSTRATED",
         "analysis_passport_ansys_not_claimed": evidence_vector["ansys_equivalence"]["status"] == "NOT_CLAIMED",
         "analysis_passport_no_trust_score": "NO_TRUST_SCORE" in passport["evidence_boundary"],
+        "results_workspace_exists": Path(summary["artifacts"]["results_evidence_workspace"]).is_file(),
+        "results_workspace_hash_present": len(summary["artifacts"]["results_evidence_workspace_sha256"]) == 64,
+        "results_workspace_schema": workspace["schema"] == "AsterMaxResultsEvidenceWorkspaceV1",
+        "results_workspace_stage_matches_passport": workspace["highest_demonstrated_stage"] == passport["highest_demonstrated_stage"],
+        "results_workspace_has_three_panels": set(workspace["panels"]) == {"results", "mesh", "evidence"},
+        "results_workspace_offline": workspace_contract["offline_only"] is True,
+        "results_workspace_hash_verifies_children": workspace_contract["child_hashes_verified_before_render"] is True,
+        "results_workspace_no_claim_upgrade": workspace_contract["workspace_does_not_upgrade_claims"] is True,
         "converged_claim_false": summary["claims"]["converged"] is False,
         "industrial_validation_false": summary["claims"]["industrial_validation"] is False,
         "ansys_equivalence_false": summary["claims"]["ansys_equivalence"] is False,
@@ -130,7 +140,7 @@ def _self_test(root: Path) -> int:
     }
     passed = all(checks.values())
     report = {
-        "schema": "AsterMaxWindowsExeSelfTestV7",
+        "schema": "AsterMaxWindowsExeSelfTestV8",
         "passed": passed,
         "checks": checks,
         "picker": picker,
@@ -141,6 +151,7 @@ def _self_test(root: Path) -> int:
         "tet10_geometry_scope": geometry_scope,
         "mesh_quality": mesh_quality,
         "analysis_passport": passport,
+        "results_evidence_workspace": workspace,
         "force_residual_n": force_residual,
         "moment_residual_nmm": moment_residual,
         "result_class": "ASTERMAX_PROJECT_UNCONVERGED_NOT_INDUSTRIAL_RESULT",
