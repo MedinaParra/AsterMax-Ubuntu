@@ -1,0 +1,35 @@
+name: Windows C3.1 Axial STEP Verification
+
+on:
+  push:
+    branches:
+      - agent/axial-step-neighborhood-c3-1-v0.8
+  pull_request:
+    branches:
+      - agent/neighborhood-verification-c3-v0.7
+  workflow_dispatch:
+
+jobs:
+  verify-c3-1:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV and test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile with warnings as errors
+        run: python -W error -m compileall -q src benchmarks packaging
+      - name: Run C3.1 decision harness
+        run: python -m pytest -q tests/test_axial_step_verification.py tests/test_neighborhood_verification.py
+      - name: Run STEP to sparse FEA axial refinement benchmark
+        run: python benchmarks/c3_1_axial_step_benchmark.py
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Upload C3.1 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: c3-1-axial-step-verification-windows
+          path: c3_1_axial_step_benchmark.json
+          if-no-files-found: error
