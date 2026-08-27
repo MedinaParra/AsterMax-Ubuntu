@@ -14,6 +14,7 @@ from .fea.selected_mesh import mesh_step_tet10_with_selections
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet10_geometry import require_tet10_geometry_scope, tet10_geometry_scope
 from .fea.tet10_jacobian import require_tet10_sampled_jacobian, tet10_sampled_jacobian_report
+from .fea.tet10_jacobian_reference import require_tet10_reference_jacobian, tet10_reference_jacobian_report
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
 from .mesh_inspector import write_mesh_inspector
@@ -35,18 +36,19 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         {"SUPPORT": project.support, "LOAD": project.load_surface},
     )
 
-    # The all-node isoparametric Jacobian is evaluated first. It is deliberately a
-    # sampled geometry diagnostic/gate and does not widen the current straight-sided
-    # TET10 solver scope. The stricter straight-sided scope gate remains authoritative
-    # for solver admission until curved integration is separately verified.
+    # V1 is the cheap declared 15-point screen. V2 is a denser deterministic
+    # barycentric-lattice reference scan added after an adversarial fixture proved
+    # that V1 alone can miss a local negative det(J). Neither finite sample set is
+    # presented as a mathematical proof of global positivity for arbitrary curved
+    # TET10 geometry, and the solver remains restricted to straight-sided TET10.
     sampled_jacobian = tet10_sampled_jacobian_report(mesh.nodes_mm, mesh.elements)
+    reference_jacobian = tet10_reference_jacobian_report(mesh.nodes_mm, mesh.elements)
     geometry_scope = tet10_geometry_scope(mesh.nodes_mm, mesh.elements)
     quality_policy = DEFAULT_TETRA_QUALITY_POLICY
     mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements, policy=quality_policy)
 
     # Diagnostic evidence is emitted before fail-closed acceptance so rejected meshes
-    # remain inspectable. Primary geometry gates precede BC/load creation and sparse
-    # assembly. Sampled-Jacobian PASS is necessary but not sufficient for curved solve.
+    # remain inspectable. Geometry gates precede BC/load creation and sparse assembly.
     inspector = output / "astermax_mesh_inspector.html"
     inspector_manifest = write_mesh_inspector(
         inspector,
@@ -55,6 +57,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         policy=quality_policy,
     )
     require_tet10_sampled_jacobian(sampled_jacobian)
+    require_tet10_reference_jacobian(reference_jacobian)
     require_tet10_geometry_scope(geometry_scope)
     require_mesh_quality(mesh_quality)
 
@@ -102,7 +105,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV6",
+        "schema": "AsterMaxProjectRunResultV7",
         "project": str(project_file),
         "geometry": str(geometry),
         "selection_mode": "PERSISTENT_CAD_SURFACE_SIGNATURES",
@@ -117,21 +120,29 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         },
         "tet10_sampled_jacobian": {
             **asdict(sampled_jacobian),
-            "gate_order": "BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "BEFORE_DENSE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "global_positivity_proof": False,
             "curved_tet10_solver_enabled": False,
         },
+        "tet10_reference_jacobian": {
+            **asdict(reference_jacobian),
+            "gate_order": "AFTER_V1_BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "fail_closed": True,
+            "global_positivity_proof": False,
+            "known_v1_false_negative_guard": True,
+            "curved_tet10_solver_enabled": False,
+        },
         "tet10_geometry_scope": {
             **asdict(geometry_scope),
-            "gate_order": "AFTER_SAMPLED_JACOBIAN_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "AFTER_V1_AND_DENSE_REFERENCE_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "curved_tet10_solver_enabled": False,
         },
         "mesh_quality": {
             **asdict(mesh_quality),
             "policy_scope": "STRAIGHT_SIDED_TET10_CORNER_GEOMETRY",
-            "gate_order": "INSPECTOR_THEN_PRIMARY_GATES_THEN_POLICY_CONSISTENCY_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "INSPECTOR_THEN_GEOMETRY_GATES_THEN_POLICY_CONSISTENCY_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "inspector_worst_element_index": inspector_manifest["worst_element_index"],
             "inspector_policy": inspector_policy,
