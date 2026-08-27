@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from math import pi, sqrt
+from math import hypot, pi, sqrt
 from typing import Any
 
 import numpy as np
@@ -82,19 +82,11 @@ def principal_bending_normal_stress_mpa(
     return -(mu * v / iu) + (mv * u / iv)
 
 
-def circular_torsion_max_shear_mpa(
-    torque_nmm: float,
+def _solid_circle_radius_and_residual(
     section: PlanarSectionProperties,
     *,
-    circularity_relative_tolerance: float = 1.0e-6,
+    circularity_relative_tolerance: float,
 ) -> tuple[float, float]:
-    """Saint-Venant torsion witness for a solid circular section only.
-
-    Radius is independently inferred from CAD area and the CAD polar second moment
-    must match pi*r^4/2 within the declared tolerance. Non-circular sections fail
-    closed rather than receiving a circular-shaft approximation.
-    """
-    torque = _finite("torque_nmm", torque_nmm)
     area = _positive("section.area_mm2", section.area_mm2)
     polar = _positive("section.polar_i_n_mm4", section.polar_i_n_mm4)
     tol = _positive("circularity_relative_tolerance", circularity_relative_tolerance)
@@ -103,7 +95,46 @@ def circular_torsion_max_shear_mpa(
     residual = abs(polar - expected_polar) / max(abs(polar), abs(expected_polar), 1.0e-30)
     if residual > tol:
         raise AnalyticalEvidenceError(f"CIRCULAR_TORSION_OUT_OF_DOMAIN:{residual:.17g}")
-    return torque * radius / polar, residual
+    return radius, residual
+
+
+def circular_torsion_shear_at_radius_mpa(
+    torque_nmm: float,
+    section: PlanarSectionProperties,
+    radial_position_mm: float,
+    *,
+    circularity_relative_tolerance: float = 1.0e-6,
+) -> tuple[float, float]:
+    """Saint-Venant torsion shear at radius rho for a solid circular section only."""
+    torque = _finite("torque_nmm", torque_nmm)
+    rho = _finite("radial_position_mm", radial_position_mm)
+    if rho < 0.0:
+        raise AnalyticalEvidenceError("radial_position_mm must be nonnegative")
+    radius, residual = _solid_circle_radius_and_residual(
+        section,
+        circularity_relative_tolerance=circularity_relative_tolerance,
+    )
+    if rho > radius * (1.0 + 1.0e-12):
+        raise AnalyticalEvidenceError("TORSION_STRESS_POINT_OUTSIDE_SECTION")
+    return torque * min(rho, radius) / section.polar_i_n_mm4, residual
+
+
+def circular_torsion_max_shear_mpa(
+    torque_nmm: float,
+    section: PlanarSectionProperties,
+    *,
+    circularity_relative_tolerance: float = 1.0e-6,
+) -> tuple[float, float]:
+    radius, _ = _solid_circle_radius_and_residual(
+        section,
+        circularity_relative_tolerance=circularity_relative_tolerance,
+    )
+    return circular_torsion_shear_at_radius_mpa(
+        torque_nmm,
+        section,
+        radius,
+        circularity_relative_tolerance=circularity_relative_tolerance,
+    )
 
 
 def von_mises_from_normal_and_shear_mpa(normal_stress_mpa: float, shear_stress_mpa: float) -> float:
@@ -124,20 +155,24 @@ def combined_principal_bending_circular_torsion_witness(
     principal_axis_relative_tolerance: float = 1.0e-10,
     circularity_relative_tolerance: float = 1.0e-6,
 ) -> AnalyticalStressWitness:
+    u = _finite("u_mm", u_mm)
+    v = _finite("v_mm", v_mm)
     axial = axial_normal_stress_mpa(axial_force_n, section.area_mm2)
     bending = principal_bending_normal_stress_mpa(
         moment_u_nmm=moment_u_nmm,
         moment_v_nmm=moment_v_nmm,
-        u_mm=u_mm,
-        v_mm=v_mm,
+        u_mm=u,
+        v_mm=v,
         i_u_mm4=section.i_u_mm4,
         i_v_mm4=section.i_v_mm4,
         i_uv_mm4=section.i_uv_mm4,
         principal_axis_relative_tolerance=principal_axis_relative_tolerance,
     )
-    tau, circularity_residual = circular_torsion_max_shear_mpa(
+    rho = hypot(u, v)
+    tau, circularity_residual = circular_torsion_shear_at_radius_mpa(
         torque_nmm,
         section,
+        rho,
         circularity_relative_tolerance=circularity_relative_tolerance,
     )
     sigma = axial + bending
@@ -160,8 +195,9 @@ def combined_principal_bending_circular_torsion_witness(
             "axial_force_n": float(axial_force_n),
             "moment_u_nmm": float(moment_u_nmm),
             "moment_v_nmm": float(moment_v_nmm),
-            "u_mm": float(u_mm),
-            "v_mm": float(v_mm),
+            "u_mm": u,
+            "v_mm": v,
+            "radial_position_mm": rho,
             "torque_nmm": float(torque_nmm),
             "circularity_relative_residual": circularity_residual,
         },
