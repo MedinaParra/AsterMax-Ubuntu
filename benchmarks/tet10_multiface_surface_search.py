@@ -69,14 +69,20 @@ def combined_operator(nodes, sources):
     rows = []
     weights = []
     for source in sources:
-        operator, face_weights, _ = tri6_surface_operator(
+        operator, _, face_weights = tri6_surface_operator(
             nodes_mm=nodes,
             face_nodes=source.node_indices,
             contact_normal=source.contact_normal,
         )
         rows.extend(operator)
         weights.extend(face_weights.tolist())
-    return np.asarray(rows, dtype=float), np.asarray(weights, dtype=float)
+    operator = np.asarray(rows, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    if operator.ndim != 2 or weights.ndim != 1 or weights.size != operator.shape[0]:
+        raise ValueError(
+            "GAP-H independent reference requires one scalar quadrature weight per integration point"
+        )
+    return operator, weights
 
 
 def independent_pressure_influence(nodes, elements, fixed, operator, weights):
