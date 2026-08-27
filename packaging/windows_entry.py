@@ -5,8 +5,10 @@ import math
 from pathlib import Path
 import sys
 
-from astermax.app import run_step_analysis
 from astermax.desktop import main as desktop_main
+from astermax.face_picker import build_project_from_face_fingerprints, write_face_picker_html
+from astermax.fea.selections import inspect_step_surfaces
+from astermax.project_runner import run_project
 
 
 def _write_fixture_step(path: Path) -> None:
@@ -28,16 +30,26 @@ def _write_fixture_step(path: Path) -> None:
 def _self_test(root: Path) -> int:
     root.mkdir(parents=True, exist_ok=True)
     step = root / "exe_self_test.step"
+    picker_html = root / "exe_face_picker.html"
+    project_file = root / "exe_self_test.astermax"
     results = root / "results"
     _write_fixture_step(step)
-    summary = run_step_analysis(
+
+    picker = write_face_picker_html(step, picker_html, display_mesh_size_mm=20.0)
+    surfaces = inspect_step_surfaces(step)
+    end_faces = [sig for _, sig in surfaces if abs(sig.area_mm2 - 200.0) <= 1.0e-6]
+    if len(end_faces) != 2:
+        raise RuntimeError(f"EXE self-test expected two 200 mm2 end faces, found {len(end_faces)}")
+    end_faces.sort(key=lambda sig: sig.centroid_mm)
+    build_project_from_face_fingerprints(
         step,
-        results,
+        project_file,
+        end_faces[0].fingerprint_sha256,
+        end_faces[1].fingerprint_sha256,
         mesh_size_mm=20.0,
-        young_modulus_mpa=200000.0,
-        poisson_ratio=0.30,
         resultant_n=(0.0, -1000.0, 0.0),
     )
+    summary = run_project(project_file, results)
 
     force_residual = float(summary["checks"]["force_residual_n"])
     moment_residual = float(summary["checks"]["moment_residual_nmm"])
@@ -46,6 +58,14 @@ def _self_test(root: Path) -> int:
         "finite_moment_residual": math.isfinite(moment_residual),
         "force_balance": force_residual <= 1.0e-5,
         "moment_balance": moment_residual <= 1.0e-3,
+        "picker_html_exists": picker_html.is_file(),
+        "picker_faces_exposed": int(picker["faces"]) == 6,
+        "project_exists": project_file.is_file(),
+        "persistent_selection_mode": summary["selection_mode"] == "PERSISTENT_CAD_SURFACE_SIGNATURES",
+        "named_support": summary["scope_contract"]["constraint"] == "SUPPORT",
+        "named_load": summary["scope_contract"]["load"] == "LOAD",
+        "support_tri6_present": summary["mesh"]["support_tri6"] > 0,
+        "load_tri6_present": summary["mesh"]["load_tri6"] > 0,
         "converged_claim_false": summary["claims"]["converged"] is False,
         "industrial_validation_false": summary["claims"]["industrial_validation"] is False,
         "ansys_equivalence_false": summary["claims"]["ansys_equivalence"] is False,
@@ -55,13 +75,14 @@ def _self_test(root: Path) -> int:
     }
     passed = all(checks.values())
     report = {
-        "schema": "AsterMaxWindowsExeSelfTestV1",
+        "schema": "AsterMaxWindowsExeSelfTestV2",
         "passed": passed,
         "checks": checks,
+        "picker": picker,
         "mesh": summary["mesh"],
         "force_residual_n": force_residual,
         "moment_residual_nmm": moment_residual,
-        "result_class": summary["result_class"],
+        "result_class": "ASTERMAX_PROJECT_UNCONVERGED_NOT_INDUSTRIAL_RESULT",
         "desktop_entry": "PROJECT_CENTRIC_CAD_FACE_PICKER",
     }
     (root / "exe_self_test.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
