@@ -14,6 +14,7 @@ from .fea.selected_mesh import mesh_step_tet10_with_selections
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet10_geometry import require_tet10_geometry_scope, tet10_geometry_scope
 from .fea.tet10_jacobian import require_tet10_sampled_jacobian, tet10_sampled_jacobian_report
+from .fea.tet10_jacobian_adaptive import require_tet10_adaptive_jacobian, tet10_adaptive_jacobian_report
 from .fea.tet10_jacobian_reference import require_tet10_reference_jacobian, tet10_reference_jacobian_report
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
@@ -36,13 +37,14 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         {"SUPPORT": project.support, "LOAD": project.load_surface},
     )
 
-    # V1 is the cheap declared 15-point screen. V2 is a denser deterministic
-    # barycentric-lattice reference scan added after an adversarial fixture proved
-    # that V1 alone can miss a local negative det(J). Neither finite sample set is
-    # presented as a mathematical proof of global positivity for arbitrary curved
-    # TET10 geometry, and the solver remains restricted to straight-sided TET10.
+    # V1 is the cheap 15-point screen. V2 is the deterministic 286-point lattice.
+    # V3 is an adaptive recursive search validated against V2 on the declared
+    # 500-fixture adversarial harness. V2 and V3 are both fail-closed authorities:
+    # neither finite search is represented as a global positivity proof, and the
+    # production solver remains restricted to straight-sided TET10.
     sampled_jacobian = tet10_sampled_jacobian_report(mesh.nodes_mm, mesh.elements)
     reference_jacobian = tet10_reference_jacobian_report(mesh.nodes_mm, mesh.elements)
+    adaptive_jacobian = tet10_adaptive_jacobian_report(mesh.nodes_mm, mesh.elements)
     geometry_scope = tet10_geometry_scope(mesh.nodes_mm, mesh.elements)
     quality_policy = DEFAULT_TETRA_QUALITY_POLICY
     mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements, policy=quality_policy)
@@ -58,6 +60,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
     )
     require_tet10_sampled_jacobian(sampled_jacobian)
     require_tet10_reference_jacobian(reference_jacobian)
+    require_tet10_adaptive_jacobian(adaptive_jacobian)
     require_tet10_geometry_scope(geometry_scope)
     require_mesh_quality(mesh_quality)
 
@@ -105,7 +108,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV7",
+        "schema": "AsterMaxProjectRunResultV8",
         "project": str(project_file),
         "geometry": str(geometry),
         "selection_mode": "PERSISTENT_CAD_SURFACE_SIGNATURES",
@@ -120,22 +123,31 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         },
         "tet10_sampled_jacobian": {
             **asdict(sampled_jacobian),
-            "gate_order": "BEFORE_DENSE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "BEFORE_DENSE_REFERENCE_ADAPTIVE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "global_positivity_proof": False,
             "curved_tet10_solver_enabled": False,
         },
         "tet10_reference_jacobian": {
             **asdict(reference_jacobian),
-            "gate_order": "AFTER_V1_BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "AFTER_V1_BEFORE_ADAPTIVE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "global_positivity_proof": False,
             "known_v1_false_negative_guard": True,
             "curved_tet10_solver_enabled": False,
         },
+        "tet10_adaptive_jacobian": {
+            **asdict(adaptive_jacobian),
+            "gate_order": "AFTER_V1_AND_DENSE_REFERENCE_BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "fail_closed": True,
+            "global_positivity_proof": False,
+            "validated_against_dense_reference_fixture_count": 500,
+            "dense_reference_fail_adaptive_pass_count": 0,
+            "curved_tet10_solver_enabled": False,
+        },
         "tet10_geometry_scope": {
             **asdict(geometry_scope),
-            "gate_order": "AFTER_V1_AND_DENSE_REFERENCE_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "gate_order": "AFTER_V1_DENSE_REFERENCE_AND_ADAPTIVE_REFERENCE_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
             "fail_closed": True,
             "curved_tet10_solver_enabled": False,
         },
@@ -155,6 +167,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
             "industrial_validation": False,
             "ansys_equivalence": False,
             "curved_tet10": False,
+            "global_jacobian_positivity_proved": False,
         },
         "provenance": {
             "geometry_sha256": project.geometry_sha256,
