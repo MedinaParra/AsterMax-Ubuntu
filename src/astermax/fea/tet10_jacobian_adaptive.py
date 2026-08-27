@@ -11,14 +11,20 @@ from .tet10_jacobian import tet10_jacobian_matrix
 class Tet10JacobianAdaptivePolicy:
     max_depth: int = 5
     determinant_epsilon: float = 1.0e-12
-    schema: str = "TET10_ADAPTIVE_BARYCENTRIC_CERTIFICATION_V1"
+    minimum_baseline_depth: int = 2
+    relative_variation_refine: float = 0.02
+    schema: str = "TET10_ADAPTIVE_BARYCENTRIC_CERTIFICATION_V2"
 
     def validate(self) -> None:
         if not isinstance(self.max_depth, int) or self.max_depth < 1:
             raise ValueError("max_depth must be an integer >= 1")
+        if not isinstance(self.minimum_baseline_depth, int) or not (0 <= self.minimum_baseline_depth <= self.max_depth):
+            raise ValueError("minimum_baseline_depth must be in [0, max_depth]")
         if not np.isfinite(self.determinant_epsilon) or self.determinant_epsilon <= 0.0:
             raise ValueError("determinant_epsilon must be finite and positive")
-        if self.schema != "TET10_ADAPTIVE_BARYCENTRIC_CERTIFICATION_V1":
+        if not np.isfinite(self.relative_variation_refine) or not (0.0 < self.relative_variation_refine < 1.0):
+            raise ValueError("relative_variation_refine must be finite and in (0, 1)")
+        if self.schema != "TET10_ADAPTIVE_BARYCENTRIC_CERTIFICATION_V2":
             raise ValueError("unsupported adaptive TET10 Jacobian schema")
 
 
@@ -80,11 +86,15 @@ def tet10_adaptive_jacobian_report(
     *,
     policy: Tet10JacobianAdaptivePolicy = DEFAULT_TET10_JACOBIAN_ADAPTIVE_POLICY,
 ) -> Tet10JacobianAdaptiveReport:
-    """Run a deterministic adaptive search for local TET10 Jacobian inversion.
+    """Run a deterministic, variation-aware adaptive search for TET10 inversion.
 
-    This strengthens the fixed lattice by recursively sampling suspicious regions.
-    It remains a finite search and is therefore not a mathematical proof of global
-    positivity for an arbitrary curved TET10.
+    Every simplex is refined through a declared baseline depth. Beyond that depth,
+    work is spent only where the sampled determinant varies enough to justify
+    additional search and the cell contains the current positive worst case. This
+    avoids exhaustively refining affine/straight-sided TET10 while preserving a
+    fail-closed search around curved determinant valleys.
+
+    This remains finite sampling, not a mathematical proof of global positivity.
     """
     policy.validate()
     nodes = np.asarray(nodes_mm, dtype=float)
@@ -132,20 +142,27 @@ def tet10_adaptive_jacobian_report(
                 values.append(cache[key])
 
             local_min = min(values)
+            local_max = max(values)
             if local_min <= policy.determinant_epsilon or depth >= policy.max_depth:
                 continue
 
-            # Always establish a two-level baseline, then spend work only in cells
-            # whose local minimum is close to the current positive worst case.
-            positive_floor = max(policy.determinant_epsilon, minimum)
-            if depth < 2 or local_min <= 2.0 * positive_floor:
+            if depth < policy.minimum_baseline_depth:
+                stack.extend((child, depth + 1) for child in _tetra_children(simplex))
+                continue
+
+            scale = max(abs(local_min), abs(local_max), policy.determinant_epsilon)
+            relative_variation = (local_max - local_min) / scale
+            current_floor = max(policy.determinant_epsilon, minimum)
+            local_span = max(local_max - local_min, policy.determinant_epsilon)
+            contains_worst_valley = local_min <= current_floor + local_span
+            if relative_variation >= policy.relative_variation_refine and contains_worst_valley:
                 stack.extend((child, depth + 1) for child in _tetra_children(simplex))
 
     if elems.shape[0] == 0:
         minimum = float("nan")
     status = "PASS" if nonpositive == 0 else "FAIL"
     return Tet10JacobianAdaptiveReport(
-        schema="AsterMaxTet10JacobianAdaptiveReportV1",
+        schema="AsterMaxTet10JacobianAdaptiveReportV2",
         status=status,
         element_count=int(elems.shape[0]),
         evaluated_points=int(evaluated),
@@ -156,7 +173,7 @@ def tet10_adaptive_jacobian_report(
         maximum_depth_reached=int(max_depth_reached),
         policy=asdict(policy),
         evidence_boundary=(
-            "ADAPTIVE_BARYCENTRIC_SEARCH_NOT_GLOBAL_POSITIVITY_PROOF_"
+            "VARIATION_AWARE_ADAPTIVE_SEARCH_NOT_GLOBAL_POSITIVITY_PROOF_"
             "AND_DOES_NOT_ENABLE_CURVED_TET10_SOLVER"
         ),
     )

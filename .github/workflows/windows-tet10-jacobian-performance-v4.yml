@@ -1,0 +1,35 @@
+name: Windows TET10 Jacobian Performance V4
+
+on:
+  push:
+    branches:
+      - agent/tet10-jacobian-dual-preflight-v4
+  pull_request:
+    branches:
+      - agent/tet10-jacobian-certification-v3
+  workflow_dispatch:
+
+jobs:
+  verify-adaptive-performance:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV and test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile with warnings as errors
+        run: python -W error -m compileall -q src packaging benchmarks
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Compare optimized adaptive V3 against dense V2
+        run: python benchmarks/tet10_jacobian_certification_v3.py
+      - name: Enforce no declared V2 misses
+        run: python -c "import json; d=json.load(open('tet10_jacobian_certification_v3.json')); assert d['v2_fail_v3_pass_count']==0, d; print('V2 misses:', d['v2_fail_v3_pass_count']); print('mean points:', d['v3_evaluated_points_mean']); print('max points:', d['v3_evaluated_points_max'])"
+      - name: Upload performance evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet10-jacobian-performance-v4-windows
+          path: tet10_jacobian_certification_v3.json
+          if-no-files-found: error
