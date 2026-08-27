@@ -53,6 +53,9 @@ def _self_test(root: Path) -> int:
 
     force_residual = float(summary["checks"]["force_residual_n"])
     moment_residual = float(summary["checks"]["moment_residual_nmm"])
+    geometry_scope = summary["tet10_geometry_scope"]
+    mesh_quality = summary["mesh_quality"]
+    inspector_policy = mesh_quality["policy"]
     checks = {
         "finite_force_residual": math.isfinite(force_residual),
         "finite_moment_residual": math.isfinite(moment_residual),
@@ -66,6 +69,13 @@ def _self_test(root: Path) -> int:
         "named_load": summary["scope_contract"]["load"] == "LOAD",
         "support_tri6_present": summary["mesh"]["support_tri6"] > 0,
         "load_tri6_present": summary["mesh"]["load_tri6"] > 0,
+        "tet10_geometry_scope_pass": geometry_scope["status"] == "PASS",
+        "tet10_geometry_scope_zero_outside": geometry_scope["non_straight_sided_elements"] == 0,
+        "tet10_geometry_scope_preassembly": geometry_scope["gate_order"] == "BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "curved_tet10_disabled": geometry_scope["curved_tet10_solver_enabled"] is False,
+        "mesh_quality_not_fail": mesh_quality["status"] != "FAIL",
+        "mesh_quality_policy_serialized": isinstance(inspector_policy, dict) and len(inspector_policy) >= 7,
+        "mesh_inspector_exists": Path(summary["artifacts"]["mesh_inspector"]).is_file(),
         "converged_claim_false": summary["claims"]["converged"] is False,
         "industrial_validation_false": summary["claims"]["industrial_validation"] is False,
         "ansys_equivalence_false": summary["claims"]["ansys_equivalence"] is False,
@@ -75,11 +85,13 @@ def _self_test(root: Path) -> int:
     }
     passed = all(checks.values())
     report = {
-        "schema": "AsterMaxWindowsExeSelfTestV2",
+        "schema": "AsterMaxWindowsExeSelfTestV3",
         "passed": passed,
         "checks": checks,
         "picker": picker,
         "mesh": summary["mesh"],
+        "tet10_geometry_scope": geometry_scope,
+        "mesh_quality": mesh_quality,
         "force_residual_n": force_residual,
         "moment_residual_nmm": moment_residual,
         "result_class": "ASTERMAX_PROJECT_UNCONVERGED_NOT_INDUSTRIAL_RESULT",
