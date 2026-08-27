@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+import astermax.project_runner as runner
+from astermax.fea.mesh_quality import MeshQualityError, MeshQualityReport
+
+
+def test_project_runner_blocks_before_solver_when_mesh_quality_fails(monkeypatch, tmp_path):
+    project = SimpleNamespace(
+        mesh_size_mm=10.0,
+        support=object(),
+        load_surface=object(),
+        resultant_n=(0.0, -1000.0, 0.0),
+        young_modulus_mpa=200000.0,
+        poisson_ratio=0.3,
+        geometry_sha256="g",
+    )
+    bad_mesh = SimpleNamespace(
+        nodes_mm=np.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]],
+            dtype=float,
+        ),
+        elements=np.array([[0, 1, 2, 3]], dtype=np.int64),
+        surface_triangles={"SUPPORT": np.array([[0, 1, 2]]), "LOAD": np.array([[0, 1, 2]])},
+    )
+    failed_report = MeshQualityReport(
+        element_count=1,
+        min_scaled_jacobian=-1.0,
+        min_mean_ratio=0.0,
+        max_edge_aspect_ratio=1.41421356237,
+        inverted_elements=1,
+        degenerate_elements=0,
+        warn_elements=0,
+        fail_elements=1,
+        status="FAIL",
+    )
+
+    monkeypatch.setattr(runner, "read_project", lambda path: project)
+    monkeypatch.setattr(runner, "resolve_project_geometry", lambda project_file, p: tmp_path / "fixture.step")
+    monkeypatch.setattr(runner, "mesh_step_tet10_with_selections", lambda *args, **kwargs: bad_mesh)
+    monkeypatch.setattr(runner, "tetra_mesh_quality", lambda *args, **kwargs: failed_report)
+
+    solver_called = False
+
+    def forbidden_solver(*args, **kwargs):
+        nonlocal solver_called
+        solver_called = True
+        raise AssertionError("solver must not be reached after mesh-quality FAIL")
+
+    monkeypatch.setattr(runner, "solve_linear_static_tet10", forbidden_solver)
+
+    with pytest.raises(MeshQualityError, match="mesh quality gate failed"):
+        runner.run_project(tmp_path / "model.astermax", tmp_path / "results")
+
+    assert solver_called is False
