@@ -79,6 +79,51 @@ def test_evidence_graph_fingerprint_is_stable_across_insertion_order():
     assert g1.fingerprint_sha256 == g2.fingerprint_sha256
 
 
+def test_evidence_metadata_is_a_deep_immutable_snapshot():
+    caller_owned = {
+        "source": {"revision": 1, "document": "LOAD_CASE_A"},
+        "tags": ["controlled", "reviewed"],
+    }
+    record = EvidenceRecord(
+        evidence_id="EV_SNAPSHOT",
+        kind="LOAD_PROVENANCE",
+        status=EvidenceStatus.VERIFIED,
+        source=EvidenceSource.DOCUMENT,
+        description="Controlled load definition.",
+        metadata=caller_owned,
+    )
+    graph = EvidenceGraph(_context())
+    graph.add(record)
+    fingerprint_before = graph.fingerprint_sha256
+
+    caller_owned["source"]["revision"] = 99
+    caller_owned["tags"].append("mutated-after-construction")
+
+    assert record.canonical()["metadata"] == {
+        "source": {"document": "LOAD_CASE_A", "revision": 1},
+        "tags": ["controlled", "reviewed"],
+    }
+    assert graph.fingerprint_sha256 == fingerprint_before
+    with pytest.raises(TypeError):
+        record.metadata["new"] = "not allowed"
+    with pytest.raises(TypeError):
+        record.metadata["source"]["revision"] = 2
+
+
+def test_evidence_graph_rejects_provenance_cycles():
+    graph = EvidenceGraph(_context())
+    graph.add(_verified("EV_A", "CAD_PROVENANCE", EvidenceSource.DOCUMENT))
+    graph.add(_verified("EV_B", "LOAD_PROVENANCE", EvidenceSource.DOCUMENT))
+    graph.add(_verified("EV_C", "SOLUTION_VERIFICATION"))
+
+    graph.link("EV_A", "EV_B")
+    graph.link("EV_B", "EV_C")
+    with pytest.raises(ValueError, match="acyclic"):
+        graph.link("EV_C", "EV_A")
+
+    assert len(graph.edges) == 2
+
+
 def test_ai_proposal_cannot_promote_itself_to_verified_evidence():
     with pytest.raises(ValueError, match="AI_PROPOSAL cannot create VERIFIED evidence"):
         EvidenceRecord(
