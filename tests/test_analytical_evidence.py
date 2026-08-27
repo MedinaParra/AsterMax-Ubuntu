@@ -10,6 +10,7 @@ from astermax.fea.analytical_evidence import (
     analytical_stress_evidence,
     axial_normal_stress_mpa,
     circular_torsion_max_shear_mpa,
+    circular_torsion_shear_at_radius_mpa,
     combined_principal_bending_circular_torsion_witness,
     principal_bending_normal_stress_mpa,
     von_mises_from_normal_and_shear_mpa,
@@ -47,13 +48,10 @@ def _circle(radius_mm: float = 10.0) -> PlanarSectionProperties:
 
 
 def test_axial_stress_uses_n_mm_mpa_contract() -> None:
-    # 10 kN on 200 mm^2 = 50 N/mm^2 = 50 MPa.
     assert axial_normal_stress_mpa(10_000.0, 200.0) == pytest.approx(50.0)
 
 
 def test_principal_bending_matches_rectangle_closed_form() -> None:
-    # Rectangle b=20 mm, h=10 mm: Iu=b*h^3/12=1666.666... mm^4.
-    # At v=+5 mm and Mu=100 N*m=100000 N*mm, |sigma|=M*c/I=300 MPa.
     sigma = principal_bending_normal_stress_mpa(
         moment_u_nmm=100_000.0,
         moment_v_nmm=0.0,
@@ -86,6 +84,21 @@ def test_solid_circle_torsion_matches_closed_form() -> None:
     expected = 2.0 * torque / (pi * 10.0**3)
     assert residual < 1.0e-14
     assert tau == pytest.approx(expected, rel=1.0e-13)
+
+
+def test_circular_torsion_is_pointwise_not_always_maximum() -> None:
+    section = _circle(10.0)
+    torque = 100_000.0
+    tau_center, _ = circular_torsion_shear_at_radius_mpa(torque, section, 0.0)
+    tau_half, _ = circular_torsion_shear_at_radius_mpa(torque, section, 5.0)
+    tau_max, _ = circular_torsion_max_shear_mpa(torque, section)
+    assert tau_center == pytest.approx(0.0)
+    assert tau_half == pytest.approx(0.5 * tau_max)
+
+
+def test_torsion_rejects_point_outside_circle() -> None:
+    with pytest.raises(AnalyticalEvidenceError, match="POINT_OUTSIDE_SECTION"):
+        circular_torsion_shear_at_radius_mpa(10.0, _circle(10.0), 10.1)
 
 
 def test_rectangular_section_is_rejected_by_circular_torsion_witness() -> None:
@@ -130,6 +143,7 @@ def test_combined_witness_is_deterministic_and_claim_grade() -> None:
     assert first.normal_stress_mpa == pytest.approx(expected_axial + expected_bending)
     assert first.shear_stress_mpa == pytest.approx(expected_tau)
     assert first.von_mises_mpa == pytest.approx(expected_vm)
+    assert first.inputs["radial_position_mm"] == pytest.approx(10.0)
 
     evidence = analytical_stress_evidence(first)
     assert evidence.status is EvidenceStatus.VERIFIED
