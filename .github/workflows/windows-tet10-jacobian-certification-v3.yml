@@ -1,0 +1,33 @@
+name: Windows TET10 Jacobian Certification V3
+
+on:
+  push:
+    branches:
+      - agent/tet10-jacobian-certification-v3
+  pull_request:
+    branches:
+      - agent/tet10-jacobian-certification-v2
+  workflow_dispatch:
+
+jobs:
+  certify-jacobian-v3:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV and test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile with warnings as errors
+        run: python -W error -m compileall -q src packaging benchmarks
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Run adaptive-vs-dense TET10 Jacobian benchmark
+        run: python benchmarks/tet10_jacobian_certification_v3.py
+      - name: Upload certification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet10-jacobian-certification-v3-windows
+          path: tet10_jacobian_certification_v3.json
+          if-no-files-found: error
