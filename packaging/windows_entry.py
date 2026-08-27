@@ -55,6 +55,7 @@ def _self_test(root: Path) -> int:
     moment_residual = float(summary["checks"]["moment_residual_nmm"])
     sampled_jacobian = summary["tet10_sampled_jacobian"]
     reference_jacobian = summary["tet10_reference_jacobian"]
+    adaptive_jacobian = summary["tet10_adaptive_jacobian"]
     geometry_scope = summary["tet10_geometry_scope"]
     mesh_quality = summary["mesh_quality"]
     quality_policy = mesh_quality["policy"]
@@ -74,18 +75,26 @@ def _self_test(root: Path) -> int:
         "tet10_sampled_jacobian_pass": sampled_jacobian["status"] == "PASS",
         "tet10_sampled_jacobian_zero_nonpositive": sampled_jacobian["nonpositive_sample_count"] == 0,
         "tet10_sampled_jacobian_all_nodes": sampled_jacobian["sample_count_per_element"] == 15,
-        "tet10_sampled_jacobian_pre_reference": sampled_jacobian["gate_order"] == "BEFORE_DENSE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "tet10_sampled_jacobian_pre_reference": sampled_jacobian["gate_order"] == "BEFORE_DENSE_REFERENCE_ADAPTIVE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
         "tet10_sampled_jacobian_not_global_proof": sampled_jacobian["global_positivity_proof"] is False,
         "tet10_reference_jacobian_pass": reference_jacobian["status"] == "PASS",
         "tet10_reference_jacobian_zero_nonpositive": reference_jacobian["nonpositive_sample_count"] == 0,
         "tet10_reference_jacobian_dense": reference_jacobian["sample_count_per_element"] == 286,
-        "tet10_reference_jacobian_pre_scope": reference_jacobian["gate_order"] == "AFTER_V1_BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "tet10_reference_jacobian_pre_adaptive": reference_jacobian["gate_order"] == "AFTER_V1_BEFORE_ADAPTIVE_REFERENCE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
         "tet10_reference_jacobian_not_global_proof": reference_jacobian["global_positivity_proof"] is False,
         "tet10_reference_known_v1_guard": reference_jacobian["known_v1_false_negative_guard"] is True,
         "tet10_reference_curved_solver_disabled": reference_jacobian["curved_tet10_solver_enabled"] is False,
+        "tet10_adaptive_jacobian_pass": adaptive_jacobian["status"] == "PASS",
+        "tet10_adaptive_jacobian_zero_nonpositive": adaptive_jacobian["nonpositive_sample_count"] == 0,
+        "tet10_adaptive_jacobian_points_evaluated": adaptive_jacobian["evaluated_points"] > 0,
+        "tet10_adaptive_jacobian_pre_scope": adaptive_jacobian["gate_order"] == "AFTER_V1_AND_DENSE_REFERENCE_BEFORE_STRAIGHT_SIDED_SCOPE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "tet10_adaptive_jacobian_not_global_proof": adaptive_jacobian["global_positivity_proof"] is False,
+        "tet10_adaptive_validated_fixture_count": adaptive_jacobian["validated_against_dense_reference_fixture_count"] == 500,
+        "tet10_adaptive_no_declared_v2_misses": adaptive_jacobian["dense_reference_fail_adaptive_pass_count"] == 0,
+        "tet10_adaptive_curved_solver_disabled": adaptive_jacobian["curved_tet10_solver_enabled"] is False,
         "tet10_geometry_scope_pass": geometry_scope["status"] == "PASS",
         "tet10_geometry_scope_zero_outside": geometry_scope["non_straight_sided_elements"] == 0,
-        "tet10_geometry_scope_preassembly": geometry_scope["gate_order"] == "AFTER_V1_AND_DENSE_REFERENCE_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+        "tet10_geometry_scope_preassembly": geometry_scope["gate_order"] == "AFTER_V1_DENSE_REFERENCE_AND_ADAPTIVE_REFERENCE_BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
         "curved_tet10_disabled": geometry_scope["curved_tet10_solver_enabled"] is False,
         "mesh_quality_not_fail": mesh_quality["status"] != "FAIL",
         "mesh_quality_policy_serialized": isinstance(quality_policy, dict) and len(quality_policy) >= 7,
@@ -97,19 +106,21 @@ def _self_test(root: Path) -> int:
         "industrial_validation_false": summary["claims"]["industrial_validation"] is False,
         "ansys_equivalence_false": summary["claims"]["ansys_equivalence"] is False,
         "curved_tet10_claim_false": summary["claims"]["curved_tet10"] is False,
+        "global_jacobian_proof_claim_false": summary["claims"]["global_jacobian_positivity_proved"] is False,
         "viewer_exists": Path(summary["artifacts"]["viewer"]).is_file(),
         "vtu_exists": Path(summary["artifacts"]["vtu"]).is_file(),
         "summary_exists": Path(summary["artifacts"]["summary"]).is_file(),
     }
     passed = all(checks.values())
     report = {
-        "schema": "AsterMaxWindowsExeSelfTestV5",
+        "schema": "AsterMaxWindowsExeSelfTestV6",
         "passed": passed,
         "checks": checks,
         "picker": picker,
         "mesh": summary["mesh"],
         "tet10_sampled_jacobian": sampled_jacobian,
         "tet10_reference_jacobian": reference_jacobian,
+        "tet10_adaptive_jacobian": adaptive_jacobian,
         "tet10_geometry_scope": geometry_scope,
         "mesh_quality": mesh_quality,
         "force_residual_n": force_residual,
