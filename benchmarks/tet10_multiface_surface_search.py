@@ -56,11 +56,12 @@ def build_fixture():
 
 
 def target_from_source(nodes, source_nodes, gap_mm, face_id, xy_shift=(0.0, 0.0)):
+    # The source fixture corner order already has geometric normal -Z, opposed
+    # to the declared +Z closing direction, so preserve its TRI6 ordering.
     xyz = nodes[source_nodes].copy()
     xyz[:, 0] += xy_shift[0]
     xyz[:, 1] += xy_shift[1]
     xyz[:, 2] += gap_mm
-    xyz = xyz[np.asarray([0, 2, 1, 5, 4, 3], dtype=int)]
     return RigidTri6TargetFace(face_id, xyz)
 
 
@@ -197,9 +198,7 @@ def main():
     search_gaps = np.asarray([record.initial_gap_mm for record in result.pairing_records], dtype=float)
     pressure_error = float(np.max(np.abs(result.contact_pressure_mpa - reference_p)))
     displacement_error = float(np.max(np.abs(result.integration_displacements_mm - reference_u)))
-    generalized_resultant = np.zeros(3, dtype=float)
-    for row in result.contact_generalized_force_n:
-        generalized_resultant += row
+    generalized_resultant = np.sum(result.contact_generalized_force_n, axis=0)
     point_resultant = np.zeros(3, dtype=float)
     for record, point_force in zip(result.pairing_records, result.contact_point_forces_n):
         point_resultant += point_force * record.source_normal
