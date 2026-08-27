@@ -59,6 +59,8 @@ def _self_test(root: Path) -> int:
     geometry_scope = summary["tet10_geometry_scope"]
     mesh_quality = summary["mesh_quality"]
     quality_policy = mesh_quality["policy"]
+    passport = summary["analysis_passport"]
+    evidence_vector = passport["evidence_vector"]
     checks = {
         "finite_force_residual": math.isfinite(force_residual),
         "finite_moment_residual": math.isfinite(moment_residual),
@@ -102,6 +104,21 @@ def _self_test(root: Path) -> int:
         "mesh_inspector_policy_exact": mesh_quality["inspector_policy"] == quality_policy,
         "mesh_inspector_shared_classifier": mesh_quality["inspector_status_uses_shared_classifier"] is True,
         "mesh_inspector_exists": Path(summary["artifacts"]["mesh_inspector"]).is_file(),
+        "analysis_passport_exists": Path(summary["artifacts"]["analysis_passport"]).is_file(),
+        "analysis_passport_hash_present": len(summary["artifacts"]["analysis_passport_sha256"]) == 64,
+        "analysis_passport_schema": passport["schema"] == "AsterMaxAnalysisPassportV1",
+        "analysis_passport_stage": passport["highest_demonstrated_stage"] == "EQUILIBRIUM_VERIFIED",
+        "analysis_passport_geometry_verified": evidence_vector["geometry_provenance"]["status"] == "VERIFIED",
+        "analysis_passport_scopes_verified": evidence_vector["persistent_cad_scopes"]["status"] == "VERIFIED",
+        "analysis_passport_v1_pass": evidence_vector["tet10_jacobian_v1"]["status"] == "PASS",
+        "analysis_passport_v2_pass": evidence_vector["tet10_jacobian_v2"]["status"] == "PASS",
+        "analysis_passport_v3_pass": evidence_vector["tet10_jacobian_v3"]["status"] == "PASS",
+        "analysis_passport_mesh_pass": evidence_vector["mesh_quality"]["status"] == "PASS",
+        "analysis_passport_equilibrium_pass": evidence_vector["force_balance"]["status"] == "PASS" and evidence_vector["moment_balance"]["status"] == "PASS",
+        "analysis_passport_convergence_not_demonstrated": evidence_vector["solution_convergence"]["status"] == "NOT_DEMONSTRATED",
+        "analysis_passport_industrial_not_demonstrated": evidence_vector["industrial_validation"]["status"] == "NOT_DEMONSTRATED",
+        "analysis_passport_ansys_not_claimed": evidence_vector["ansys_equivalence"]["status"] == "NOT_CLAIMED",
+        "analysis_passport_no_trust_score": "NO_TRUST_SCORE" in passport["evidence_boundary"],
         "converged_claim_false": summary["claims"]["converged"] is False,
         "industrial_validation_false": summary["claims"]["industrial_validation"] is False,
         "ansys_equivalence_false": summary["claims"]["ansys_equivalence"] is False,
@@ -113,7 +130,7 @@ def _self_test(root: Path) -> int:
     }
     passed = all(checks.values())
     report = {
-        "schema": "AsterMaxWindowsExeSelfTestV6",
+        "schema": "AsterMaxWindowsExeSelfTestV7",
         "passed": passed,
         "checks": checks,
         "picker": picker,
@@ -123,6 +140,7 @@ def _self_test(root: Path) -> int:
         "tet10_adaptive_jacobian": adaptive_jacobian,
         "tet10_geometry_scope": geometry_scope,
         "mesh_quality": mesh_quality,
+        "analysis_passport": passport,
         "force_residual_n": force_residual,
         "moment_residual_nmm": moment_residual,
         "result_class": "ASTERMAX_PROJECT_UNCONVERGED_NOT_INDUSTRIAL_RESULT",
