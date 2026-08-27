@@ -409,7 +409,22 @@ def build_analysis_passport(
     graph: EvidenceGraph,
     decisions: Iterable[ClaimDecision],
 ) -> dict[str, Any]:
-    """Build a transparent credibility vector; deliberately no aggregate score."""
+    """Build a transparent credibility vector; deliberately no aggregate score.
+
+    A claim decision is valid only for the exact evidence-graph fingerprint on
+    which it was evaluated. Any evidence mutation/addition requires re-evaluation
+    before a new passport can be emitted.
+    """
+    graph_hash = graph.fingerprint_sha256
+    ordered_decisions = sorted(tuple(decisions), key=lambda decision: decision.claim_id)
+    if len({decision.claim_id for decision in ordered_decisions}) != len(ordered_decisions):
+        raise ValueError("analysis passport cannot contain duplicate claim decisions")
+    stale = [decision.claim_id for decision in ordered_decisions if decision.graph_sha256 != graph_hash]
+    if stale:
+        raise ValueError(
+            "claim decision is stale for current evidence graph: " + ",".join(stale)
+        )
+
     vector: dict[str, list[dict[str, str]]] = {}
     for record in graph.records:
         vector.setdefault(record.kind, []).append(
@@ -419,11 +434,10 @@ def build_analysis_passport(
                 "source": record.source.value,
             }
         )
-    ordered_decisions = sorted(decisions, key=lambda decision: decision.claim_id)
     payload = {
         "schema": "AsterMaxAnalysisPassportV1",
         "context": graph.context.canonical(),
-        "evidence_graph_sha256": graph.fingerprint_sha256,
+        "evidence_graph_sha256": graph_hash,
         "credibility_vector": {key: vector[key] for key in sorted(vector)},
         "claims": [
             {
