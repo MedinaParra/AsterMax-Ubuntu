@@ -11,6 +11,7 @@ from .fea.mesh_quality import require_mesh_quality, tetra_mesh_quality
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.selected_mesh import mesh_step_tet10_with_selections
 from .fea.solver import solve_linear_static_tet10
+from .fea.tet10_geometry import require_tet10_geometry_scope, tet10_geometry_scope
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
 from .mesh_inspector import write_mesh_inspector
@@ -32,11 +33,16 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         {"SUPPORT": project.support, "LOAD": project.load_surface},
     )
 
-    # Diagnostic evidence is emitted before the fail-closed acceptance gate so a rejected
-    # mesh remains inspectable. The inspector ranking never changes acceptance thresholds.
+    # Geometry scope and mesh quality are both evaluated before BC/load creation or
+    # sparse assembly. The current verified TET10 solver scope remains straight-sided.
+    geometry_scope = tet10_geometry_scope(mesh.nodes_mm, mesh.elements)
     mesh_quality = tetra_mesh_quality(mesh.nodes_mm, mesh.elements)
+
+    # Diagnostic evidence is emitted before fail-closed acceptance so rejected corner-
+    # quality meshes remain inspectable. Curved/high-order quality is not claimed here.
     inspector = output / "astermax_mesh_inspector.html"
     inspector_manifest = write_mesh_inspector(inspector, mesh.nodes_mm, mesh.elements)
+    require_tet10_geometry_scope(geometry_scope)
     require_mesh_quality(mesh_quality)
 
     support_nodes = unique_surface_nodes(mesh.surface_triangles["SUPPORT"])
@@ -61,7 +67,7 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
         result_class=RESULT_CLASS, converged_claim=False, industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxProjectRunResultV3",
+        "schema": "AsterMaxProjectRunResultV4",
         "project": str(project_file),
         "geometry": str(geometry),
         "selection_mode": "PERSISTENT_CAD_SURFACE_SIGNATURES",
@@ -72,6 +78,12 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
             "support_tri6": int(mesh.surface_triangles["SUPPORT"].shape[0]),
             "load_tri6": int(mesh.surface_triangles["LOAD"].shape[0]),
         },
+        "tet10_geometry_scope": {
+            **asdict(geometry_scope),
+            "gate_order": "BEFORE_BC_LOAD_ASSEMBLY_AND_SOLVE",
+            "fail_closed": True,
+            "curved_tet10_solver_enabled": False,
+        },
         "mesh_quality": {
             **asdict(mesh_quality),
             "policy_scope": "STRAIGHT_SIDED_TET10_CORNER_GEOMETRY",
@@ -80,7 +92,12 @@ def run_project(project_path: str | Path, output_dir: str | Path) -> dict:
             "inspector_worst_element_index": inspector_manifest["worst_element_index"],
         },
         "checks": {"force_residual_n": force_residual, "moment_residual_nmm": moment_residual},
-        "claims": {"converged": False, "industrial_validation": False, "ansys_equivalence": False},
+        "claims": {
+            "converged": False,
+            "industrial_validation": False,
+            "ansys_equivalence": False,
+            "curved_tet10": False,
+        },
         "provenance": {
             "geometry_sha256": project.geometry_sha256,
             "support_surface_sha256": project.support.fingerprint_sha256,
