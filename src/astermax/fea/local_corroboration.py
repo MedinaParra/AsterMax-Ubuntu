@@ -27,26 +27,31 @@ def local_neighborhood_binding_evidence(
     binding_id: str,
     comparison: NeighborhoodComparison,
     witness_evidence: EvidenceRecord,
-    fea_result_sha256: str,
+    result_sha256: str,
+    result_classification: str,
 ) -> EvidenceRecord:
     binding_id = str(binding_id).strip()
-    fea_sha = str(fea_result_sha256).lower().strip()
+    result_sha = str(result_sha256).lower().strip()
+    classification = str(result_classification).strip()
     if not binding_id:
         raise LocalCorroborationError("binding_id must be non-empty")
-    if not _SHA256_RE.fullmatch(fea_sha):
-        raise LocalCorroborationError("fea_result_sha256 must be a lowercase SHA-256 digest")
+    if not _SHA256_RE.fullmatch(result_sha):
+        raise LocalCorroborationError("result_sha256 must be a lowercase SHA-256 digest")
+    if not classification:
+        raise LocalCorroborationError("result_classification must be non-empty")
     if witness_evidence.kind not in {"STRESS_CONCENTRATION_WITNESS", "KIRSCH_HOLE_WITNESS"}:
         raise LocalCorroborationError("unsupported local analytical witness kind")
     if not witness_evidence.claim_grade or witness_evidence.payload_sha256 is None:
         raise LocalCorroborationError("local analytical witness must be claim-grade and hash-bound")
 
     payload = {
-        "schema": "AsterMaxLocalNeighborhoodBindingV1",
+        "schema": "AsterMaxLocalNeighborhoodBindingV2",
         "binding_id": binding_id,
         "comparison_sha256": comparison.comparison_sha256,
         "witness_evidence_id": witness_evidence.evidence_id,
         "witness_payload_sha256": witness_evidence.payload_sha256,
-        "fea_result_sha256": fea_sha,
+        "result_sha256": result_sha,
+        "result_classification": classification,
         "comparison_passed": comparison.passed,
         "core_exclusion_mm": comparison.core_exclusion_mm,
         "max_relative_error": comparison.max_relative_error,
@@ -59,7 +64,7 @@ def local_neighborhood_binding_evidence(
         status=EvidenceStatus.VERIFIED if comparison.passed else EvidenceStatus.CONTRADICTED,
         source=EvidenceSource.DETERMINISTIC_CHECK,
         description=(
-            "Exact binding of one result hash, one independent analytical/empirical witness "
+            "Exact binding of one classified result hash, one independent analytical/empirical witness "
             "and one spatial neighborhood comparison."
         ),
         payload_sha256=digest,
@@ -232,7 +237,8 @@ def empirical_local_chain_evidence(
         ),
         "witness_sha256": witness_evidence.payload_sha256,
         "local_binding_sha256": binding_evidence.payload_sha256,
-        "result_sha256": str(binding_evidence.metadata.get("fea_result_sha256", "")),
+        "result_sha256": str(binding_evidence.metadata.get("result_sha256", "")),
+        "result_classification": str(binding_evidence.metadata.get("result_classification", "")),
     }
     digest = canonical_sha256(payload)
     return EvidenceRecord(
@@ -241,7 +247,7 @@ def empirical_local_chain_evidence(
         status=EvidenceStatus.VERIFIED,
         source=EvidenceSource.DETERMINISTIC_CHECK,
         description=(
-            "Deterministic binding of exact source provenance, authorized datasets, shaft geometry, notch witness and local result comparison."
+            "Deterministic binding of exact source provenance, authorized datasets, shaft geometry, notch witness and classified local result comparison."
         ),
         payload_sha256=digest,
         metadata=payload,
