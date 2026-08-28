@@ -14,6 +14,7 @@ from .fea.gmsh_bridge import (
     mesh_step_tet10,
     unique_surface_nodes,
 )
+from .fea.live_analysis_evidence import file_sha256, install_live_analysis_evidence_tab
 from .fea.native_credibility import install_native_credibility_tab
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.solver import solve_linear_static_tet10
@@ -42,6 +43,7 @@ def run_step_analysis(step_path: str | Path, output_dir: str | Path, *, mesh_siz
     if float(np.linalg.norm(load)) == 0.0:
         raise ValueError("resultant_n must be non-zero")
 
+    source_sha256 = file_sha256(source)
     output.mkdir(parents=True, exist_ok=True)
     mesh = mesh_step_tet10(source, float(mesh_size_mm))
     material = IsotropicMaterial(float(young_modulus_mpa), float(poisson_ratio))
@@ -63,6 +65,7 @@ def run_step_analysis(step_path: str | Path, output_dir: str | Path, *, mesh_siz
         "schema": "AsterMaxDesktopPMVResultV1",
         "result_class": RESULT_CLASS,
         "source_step": str(source),
+        "source_step_sha256": source_sha256,
         "units": {"length": "mm", "force": "N", "stress": "MPa"},
         "scope_contract": {"constraint": "X_MIN_FIXED_ALL_TRANSLATIONS", "load": "X_MAX_CONSISTENT_TRI6_RESULTANT"},
         "mesh": {"family": "TET10", "target_size_mm": float(mesh_size_mm), "nodes": int(mesh.nodes_mm.shape[0]), "elements": int(mesh.elements.shape[0]), "dimensions_mm": [float(v) for v in mesh.dimensions_mm]},
@@ -91,6 +94,7 @@ def _desktop_main() -> int:
     notebook.pack(fill="both", expand=True, padx=10, pady=10)
     frame = ttk.Frame(notebook, padding=18)
     notebook.add(frame, text="Analysis")
+    bind_live_evidence = install_live_analysis_evidence_tab(notebook)
     install_native_credibility_tab(notebook)
 
     step_var = tk.StringVar()
@@ -124,7 +128,7 @@ def _desktop_main() -> int:
         if command:
             ttk.Button(frame, text=button_text, command=command).grid(row=idx, column=2, padx=(8, 0), pady=5)
 
-    warning = "PMV scope: exactly one STEP solid; X_MIN is fixed and the requested resultant is applied on X_MAX. Arbitrary user models are exported with CONVERGED=false and INDUSTRIAL_VALIDATION=false. The Credibility tab accepts only validated fixture evidence and cannot upgrade these claims."
+    warning = "PMV scope: exactly one STEP solid; X_MIN is fixed and the requested resultant is applied on X_MAX. Arbitrary user models are exported with CONVERGED=false and INDUSTRIAL_VALIDATION=false. Current Model Evidence is bound to this solve's STEP/artifact hashes; fixture Credibility remains separate."
     ttk.Label(frame, text=warning, wraplength=760).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(6, 8))
@@ -157,10 +161,16 @@ def _desktop_main() -> int:
 
             def finished() -> None:
                 set_busy(False)
+                try:
+                    bind_live_evidence(summary)
+                except Exception as exc:
+                    status_var.set("Analysis completed but live evidence binding failed.")
+                    messagebox.showerror("AsterMax evidence", str(exc))
+                    return
                 checks = summary["checks"]
-                status_var.set(f"Completed: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm")
+                status_var.set(f"Completed: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm · evidence bound")
                 webbrowser.open(Path(summary["artifacts"]["viewer"]).as_uri())
-                messagebox.showinfo("AsterMax", "Analysis completed. Offline viewer opened. Results remain marked un-converged for arbitrary user geometry.")
+                messagebox.showinfo("AsterMax", "Analysis completed and Current Model Evidence was hash-verified and bound. Results remain un-converged for arbitrary user geometry.")
 
             root.after(0, finished)
 
