@@ -14,6 +14,7 @@ from .fea.gmsh_bridge import (
     mesh_step_tet10,
     unique_surface_nodes,
 )
+from .fea.native_credibility import install_native_credibility_tab
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet4 import IsotropicMaterial
@@ -83,8 +84,14 @@ def _desktop_main() -> int:
 
     root = tk.Tk()
     root.title("AsterMax PMV · TET10 Verification")
-    root.geometry("720x620")
-    root.minsize(680, 560)
+    root.geometry("900x700")
+    root.minsize(780, 620)
+
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill="both", expand=True, padx=10, pady=10)
+    frame = ttk.Frame(notebook, padding=18)
+    notebook.add(frame, text="Analysis")
+    install_native_credibility_tab(notebook)
 
     step_var = tk.StringVar()
     out_var = tk.StringVar(value=str((Path.home() / "AsterMaxResults").resolve()))
@@ -96,8 +103,6 @@ def _desktop_main() -> int:
     fz_var = tk.StringVar(value="0.0")
     status_var = tk.StringVar(value="Ready. Select one STEP solid in millimetres.")
 
-    frame = ttk.Frame(root, padding=18)
-    frame.pack(fill="both", expand=True)
     frame.columnconfigure(1, weight=1)
     ttk.Label(frame, text="AsterMax PMV", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
     ttk.Label(frame, text="Linear static TET10 · N-mm-MPa · verification build").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 16))
@@ -119,11 +124,11 @@ def _desktop_main() -> int:
         if command:
             ttk.Button(frame, text=button_text, command=command).grid(row=idx, column=2, padx=(8, 0), pady=5)
 
-    warning = "PMV scope: exactly one STEP solid; X_MIN is fixed and the requested resultant is applied on X_MAX. Arbitrary user models are exported with CONVERGED=false and INDUSTRIAL_VALIDATION=false."
-    ttk.Label(frame, text=warning, wraplength=650).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
+    warning = "PMV scope: exactly one STEP solid; X_MIN is fixed and the requested resultant is applied on X_MAX. Arbitrary user models are exported with CONVERGED=false and INDUSTRIAL_VALIDATION=false. The Credibility tab accepts only validated fixture evidence and cannot upgrade these claims."
+    ttk.Label(frame, text=warning, wraplength=760).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(6, 8))
-    ttk.Label(frame, textvariable=status_var, wraplength=650).grid(row=12, column=0, columnspan=3, sticky="w")
+    ttk.Label(frame, textvariable=status_var, wraplength=760).grid(row=12, column=0, columnspan=3, sticky="w")
     run_button = ttk.Button(frame, text="Run TET10 analysis")
     run_button.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(16, 6))
 
