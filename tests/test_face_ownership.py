@@ -38,7 +38,10 @@ def _sloped_face_tag(step: Path) -> int:
     for tag, signature in list_face_signatures(step):
         bbox = signature.bbox_mm
         spans = np.asarray((bbox[3] - bbox[0], bbox[4] - bbox[1], bbox[5] - bbox[2]), dtype=float)
-        if np.count_nonzero(spans > 1.0e-7) == 3:
+        # OCC expands planar face bounding boxes by a small geometric tolerance.
+        # Use a fixture-scale threshold so only the genuinely sloped rectangular
+        # face spans all three macroscopic directions (40 x 12 x 20 mm).
+        if np.count_nonzero(spans > 1.0) == 3:
             candidates.append(tag)
     assert len(candidates) == 1
     return candidates[0]
