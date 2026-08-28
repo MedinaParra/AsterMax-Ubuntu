@@ -1,0 +1,40 @@
+name: Windows C4 Credibility Visualization
+
+on:
+  push:
+    branches:
+      - agent/credibility-visualization-c4-v1.0
+  pull_request:
+    branches:
+      - agent/cad-derived-axial-witness-c3-2-v0.9
+  workflow_dispatch:
+
+jobs:
+  verify-c4:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV and test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile with warnings as errors
+        run: python -W error -m compileall -q src benchmarks
+      - name: Run C4 visualization harness
+        run: python -m pytest -q tests/test_credibility_visualization.py
+      - name: Generate real C3.2 evidence
+        run: python benchmarks/c3_2_cad_derived_axial_benchmark.py
+      - name: Render C4 credibility chain from real evidence
+        run: python benchmarks/c4_credibility_visualization.py
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Upload C4 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: astermax-c4-credibility-chain-windows
+          path: |
+            c3_2_cad_derived_axial_benchmark.json
+            astermax_c4_credibility_chain.html
+            astermax_c4_credibility_chain.manifest.json
+          if-no-files-found: error
