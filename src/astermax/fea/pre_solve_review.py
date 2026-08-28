@@ -10,6 +10,7 @@ from astermax.credibility import canonical_sha256
 from .gmsh_bridge import mesh_step_tet10
 from .live_analysis_evidence import file_sha256
 from .model_preparation_evidence import build_model_preparation_evidence
+from .named_selection_bc import bind_named_selection_to_mesh, capture_axis_named_selection
 from .tet_quality import build_tet10_corner_quality_snapshot, require_quality_crosscheck
 from .visual_model_preparation import build_visual_model_preparation_snapshot
 
@@ -26,6 +27,12 @@ class PreSolveReviewSnapshot:
     visual_preparation_sha256: str
     constraint_selection_sha256: str
     load_selection_sha256: str
+    support_named_selection_sha256: str
+    load_named_selection_sha256: str
+    support_binding_sha256: str
+    load_binding_sha256: str
+    support_surface_keys: tuple[str, ...]
+    load_surface_keys: tuple[str, ...]
     mesh_target_size_mm: float
     node_count: int
     tet10_count: int
@@ -70,7 +77,16 @@ def _validated_analysis_inputs(*, mesh_size_mm: float, young_modulus_mpa: float,
     return mesh_size, young, poisson, load
 
 
-def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, young_modulus_mpa: float, poisson_ratio: float, resultant_n: tuple[float, float, float]) -> dict[str, Any]:
+def prepare_model_for_review(
+    step_path: str | Path,
+    *,
+    mesh_size_mm: float,
+    young_modulus_mpa: float,
+    poisson_ratio: float,
+    resultant_n: tuple[float, float, float],
+    support_surface_keys: tuple[str, ...] = ("X_MIN",),
+    load_surface_keys: tuple[str, ...] = ("X_MAX",),
+) -> dict[str, Any]:
     source = Path(step_path).expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"STEP file not found: {source}")
@@ -83,13 +99,41 @@ def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, youn
     visual = build_visual_model_preparation_snapshot(nodes_mm=mesh.nodes_mm, elements=mesh.elements, surface_triangles=mesh.surface_triangles, preparation=asdict(preparation))
     quality = build_tet10_corner_quality_snapshot(mesh.nodes_mm, mesh.elements)
     require_quality_crosscheck(quality)
+
+    support_selection = capture_axis_named_selection(source, mesh.bbox_mm, support_surface_keys, name="Support", role="SUPPORT")
+    load_selection = capture_axis_named_selection(source, mesh.bbox_mm, load_surface_keys, name="Load", role="LOAD")
+    if support_selection.named_selection_sha256 == load_selection.named_selection_sha256:
+        raise PreSolveReviewError("support and load named selections must be distinct")
+    support_binding, support_triangles = bind_named_selection_to_mesh(
+        source,
+        support_selection,
+        bbox_mm=mesh.bbox_mm,
+        surface_triangles=mesh.surface_triangles,
+        expected_role="SUPPORT",
+    )
+    load_binding, load_triangles = bind_named_selection_to_mesh(
+        source,
+        load_selection,
+        bbox_mm=mesh.bbox_mm,
+        surface_triangles=mesh.surface_triangles,
+        expected_role="LOAD",
+    )
+    if set(support_binding.surface_keys) & set(load_binding.surface_keys):
+        raise PreSolveReviewError("support and load named selections overlap")
+
     core = {
-        "schema": "AsterMaxPreSolveReviewV2",
+        "schema": "AsterMaxPreSolveReviewV3",
         "step_sha256": step_sha,
         "preparation_sha256": preparation.snapshot_sha256,
         "visual_preparation_sha256": visual.snapshot_sha256,
         "constraint_selection_sha256": preparation.constraint_selection_sha256,
         "load_selection_sha256": preparation.load_selection_sha256,
+        "support_named_selection_sha256": support_selection.named_selection_sha256,
+        "load_named_selection_sha256": load_selection.named_selection_sha256,
+        "support_binding_sha256": support_binding.binding_sha256,
+        "load_binding_sha256": load_binding.binding_sha256,
+        "support_surface_keys": support_binding.surface_keys,
+        "load_surface_keys": load_binding.surface_keys,
         "mesh_target_size_mm": mesh_size,
         "node_count": int(mesh.nodes_mm.shape[0]),
         "tet10_count": int(mesh.elements.shape[0]),
@@ -109,14 +153,31 @@ def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, youn
         "ansys_equivalence": False,
     }
     review = PreSolveReviewSnapshot(**core, review_sha256=canonical_sha256(core))
-    return {"source": source, "mesh": mesh, "preparation": preparation, "visual": visual, "quality": quality, "review": review}
+    return {
+        "source": source,
+        "mesh": mesh,
+        "preparation": preparation,
+        "visual": visual,
+        "quality": quality,
+        "support_selection": support_selection,
+        "load_named_selection": load_selection,
+        "support_binding": support_binding,
+        "load_binding": load_binding,
+        "support_triangles": support_triangles,
+        "load_triangles": load_triangles,
+        "review": review,
+    }
 
 
 def accept_model_preparation(review: PreSolveReviewSnapshot) -> ModelPreparationAcceptance:
-    if review.schema != "AsterMaxPreSolveReviewV2" or review.state != "REVIEW_REQUIRED":
+    if review.schema != "AsterMaxPreSolveReviewV3" or review.state != "REVIEW_REQUIRED":
         raise PreSolveReviewError("MODEL_PREPARATION_REVIEW_NOT_ACCEPTABLE")
     if not review.tetra_quality_crosscheck_verified or review.tetra_mean_ratio_minimum <= 0.0:
         raise PreSolveReviewError("MODEL_PREPARATION_TETRA_QUALITY_NOT_VERIFIED")
+    if review.support_named_selection_sha256 == review.load_named_selection_sha256:
+        raise PreSolveReviewError("MODEL_PREPARATION_NAMED_SELECTIONS_NOT_DISTINCT")
+    if set(review.support_surface_keys) & set(review.load_surface_keys):
+        raise PreSolveReviewError("MODEL_PREPARATION_NAMED_SELECTIONS_OVERLAP")
     if review.converged or review.industrial_validation or review.ansys_equivalence:
         raise PreSolveReviewError("MODEL_PREPARATION_REVIEW_ILLEGAL_CLAIM")
     core = {"schema": "AsterMaxModelPreparationAcceptanceV1", "review_sha256": review.review_sha256, "state": "MODEL_PREPARATION_ACCEPTED"}
@@ -134,6 +195,12 @@ def verify_acceptance(prepared: dict[str, Any], acceptance: ModelPreparationAcce
         raise PreSolveReviewError("MODEL_PREPARATION_ACCEPTANCE_STALE")
     if file_sha256(source) != review.step_sha256:
         raise PreSolveReviewError("STEP_CHANGED_AFTER_MODEL_PREPARATION_REVIEW")
+    support_binding = prepared.get("support_binding")
+    load_binding = prepared.get("load_binding")
+    if support_binding is None or load_binding is None:
+        raise PreSolveReviewError("MODEL_PREPARATION_NAMED_SELECTION_BINDING_MISSING")
+    if support_binding.binding_sha256 != review.support_binding_sha256 or load_binding.binding_sha256 != review.load_binding_sha256:
+        raise PreSolveReviewError("MODEL_PREPARATION_NAMED_SELECTION_BINDING_STALE")
     expected = canonical_sha256({"schema": acceptance.schema, "review_sha256": acceptance.review_sha256, "state": acceptance.state})
     if acceptance.acceptance_sha256 != expected:
         raise PreSolveReviewError("MODEL_PREPARATION_ACCEPTANCE_TAMPERED")
@@ -149,4 +216,8 @@ def visual_preparation_payload(prepared: dict[str, Any]) -> dict[str, Any]:
         "surface_triangles": mesh.surface_triangles,
         "preparation": asdict(preparation),
         "tetra_quality": asdict(quality),
+        "named_selections": {
+            "support": asdict(prepared["support_binding"]),
+            "load": asdict(prepared["load_binding"]),
+        },
     }
