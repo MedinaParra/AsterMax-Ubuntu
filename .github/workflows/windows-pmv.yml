@@ -21,6 +21,7 @@ on:
       - agent/step-shoulder-local-stress-convergence-v1.1
       - agent/step-shoulder-sector-probe-convergence-v1.2
       - agent/step-shoulder-geometry-error-fine-convergence-v1.3
+      - agent/curved-tet10-code-verification-v1.4
 
 jobs:
   verify-fea-core:
@@ -166,4 +167,15 @@ jobs:
           path: |
             step_shoulder_geometry_error_fine_convergence.step
             step_shoulder_geometry_error_fine_convergence.json
+          if-no-files-found: error
+      - name: Verify curved TET10 isoparametric geometry and reference quadrature
+        run: python benchmarks/curved_tet10_code_verification.py
+      - name: Upload curved TET10 code-verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-tet10-code-verification-windows
+          path: |
+            curved_tet10_code_verification.step
+            curved_tet10_code_verification.json
           if-no-files-found: error
