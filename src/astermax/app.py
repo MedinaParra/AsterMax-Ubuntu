@@ -22,6 +22,7 @@ from .fea.solver import solve_linear_static_tet10
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
 from .fea.visual_model_preparation import install_visual_model_preparation_tab
+from .fea.worst_element_inspector import install_worst_element_quality_tab
 
 RESULT_CLASS = "PMV_UNCONVERGED_USER_MODEL_NOT_INDUSTRIAL_RESULT"
 
@@ -128,6 +129,7 @@ def _desktop_main() -> int:
     notebook.add(frame, text="Analysis")
     bind_live_evidence = install_live_analysis_evidence_tab(notebook)
     bind_visual_preparation = install_visual_model_preparation_tab(notebook)
+    bind_worst_quality = install_worst_element_quality_tab(notebook)
     install_native_credibility_tab(notebook)
 
     step_var = tk.StringVar()
@@ -164,7 +166,7 @@ def _desktop_main() -> int:
         if command:
             ttk.Button(frame, text=button_text, command=command).grid(row=idx, column=2, padx=(8, 0), pady=5)
 
-    warning = "C4.5: Solve is disabled until the exact STEP, persistent Support/Load scopes and TET10 preparation diagnostics are prepared and explicitly accepted. Any STEP or analysis-input change requires preparation again. Mesh edge ratio remains a diagnostic proxy, not ANSYS Element Quality."
+    warning = "C4.7: Solve is disabled until the exact STEP, persistent Support/Load scopes, Jacobian gates and independently cross-checked mean-ratio quality are reviewed. Mesh Quality highlights the worst TET10 but declares no industrial rejection threshold and no ANSYS metric equivalence."
     ttk.Label(frame, text=warning, wraplength=980).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(6, 8))
@@ -191,7 +193,7 @@ def _desktop_main() -> int:
         except ValueError as exc:
             messagebox.showerror("Invalid input", str(exc)); return
         prepared_holder.clear(); set_busy(True)
-        status_var.set("Preparing exact STEP, persistent scopes, TET10 mesh and diagnostics — no solve is running…")
+        status_var.set("Preparing exact STEP, persistent scopes, TET10 mesh and cross-checked quality — no solve is running…")
 
         def worker() -> None:
             try:
@@ -202,7 +204,9 @@ def _desktop_main() -> int:
             def finished() -> None:
                 set_busy(False)
                 try:
-                    bind_visual_preparation(visual_preparation_payload(prepared))
+                    payload = visual_preparation_payload(prepared)
+                    bind_visual_preparation(payload)
+                    bind_worst_quality(payload)
                 except Exception as exc:
                     status_var.set("Preparation completed but visual review binding failed; solve remains blocked.")
                     messagebox.showerror("AsterMax evidence", str(exc)); return
@@ -210,8 +214,8 @@ def _desktop_main() -> int:
                 prepared_holder["args"] = args
                 solve_button.configure(state="normal")
                 review = prepared["review"]
-                status_var.set(f"REVIEW REQUIRED: {review.node_count} nodes / {review.tet10_count} TET10 · min detJ {review.minimum_det_jacobian_mm3:.3e} mm³ · edge ratio min {review.edge_ratio_minimum:.3f}. Inspect Model Prep Inspector, then accept & solve.")
-                notebook.select(2)
+                status_var.set(f"REVIEW REQUIRED: {review.node_count} nodes / {review.tet10_count} TET10 · min detJ {review.minimum_det_jacobian_mm3:.3e} mm³ · mean ratio min {review.tetra_mean_ratio_minimum:.3f}. Inspect Model Prep and Mesh Quality, then accept & solve.")
+                notebook.select(3)
             root.after(0, finished)
         threading.Thread(target=worker, daemon=True).start()
 
@@ -241,7 +245,9 @@ def _desktop_main() -> int:
                 set_busy(False); solve_button.configure(state="disabled"); prepared_holder.clear()
                 try:
                     bind_live_evidence(summary)
-                    bind_visual_preparation(summary["_visual_preparation_payload"])
+                    payload = summary["_visual_preparation_payload"]
+                    bind_visual_preparation(payload)
+                    bind_worst_quality(payload)
                 except Exception as exc:
                     status_var.set("Solve completed but evidence binding failed."); messagebox.showerror("AsterMax evidence", str(exc)); return
                 checks = summary["checks"]
