@@ -17,8 +17,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install PMV and test dependencies
-        run: python -m pip install -e . pytest
+      - name: Install PMV and full test dependencies
+        run: python -m pip install -e .[test]
       - name: Compile credibility and desktop modules
         run: python -W error -m py_compile src/astermax/fea/native_credibility.py src/astermax/fea/credibility_visualization.py src/astermax/app.py
       - name: Run C4.1 native credibility harness
