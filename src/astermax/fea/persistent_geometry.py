@@ -150,6 +150,21 @@ def _resolve_current(gmsh, selection: PersistentFaceSelection, diagonal: float) 
     return FaceResolution(selection.selection_id, tag, sig.sha256, selection.selection_sha256)
 
 
+def resolve_face_selection_in_current_model(gmsh, selection: PersistentFaceSelection) -> FaceResolution:
+    """Resolve a captured face against the currently imported OCC model.
+
+    This is intended for mesh-generation workflows that must resolve a
+    persistent geometric selection and retrieve its surface elements from the
+    *same* Gmsh model instance. Source-file identity remains the caller's
+    responsibility; the geometry signature and model diagonal are still
+    checked here and ambiguity fails closed.
+    """
+    diagonal = _model_diagonal(gmsh)
+    if not _close(diagonal, selection.model_diagonal_mm, selection.model_diagonal_mm, selection.relative_tolerance):
+        raise PersistentGeometryError("SOURCE_DIMENSION_MISMATCH")
+    return _resolve_current(gmsh, selection, diagonal)
+
+
 def list_face_signatures(step_path: str | Path) -> tuple[tuple[int, FaceSignature], ...]:
     source = _step(step_path)
     gmsh = _gmsh(); gmsh.initialize()
