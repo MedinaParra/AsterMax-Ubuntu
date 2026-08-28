@@ -44,6 +44,7 @@ from astermax.fea.stress_concentration_source import shigley_2024_release_source
 
 
 OUTPUT = Path("local_stress_credibility.json")
+SYNTHETIC_RESULT_CLASS = "SYNTHETIC_SOFTWARE_VERIFICATION_FIXTURE_NOT_FEA_RESULT"
 
 
 def main() -> int:
@@ -63,7 +64,7 @@ def main() -> int:
         ),
         consequence_level=ConsequenceLevel.LOW,
         assumptions=(
-            "SYNTHETIC_SOFTWARE_VERIFICATION_FIXTURE_NOT_FEA_RESULT",
+            SYNTHETIC_RESULT_CLASS,
             "linear elasticity",
             "Kirsch infinite-plate approximation with declared boundary clearance",
         ),
@@ -109,8 +110,8 @@ def main() -> int:
     graph.add(neighborhood_comparison_evidence(comparison))
 
     synthetic_payload = {
-        "schema": "AsterMaxSyntheticLocalProfileV1",
-        "classification": "SYNTHETIC_SOFTWARE_VERIFICATION_FIXTURE_NOT_FEA_RESULT",
+        "schema": "AsterMaxSyntheticLocalProfileV2",
+        "classification": SYNTHETIC_RESULT_CLASS,
         "samples": synthetic_profile,
     }
     synthetic_result_sha = hashlib.sha256(
@@ -120,7 +121,8 @@ def main() -> int:
         binding_id="KIRSCH_SYNTHETIC_BINDING",
         comparison=comparison,
         witness_evidence=kirsch_evidence,
-        fea_result_sha256=synthetic_result_sha,
+        result_sha256=synthetic_result_sha,
+        result_classification=SYNTHETIC_RESULT_CLASS,
     )
     graph.add(binding)
 
@@ -152,8 +154,8 @@ def main() -> int:
 
     shigley_metadata = shigley_2024_release_source_metadata()
     report = {
-        "schema": "AsterMaxLocalStressCredibilityBenchmarkV1",
-        "classification": "SYNTHETIC_SOFTWARE_VERIFICATION_FIXTURE_NOT_FEA_RESULT",
+        "schema": "AsterMaxLocalStressCredibilityBenchmarkV2",
+        "classification": SYNTHETIC_RESULT_CLASS,
         "industrial_validation_claim": False,
         "ansys_equivalence_claim": False,
         "shigley_adapter": {
@@ -171,7 +173,11 @@ def main() -> int:
             "far_field_stress_mpa": kirsch.far_field_stress_mpa,
             "boundary_kt": kirsch_boundary_kt(kirsch),
         },
-        "synthetic_result_sha256": synthetic_result_sha,
+        "synthetic_result": {
+            "sha256": synthetic_result_sha,
+            "classification": SYNTHETIC_RESULT_CLASS,
+            "binding_sha256": binding.payload_sha256,
+        },
         "neighborhood": {
             "comparison_sha256": comparison.comparison_sha256,
             "passed": comparison.passed,
@@ -207,6 +213,7 @@ def main() -> int:
     assert recommendation.action == "REFINE_NEIGHBORHOOD_DO_NOT_CHASE_PEAK"
     assert neighborhood_decision.state is ClaimState.PERMITTED
     assert peak_decision.state is ClaimState.BLOCKED
+    assert binding.metadata["result_classification"] == SYNTHETIC_RESULT_CLASS
     assert shigley_metadata.calculation_data_embedded is False
 
     OUTPUT.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
