@@ -140,8 +140,15 @@ def mesh_step_tet10_around_shoulder(
     local_size_mm: float,
     padding_mm: float | None = None,
     face_selections: Iterable[PersistentFaceSelection] = (),
+    second_order_linear: bool = True,
 ) -> FeatureRefinedTet10Mesh:
-    """Generate a straight-sided TET10 mesh with a feature-bound local size box.
+    """Generate a feature-bound TET10 mesh with explicit geometry mode.
+
+    ``second_order_linear=True`` preserves the fully verified historical PMV
+    behavior: all quadratic midside nodes lie at straight edge midpoints.
+    ``False`` asks Gmsh to project high-order boundary nodes to CAD and is only
+    admitted for dedicated curved-isoparametric verification until a separate
+    solver gate explicitly enables it.
 
     Persistent face selections, when supplied, are resolved against the same
     imported OCC model used to generate the volume mesh. Their TRI6 connectivity
@@ -159,6 +166,9 @@ def mesh_step_tet10_around_shoulder(
         raise ValueError("global_size_mm must be finite and positive")
     if not np.isfinite(local_size) or local_size <= 0.0 or local_size > global_size:
         raise ValueError("local_size_mm must be finite, positive and <= global_size_mm")
+    if not isinstance(second_order_linear, (bool, np.bool_)):
+        raise ValueError("second_order_linear must be boolean")
+    linear_mode = bool(second_order_linear)
     source_sha = sha256_file(source)
     source_size = int(source.stat().st_size)
     if source_sha != feature.source_sha256 or source_size != feature.source_size_bytes:
@@ -186,7 +196,7 @@ def mesh_step_tet10_around_shoulder(
         gmsh.option.setNumber("Mesh.MeshSizeMin", local_size)
         gmsh.option.setNumber("Mesh.MeshSizeMax", global_size)
         gmsh.option.setNumber("Mesh.ElementOrder", 2)
-        gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
+        gmsh.option.setNumber("Mesh.SecondOrderLinear", 1 if linear_mode else 0)
 
         field_id = gmsh.model.mesh.field.add("Box")
         gmsh.model.mesh.field.setNumber(field_id, "VIn", local_size)
@@ -253,7 +263,7 @@ def mesh_step_tet10_around_shoulder(
             global_size_mm=global_size,
             local_size_mm=local_size,
             local_box_mm=box,
-            second_order_linear=True,
+            second_order_linear=linear_mode,
             gmsh_version=str(getattr(gmsh, "__version__", "unknown")),
             local_element_count=local_count,
             outside_element_count=outside_count,
