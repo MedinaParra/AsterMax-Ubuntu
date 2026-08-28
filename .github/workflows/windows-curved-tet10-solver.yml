@@ -1,0 +1,31 @@
+name: Windows Curved TET10 Solver Verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-tet10-solver-verification-v1.7
+
+jobs:
+  verify-curved-tet10-solver:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Verify curved TET10 solver on persistent STEP shoulder model
+        run: python benchmarks/curved_tet10_solver_verification.py
+      - name: Upload C11 curved solver verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-tet10-solver-verification-windows
+          path: |
+            curved_tet10_solver_verification.step
+            curved_tet10_solver_verification.json
+          if-no-files-found: error
