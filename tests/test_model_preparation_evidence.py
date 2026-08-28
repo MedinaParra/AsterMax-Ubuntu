@@ -3,8 +3,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from astermax.app import run_step_analysis
 from astermax.fea.gmsh_bridge import _gmsh, mesh_step_tet10
-from astermax.fea.live_analysis_evidence import file_sha256
+from astermax.fea.live_analysis_evidence import build_live_analysis_evidence, file_sha256
 from astermax.fea.model_preparation_evidence import (
     ModelPreparationEvidenceError,
     build_model_preparation_evidence,
@@ -108,3 +109,28 @@ def test_wrong_step_hash_cannot_bind_preparation_evidence(tmp_path: Path) -> Non
             nodes_mm=mesh.nodes_mm,
             elements=mesh.elements,
         )
+
+
+def test_run_step_analysis_binds_real_preparation_solve_and_artifact_chain(tmp_path: Path) -> None:
+    step = tmp_path / "box.step"
+    _write_box(step, dx=60.0, dy=20.0, dz=10.0)
+    summary = run_step_analysis(
+        step,
+        tmp_path / "result",
+        mesh_size_mm=20.0,
+        resultant_n=(1000.0, 0.0, 0.0),
+    )
+    preparation = summary["model_preparation"]
+    assert preparation["step_sha256"] == summary["source_step_sha256"] == file_sha256(step)
+    assert preparation["constraint_selection_sha256"] != preparation["load_selection_sha256"]
+    assert preparation["mesh_gate"]["positive_jacobian_verified"] is True
+    assert preparation["mesh_gate"]["straight_sided_verified"] is True
+    assert preparation["mesh_gate"]["tet10_count"] == summary["mesh"]["elements"]
+    assert Path(summary["artifacts"]["vtu"]).is_file()
+    assert Path(summary["artifacts"]["viewer"]).is_file()
+    live = build_live_analysis_evidence(summary)
+    assert live.step_sha256 == summary["source_step_sha256"]
+    assert live.preparation_snapshot_sha256 == preparation["snapshot_sha256"]
+    assert live.converged is False
+    assert live.industrial_validation is False
+    assert live.ansys_equivalence is False
