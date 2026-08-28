@@ -1,0 +1,30 @@
+name: Windows C5.1 Named Selection BC Binding
+
+on:
+  pull_request:
+    paths:
+      - "src/astermax/app.py"
+      - "src/astermax/fea/named_selections.py"
+      - "src/astermax/fea/named_selection_bc.py"
+      - "src/astermax/fea/pre_solve_review.py"
+      - "tests/test_named_selection_bc.py"
+      - ".github/workflows/windows-c5-1-named-selection-bc.yml"
+
+jobs:
+  verify-named-selection-bc-binding:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PMV and full test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile C5.1 modules with warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/named_selections.py src/astermax/fea/named_selection_bc.py src/astermax/fea/pre_solve_review.py src/astermax/app.py
+      - name: Run C5.1 named-selection BC binding harness
+        run: python -m pytest tests/test_named_selection_bc.py -q
+      - name: Re-run C5 persistent named-selection harness
+        run: python -m pytest tests/test_named_selections.py -q
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
