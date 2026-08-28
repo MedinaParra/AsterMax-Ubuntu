@@ -112,12 +112,11 @@ def _scope_contract(
     named_selections: dict[str, Any] | None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], str, str]:
     if named_selections is None:
-        return (
-            ("X_MIN",),
-            ("X_MAX",),
-            str(preparation["constraint_selection_sha256"]),
-            str(preparation["load_selection_sha256"]),
-        )
+        support_sha = str(preparation["constraint_selection_sha256"])
+        load_sha = str(preparation["load_selection_sha256"])
+        if support_sha == load_sha:
+            raise VisualModelPreparationError("support and load persistent selections must differ")
+        return (("X_MIN",), ("X_MAX",), support_sha, load_sha)
     support = named_selections.get("support", {})
     load = named_selections.get("load", {})
     support_keys = tuple(str(v) for v in support.get("surface_keys", ()))
