@@ -32,6 +32,9 @@ from astermax.fea.stress_concentration_source import (
 )
 
 
+SYNTHETIC_RESULT_CLASS = "SYNTHETIC_SOFTWARE_VERIFICATION_FIXTURE_NOT_FEA_RESULT"
+
+
 def _context():
     return ContextOfUse(
         context_id="LOCAL_NOTCH_VERIFICATION",
@@ -107,7 +110,8 @@ def _empirical_bundle():
         binding_id="B1",
         comparison=neighborhood,
         witness_evidence=witness_ev,
-        fea_result_sha256=hashlib.sha256(b"synthetic-fea-result").hexdigest(),
+        result_sha256=hashlib.sha256(b"synthetic-result").hexdigest(),
+        result_classification=SYNTHETIC_RESULT_CLASS,
     )
     chain = empirical_local_chain_evidence(
         chain_id="CHAIN1",
@@ -204,6 +208,15 @@ def test_cross_mixing_dataset_from_another_source_is_rejected():
             witness_evidence=records[6],
             binding_evidence=records[7],
         )
+
+
+def test_result_classification_is_bound_and_not_implied_to_be_fea():
+    records = _empirical_bundle()["records"]
+    binding = records[7]
+    chain = records[8]
+    assert binding.metadata["result_classification"] == SYNTHETIC_RESULT_CLASS
+    assert chain.metadata["result_classification"] == SYNTHETIC_RESULT_CLASS
+    assert "fea_result_sha256" not in binding.metadata
 
 
 def test_likely_singularity_blocks_peak_claim_but_not_neighborhood_claim():
