@@ -1,13 +1,10 @@
-import itertools
-import math
-
 import numpy as np
 import pytest
 
 from astermax.fea.tet10 import (
-    TET10_GAUSS_POINTS,
     straight_sided_tet10_from_vertices,
     tet10_B_matrix,
+    tet10_shape_derivatives,
     tet10_stiffness,
 )
 from astermax.fea.tet10_isoparametric import (
@@ -113,20 +110,21 @@ def test_four_point_rule_is_not_silently_relabelled_as_curved_reference():
     coords = _mild_curved_coords()
     four_point = tet10_stiffness(coords, MATERIAL)
     reference = tet10_stiffness_isoparametric_reference(coords, MATERIAL, quadrature_order=5)
-    # The existing four-point kernel is still mathematically evaluable, but C10
-    # must not treat it as independently verified for curved geometry.
     assert relative_matrix_difference(four_point, reference) > 1.0e-5
 
 
 def test_inverted_curved_mapping_is_measured_without_weakening_solver_guard():
     coords = _mild_curved_coords()
     coords[[0, 1]] = coords[[1, 0]]
+    rule = duffy_tetra_gauss_rule(4)
+    raw_dets = np.asarray([
+        np.linalg.det(coords.T @ tet10_shape_derivatives(point)) for point in rule.points
+    ])
+    bad_point = rule.points[int(np.argmin(raw_dets))]
+
     audit = tet10_isoparametric_jacobian_audit(coords, quadrature_order=4)
     assert audit.all_positive is False
     assert audit.nonpositive_point_count > 0
     assert audit.minimum_det_jacobian <= 0.0
     with pytest.raises(ValueError, match="Degenerate or inverted TET10 Jacobian"):
-        tet10_B_matrix(coords, duffy_tetra_gauss_rule(4).points[int(np.argmin([
-            np.linalg.det(coords.T @ __import__('astermax.fea.tet10', fromlist=['tet10_shape_derivatives']).tet10_shape_derivatives(p))
-            for p in duffy_tetra_gauss_rule(4).points
-        ]))])
+        tet10_B_matrix(coords, bad_point)
