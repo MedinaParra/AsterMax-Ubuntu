@@ -92,7 +92,7 @@ def test_real_step_pre_solve_review_contains_crosschecked_mean_ratio(tmp_path: P
     prepared = prepare_step_analysis(step, mesh_size_mm=20.0, young_modulus_mpa=200000.0, poisson_ratio=0.3, resultant_n=(1000.0, 0.0, 0.0))
     review = prepared["review"]
     quality = prepared["quality"]
-    assert review.schema == "AsterMaxPreSolveReviewV2"
+    assert review.schema == "AsterMaxPreSolveReviewV3"
     assert 0.0 < review.tetra_mean_ratio_minimum <= review.tetra_mean_ratio_p10 <= review.tetra_mean_ratio_median <= 1.0
     assert review.tetra_quality_sha256 == quality.snapshot_sha256
     assert review.tetra_quality_crosscheck_verified is True
