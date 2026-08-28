@@ -10,6 +10,7 @@ from astermax.credibility import canonical_sha256
 from .gmsh_bridge import mesh_step_tet10
 from .live_analysis_evidence import file_sha256
 from .model_preparation_evidence import build_model_preparation_evidence
+from .tet_quality import build_tet10_corner_quality_snapshot, require_quality_crosscheck
 from .visual_model_preparation import build_visual_model_preparation_snapshot
 
 
@@ -30,6 +31,11 @@ class PreSolveReviewSnapshot:
     tet10_count: int
     minimum_det_jacobian_mm3: float
     edge_ratio_minimum: float
+    tetra_mean_ratio_minimum: float
+    tetra_mean_ratio_p10: float
+    tetra_mean_ratio_median: float
+    tetra_quality_sha256: str
+    tetra_quality_crosscheck_verified: bool
     material_young_modulus_mpa: float
     material_poisson_ratio: float
     resultant_n: tuple[float, float, float]
@@ -75,8 +81,10 @@ def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, youn
     mesh = mesh_step_tet10(source, mesh_size)
     preparation = build_model_preparation_evidence(source, step_sha256=step_sha, bbox_mm=mesh.bbox_mm, nodes_mm=mesh.nodes_mm, elements=mesh.elements)
     visual = build_visual_model_preparation_snapshot(nodes_mm=mesh.nodes_mm, elements=mesh.elements, surface_triangles=mesh.surface_triangles, preparation=asdict(preparation))
+    quality = build_tet10_corner_quality_snapshot(mesh.nodes_mm, mesh.elements)
+    require_quality_crosscheck(quality)
     core = {
-        "schema": "AsterMaxPreSolveReviewV1",
+        "schema": "AsterMaxPreSolveReviewV2",
         "step_sha256": step_sha,
         "preparation_sha256": preparation.snapshot_sha256,
         "visual_preparation_sha256": visual.snapshot_sha256,
@@ -87,6 +95,11 @@ def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, youn
         "tet10_count": int(mesh.elements.shape[0]),
         "minimum_det_jacobian_mm3": float(preparation.mesh_gate["minimum_det_jacobian_mm3"]),
         "edge_ratio_minimum": float(visual.edge_ratio_minimum),
+        "tetra_mean_ratio_minimum": quality.minimum,
+        "tetra_mean_ratio_p10": quality.percentile_10,
+        "tetra_mean_ratio_median": quality.median,
+        "tetra_quality_sha256": quality.snapshot_sha256,
+        "tetra_quality_crosscheck_verified": quality.crosscheck_verified,
         "material_young_modulus_mpa": young,
         "material_poisson_ratio": poisson,
         "resultant_n": tuple(float(v) for v in load),
@@ -96,12 +109,14 @@ def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, youn
         "ansys_equivalence": False,
     }
     review = PreSolveReviewSnapshot(**core, review_sha256=canonical_sha256(core))
-    return {"source": source, "mesh": mesh, "preparation": preparation, "visual": visual, "review": review}
+    return {"source": source, "mesh": mesh, "preparation": preparation, "visual": visual, "quality": quality, "review": review}
 
 
 def accept_model_preparation(review: PreSolveReviewSnapshot) -> ModelPreparationAcceptance:
-    if review.schema != "AsterMaxPreSolveReviewV1" or review.state != "REVIEW_REQUIRED":
+    if review.schema != "AsterMaxPreSolveReviewV2" or review.state != "REVIEW_REQUIRED":
         raise PreSolveReviewError("MODEL_PREPARATION_REVIEW_NOT_ACCEPTABLE")
+    if not review.tetra_quality_crosscheck_verified or review.tetra_mean_ratio_minimum <= 0.0:
+        raise PreSolveReviewError("MODEL_PREPARATION_TETRA_QUALITY_NOT_VERIFIED")
     if review.converged or review.industrial_validation or review.ansys_equivalence:
         raise PreSolveReviewError("MODEL_PREPARATION_REVIEW_ILLEGAL_CLAIM")
     core = {"schema": "AsterMaxModelPreparationAcceptanceV1", "review_sha256": review.review_sha256, "state": "MODEL_PREPARATION_ACCEPTED"}
@@ -127,4 +142,11 @@ def verify_acceptance(prepared: dict[str, Any], acceptance: ModelPreparationAcce
 def visual_preparation_payload(prepared: dict[str, Any]) -> dict[str, Any]:
     mesh = prepared["mesh"]
     preparation = prepared["preparation"]
-    return {"nodes_mm": mesh.nodes_mm, "elements": mesh.elements, "surface_triangles": mesh.surface_triangles, "preparation": asdict(preparation)}
+    quality = prepared["quality"]
+    return {
+        "nodes_mm": mesh.nodes_mm,
+        "elements": mesh.elements,
+        "surface_triangles": mesh.surface_triangles,
+        "preparation": asdict(preparation),
+        "tetra_quality": asdict(quality),
+    }
