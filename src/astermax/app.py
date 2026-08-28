@@ -22,6 +22,7 @@ from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
+from .fea.visual_model_preparation import install_visual_model_preparation_tab
 
 RESULT_CLASS = "PMV_UNCONVERGED_USER_MODEL_NOT_INDUSTRIAL_RESULT"
 
@@ -89,6 +90,15 @@ def run_step_analysis(step_path: str | Path, output_dir: str | Path, *, mesh_siz
     summary_path = output / "astermax_result_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary["artifacts"]["summary"] = str(summary_path)
+    # Native C4.4 rendering data is intentionally runtime-only: the persisted
+    # summary remains the compact evidence contract, while the inspector binds
+    # directly to the exact mesh and TRI6 scopes that produced this solve.
+    summary["_visual_preparation_payload"] = {
+        "nodes_mm": mesh.nodes_mm,
+        "elements": mesh.elements,
+        "surface_triangles": mesh.surface_triangles,
+        "preparation": summary["model_preparation"],
+    }
     return summary
 
 
@@ -98,14 +108,15 @@ def _desktop_main() -> int:
 
     root = tk.Tk()
     root.title("AsterMax PMV · TET10 Verification")
-    root.geometry("940x730")
-    root.minsize(800, 640)
+    root.geometry("1180x780")
+    root.minsize(900, 680)
 
     notebook = ttk.Notebook(root)
     notebook.pack(fill="both", expand=True, padx=10, pady=10)
     frame = ttk.Frame(notebook, padding=18)
     notebook.add(frame, text="Analysis")
     bind_live_evidence = install_live_analysis_evidence_tab(notebook)
+    bind_visual_preparation = install_visual_model_preparation_tab(notebook)
     install_native_credibility_tab(notebook)
 
     step_var = tk.StringVar()
@@ -139,11 +150,11 @@ def _desktop_main() -> int:
         if command:
             ttk.Button(frame, text=button_text, command=command).grid(row=idx, column=2, padx=(8, 0), pady=5)
 
-    warning = "PMV scope: exactly one STEP solid; persistent X_MIN/X_MAX face evidence is captured from the exact STEP, then straight-sided TET10 and positive Gauss-point Jacobian gates must pass before the solve. Arbitrary user models remain CONVERGED=false and INDUSTRIAL_VALIDATION=false."
-    ttk.Label(frame, text=warning, wraplength=800).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
+    warning = "PMV scope: exactly one STEP solid; persistent X_MIN/X_MAX face evidence is captured from the exact STEP, then straight-sided TET10 and positive Gauss-point Jacobian gates must pass before the solve. Model Prep Inspector visualizes real TRI6 scopes and reports an edge-ratio proxy that is explicitly not ANSYS Element Quality. Arbitrary user models remain CONVERGED=false and INDUSTRIAL_VALIDATION=false."
+    ttk.Label(frame, text=warning, wraplength=980).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(6, 8))
-    ttk.Label(frame, textvariable=status_var, wraplength=800).grid(row=12, column=0, columnspan=3, sticky="w")
+    ttk.Label(frame, textvariable=status_var, wraplength=980).grid(row=12, column=0, columnspan=3, sticky="w")
     run_button = ttk.Button(frame, text="Run evidence-gated TET10 analysis")
     run_button.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(16, 6))
 
@@ -161,7 +172,7 @@ def _desktop_main() -> int:
             messagebox.showerror("Invalid input", str(exc))
             return
         set_busy(True)
-        status_var.set("Capturing CAD scopes, checking TET10 mesh, solving and binding evidence…")
+        status_var.set("Capturing CAD scopes, checking TET10 mesh, solving and binding visual evidence…")
 
         def worker() -> None:
             try:
@@ -174,15 +185,16 @@ def _desktop_main() -> int:
                 set_busy(False)
                 try:
                     bind_live_evidence(summary)
+                    bind_visual_preparation(summary["_visual_preparation_payload"])
                 except Exception as exc:
-                    status_var.set("Analysis completed but live evidence binding failed.")
+                    status_var.set("Analysis completed but evidence binding failed.")
                     messagebox.showerror("AsterMax evidence", str(exc))
                     return
                 checks = summary["checks"]
                 gate = summary["model_preparation"]["mesh_gate"]
-                status_var.set(f"Completed: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · min detJ {gate['minimum_det_jacobian_mm3']:.3e} mm³ · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm · evidence bound")
+                status_var.set(f"Completed: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · min detJ {gate['minimum_det_jacobian_mm3']:.3e} mm³ · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm · visual preparation evidence bound")
                 webbrowser.open(Path(summary["artifacts"]["viewer"]).as_uri())
-                messagebox.showinfo("AsterMax", "Analysis completed. Persistent CAD scopes, TET10 preparation gates and result artifacts were evidence-bound. Arbitrary-model convergence remains unclaimed.")
+                messagebox.showinfo("AsterMax", "Analysis completed. Persistent CAD scopes, TET10 preparation diagnostics, visual model-preparation evidence and result artifacts were bound. Arbitrary-model convergence remains unclaimed.")
 
             root.after(0, finished)
 
