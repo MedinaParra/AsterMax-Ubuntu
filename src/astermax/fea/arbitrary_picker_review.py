@@ -143,7 +143,16 @@ def build_arbitrary_picker_review_snapshot(prepared: dict, *, max_triangles_per_
         "industrial_validation": False,
         "ansys_equivalence": False,
     }
-    return ArbitraryPickerReviewSnapshot(**core, snapshot_sha256=canonical_sha256(core))
+    runtime = dict(core)
+    for field_name in (
+        "support_face_ids",
+        "load_face_ids",
+        "support_face_signature_sha256",
+        "load_face_signature_sha256",
+        "projected_faces",
+    ):
+        runtime[field_name] = tuple(runtime[field_name])
+    return ArbitraryPickerReviewSnapshot(**runtime, snapshot_sha256=canonical_sha256(core))
 
 
 def install_arbitrary_picker_review_tab(notebook):
