@@ -89,7 +89,7 @@ def build_linear_normal_stress_witness(
     moment_v_nmm: float,
     max_relative_resultant_residual: float = 1.0e-12,
 ) -> LinearNormalStressWitness:
-    """Build an axial + general biaxial bending witness on a verified planar section.
+    """Build an axial + general biaxial bending witness on a planar section.
 
     Local convention uses the right-handed section basis (u, v, n) from C1 and
     normal traction sigma*n. The field is
@@ -101,7 +101,8 @@ def build_linear_normal_stress_witness(
 
     C1 stores I_u=integral(v^2)dA, I_v=integral(u^2)dA and
     I_uv=integral(u*v)dA. Solving these equations supports non-principal axes
-    without silently assuming I_uv=0.
+    without silently assuming I_uv=0. Claim-grade use still requires the exact
+    CAD evidence chain created by analytical_section_chain_evidence().
     """
     determinant, condition_indicator = _validate_section(section)
     n_force = _finite("axial_force_n", axial_force_n)
@@ -176,7 +177,7 @@ def analytical_section_witness_evidence(witness: LinearNormalStressWitness) -> E
         source=EvidenceSource.ANALYTICAL_WITNESS,
         description=(
             "Axial plus biaxial linear normal-stress field reconstructs the declared "
-            "section force and bending moments from CAD-derived section integrals."
+            "section force and bending moments from the supplied section integrals."
         ),
         payload_sha256=witness.witness_sha256,
         metadata={
@@ -192,6 +193,77 @@ def analytical_section_witness_evidence(witness: LinearNormalStressWitness) -> E
             "convention": witness.convention,
             "method": witness.method,
         },
+    )
+
+
+def analytical_section_chain_evidence(
+    face_evidence: EvidenceRecord,
+    section_evidence: EvidenceRecord,
+    witness_evidence: EvidenceRecord,
+) -> EvidenceRecord:
+    """Bind C1 geometry, C1 section integrals and C2 witness to exact payloads.
+
+    ClaimEngine intentionally evaluates categorical evidence requirements. This
+    deterministic binding record prevents a valid witness for section A from
+    being combined with unrelated CAD section evidence B.
+    """
+    if (
+        face_evidence.kind != "CAD_FACE_IDENTITY"
+        or face_evidence.source is not EvidenceSource.DETERMINISTIC_CHECK
+        or not face_evidence.claim_grade
+    ):
+        raise AnalyticalWitnessError("ANALYTICAL_SECTION_CHAIN_INVALID_FACE_EVIDENCE")
+    if (
+        section_evidence.kind != "CAD_SECTION_PROPERTIES"
+        or section_evidence.source is not EvidenceSource.DETERMINISTIC_CHECK
+        or not section_evidence.claim_grade
+        or section_evidence.payload_sha256 is None
+    ):
+        raise AnalyticalWitnessError("ANALYTICAL_SECTION_CHAIN_INVALID_SECTION_EVIDENCE")
+    if (
+        witness_evidence.kind != "ANALYTICAL_SECTION_WITNESS"
+        or witness_evidence.source is not EvidenceSource.ANALYTICAL_WITNESS
+        or not witness_evidence.claim_grade
+        or witness_evidence.payload_sha256 is None
+    ):
+        raise AnalyticalWitnessError("ANALYTICAL_SECTION_CHAIN_INVALID_WITNESS_EVIDENCE")
+
+    face_selection = str(face_evidence.metadata.get("selection_id", ""))
+    section_selection = str(section_evidence.metadata.get("selection_id", ""))
+    witness_selection = str(witness_evidence.metadata.get("selection_id", ""))
+    section_face_signature = str(section_evidence.metadata.get("face_signature_sha256", ""))
+    face_signature = str(face_evidence.metadata.get("signature_sha256", ""))
+    witness_section_sha = str(witness_evidence.metadata.get("section_sha256", ""))
+
+    if not face_selection or not (face_selection == section_selection == witness_selection):
+        raise AnalyticalWitnessError("ANALYTICAL_SECTION_CHAIN_SELECTION_MISMATCH")
+    if not face_signature or section_face_signature != face_signature:
+        raise AnalyticalWitnessError("ANALYTICAL_SECTION_CHAIN_FACE_SIGNATURE_MISMATCH")
+    if witness_section_sha != section_evidence.payload_sha256:
+        raise AnalyticalWitnessError("ANALYTICAL_SECTION_CHAIN_SECTION_SHA_MISMATCH")
+
+    payload = {
+        "schema": "AsterMaxAnalyticalSectionEvidenceChainV1",
+        "selection_id": face_selection,
+        "face_evidence_id": face_evidence.evidence_id,
+        "face_payload_sha256": face_evidence.payload_sha256,
+        "section_evidence_id": section_evidence.evidence_id,
+        "section_payload_sha256": section_evidence.payload_sha256,
+        "witness_evidence_id": witness_evidence.evidence_id,
+        "witness_payload_sha256": witness_evidence.payload_sha256,
+    }
+    chain_sha = canonical_sha256(payload)
+    return EvidenceRecord(
+        evidence_id=f"SECTION_CHAIN:{face_selection}:{chain_sha[:16]}",
+        kind="ANALYTICAL_SECTION_CHAIN",
+        status=EvidenceStatus.VERIFIED,
+        source=EvidenceSource.DETERMINISTIC_CHECK,
+        description=(
+            "Exact C1 face identity, C1 CAD section properties and C2 analytical "
+            "witness payloads are deterministically bound to the same section."
+        ),
+        payload_sha256=chain_sha,
+        metadata=payload,
     )
 
 
@@ -216,6 +288,10 @@ def analytical_section_claim(context_id: str) -> ClaimDefinition:
             ClaimRequirement(
                 "ANALYTICAL_SECTION_WITNESS",
                 allowed_sources=(EvidenceSource.ANALYTICAL_WITNESS,),
+            ),
+            ClaimRequirement(
+                "ANALYTICAL_SECTION_CHAIN",
+                allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,),
             ),
         ),
     )
