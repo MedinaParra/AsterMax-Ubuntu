@@ -5,7 +5,8 @@ import math
 from pathlib import Path
 import sys
 
-from astermax.app import main as desktop_main, run_step_analysis
+from astermax.app import run_step_analysis
+from astermax.desktop_picker_app import desktop_main
 
 
 def _write_fixture_step(path: Path) -> None:
