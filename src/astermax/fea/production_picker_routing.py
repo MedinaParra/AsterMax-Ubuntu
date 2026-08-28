@@ -41,9 +41,9 @@ def prepare_picker_routed_model(
     """
     step = Path(step_path).expanduser().resolve()
     current_step_sha = sha256_file(step)
-    if current_step_sha != assignment.support_selection.source_step_sha256:
+    if current_step_sha != assignment.support_selection.source_sha256:
         raise ProductionPickerRoutingError("PICKER_ROUTE_SUPPORT_STEP_STALE")
-    if current_step_sha != assignment.load_selection.source_step_sha256:
+    if current_step_sha != assignment.load_selection.source_sha256:
         raise ProductionPickerRoutingError("PICKER_ROUTE_LOAD_STEP_STALE")
     if assignment.support_selection.selection_sha256 != assignment.support_binding.named_selection_sha256:
         raise ProductionPickerRoutingError("PICKER_ROUTE_SUPPORT_SELECTION_BINDING_MISMATCH")
