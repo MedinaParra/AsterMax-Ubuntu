@@ -270,8 +270,7 @@ def recognize_x_axis_shoulder_from_observations(
         raise ShaftShoulderRecognitionError("TRANSITION_FACE_AMBIGUOUS:" + ",".join(str(f.tag) for f in transitions))
     transition = transitions[0]
 
-    payload = {
-        "schema": "AsterMaxXAxisShoulderFeatureV1",
+    fields = {
         "feature_id": fid,
         "source_name": str(source_name),
         "source_sha256": str(source_sha256).lower(),
@@ -290,7 +289,8 @@ def recognize_x_axis_shoulder_from_observations(
         "axis_center_yz_mm": axis_center,
         "transition_bbox_mm": transition.bbox_mm,
     }
-    return XAxisShoulderFeature(**payload | {"feature_sha256": canonical_sha256(payload)})
+    hash_payload = {"schema": "AsterMaxXAxisShoulderFeatureV1", **fields}
+    return XAxisShoulderFeature(**fields, feature_sha256=canonical_sha256(hash_payload))
 
 
 def recognize_x_axis_shaft_shoulder(
