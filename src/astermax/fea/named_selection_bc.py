@@ -113,6 +113,7 @@ def bind_named_selection_to_mesh(
         raise NamedSelectionBindingError("named selection role does not match BC binding")
     resolution = resolve_named_selection(step_path, selection)
     keys = tuple(_surface_key_for_member(member, bbox) for member in selection.member_selections)
+    resolved_tags = tuple(int(tag) for tag in resolution.resolved_tags)
     if len(set(keys)) != len(keys):
         raise NamedSelectionBindingError("named selection maps duplicate mesh boundary groups")
     blocks: list[np.ndarray] = []
@@ -122,17 +123,27 @@ def bind_named_selection_to_mesh(
             raise NamedSelectionBindingError(f"mesh boundary {key} does not contain TRI6 data")
         blocks.append(block)
     triangles = np.vstack(blocks)
-    core = {
+    hash_core = {
         "schema": "AsterMaxNamedSelectionMeshBindingV1",
         "name": selection.name,
         "role": selection.role,
         "named_selection_sha256": selection.named_selection_sha256,
         "resolution_sha256": resolution.resolution_sha256,
         "surface_keys": list(keys),
-        "resolved_face_tags": list(resolution.resolved_tags),
+        "resolved_face_tags": list(resolved_tags),
         "tri6_count": int(triangles.shape[0]),
     }
-    binding = NamedSelectionMeshBinding(**core, binding_sha256=canonical_sha256(core))
+    binding = NamedSelectionMeshBinding(
+        schema=hash_core["schema"],
+        name=selection.name,
+        role=selection.role,
+        named_selection_sha256=selection.named_selection_sha256,
+        resolution_sha256=resolution.resolution_sha256,
+        surface_keys=keys,
+        resolved_face_tags=resolved_tags,
+        tri6_count=int(triangles.shape[0]),
+        binding_sha256=canonical_sha256(hash_core),
+    )
     return binding, triangles
 
 
