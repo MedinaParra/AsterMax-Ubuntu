@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 import threading
 import webbrowser
@@ -15,6 +16,7 @@ from .fea.gmsh_bridge import (
     unique_surface_nodes,
 )
 from .fea.live_analysis_evidence import file_sha256, install_live_analysis_evidence_tab
+from .fea.model_preparation_evidence import build_model_preparation_evidence
 from .fea.native_credibility import install_native_credibility_tab
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.solver import solve_linear_static_tet10
@@ -46,6 +48,14 @@ def run_step_analysis(step_path: str | Path, output_dir: str | Path, *, mesh_siz
     source_sha256 = file_sha256(source)
     output.mkdir(parents=True, exist_ok=True)
     mesh = mesh_step_tet10(source, float(mesh_size_mm))
+    preparation = build_model_preparation_evidence(
+        source,
+        step_sha256=source_sha256,
+        bbox_mm=mesh.bbox_mm,
+        nodes_mm=mesh.nodes_mm,
+        elements=mesh.elements,
+    )
+
     material = IsotropicMaterial(float(young_modulus_mpa), float(poisson_ratio))
     fixed_nodes = unique_surface_nodes(mesh.surface_triangles["X_MIN"])
     fixed_dofs = fixed_dofs_for_nodes(fixed_nodes)
@@ -68,6 +78,7 @@ def run_step_analysis(step_path: str | Path, output_dir: str | Path, *, mesh_siz
         "source_step_sha256": source_sha256,
         "units": {"length": "mm", "force": "N", "stress": "MPa"},
         "scope_contract": {"constraint": "X_MIN_FIXED_ALL_TRANSLATIONS", "load": "X_MAX_CONSISTENT_TRI6_RESULTANT"},
+        "model_preparation": asdict(preparation),
         "mesh": {"family": "TET10", "target_size_mm": float(mesh_size_mm), "nodes": int(mesh.nodes_mm.shape[0]), "elements": int(mesh.elements.shape[0]), "dimensions_mm": [float(v) for v in mesh.dimensions_mm]},
         "material": {"young_modulus_mpa": float(young_modulus_mpa), "poisson_ratio": float(poisson_ratio)},
         "resultant_n": [float(v) for v in load],
@@ -87,8 +98,8 @@ def _desktop_main() -> int:
 
     root = tk.Tk()
     root.title("AsterMax PMV · TET10 Verification")
-    root.geometry("900x700")
-    root.minsize(780, 620)
+    root.geometry("940x730")
+    root.minsize(800, 640)
 
     notebook = ttk.Notebook(root)
     notebook.pack(fill="both", expand=True, padx=10, pady=10)
@@ -109,7 +120,7 @@ def _desktop_main() -> int:
 
     frame.columnconfigure(1, weight=1)
     ttk.Label(frame, text="AsterMax PMV", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
-    ttk.Label(frame, text="Linear static TET10 · N-mm-MPa · verification build").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 16))
+    ttk.Label(frame, text="Linear static TET10 · N-mm-MPa · evidence-first verification build").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 16))
 
     def browse_step() -> None:
         path = filedialog.askopenfilename(filetypes=[("STEP geometry", "*.step *.stp"), ("All files", "*.*")])
@@ -128,12 +139,12 @@ def _desktop_main() -> int:
         if command:
             ttk.Button(frame, text=button_text, command=command).grid(row=idx, column=2, padx=(8, 0), pady=5)
 
-    warning = "PMV scope: exactly one STEP solid; X_MIN is fixed and the requested resultant is applied on X_MAX. Arbitrary user models are exported with CONVERGED=false and INDUSTRIAL_VALIDATION=false. Current Model Evidence is bound to this solve's STEP/artifact hashes; fixture Credibility remains separate."
-    ttk.Label(frame, text=warning, wraplength=760).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
+    warning = "PMV scope: exactly one STEP solid; persistent X_MIN/X_MAX face evidence is captured from the exact STEP, then straight-sided TET10 and positive Gauss-point Jacobian gates must pass before the solve. Arbitrary user models remain CONVERGED=false and INDUSTRIAL_VALIDATION=false."
+    ttk.Label(frame, text=warning, wraplength=800).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(16, 10))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(6, 8))
-    ttk.Label(frame, textvariable=status_var, wraplength=760).grid(row=12, column=0, columnspan=3, sticky="w")
-    run_button = ttk.Button(frame, text="Run TET10 analysis")
+    ttk.Label(frame, textvariable=status_var, wraplength=800).grid(row=12, column=0, columnspan=3, sticky="w")
+    run_button = ttk.Button(frame, text="Run evidence-gated TET10 analysis")
     run_button.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(16, 6))
 
     def set_busy(busy: bool) -> None:
@@ -150,7 +161,7 @@ def _desktop_main() -> int:
             messagebox.showerror("Invalid input", str(exc))
             return
         set_busy(True)
-        status_var.set("Meshing and solving…")
+        status_var.set("Capturing CAD scopes, checking TET10 mesh, solving and binding evidence…")
 
         def worker() -> None:
             try:
@@ -168,9 +179,10 @@ def _desktop_main() -> int:
                     messagebox.showerror("AsterMax evidence", str(exc))
                     return
                 checks = summary["checks"]
-                status_var.set(f"Completed: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm · evidence bound")
+                gate = summary["model_preparation"]["mesh_gate"]
+                status_var.set(f"Completed: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · min detJ {gate['minimum_det_jacobian_mm3']:.3e} mm³ · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm · evidence bound")
                 webbrowser.open(Path(summary["artifacts"]["viewer"]).as_uri())
-                messagebox.showinfo("AsterMax", "Analysis completed and Current Model Evidence was hash-verified and bound. Results remain un-converged for arbitrary user geometry.")
+                messagebox.showinfo("AsterMax", "Analysis completed. Persistent CAD scopes, TET10 preparation gates and result artifacts were evidence-bound. Arbitrary-model convergence remains unclaimed.")
 
             root.after(0, finished)
 
