@@ -1,0 +1,31 @@
+name: Windows Curved TRI6 Surface Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-tri6-surface-audit-v1.6
+
+jobs:
+  audit-curved-tri6-surface:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness including Gmsh TRI6 ordering contract
+        run: python -m pytest -q
+      - name: Audit selected curved TRI6 surface and replay C10b candidate
+        run: python benchmarks/curved_tri6_surface_audit.py
+      - name: Upload C10c audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-tri6-surface-audit-windows
+          path: |
+            curved_tet10_high_order_optimize.step
+            curved_tri6_surface_audit.json
+          if-no-files-found: error
