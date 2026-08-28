@@ -15,6 +15,7 @@ on:
       - agent/windows-tet10-viewer-evidence-v1.5
       - agent/tet4-vs-tet10-efficiency-v1.6
       - agent/analytical-torsion-10cycles-v0.7
+      - agent/stress-concentration-neighborhood-10cycles-v0.8
 
 jobs:
   verify-fea-core:
@@ -96,4 +97,13 @@ jobs:
           path: |
             analytical_circular_shaft.step
             analytical_circular_shaft_evidence.json
+          if-no-files-found: error
+      - name: Generate local stress credibility evidence
+        run: python benchmarks/local_stress_credibility.py
+      - name: Upload local stress credibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-stress-credibility-windows
+          path: local_stress_credibility.json
           if-no-files-found: error
