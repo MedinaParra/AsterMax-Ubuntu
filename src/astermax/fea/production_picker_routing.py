@@ -45,9 +45,9 @@ def prepare_picker_routed_model(
         raise ProductionPickerRoutingError("PICKER_ROUTE_SUPPORT_STEP_STALE")
     if current_step_sha != assignment.load_selection.source_sha256:
         raise ProductionPickerRoutingError("PICKER_ROUTE_LOAD_STEP_STALE")
-    if assignment.support_selection.selection_sha256 != assignment.support_binding.named_selection_sha256:
+    if assignment.support_selection.named_selection_sha256 != assignment.support_binding.named_selection_sha256:
         raise ProductionPickerRoutingError("PICKER_ROUTE_SUPPORT_SELECTION_BINDING_MISMATCH")
-    if assignment.load_selection.selection_sha256 != assignment.load_binding.named_selection_sha256:
+    if assignment.load_selection.named_selection_sha256 != assignment.load_binding.named_selection_sha256:
         raise ProductionPickerRoutingError("PICKER_ROUTE_LOAD_SELECTION_BINDING_MISMATCH")
     if set(assignment.support_binding.face_signature_sha256) & set(assignment.load_binding.face_signature_sha256):
         raise ProductionPickerRoutingError("PICKER_ROUTE_SUPPORT_LOAD_OVERLAP")
@@ -70,8 +70,8 @@ def prepare_picker_routed_model(
         "source_step_sha256": current_step_sha,
         "support_face_ids": list(assignment.support_face_ids),
         "load_face_ids": list(assignment.load_face_ids),
-        "support_named_selection_sha256": assignment.support_selection.selection_sha256,
-        "load_named_selection_sha256": assignment.load_selection.selection_sha256,
+        "support_named_selection_sha256": assignment.support_selection.named_selection_sha256,
+        "load_named_selection_sha256": assignment.load_selection.named_selection_sha256,
         "support_binding_sha256": assignment.support_binding.binding_sha256,
         "load_binding_sha256": assignment.load_binding.binding_sha256,
         "mesh_size_mm": float(mesh_size_mm),
@@ -81,8 +81,8 @@ def prepare_picker_routed_model(
         source_step_sha256=current_step_sha,
         support_face_ids=tuple(assignment.support_face_ids),
         load_face_ids=tuple(assignment.load_face_ids),
-        support_named_selection_sha256=assignment.support_selection.selection_sha256,
-        load_named_selection_sha256=assignment.load_selection.selection_sha256,
+        support_named_selection_sha256=assignment.support_selection.named_selection_sha256,
+        load_named_selection_sha256=assignment.load_selection.named_selection_sha256,
         support_binding_sha256=assignment.support_binding.binding_sha256,
         load_binding_sha256=assignment.load_binding.binding_sha256,
         mesh_size_mm=float(mesh_size_mm),
