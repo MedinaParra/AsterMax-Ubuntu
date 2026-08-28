@@ -124,6 +124,27 @@ def empirical_local_neighborhood_claim(context_id: str) -> ClaimDefinition:
     )
 
 
+def analytical_local_neighborhood_claim(context_id: str) -> ClaimDefinition:
+    return ClaimDefinition(
+        claim_id="CLAIM_ANALYTICAL_LOCAL_NEIGHBORHOOD_CORROBORATED",
+        context_id=context_id,
+        statement=(
+            "For the declared analytical verification witness, the hash-bound local result neighborhood "
+            "agrees with the independent field within the declared tolerance."
+        ),
+        requirements=(
+            ClaimRequirement(
+                "KIRSCH_HOLE_WITNESS",
+                allowed_sources=(EvidenceSource.ANALYTICAL_WITNESS,),
+            ),
+            ClaimRequirement(
+                "LOCAL_NEIGHBORHOOD_BINDING",
+                allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,),
+            ),
+        ),
+    )
+
+
 def local_peak_reliability_claim(context_id: str) -> ClaimDefinition:
     return ClaimDefinition(
         claim_id="CLAIM_LOCAL_FEA_PEAK_MESH_STABLE",
