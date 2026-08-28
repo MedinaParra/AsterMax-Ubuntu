@@ -1,0 +1,26 @@
+name: Windows C4.5 Pre-Solve Review Gate
+
+on:
+  pull_request:
+    paths:
+      - "src/astermax/app.py"
+      - "src/astermax/fea/pre_solve_review.py"
+      - "tests/test_pre_solve_review.py"
+      - ".github/workflows/windows-c4-5-pre-solve-review.yml"
+
+jobs:
+  verify-pre-solve-review:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PMV and full test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile C4.5 modules with warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/pre_solve_review.py src/astermax/app.py
+      - name: Run C4.5 pre-solve review harness
+        run: python -m pytest tests/test_pre_solve_review.py -q
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
