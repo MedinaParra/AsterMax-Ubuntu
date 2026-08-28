@@ -14,6 +14,7 @@ on:
       - agent/windows-tet10-global-v1.4
       - agent/windows-tet10-viewer-evidence-v1.5
       - agent/tet4-vs-tet10-efficiency-v1.6
+      - agent/analytical-torsion-10cycles-v0.7
 
 jobs:
   verify-fea-core:
@@ -84,4 +85,15 @@ jobs:
         with:
           name: tet4-vs-tet10-efficiency-windows
           path: tet4_vs_tet10_efficiency.json
+          if-no-files-found: error
+      - name: Generate analytical circular shaft evidence
+        run: python benchmarks/analytical_circular_shaft_evidence.py
+      - name: Upload analytical circular shaft evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analytical-circular-shaft-evidence-windows
+          path: |
+            analytical_circular_shaft.step
+            analytical_circular_shaft_evidence.json
           if-no-files-found: error
