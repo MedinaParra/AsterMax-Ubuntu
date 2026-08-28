@@ -1,0 +1,30 @@
+name: Windows C5.2 Arbitrary Face Ownership
+
+on:
+  pull_request:
+    paths:
+      - "src/astermax/fea/face_ownership.py"
+      - "src/astermax/fea/persistent_geometry.py"
+      - "src/astermax/fea/named_selections.py"
+      - "src/astermax/fea/gmsh_bridge.py"
+      - "tests/test_face_ownership.py"
+      - ".github/workflows/windows-c5-2-face-ownership.yml"
+
+jobs:
+  verify-arbitrary-face-ownership:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PMV and full test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile C5.2 modules with warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/face_ownership.py src/astermax/fea/persistent_geometry.py src/astermax/fea/named_selections.py
+      - name: Run C5.2 arbitrary face ownership harness
+        run: python -m pytest tests/test_face_ownership.py -q
+      - name: Re-run C5 named-selection harnesses
+        run: python -m pytest tests/test_named_selections.py tests/test_named_selection_bc.py -q
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
