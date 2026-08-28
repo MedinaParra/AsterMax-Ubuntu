@@ -98,53 +98,80 @@ def main() -> int:
     if geometry.mesh_sha256 != mesh.mesh_sha256:
         raise RuntimeError(f"CURVED_GEOMETRY_AUDIT_MESH_IDENTITY_MISMATCH:{geometry.mesh_sha256}!={mesh.mesh_sha256}")
 
-    curved_indices = []
-    deviations = []
-    scales = []
+    curved_indices: list[int] = []
+    deviations: list[float] = []
     for index, conn in enumerate(mesh.elements):
         coords = mesh.nodes_mm[conn]
         deviation = _midside_geometry_deviation(coords)
         scale = max(float(np.linalg.norm(coords[:4].max(axis=0) - coords[:4].min(axis=0))), 1.0)
         deviations.append(deviation)
-        scales.append(scale)
         if deviation > scale * 1.0e-10:
             curved_indices.append(index)
     if not curved_indices:
         raise RuntimeError("GMSH_CURVED_MODE_PRODUCED_NO_CURVED_TET10_ELEMENTS")
 
     minimum_det = float("inf")
-    minimum_ratio = float("inf")
+    minimum_ratio: float | None = None
+    nonpositive_sample_count = 0
+    invalid_curved_indices: list[int] = []
+    valid_curved_indices: list[int] = []
     for index in curved_indices:
-        audit = tet10_isoparametric_jacobian_audit(mesh.nodes_mm[mesh.elements[index]], quadrature_order=4)
+        audit = tet10_isoparametric_jacobian_audit(
+            mesh.nodes_mm[mesh.elements[index]], quadrature_order=4
+        )
         minimum_det = min(minimum_det, audit.minimum_det_jacobian)
-        minimum_ratio = min(minimum_ratio, audit.minimum_over_maximum_ratio)
+        nonpositive_sample_count += audit.nonpositive_point_count
+        if audit.all_positive:
+            valid_curved_indices.append(index)
+            if audit.minimum_over_maximum_ratio is not None:
+                minimum_ratio = (
+                    audit.minimum_over_maximum_ratio
+                    if minimum_ratio is None
+                    else min(minimum_ratio, audit.minimum_over_maximum_ratio)
+                )
+        else:
+            invalid_curved_indices.append(index)
 
-    worst_index = int(curved_indices[int(np.argmax(np.asarray(deviations)[curved_indices]))])
-    worst_coords = mesh.nodes_mm[mesh.elements[worst_index]]
     material = IsotropicMaterial(young_modulus_mpa=200000.0, poisson_ratio=0.3)
-    k_four = tet10_stiffness(worst_coords, material)
-    k_ref4 = tet10_stiffness_isoparametric_reference(worst_coords, material, quadrature_order=4)
-    k_ref5 = tet10_stiffness_isoparametric_reference(worst_coords, material, quadrature_order=5)
-    four_vs_ref5 = relative_matrix_difference(k_four, k_ref5)
-    ref4_vs_ref5 = relative_matrix_difference(k_ref4, k_ref5)
+    quadrature_element_index: int | None = None
+    four_vs_ref5: float | None = None
+    ref4_vs_ref5: float | None = None
+    if valid_curved_indices:
+        quadrature_element_index = int(
+            max(valid_curved_indices, key=lambda i: deviations[i])
+        )
+        worst_valid_coords = mesh.nodes_mm[mesh.elements[quadrature_element_index]]
+        k_four = tet10_stiffness(worst_valid_coords, material)
+        k_ref4 = tet10_stiffness_isoparametric_reference(
+            worst_valid_coords, material, quadrature_order=4
+        )
+        k_ref5 = tet10_stiffness_isoparametric_reference(
+            worst_valid_coords, material, quadrature_order=5
+        )
+        four_vs_ref5 = relative_matrix_difference(k_four, k_ref5)
+        ref4_vs_ref5 = relative_matrix_difference(k_ref4, k_ref5)
 
+    all_curved_jacobians_positive = len(invalid_curved_indices) == 0
+    reference_converged = (
+        ref4_vs_ref5 is not None
+        and ref4_vs_ref5 <= MAX_REFERENCE_ORDER4_VS5_RELATIVE_STIFFNESS
+    )
     checks = {
         "curved_elements_exist": len(curved_indices) > 0,
-        "all_audited_curved_jacobians_positive": minimum_det > 0.0,
+        "all_audited_curved_jacobians_positive": all_curved_jacobians_positive,
         "curved_geometry_audit_matches_mesh_sha": geometry.mesh_sha256 == mesh.mesh_sha256,
         "cad_projected_midside_nodes_on_fillet": geometry.max_midside_deviation_over_fillet_radius <= 1.0e-8,
         "sampled_interpolated_surface_within_internal_target": (
-            geometry.max_sampled_surface_deviation_over_fillet_radius <= MAX_SAMPLED_SURFACE_ERROR_OVER_FILLET_RADIUS
+            geometry.max_sampled_surface_deviation_over_fillet_radius
+            <= MAX_SAMPLED_SURFACE_ERROR_OVER_FILLET_RADIUS
         ),
-        "independent_reference_quadrature_converged_on_worst_curved_element": (
-            ref4_vs_ref5 <= MAX_REFERENCE_ORDER4_VS5_RELATIVE_STIFFNESS
-        ),
+        "independent_reference_quadrature_converged_on_worst_valid_curved_element": reference_converged,
         "historical_four_point_not_used_as_curved_reference": True,
     }
     passed = all(checks.values())
 
     report = {
-        "schema": "AsterMaxCurvedTet10CodeVerificationBenchmarkV1",
+        "schema": "AsterMaxCurvedTet10CodeVerificationBenchmarkV2",
         "classification": "CURVED_ISOPARAMETRIC_CODE_VERIFICATION_NOT_SOLVER_VALIDATION",
         "curved_tet10_solver_enabled": False,
         "industrial_validation_claim": False,
@@ -164,12 +191,17 @@ def main() -> int:
             "geometry_evidence_sha256": geometry.evidence_sha256,
         },
         "jacobian_audit": {
-            "method": "DUFFY_GL4_64_POINTS_ON_EVERY_CURVED_ELEMENT",
+            "method": "DUFFY_GL4_64_POINTS_ON_EVERY_CURVED_ELEMENT_RAW_DETJ_DIAGNOSTIC",
             "minimum_det_jacobian": minimum_det,
-            "minimum_det_over_maximum_ratio": minimum_ratio,
+            "minimum_positive_element_det_over_maximum_ratio": minimum_ratio,
+            "invalid_curved_tet10_count": len(invalid_curved_indices),
+            "valid_curved_tet10_count": len(valid_curved_indices),
+            "nonpositive_sample_count": nonpositive_sample_count,
+            "first_invalid_element_indices_runtime_only": invalid_curved_indices[:20],
+            "production_solver_guard_unchanged": True,
         },
-        "quadrature_audit_worst_curved_element": {
-            "element_index_runtime_only": worst_index,
+        "quadrature_audit_worst_valid_curved_element": {
+            "element_index_runtime_only": quadrature_element_index,
             "four_point_vs_duffy_order5_relative_stiffness": four_vs_ref5,
             "duffy_order4_vs_order5_relative_stiffness": ref4_vs_ref5,
             "reference_acceptance_limit": MAX_REFERENCE_ORDER4_VS5_RELATIVE_STIFFNESS,
@@ -183,7 +215,8 @@ def main() -> int:
         "passed": passed,
         "interpretation_boundary": (
             "C10 verifies mathematical support for general TET10 isoparametric mapping and audits a CAD-projected Gmsh curved mesh. "
-            "It does not enable a curved production solver. The historical four-point stiffness rule remains verified only for straight-sided geometry; Duffy GL4/GL5 are independent verification references, not yet a selected production integration policy."
+            "Non-positive Jacobian samples are recorded as blocking evidence rather than hidden by an exception; the production solver guard remains unchanged. "
+            "C10 does not enable a curved production solver. The historical four-point stiffness rule remains verified only for straight-sided geometry; Duffy GL4/GL5 are independent verification references, not yet a selected production integration policy."
         ),
     }
     report["benchmark_sha256"] = canonical_sha256(report)
