@@ -18,6 +18,7 @@ on:
       - agent/stress-concentration-neighborhood-10cycles-v0.8
       - agent/step-feature-local-adaptivity-v0.9
       - agent/step-shoulder-real-tet10-solve-v1.0
+      - agent/step-shoulder-local-stress-convergence-v1.1
 
 jobs:
   verify-fea-core:
@@ -130,4 +131,15 @@ jobs:
           path: |
             step_shoulder_real_tet10_solve.step
             step_shoulder_real_tet10_solve.json
+          if-no-files-found: error
+      - name: Measure real local shoulder stress convergence
+        run: python benchmarks/step_shoulder_local_stress_convergence.py
+      - name: Upload real local shoulder stress convergence evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-shoulder-local-stress-convergence-windows
+          path: |
+            step_shoulder_local_stress_convergence.step
+            step_shoulder_local_stress_convergence.json
           if-no-files-found: error
