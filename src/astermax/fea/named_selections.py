@@ -36,6 +36,7 @@ class PersistentNamedSelection:
     source_sha256: str
     face_count: int
     faces: tuple[NamedSelectionFace, ...]
+    member_selections: tuple[PersistentFaceSelection, ...]
     named_selection_sha256: str
 
 
@@ -81,15 +82,14 @@ def capture_named_selection(
     if len(set(tags)) != len(tags):
         raise NamedSelectionError("named selection contains duplicate face tags")
 
-    captured: list[PersistentFaceSelection] = []
-    for index, tag in enumerate(tags):
-        captured.append(
-            capture_face_selection(
-                step_path,
-                tag,
-                f"NAMED_{clean_role}_{canonical_sha256({'name': clean_name})[:12]}_{index}",
-            )
+    captured = tuple(
+        capture_face_selection(
+            step_path,
+            tag,
+            f"NAMED_{clean_role}_{canonical_sha256({'name': clean_name})[:12]}_{index}",
         )
+        for index, tag in enumerate(tags)
+    )
     source_sha = captured[0].source_sha256
     if any(item.source_sha256 != source_sha for item in captured):
         raise NamedSelectionError("named selection faces do not share one STEP identity")
@@ -113,30 +113,52 @@ def capture_named_selection(
         "faces": [asdict(face) for face in faces],
         "member_selection_sha256": [item.selection_sha256 for item in captured],
     }
-    result = PersistentNamedSelection(
+    return PersistentNamedSelection(
         schema=core["schema"],
         name=clean_name,
         role=clean_role,
         source_sha256=source_sha,
         face_count=len(faces),
         faces=faces,
+        member_selections=captured,
         named_selection_sha256=canonical_sha256(core),
     )
-    object.__setattr__(result, "_members", tuple(captured))
-    return result
 
 
 def resolve_named_selection(step_path: str | Path, selection: PersistentNamedSelection) -> NamedSelectionResolution:
-    members = getattr(selection, "_members", None)
-    if not members or len(members) != selection.face_count:
-        raise NamedSelectionError("named selection member provenance is unavailable")
-    resolutions = tuple(resolve_face_selection(step_path, member) for member in members)
+    if selection.schema != "AsterMaxPersistentNamedSelectionV1":
+        raise NamedSelectionError("unsupported named-selection schema")
+    if selection.face_count <= 0 or len(selection.member_selections) != selection.face_count:
+        raise NamedSelectionError("named selection member provenance is incomplete")
+    if len(selection.faces) != selection.face_count:
+        raise NamedSelectionError("named selection face summary is incomplete")
+    if any(member.source_sha256 != selection.source_sha256 for member in selection.member_selections):
+        raise NamedSelectionError("named selection source provenance mismatch")
+    if tuple(member.selection_sha256 for member in selection.member_selections) != tuple(
+        face.selection_sha256 for face in selection.faces
+    ):
+        raise NamedSelectionError("named selection member hash mismatch")
+
+    resolutions = tuple(resolve_face_selection(step_path, member) for member in selection.member_selections)
     tags = tuple(item.resolved_tag for item in resolutions)
     signatures = tuple(item.signature_sha256 for item in resolutions)
     if len(set(tags)) != len(tags):
         raise NamedSelectionError("named selection resolved duplicate faces")
     if signatures != tuple(face.signature_sha256 for face in selection.faces):
         raise NamedSelectionError("named selection face signature mismatch")
+
+    expected_core = {
+        "schema": selection.schema,
+        "name": selection.name,
+        "role": selection.role,
+        "source_sha256": selection.source_sha256,
+        "face_count": selection.face_count,
+        "faces": [asdict(face) for face in selection.faces],
+        "member_selection_sha256": [member.selection_sha256 for member in selection.member_selections],
+    }
+    if canonical_sha256(expected_core) != selection.named_selection_sha256:
+        raise NamedSelectionError("named selection identity was tampered")
+
     core = {
         "schema": "AsterMaxNamedSelectionResolutionV1",
         "name": selection.name,
