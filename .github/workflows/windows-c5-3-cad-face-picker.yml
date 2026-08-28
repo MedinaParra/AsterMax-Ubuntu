@@ -1,0 +1,30 @@
+name: Windows C5.3 CAD Face Picker
+
+on:
+  pull_request:
+    paths:
+      - "src/astermax/fea/cad_face_picker.py"
+      - "src/astermax/fea/face_ownership.py"
+      - "src/astermax/fea/arbitrary_bc.py"
+      - "src/astermax/fea/named_selections.py"
+      - "tests/test_cad_face_picker.py"
+      - ".github/workflows/windows-c5-3-cad-face-picker.yml"
+
+jobs:
+  verify-cad-face-picker:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PMV and full test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile C5.3 picker with warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/cad_face_picker.py
+      - name: Run C5.3 CAD face picker harness
+        run: python -m pytest tests/test_cad_face_picker.py -q
+      - name: Re-run arbitrary-face production harnesses
+        run: python -m pytest tests/test_face_ownership.py tests/test_arbitrary_bc.py tests/test_named_selections.py tests/test_named_selection_bc.py -q
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
