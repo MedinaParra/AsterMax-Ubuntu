@@ -12,6 +12,7 @@ from astermax.credibility import (
 )
 from astermax.fea.analytical_witness import (
     AnalyticalWitnessError,
+    analytical_section_chain_evidence,
     analytical_section_claim,
     analytical_section_witness_evidence,
     build_linear_normal_stress_witness,
@@ -54,10 +55,10 @@ def _x_max_face(path: Path) -> int:
     return matches[0]
 
 
-def _synthetic_section(*, i_u=5000.0, i_v=8000.0, i_uv=2000.0):
+def _synthetic_section(*, selection_id="SYNTHETIC_SECTION", i_u=5000.0, i_v=8000.0, i_uv=2000.0):
     payload = {
         "schema": "AsterMaxPlanarSectionPropertiesV1",
-        "selection_id": "SYNTHETIC_SECTION",
+        "selection_id": selection_id,
         "source_sha256": "1" * 64,
         "face_signature_sha256": "2" * 64,
         "area_mm2": 400.0,
@@ -151,7 +152,7 @@ def test_nonfinite_load_is_rejected():
         )
 
 
-def test_c2_witness_feeds_c0_claim_engine_only_with_cad_evidence(tmp_path):
+def test_c2_witness_feeds_c0_claim_engine_only_with_bound_cad_chain(tmp_path):
     path = tmp_path / "box.step"
     _write_box(path)
     selection = capture_face_selection(path, _x_max_face(path), "C2_CLAIM_SECTION")
@@ -173,27 +174,39 @@ def test_c2_witness_feeds_c0_claim_engine_only_with_cad_evidence(tmp_path):
             "persistent CAD face identity verified",
             "CAD section integrals verified",
             "section resultants reconstructed within deterministic tolerance",
+            "analytical witness bound to the exact CAD section payload",
         ),
         consequence_level=ConsequenceLevel.HIGH,
     )
     claim = analytical_section_claim(context.context_id)
 
-    incomplete = EvidenceGraph(context)
-    incomplete.add(persistent_face_identity_evidence(selection, resolution))
-    incomplete.add(section_properties_evidence(section))
-    blocked = ClaimEngine.evaluate(claim, incomplete)
-    assert blocked.state is ClaimState.BLOCKED
-    assert any("ANALYTICAL_SECTION_WITNESS" in item for item in blocked.blockers)
-
-    graph = EvidenceGraph(context)
     face_evidence = persistent_face_identity_evidence(selection, resolution)
     section_evidence = section_properties_evidence(section)
     witness_evidence = analytical_section_witness_evidence(witness)
-    graph.add(face_evidence)
-    graph.add(section_evidence)
-    graph.add(witness_evidence)
+
+    incomplete = EvidenceGraph(context)
+    incomplete.add(face_evidence)
+    incomplete.add(section_evidence)
+    incomplete.add(witness_evidence)
+    incomplete.link(section_evidence.evidence_id, face_evidence.evidence_id, "DERIVED_FROM")
+    incomplete.link(witness_evidence.evidence_id, section_evidence.evidence_id, "USES_SECTION")
+    blocked = ClaimEngine.evaluate(claim, incomplete)
+    assert blocked.state is ClaimState.BLOCKED
+    assert any("ANALYTICAL_SECTION_CHAIN" in item for item in blocked.blockers)
+
+    chain_evidence = analytical_section_chain_evidence(
+        face_evidence,
+        section_evidence,
+        witness_evidence,
+    )
+    graph = EvidenceGraph(context)
+    for record in (face_evidence, section_evidence, witness_evidence, chain_evidence):
+        graph.add(record)
     graph.link(section_evidence.evidence_id, face_evidence.evidence_id, "DERIVED_FROM")
     graph.link(witness_evidence.evidence_id, section_evidence.evidence_id, "USES_SECTION")
+    graph.link(chain_evidence.evidence_id, face_evidence.evidence_id, "BINDS_FACE")
+    graph.link(chain_evidence.evidence_id, section_evidence.evidence_id, "BINDS_SECTION")
+    graph.link(chain_evidence.evidence_id, witness_evidence.evidence_id, "BINDS_WITNESS")
 
     decision = ClaimEngine.evaluate(claim, graph)
     assert decision.state is ClaimState.PERMITTED
@@ -201,7 +214,33 @@ def test_c2_witness_feeds_c0_claim_engine_only_with_cad_evidence(tmp_path):
         face_evidence.evidence_id,
         section_evidence.evidence_id,
         witness_evidence.evidence_id,
+        chain_evidence.evidence_id,
     }
+
+
+def test_chain_rejects_witness_from_different_section(tmp_path):
+    path = tmp_path / "box.step"
+    _write_box(path)
+    selection = capture_face_selection(path, _x_max_face(path), "C2_BINDING_SECTION")
+    resolution = resolve_face_selection(path, selection)
+    section = planar_section_properties(path, selection)
+    face_evidence = persistent_face_identity_evidence(selection, resolution)
+    section_evidence = section_properties_evidence(section)
+
+    other_section = _synthetic_section(selection_id=selection.selection_id)
+    other_witness = build_linear_normal_stress_witness(
+        other_section,
+        axial_force_n=100.0,
+        moment_u_nmm=20.0,
+        moment_v_nmm=30.0,
+    )
+    other_witness_evidence = analytical_section_witness_evidence(other_witness)
+    with pytest.raises(AnalyticalWitnessError, match="SECTION_SHA_MISMATCH"):
+        analytical_section_chain_evidence(
+            face_evidence,
+            section_evidence,
+            other_witness_evidence,
+        )
 
 
 def test_witness_hash_is_deterministic_for_same_section_and_loads():
