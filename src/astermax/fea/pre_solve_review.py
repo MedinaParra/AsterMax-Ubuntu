@@ -48,13 +48,7 @@ class ModelPreparationAcceptance:
     acceptance_sha256: str
 
 
-def _validated_analysis_inputs(
-    *,
-    mesh_size_mm: float,
-    young_modulus_mpa: float,
-    poisson_ratio: float,
-    resultant_n: tuple[float, float, float],
-) -> tuple[float, float, float, np.ndarray]:
+def _validated_analysis_inputs(*, mesh_size_mm: float, young_modulus_mpa: float, poisson_ratio: float, resultant_n: tuple[float, float, float]) -> tuple[float, float, float, np.ndarray]:
     mesh_size = float(mesh_size_mm)
     young = float(young_modulus_mpa)
     poisson = float(poisson_ratio)
@@ -70,40 +64,17 @@ def _validated_analysis_inputs(
     return mesh_size, young, poisson, load
 
 
-def prepare_model_for_review(
-    step_path: str | Path,
-    *,
-    mesh_size_mm: float,
-    young_modulus_mpa: float,
-    poisson_ratio: float,
-    resultant_n: tuple[float, float, float],
-) -> dict[str, Any]:
+def prepare_model_for_review(step_path: str | Path, *, mesh_size_mm: float, young_modulus_mpa: float, poisson_ratio: float, resultant_n: tuple[float, float, float]) -> dict[str, Any]:
     source = Path(step_path).expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"STEP file not found: {source}")
     if source.suffix.lower() not in {".step", ".stp"}:
         raise PreSolveReviewError("source geometry must be a .step or .stp file")
-    mesh_size, young, poisson, load = _validated_analysis_inputs(
-        mesh_size_mm=mesh_size_mm,
-        young_modulus_mpa=young_modulus_mpa,
-        poisson_ratio=poisson_ratio,
-        resultant_n=resultant_n,
-    )
+    mesh_size, young, poisson, load = _validated_analysis_inputs(mesh_size_mm=mesh_size_mm, young_modulus_mpa=young_modulus_mpa, poisson_ratio=poisson_ratio, resultant_n=resultant_n)
     step_sha = file_sha256(source)
     mesh = mesh_step_tet10(source, mesh_size)
-    preparation = build_model_preparation_evidence(
-        source,
-        step_sha256=step_sha,
-        bbox_mm=mesh.bbox_mm,
-        nodes_mm=mesh.nodes_mm,
-        elements=mesh.elements,
-    )
-    visual = build_visual_model_preparation_snapshot(
-        nodes_mm=mesh.nodes_mm,
-        elements=mesh.elements,
-        surface_triangles=mesh.surface_triangles,
-        preparation=asdict(preparation),
-    )
+    preparation = build_model_preparation_evidence(source, step_sha256=step_sha, bbox_mm=mesh.bbox_mm, nodes_mm=mesh.nodes_mm, elements=mesh.elements)
+    visual = build_visual_model_preparation_snapshot(nodes_mm=mesh.nodes_mm, elements=mesh.elements, surface_triangles=mesh.surface_triangles, preparation=asdict(preparation))
     core = {
         "schema": "AsterMaxPreSolveReviewV1",
         "step_sha256": step_sha,
@@ -114,7 +85,7 @@ def prepare_model_for_review(
         "mesh_target_size_mm": mesh_size,
         "node_count": int(mesh.nodes_mm.shape[0]),
         "tet10_count": int(mesh.elements.shape[0]),
-        "minimum_det_jacobian_mm3": float(preparation.mesh_gate.minimum_det_jacobian_mm3),
+        "minimum_det_jacobian_mm3": float(preparation.mesh_gate["minimum_det_jacobian_mm3"]),
         "edge_ratio_minimum": float(visual.edge_ratio_minimum),
         "material_young_modulus_mpa": young,
         "material_poisson_ratio": poisson,
@@ -125,13 +96,7 @@ def prepare_model_for_review(
         "ansys_equivalence": False,
     }
     review = PreSolveReviewSnapshot(**core, review_sha256=canonical_sha256(core))
-    return {
-        "source": source,
-        "mesh": mesh,
-        "preparation": preparation,
-        "visual": visual,
-        "review": review,
-    }
+    return {"source": source, "mesh": mesh, "preparation": preparation, "visual": visual, "review": review}
 
 
 def accept_model_preparation(review: PreSolveReviewSnapshot) -> ModelPreparationAcceptance:
@@ -139,11 +104,7 @@ def accept_model_preparation(review: PreSolveReviewSnapshot) -> ModelPreparation
         raise PreSolveReviewError("MODEL_PREPARATION_REVIEW_NOT_ACCEPTABLE")
     if review.converged or review.industrial_validation or review.ansys_equivalence:
         raise PreSolveReviewError("MODEL_PREPARATION_REVIEW_ILLEGAL_CLAIM")
-    core = {
-        "schema": "AsterMaxModelPreparationAcceptanceV1",
-        "review_sha256": review.review_sha256,
-        "state": "MODEL_PREPARATION_ACCEPTED",
-    }
+    core = {"schema": "AsterMaxModelPreparationAcceptanceV1", "review_sha256": review.review_sha256, "state": "MODEL_PREPARATION_ACCEPTED"}
     return ModelPreparationAcceptance(**core, acceptance_sha256=canonical_sha256(core))
 
 
@@ -158,11 +119,7 @@ def verify_acceptance(prepared: dict[str, Any], acceptance: ModelPreparationAcce
         raise PreSolveReviewError("MODEL_PREPARATION_ACCEPTANCE_STALE")
     if file_sha256(source) != review.step_sha256:
         raise PreSolveReviewError("STEP_CHANGED_AFTER_MODEL_PREPARATION_REVIEW")
-    expected = canonical_sha256({
-        "schema": acceptance.schema,
-        "review_sha256": acceptance.review_sha256,
-        "state": acceptance.state,
-    })
+    expected = canonical_sha256({"schema": acceptance.schema, "review_sha256": acceptance.review_sha256, "state": acceptance.state})
     if acceptance.acceptance_sha256 != expected:
         raise PreSolveReviewError("MODEL_PREPARATION_ACCEPTANCE_TAMPERED")
 
@@ -170,9 +127,4 @@ def verify_acceptance(prepared: dict[str, Any], acceptance: ModelPreparationAcce
 def visual_preparation_payload(prepared: dict[str, Any]) -> dict[str, Any]:
     mesh = prepared["mesh"]
     preparation = prepared["preparation"]
-    return {
-        "nodes_mm": mesh.nodes_mm,
-        "elements": mesh.elements,
-        "surface_triangles": mesh.surface_triangles,
-        "preparation": asdict(preparation),
-    }
+    return {"nodes_mm": mesh.nodes_mm, "elements": mesh.elements, "surface_triangles": mesh.surface_triangles, "preparation": asdict(preparation)}
