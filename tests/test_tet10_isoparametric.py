@@ -102,7 +102,10 @@ def test_curved_reference_quadrature_converges_and_jacobians_stay_positive():
     assert diff45 < diff34
     assert diff45 < 1.0e-4
     audit = tet10_isoparametric_jacobian_audit(coords, quadrature_order=5)
+    assert audit.all_positive is True
+    assert audit.nonpositive_point_count == 0
     assert audit.minimum_det_jacobian > 0.0
+    assert audit.minimum_over_maximum_ratio is not None
     assert 0.0 < audit.minimum_over_maximum_ratio <= 1.0
 
 
@@ -115,8 +118,15 @@ def test_four_point_rule_is_not_silently_relabelled_as_curved_reference():
     assert relative_matrix_difference(four_point, reference) > 1.0e-5
 
 
-def test_inverted_curved_mapping_is_rejected():
+def test_inverted_curved_mapping_is_measured_without_weakening_solver_guard():
     coords = _mild_curved_coords()
     coords[[0, 1]] = coords[[1, 0]]
-    with pytest.raises(ValueError, match="Degenerate or inverted TET10 Jacobian|non-positive"):
-        tet10_isoparametric_jacobian_audit(coords, quadrature_order=4)
+    audit = tet10_isoparametric_jacobian_audit(coords, quadrature_order=4)
+    assert audit.all_positive is False
+    assert audit.nonpositive_point_count > 0
+    assert audit.minimum_det_jacobian <= 0.0
+    with pytest.raises(ValueError, match="Degenerate or inverted TET10 Jacobian"):
+        tet10_B_matrix(coords, duffy_tetra_gauss_rule(4).points[int(np.argmin([
+            np.linalg.det(coords.T @ __import__('astermax.fea.tet10', fromlist=['tet10_shape_derivatives']).tet10_shape_derivatives(p))
+            for p in duffy_tetra_gauss_rule(4).points
+        ]))])
