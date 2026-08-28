@@ -159,7 +159,12 @@ def build_cad_face_picker_catalog(
         "faces": [asdict(face) for face in faces],
     }
     return CadFacePickerCatalog(
-        **core,
+        schema=core["schema"],
+        source_step_sha256=inventory.source_step_sha256,
+        ownership_sha256=inventory.ownership_sha256,
+        viewport_width_px=int(viewport_width_px),
+        viewport_height_px=int(viewport_height_px),
+        projection_contract=core["projection_contract"],
         faces=tuple(faces),
         catalog_sha256=canonical_sha256(core),
     )
