@@ -17,6 +17,7 @@ on:
       - agent/analytical-torsion-10cycles-v0.7
       - agent/stress-concentration-neighborhood-10cycles-v0.8
       - agent/step-feature-local-adaptivity-v0.9
+      - agent/step-shoulder-real-tet10-solve-v1.0
 
 jobs:
   verify-fea-core:
@@ -118,4 +119,15 @@ jobs:
           path: |
             step_shoulder_local_adaptivity.step
             step_shoulder_local_adaptivity.json
+          if-no-files-found: error
+      - name: Solve real STEP shaft shoulder with consistent TRI6 traction
+        run: python benchmarks/step_shoulder_real_tet10_solve.py
+      - name: Upload real STEP shoulder TET10 solve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-shoulder-real-tet10-solve-windows
+          path: |
+            step_shoulder_real_tet10_solve.step
+            step_shoulder_real_tet10_solve.json
           if-no-files-found: error
