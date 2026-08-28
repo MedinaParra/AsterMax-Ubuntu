@@ -40,6 +40,7 @@ class FeatureRefinedTet10Mesh:
     mesh_sha256: str
     surface_tri6_by_selection: dict[str, np.ndarray] = field(default_factory=dict)
     surface_resolution_by_selection: dict[str, tuple[int, str, str]] = field(default_factory=dict)
+    high_order_optimize: int = 0
 
 
 def _step(path: str | Path) -> Path:
@@ -141,20 +142,15 @@ def mesh_step_tet10_around_shoulder(
     padding_mm: float | None = None,
     face_selections: Iterable[PersistentFaceSelection] = (),
     second_order_linear: bool = True,
+    high_order_optimize: int = 0,
 ) -> FeatureRefinedTet10Mesh:
-    """Generate a feature-bound TET10 mesh with explicit geometry mode.
+    """Generate a feature-bound TET10 mesh with explicit high-order geometry policy.
 
-    ``second_order_linear=True`` preserves the fully verified historical PMV
-    behavior: all quadratic midside nodes lie at straight edge midpoints.
-    ``False`` asks Gmsh to project high-order boundary nodes to CAD and is only
-    admitted for dedicated curved-isoparametric verification until a separate
-    solver gate explicitly enables it.
-
-    Persistent face selections, when supplied, are resolved against the same
-    imported OCC model used to generate the volume mesh. Their TRI6 connectivity
-    is returned in global zero-based node indices so boundary conditions and
-    consistent tractions cannot silently depend on a surface tag from another
-    import session.
+    ``second_order_linear=True`` and ``high_order_optimize=0`` preserve the
+    historical fully verified PMV behavior.  Curved CAD-projected TET10 is an
+    explicit opt-in and high-order optimization is recorded as model evidence.
+    C11 admits mode 2 only through a separate solver-verification gate; these
+    API knobs alone do not constitute an industrial-validation claim.
     """
     source = _step(step_path)
     global_size = float(global_size_mm)
@@ -169,6 +165,17 @@ def mesh_step_tet10_around_shoulder(
     if not isinstance(second_order_linear, (bool, np.bool_)):
         raise ValueError("second_order_linear must be boolean")
     linear_mode = bool(second_order_linear)
+    try:
+        optimize_mode = int(high_order_optimize)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("high_order_optimize must be an integer in [0,4]") from exc
+    if isinstance(high_order_optimize, (float, np.floating)) and float(high_order_optimize) != optimize_mode:
+        raise ValueError("high_order_optimize must be an integer in [0,4]")
+    if optimize_mode < 0 or optimize_mode > 4:
+        raise ValueError("high_order_optimize must be an integer in [0,4]")
+    if linear_mode and optimize_mode != 0:
+        raise ValueError("high_order_optimize must be 0 for straight-sided TET10")
+
     source_sha = sha256_file(source)
     source_size = int(source.stat().st_size)
     if source_sha != feature.source_sha256 or source_size != feature.source_size_bytes:
@@ -189,7 +196,6 @@ def mesh_step_tet10_around_shoulder(
         if len(volumes) != 1:
             raise FeatureAdaptivityError(f"EXPECTED_ONE_SOLID:{len(volumes)}")
 
-        # Resolve geometry before meshing and again when extracting elements.
         for selection in selections:
             resolve_face_selection_in_current_model(gmsh, selection)
 
@@ -197,6 +203,7 @@ def mesh_step_tet10_around_shoulder(
         gmsh.option.setNumber("Mesh.MeshSizeMax", global_size)
         gmsh.option.setNumber("Mesh.ElementOrder", 2)
         gmsh.option.setNumber("Mesh.SecondOrderLinear", 1 if linear_mode else 0)
+        gmsh.option.setNumber("Mesh.HighOrderOptimize", optimize_mode)
 
         field_id = gmsh.model.mesh.field.add("Box")
         gmsh.model.mesh.field.setNumber(field_id, "VIn", local_size)
@@ -272,6 +279,7 @@ def mesh_step_tet10_around_shoulder(
             mesh_sha256=mesh_digest,
             surface_tri6_by_selection=surface_tri6,
             surface_resolution_by_selection=surface_resolution,
+            high_order_optimize=optimize_mode,
         )
     finally:
         gmsh.finalize()
