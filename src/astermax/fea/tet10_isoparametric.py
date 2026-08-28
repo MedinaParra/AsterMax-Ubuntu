@@ -6,7 +6,7 @@ import math
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 
-from .tet10 import tet10_B_matrix
+from .tet10 import tet10_B_matrix, tet10_shape_derivatives
 from .tet4 import IsotropicMaterial
 
 
@@ -25,7 +25,9 @@ class Tet10JacobianAudit:
     point_count: int
     minimum_det_jacobian: float
     maximum_det_jacobian: float
-    minimum_over_maximum_ratio: float
+    minimum_over_maximum_ratio: float | None
+    nonpositive_point_count: int
+    all_positive: bool
 
 
 def duffy_tetra_gauss_rule(order: int) -> TetraQuadratureRule:
@@ -88,27 +90,51 @@ def simplex_monomial_integral(i: int, j: int, k: int) -> float:
     )
 
 
+def _raw_tet10_det_jacobian(coords_mm: np.ndarray, natural_coordinates: np.ndarray) -> float:
+    """Return det(J) without invoking the solver's positive-Jacobian guard.
+
+    This helper exists only for verification diagnostics. Production stiffness
+    and stress evaluation continue to call ``tet10_B_matrix`` and therefore
+    reject degenerate or inverted mappings before numerical use.
+    """
+    coords = np.asarray(coords_mm, dtype=float)
+    point = np.asarray(natural_coordinates, dtype=float)
+    dndr = tet10_shape_derivatives(point)
+    jacobian = coords.T @ dndr
+    return float(np.linalg.det(jacobian))
+
+
 def tet10_isoparametric_jacobian_audit(
     coords_mm: np.ndarray,
     *,
     quadrature_order: int = 4,
 ) -> Tet10JacobianAudit:
+    """Measure curved TET10 Jacobians without hiding non-positive samples.
+
+    A non-positive determinant is recorded as evidence rather than raised here,
+    so a mesh-quality gate can report the extent of the defect. This does not
+    weaken the solver: ``tet10_B_matrix`` still rejects the same element.
+    """
     coords = np.asarray(coords_mm, dtype=float)
     if coords.shape != (10, 3) or not np.all(np.isfinite(coords)):
         raise ValueError("coords_mm must be finite with shape (10,3)")
     rule = duffy_tetra_gauss_rule(quadrature_order)
-    dets = np.asarray([tet10_B_matrix(coords, point)[1] for point in rule.points], dtype=float)
+    dets = np.asarray([_raw_tet10_det_jacobian(coords, point) for point in rule.points], dtype=float)
+    if not np.all(np.isfinite(dets)):
+        raise ValueError("curved TET10 Jacobian audit produced non-finite determinant")
     minimum = float(np.min(dets))
     maximum = float(np.max(dets))
-    if minimum <= 0.0 or not np.isfinite(maximum):
-        raise ValueError("curved TET10 has non-positive or non-finite Jacobian")
+    nonpositive = int(np.count_nonzero(dets <= 0.0))
+    ratio = (minimum / maximum) if maximum > 0.0 else None
     return Tet10JacobianAudit(
         quadrature_method=rule.method,
         quadrature_order=rule.order,
         point_count=int(rule.points.shape[0]),
         minimum_det_jacobian=minimum,
         maximum_det_jacobian=maximum,
-        minimum_over_maximum_ratio=minimum / maximum,
+        minimum_over_maximum_ratio=ratio,
+        nonpositive_point_count=nonpositive,
+        all_positive=nonpositive == 0,
     )
 
 
