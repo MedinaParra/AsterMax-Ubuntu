@@ -25,7 +25,7 @@ jobs:
         run: python -W error -m py_compile src/astermax/fea/arbitrary_bc.py src/astermax/fea/face_ownership.py
       - name: Run C5.2b arbitrary BC production harness
         run: python -m pytest tests/test_arbitrary_bc.py tests/test_face_ownership.py -q
-      - name: Re-run named-selection and solver harnesses
-        run: python -m pytest tests/test_named_selections.py tests/test_named_selection_bc.py tests/test_solver.py -q
-      - name: Run deterministic regression harness
+      - name: Re-run named-selection binding harnesses
+        run: python -m pytest tests/test_named_selections.py tests/test_named_selection_bc.py -q
+      - name: Run deterministic regression harness including solver tests
         run: python -m pytest -q
