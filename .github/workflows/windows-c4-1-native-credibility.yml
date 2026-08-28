@@ -1,0 +1,27 @@
+name: Windows C4.1 Native Credibility
+
+on:
+  pull_request:
+    paths:
+      - "src/astermax/app.py"
+      - "src/astermax/fea/native_credibility.py"
+      - "src/astermax/fea/credibility_visualization.py"
+      - "tests/test_native_credibility.py"
+      - ".github/workflows/windows-c4-1-native-credibility.yml"
+
+jobs:
+  verify-native-credibility:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PMV and full test dependencies
+        run: python -m pip install -e .[test]
+      - name: Compile credibility and desktop modules
+        run: python -W error -m py_compile src/astermax/fea/native_credibility.py src/astermax/fea/credibility_visualization.py src/astermax/app.py
+      - name: Run C4.1 native credibility harness
+        run: python -m pytest tests/test_native_credibility.py tests/test_credibility_visualization.py -q
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
