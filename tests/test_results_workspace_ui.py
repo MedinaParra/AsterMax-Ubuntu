@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 
 from astermax.fea.results_workspace import build_professional_results_workspace, probe_result
-from astermax.fea.results_workspace_ui import build_results_render_payload
+from astermax.fea.results_workspace_ui import (
+    build_results_display_payload,
+    build_results_render_payload,
+    clip_axis_plane,
+)
 from astermax.fea.solver import Tet10LinearStaticResult
 
 
@@ -97,3 +101,72 @@ def test_render_payload_fails_closed_on_stale_mesh_unknown_field_and_bad_scale()
         build_results_render_payload(workspace, nodes, elements, result, field="NODAL_STRESS")
     with pytest.raises(ValueError, match="DEFORMATION_SCALE"):
         build_results_render_payload(workspace, nodes, elements, result, field="U_MAG", deformation_scale=-1.0)
+
+
+def test_clip_axis_plane_uses_absolute_global_mm_and_rejects_invalid_input() -> None:
+    assert clip_axis_plane("X", 12.5) == ((12.5, 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert clip_axis_plane("y", -3.0) == ((0.0, -3.0, 0.0), (0.0, 1.0, 0.0))
+    assert clip_axis_plane("Z", 8.0) == ((0.0, 0.0, 8.0), (0.0, 0.0, 1.0))
+    with pytest.raises(ValueError, match="CLIP_AXIS"):
+        clip_axis_plane("Q", 0.0)
+    with pytest.raises(ValueError, match="CLIP_OFFSET"):
+        clip_axis_plane("X", float("nan"))
+
+
+def test_display_payload_clip_is_provenance_bound_and_preserves_solver_ranges() -> None:
+    nodes, elements, result = _fixture()
+    workspace = _workspace(nodes, elements, result, "e" * 64)
+    unclipped = build_results_display_payload(
+        workspace, nodes, elements, result, field="VON_MISES_IP_MAX", deformation_scale=0.0
+    )
+    clipped = build_results_display_payload(
+        workspace,
+        nodes,
+        elements,
+        result,
+        field="VON_MISES_IP_MAX",
+        deformation_scale=0.0,
+        clip_enabled=True,
+        clip_axis="X",
+        clip_offset_mm=2.0,
+        keep_side="POSITIVE",
+    )
+    assert clipped.base_payload == unclipped
+    assert clipped.clip_plane.workspace_sha256 == workspace.workspace_sha256
+    assert clipped.clip_plane.solve_evidence_sha256 == workspace.solve_evidence_sha256
+    assert clipped.base_payload.value_min == pytest.approx(44.0)
+    assert clipped.base_payload.value_max == pytest.approx(44.0)
+    assert clipped.kept_triangle_count + clipped.removed_triangle_count == len(unclipped.triangles)
+    assert clipped.removed_triangle_count > 0
+
+
+def test_display_payload_axis_side_and_offset_change_clip_identity_not_raw_results() -> None:
+    nodes, elements, result = _fixture()
+    workspace = _workspace(nodes, elements, result, "f" * 64)
+    x_pos = build_results_display_payload(
+        workspace, nodes, elements, result, field="U_MAG", clip_enabled=True,
+        clip_axis="X", clip_offset_mm=2.0, keep_side="POSITIVE"
+    )
+    x_neg = build_results_display_payload(
+        workspace, nodes, elements, result, field="U_MAG", clip_enabled=True,
+        clip_axis="X", clip_offset_mm=2.0, keep_side="NEGATIVE"
+    )
+    y_pos = build_results_display_payload(
+        workspace, nodes, elements, result, field="U_MAG", clip_enabled=True,
+        clip_axis="Y", clip_offset_mm=2.0, keep_side="POSITIVE"
+    )
+    x_moved = build_results_display_payload(
+        workspace, nodes, elements, result, field="U_MAG", clip_enabled=True,
+        clip_axis="X", clip_offset_mm=8.0, keep_side="POSITIVE"
+    )
+    identities = {
+        x_pos.clip_plane.clip_sha256,
+        x_neg.clip_plane.clip_sha256,
+        y_pos.clip_plane.clip_sha256,
+        x_moved.clip_plane.clip_sha256,
+    }
+    assert len(identities) == 4
+    for payload in (x_pos, x_neg, y_pos, x_moved):
+        assert payload.base_payload.value_min == pytest.approx(0.0)
+        assert payload.base_payload.value_max == pytest.approx(0.9)
+        assert payload.base_payload.workspace_sha256 == workspace.workspace_sha256
