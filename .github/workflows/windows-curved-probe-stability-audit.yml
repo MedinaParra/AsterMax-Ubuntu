@@ -1,0 +1,31 @@
+name: Windows Curved Probe Stability Audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-probe-stability-audit-v1.9
+
+jobs:
+  audit-curved-probe-stability:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Audit nearest-IP probe against fixed physical neighborhood integral
+        run: python benchmarks/curved_probe_stability_audit.py
+      - name: Upload C12a probe-stability evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-probe-stability-audit-windows
+          path: |
+            curved_probe_stability_audit.step
+            curved_probe_stability_audit.json
+          if-no-files-found: error
