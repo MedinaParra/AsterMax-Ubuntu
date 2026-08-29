@@ -95,7 +95,7 @@ def test_hash_changes_when_stress_payload_changes():
 
 def test_invalid_stress_shape_is_rejected():
     nodes = _unit_tet10_nodes(); elements = np.arange(10, dtype=np.int64).reshape((1, 10))
-    with pytest.raises(ValueError, match="shape \(m,q,6\)"):
+    with pytest.raises(ValueError, match=r"shape \(m,q,6\)"):
         integrate_curved_tet10_far_field_stress(
             nodes_mm=nodes,
             elements=elements,
