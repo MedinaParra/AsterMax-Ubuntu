@@ -96,7 +96,7 @@ def test_desktop_cutover_preserves_sloped_picker_provenance_through_native_resul
     assert runtime["initial_payload"].solve_evidence_sha256 == results["solve_evidence_sha256"]
     assert results["displacement_field"] == "U_MAG"
     assert results["stress_field"] == "VON_MISES_IP_MAX"
-    assert results["stress_representation"] == "FOUR_TET10_INTEGRATION_POINTS_ELEMENT_MAX_NO_NODAL_SMOOTHING"
+    assert results["stress_representation"] == "FOUR_INTEGRATION_POINTS_PRESERVED_ELEMENT_MAX_ONLY_NO_NODAL_SMOOTHING"
     assert Path(summary["artifacts"]["vtu"]).is_file()
     assert Path(summary["artifacts"]["viewer"]).is_file()
     assert Path(summary["artifacts"]["summary"]).is_file()
