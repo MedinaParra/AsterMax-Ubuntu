@@ -1,0 +1,31 @@
+name: Windows TET10 Surface Axial Stress Affine Verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/tet10-surface-axial-stress-qoi-v2.6
+
+jobs:
+  verify-tet10-surface-axial-stress-affine:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Verify direct TET10 surface stress on curved CAD affine field
+        run: python benchmarks/tet10_surface_axial_stress_affine.py
+      - name: Upload C18 surface-stress verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tet10-surface-axial-stress-affine-windows
+          path: |
+            tet10_surface_axial_stress_affine.step
+            tet10_surface_axial_stress_affine.json
+          if-no-files-found: error
