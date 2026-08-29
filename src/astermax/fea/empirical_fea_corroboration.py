@@ -30,6 +30,7 @@ _EMPIRICAL_QOI = "SURFACE_PEAK_AXIAL_NORMAL_STRESS_MPA"
 class FeaLocalStressVerificationSummary:
     schema: str
     upstream_benchmark_sha256: str
+    upstream_artifact_zip_sha256: str
     upstream_decision_sha256: str
     upstream_singularity_diagnostic_sha256: str
     small_diameter_mm: float
@@ -99,6 +100,7 @@ def _relative(a: float, b: float) -> float:
 def build_fea_local_stress_verification_summary(
     *,
     upstream_benchmark_sha256: str,
+    upstream_artifact_zip_sha256: str,
     upstream_decision_sha256: str,
     upstream_singularity_diagnostic_sha256: str,
     small_diameter_mm: float,
@@ -117,6 +119,7 @@ def build_fea_local_stress_verification_summary(
     payload = {
         "schema": "AsterMaxFeaLocalStressVerificationSummaryV1",
         "upstream_benchmark_sha256": _sha("upstream_benchmark_sha256", upstream_benchmark_sha256),
+        "upstream_artifact_zip_sha256": _sha("upstream_artifact_zip_sha256", upstream_artifact_zip_sha256),
         "upstream_decision_sha256": _sha("upstream_decision_sha256", upstream_decision_sha256),
         "upstream_singularity_diagnostic_sha256": _sha(
             "upstream_singularity_diagnostic_sha256", upstream_singularity_diagnostic_sha256
@@ -165,7 +168,6 @@ def assess_empirical_fea_corroboration_eligibility(
     if prediction.geometry_sha256 != geometry.geometry_sha256:
         raise EmpiricalFeaCorroborationError("CORROBORATION_PREDICTION_GEOMETRY_SHA_MISMATCH")
     if prediction.uses_non_synthetic_authorized_data == intake.synthetic_verification_only:
-        # Expected logical relation is uses_non_synthetic == not synthetic.
         raise EmpiricalFeaCorroborationError("CORROBORATION_SYNTHETIC_FLAG_INCONSISTENT")
 
     geometry_match = all(
@@ -256,7 +258,7 @@ def fea_local_stress_verification_summary_evidence(
         source=EvidenceSource.DOCUMENT,
         description=(
             "Hash-bound summary of an upstream FEA local-stress verification result. "
-            "The summary preserves the upstream benchmark/decision/diagnostic hashes and QOI semantics."
+            "The summary preserves upstream benchmark, artifact, decision and diagnostic hashes plus QOI semantics."
         ),
         payload_sha256=summary.summary_sha256,
         metadata=summary.canonical_without_hash(),
@@ -290,8 +292,13 @@ def empirical_fea_corroboration_eligibility_claim(context_id: str) -> ClaimDefin
         ),
         requirements=(
             ClaimRequirement("AUTHORIZED_EMPIRICAL_DATASET_INTAKE", allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,)),
+            ClaimRequirement("STRESS_CONCENTRATION_DOMAIN_APPLICABILITY", allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,)),
             ClaimRequirement("EMPIRICAL_LOCAL_STRESS_PREDICTION", allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,)),
-            ClaimRequirement("FEA_LOCAL_STRESS_VERIFICATION_SUMMARY", allowed_sources=(EvidenceSource.DOCUMENT, EvidenceSource.DETERMINISTIC_CHECK)),
+            ClaimRequirement("EMPIRICAL_LOCAL_STRESS_CHAIN", allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,)),
+            ClaimRequirement(
+                "FEA_LOCAL_STRESS_VERIFICATION_SUMMARY",
+                allowed_sources=(EvidenceSource.DOCUMENT, EvidenceSource.DETERMINISTIC_CHECK),
+            ),
             ClaimRequirement("EMPIRICAL_FEA_CORROBORATION_ELIGIBILITY", allowed_sources=(EvidenceSource.DETERMINISTIC_CHECK,)),
         ),
     )
