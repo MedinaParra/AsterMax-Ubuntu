@@ -1,0 +1,33 @@
+name: Windows Curved Far Field Kinematic Corroboration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-far-field-kinematic-witness-v2.2
+
+jobs:
+  verify-curved-far-field-kinematic:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Compile warnings as errors
+        run: python -W error -m compileall -q src tests benchmarks
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Compare curved far-field FEA displacement gradient to exact F over AE witness
+        run: python benchmarks/curved_far_field_kinematic_corroboration.py
+      - name: Upload C14 kinematic corroboration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-far-field-kinematic-corroboration-windows
+          path: |
+            curved_far_field_kinematic_corroboration.step
+            curved_far_field_kinematic_corroboration.json
+          if-no-files-found: error
