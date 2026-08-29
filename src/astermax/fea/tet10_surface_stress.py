@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import math
 from typing import Any, Iterable
 
 import numpy as np
@@ -27,6 +26,7 @@ _TET10_FACE_LOCAL = (
 
 @dataclass(frozen=True)
 class Tet10SurfaceParent:
+    schema: str
     tri6_nodes: tuple[int, ...]
     element_index: int
     tet10_nodes: tuple[int, ...]
@@ -43,6 +43,7 @@ class Tet10SurfaceParent:
 
 @dataclass(frozen=True)
 class Tet10SurfaceStressSample:
+    schema: str
     element_index: int
     tri6_nodes: tuple[int, ...]
     tri6_natural_coordinates: tuple[float, float]
@@ -124,7 +125,6 @@ def resolve_tri6_parent_tet10(elements: np.ndarray, tri6_nodes: Iterable[int]) -
     if len(opposite) != 1:
         raise Tet10SurfaceStressError("TRI6_OPPOSITE_TET10_VERTEX_NOT_UNIQUE")
 
-    # Validate TRI6 midsides against the corresponding TET10 face edge nodes.
     local_face_nodes = tuple(int(tet[i]) for i in face_local)
     face_corner_globals = local_face_nodes[:3]
     face_mid_globals = local_face_nodes[3:]
@@ -168,7 +168,6 @@ def tri6_point_to_tet10_natural(parent: Tet10SurfaceParent, rs: np.ndarray | tup
         raise Tet10SurfaceStressError("TET10_FACE_BARYCENTRIC_MAPPING_FAILED")
     if not np.isclose(float(np.sum(bary)), 1.0, rtol=0.0, atol=1.0e-12):
         raise Tet10SurfaceStressError("TET10_FACE_BARYCENTRIC_PARTITION_FAILED")
-    # TET10 natural coordinates are r=L2, s=L3, t=L4.
     return bary[1:].copy()
 
 
@@ -223,8 +222,6 @@ def evaluate_tri6_surface_stress_sample(
         nodes[conn], disp[conn], material, natural
     )
 
-    # Physical point is evaluated with the same quadratic TET10 interpolation
-    # used by the solver geometry, not copied from a TRI6 stress field.
     from .tet10 import tet10_shape_functions
     x = tet10_shape_functions(natural) @ nodes[conn]
     payload = {
