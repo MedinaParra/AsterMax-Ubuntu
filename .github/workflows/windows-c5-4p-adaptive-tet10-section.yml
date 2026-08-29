@@ -1,0 +1,26 @@
+name: Windows C5.4p Adaptive TET10 Section Reconstruction
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  adaptive-tet10-section:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/adaptive_tet10_section.py src/astermax/fea/quadratic_tri6_face_contour.py src/astermax/fea/quadratic_tet10_section.py
+      - name: C5.4p adaptive geometry and topology harness
+        run: python -m pytest -q tests/test_adaptive_tet10_section.py tests/test_quadratic_tri6_face_contour.py tests/test_quadratic_tet10_section.py
+      - name: Section regression
+        run: python -m pytest -q tests/test_results_section_instrument.py tests/test_results_section_view.py tests/test_section_overlay.py tests/test_section_intersection.py
+      - name: Results regression
+        run: python -m pytest -q tests/test_results_workspace_ui.py tests/test_results_workspace.py tests/test_production_results.py
+      - name: Full regression suite
+        run: python -m pytest -q
