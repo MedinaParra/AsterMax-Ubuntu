@@ -7,6 +7,7 @@ from astermax.desktop_picker_app import (
     desktop_input_contract,
     prepare_desktop_picker_model,
     solve_desktop_picker_model,
+    verify_desktop_live_results,
     verify_desktop_picker_model,
 )
 from astermax.fea.cad_face_picker import build_cad_face_picker_catalog
@@ -63,7 +64,7 @@ def _assignment(step: Path, mesh_size_mm: float = 12.0):
     return assignment, sloped_sha
 
 
-def test_desktop_cutover_preserves_sloped_picker_provenance_through_result_artifacts(tmp_path: Path) -> None:
+def test_desktop_cutover_preserves_sloped_picker_provenance_through_native_results(tmp_path: Path) -> None:
     step = tmp_path / "sloped.step"; _write_sloped_prism(step)
     assignment, sloped_sha = _assignment(step)
     contract = desktop_input_contract(
@@ -82,14 +83,48 @@ def test_desktop_cutover_preserves_sloped_picker_provenance_through_result_artif
     assert route.load_binding_sha256 == assignment.load_binding.binding_sha256
 
     summary = solve_desktop_picker_model(prepared, contract, tmp_path / "results")
-    assert summary["schema"] == "AsterMaxDesktopPickerResultV1"
+    verify_desktop_live_results(summary)
+    assert summary["schema"] == "AsterMaxDesktopPickerResultV2"
     assert summary["scope_contract"]["authoring"] == "NATIVE_CAD_FACE_PICKER_PERSISTENT_SIGNATURE"
     assert summary["scope_contract"]["load_binding_sha256"] == assignment.load_binding.binding_sha256
     assert summary["solve_evidence"]["load_binding_sha256"] == assignment.load_binding.binding_sha256
+    results = summary["production_results"]
+    runtime = summary["_runtime_results"]
+    assert results["solve_evidence_sha256"] == summary["solve_evidence"]["solve_evidence_sha256"]
+    assert results["workspace_sha256"] == runtime["workspace"].workspace_sha256
+    assert runtime["initial_payload"].workspace_sha256 == results["workspace_sha256"]
+    assert runtime["initial_payload"].solve_evidence_sha256 == results["solve_evidence_sha256"]
+    assert results["displacement_field"] == "U_MAG"
+    assert results["stress_field"] == "VON_MISES_IP_MAX"
+    assert results["stress_representation"] == "FOUR_TET10_INTEGRATION_POINTS_ELEMENT_MAX_NO_NODAL_SMOOTHING"
     assert Path(summary["artifacts"]["vtu"]).is_file()
     assert Path(summary["artifacts"]["viewer"]).is_file()
     assert Path(summary["artifacts"]["summary"]).is_file()
+    persisted = Path(summary["artifacts"]["summary"]).read_text(encoding="utf-8")
+    assert results["bundle_sha256"] in persisted
+    assert results["workspace_sha256"] in persisted
+    assert "_runtime_results" not in persisted
     assert summary["claims"] == {"converged": False, "industrial_validation": False, "ansys_equivalence": False}
+
+
+def test_desktop_live_results_fail_closed_on_provenance_tamper(tmp_path: Path) -> None:
+    step = tmp_path / "sloped.step"; _write_sloped_prism(step)
+    assignment, _ = _assignment(step)
+    contract = desktop_input_contract(
+        step,
+        mesh_size_mm=12.0,
+        young_modulus_mpa=200000.0,
+        poisson_ratio=0.30,
+        resultant_n=(0.0, -1000.0, 0.0),
+    )
+    summary = solve_desktop_picker_model(
+        prepare_desktop_picker_model(contract, assignment), contract, tmp_path / "results"
+    )
+    tampered = dict(summary)
+    tampered["production_results"] = dict(summary["production_results"])
+    tampered["production_results"]["workspace_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="DESKTOP_RESULTS_WORKSPACE_STALE"):
+        verify_desktop_live_results(tampered)
 
 
 def test_desktop_cutover_fails_closed_when_reviewed_inputs_change(tmp_path: Path) -> None:
