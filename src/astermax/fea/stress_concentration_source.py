@@ -89,13 +89,7 @@ def build_stress_concentration_source(
 
 
 def shigley_2024_release_source_metadata() -> StressConcentrationSource:
-    """Return source metadata only; no proprietary chart/table values are embedded.
-
-    The current McGraw Hill product page identifies the 2024 Release of
-    Shigley's Mechanical Engineering Design. AsterMax deliberately requires a
-    separately authorized, explicitly located, hashed dataset before any
-    published Kt/Kts values may drive a calculation.
-    """
+    """Return source metadata only; no proprietary chart/table values are embedded."""
     return build_stress_concentration_source(
         source_id="SHIGLEY_MDE_2024_RELEASE",
         title="Shigley's Mechanical Engineering Design",
@@ -109,6 +103,33 @@ def shigley_2024_release_source_metadata() -> StressConcentrationSource:
         rights_note=(
             "METADATA_ONLY_NO_PROPRIETARY_TABLE_VALUES_EMBEDDED; calculation data must be "
             "lawfully supplied and independently hashed"
+        ),
+        calculation_data_embedded=False,
+        dataset_sha256=None,
+    )
+
+
+def naca_tn_2442_source_metadata() -> StressConcentrationSource:
+    """Public-domain provenance metadata for Frocht's NACA TN-2442.
+
+    NASA NTRS identifies NACA-TN-2442 as public and states that it is a work of
+    the U.S. Government for which public use is permitted. This helper embeds
+    metadata and the published applicability locator only. It deliberately does
+    not digitize or embed any stress-concentration-factor curve values.
+    """
+    return build_stress_concentration_source(
+        source_id="NACA_TN_2442_1951",
+        title="A Photoelastic Investigation of Stress Concentrations Due to Small Fillets and Grooves in Tension",
+        edition_or_release="NACA Technical Note 2442, August 1951",
+        publisher="National Advisory Committee for Aeronautics",
+        locator=(
+            "Published investigation scope: tension fillets/grooves; r/d approximately "
+            "0.011 to 0.08 for D/d = 1.5 and D/d = 2.0"
+        ),
+        source_url="https://ntrs.nasa.gov/citations/19930083271",
+        rights_note=(
+            "NASA_NTRS_PUBLIC; WORK_OF_US_GOV_PUBLIC_USE_PERMITTED; "
+            "METADATA_AND_APPLICABILITY_ONLY_NO_DIGITIZED_FACTOR_VALUES_EMBEDDED"
         ),
         calculation_data_embedded=False,
         dataset_sha256=None,
