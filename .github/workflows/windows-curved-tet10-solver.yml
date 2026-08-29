@@ -19,7 +19,7 @@ jobs:
       - name: Run deterministic regression harness
         run: python -m pytest -q
       - name: Verify curved TET10 solver on persistent STEP shoulder model
-        run: python benchmarks/curved_tet10_solver_verification.py
+        run: python benchmarks/curved_tet10_solver_verification_runner.py
       - name: Upload C11 curved solver verification evidence
         if: always()
         uses: actions/upload-artifact@v4
