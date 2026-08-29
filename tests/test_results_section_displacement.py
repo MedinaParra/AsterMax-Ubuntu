@@ -58,7 +58,7 @@ def test_probe_returns_verified_vector_and_magnitude():
     nodes,elements = _linear_tet10(); nodal = _affine(nodes)
     contour = _contour(nodes,elements,nodal); field = _field(nodes,elements,nodal)
     x,y = contour.polylines[0].canvas_xy[0]
-    probe = probe_section_displacement(contour,field.samples,canvas_x=x+.2,canvas_y=y-.2,max_distance_px=2.)
+    probe = probe_section_displacement(contour,field,canvas_x=x+.2,canvas_y=y-.2,max_distance_px=2.)
     assert probe.hit
     expected = _affine(np.asarray([probe.point_mm]))[0]
     assert np.allclose(probe.displacement_mm, expected, rtol=0., atol=1e-11)
@@ -69,10 +69,20 @@ def test_probe_returns_verified_vector_and_magnitude():
 def test_probe_miss_and_invalid_radius_are_explicit():
     nodes,elements = _linear_tet10(); nodal = _affine(nodes)
     contour = _contour(nodes,elements,nodal); field = _field(nodes,elements,nodal)
-    miss = probe_section_displacement(contour,field.samples,canvas_x=-1000.,canvas_y=-1000.,max_distance_px=1.)
+    miss = probe_section_displacement(contour,field,canvas_x=-1000.,canvas_y=-1000.,max_distance_px=1.)
     assert not miss.hit
     with pytest.raises(ValueError, match="SECTION_PROBE_RADIUS"):
-        probe_section_displacement(contour,field.samples,canvas_x=0.,canvas_y=0.,max_distance_px=0.)
+        probe_section_displacement(contour,field,canvas_x=0.,canvas_y=0.,max_distance_px=0.)
+
+
+def test_probe_rejects_field_from_different_nodal_solution():
+    nodes,elements = _linear_tet10(); nodal = _affine(nodes)
+    contour = _contour(nodes,elements,nodal)
+    changed = nodal.copy(); changed[0,0] += .01
+    different_field = _field(nodes,elements,changed)
+    x,y = contour.polylines[0].canvas_xy[0]
+    with pytest.raises(ValueError, match="SECTION_PROBE_FIELD_PROVENANCE"):
+        probe_section_displacement(contour,different_field,canvas_x=x,canvas_y=y)
 
 
 def test_field_change_changes_contour_field_identity():
