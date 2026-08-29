@@ -1,0 +1,26 @@
+name: Windows C5.4q Section Polyline Continuity
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  section-polyline-continuity:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/section_polyline_assembly.py src/astermax/fea/adaptive_tet10_section.py src/astermax/fea/quadratic_tri6_face_contour.py
+      - name: C5.4q ordered polyline and cross-element continuity harness
+        run: python -m pytest -q tests/test_section_polyline_assembly.py tests/test_adaptive_tet10_section.py tests/test_quadratic_tri6_face_contour.py
+      - name: Section regression
+        run: python -m pytest -q tests/test_results_section_instrument.py tests/test_results_section_view.py tests/test_section_overlay.py tests/test_section_intersection.py
+      - name: Results regression
+        run: python -m pytest -q tests/test_results_workspace_ui.py tests/test_results_workspace.py tests/test_production_results.py
+      - name: Full regression suite
+        run: python -m pytest -q
