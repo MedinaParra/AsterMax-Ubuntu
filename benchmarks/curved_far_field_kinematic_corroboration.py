@@ -12,6 +12,7 @@ from astermax.fea.analytical_witness import build_linear_normal_stress_witness
 from astermax.fea.axisymmetric_shoulder import recognize_x_axis_shaft_shoulder
 from astermax.fea.curved_far_field_kinematics import fit_curved_tet10_far_field_axial_kinematics
 from astermax.fea.curved_tet10_solver import audit_curved_tet10_mesh_jacobians, solve_linear_static_curved_tet10
+from astermax.fea.far_field_applicability import distance_ratio_requirement_satisfied
 from astermax.fea.feature_adaptivity import mesh_step_tet10_around_shoulder
 from astermax.fea.gmsh_bridge import _gmsh
 from astermax.fea.section_evidence import planar_section_properties
@@ -33,6 +34,7 @@ POISSON_RATIO = 0.3
 FAR_FIELD_X_MIN_MM = 15.0
 FAR_FIELD_X_MAX_MM = 23.0
 MIN_END_AND_FILLET_DISTANCE_OVER_DIAMETER = 0.75
+APPLICABILITY_GEOMETRY_RELATIVE_TOLERANCE = 1.0e-8
 MAX_AXIAL_GRADIENT_RELATIVE_ERROR = 0.02
 MIN_WEIGHTED_R_SQUARED = 0.99
 MAX_RESIDUAL_RMS_OVER_EXPECTED_SPAN = 0.05
@@ -102,11 +104,17 @@ def main() -> int:
         "slab_inside_small_diameter_segment": bool(
             FAR_FIELD_X_MIN_MM > 0.0 and FAR_FIELD_X_MAX_MM < small_tangency_x
         ),
-        "support_distance_over_diameter": bool(
-            distance_from_support / diameter >= MIN_END_AND_FILLET_DISTANCE_OVER_DIAMETER
+        "support_distance_over_diameter": distance_ratio_requirement_satisfied(
+            distance_mm=distance_from_support,
+            diameter_mm=diameter,
+            minimum_distance_over_diameter=MIN_END_AND_FILLET_DISTANCE_OVER_DIAMETER,
+            geometry_relative_tolerance=APPLICABILITY_GEOMETRY_RELATIVE_TOLERANCE,
         ),
-        "fillet_distance_over_diameter": bool(
-            distance_from_fillet / diameter >= MIN_END_AND_FILLET_DISTANCE_OVER_DIAMETER
+        "fillet_distance_over_diameter": distance_ratio_requirement_satisfied(
+            distance_mm=distance_from_fillet,
+            diameter_mm=diameter,
+            minimum_distance_over_diameter=MIN_END_AND_FILLET_DISTANCE_OVER_DIAMETER,
+            geometry_relative_tolerance=APPLICABILITY_GEOMETRY_RELATIVE_TOLERANCE,
         ),
     }
 
@@ -207,6 +215,7 @@ def main() -> int:
             "distance_from_support_mm": distance_from_support,
             "distance_from_fillet_mm": distance_from_fillet,
             "minimum_distance_over_diameter": MIN_END_AND_FILLET_DISTANCE_OVER_DIAMETER,
+            "geometry_relative_tolerance": APPLICABILITY_GEOMETRY_RELATIVE_TOLERANCE,
             "applicability_checks": applicability_checks,
         },
         "analytical_section": asdict(section),
@@ -249,7 +258,7 @@ def main() -> int:
         "ansys_equivalence_claim": False,
         "interpretation_boundary": (
             "C14 corroborates only the far-field axial displacement gradient against the exact prismatic-bar witness du_x/dx=F/(AE) for this generated verification fixture. "
-            "The observation is derived from TET10-interpolated displacement at actual volume integration points and does not use recovered stress. It is numerical solution verification, not physical or industrial validation."
+            "The observation is derived from TET10-interpolated displacement at actual volume integration points and does not use recovered stress. The nominal 0.75D far-field applicability rule is preserved; only a declared 1e-8*D geometric tolerance is allowed for CAD-kernel reconstruction noise. It is numerical solution verification, not physical or industrial validation."
         ),
     }
     payload["benchmark_sha256"] = canonical_sha256(payload)
