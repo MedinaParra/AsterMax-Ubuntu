@@ -1,0 +1,31 @@
+name: Windows Curved Fixed Neighborhood Convergence
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-fixed-neighborhood-convergence-v2.0
+
+jobs:
+  verify-curved-fixed-neighborhood-convergence:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Measure fixed-physical-neighborhood convergence
+        run: python benchmarks/curved_fixed_neighborhood_convergence.py
+      - name: Upload C12b fixed-neighborhood convergence evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-fixed-neighborhood-convergence-windows
+          path: |
+            curved_fixed_neighborhood_convergence.step
+            curved_fixed_neighborhood_convergence.json
+          if-no-files-found: error
