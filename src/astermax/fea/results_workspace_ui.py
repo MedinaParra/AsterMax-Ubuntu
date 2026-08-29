@@ -126,6 +126,55 @@ def build_results_render_payload(
     )
 
 
+def clip_axis_plane(axis: str, offset_mm: float) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Return a global-axis clipping plane using an absolute model-space offset in mm."""
+    axis_name = str(axis).upper()
+    offset = float(offset_mm)
+    if not math.isfinite(offset):
+        raise ValueError("RESULTS_UI_CLIP_OFFSET")
+    if axis_name == "X":
+        return (offset, 0.0, 0.0), (1.0, 0.0, 0.0)
+    if axis_name == "Y":
+        return (0.0, offset, 0.0), (0.0, 1.0, 0.0)
+    if axis_name == "Z":
+        return (0.0, 0.0, offset), (0.0, 0.0, 1.0)
+    raise ValueError("RESULTS_UI_CLIP_AXIS")
+
+
+def build_results_display_payload(
+    workspace: AsterMaxProfessionalResultsWorkspaceV1,
+    nodes_mm: np.ndarray,
+    elements: np.ndarray,
+    result: Tet10LinearStaticResult,
+    *,
+    field: str,
+    deformation_scale: float | None = None,
+    clip_enabled: bool = False,
+    clip_axis: str = "X",
+    clip_offset_mm: float = 0.0,
+    keep_side: str = "POSITIVE",
+):
+    """Build the native Results payload, optionally through the validated C5.4g clip contract."""
+    if not clip_enabled:
+        return build_results_render_payload(
+            workspace, nodes_mm, elements, result, field=field, deformation_scale=deformation_scale
+        )
+    from .results_clip import build_clipped_results_render_payload
+
+    origin, normal = clip_axis_plane(clip_axis, clip_offset_mm)
+    return build_clipped_results_render_payload(
+        workspace,
+        nodes_mm,
+        elements,
+        result,
+        field=field,
+        plane_origin_mm=origin,
+        plane_normal=normal,
+        keep_side=keep_side,
+        deformation_scale=deformation_scale,
+    )
+
+
 def _canvas_transform(points: np.ndarray, width: float, height: float, margin: float = 38.0) -> np.ndarray:
     if points.size == 0:
         return points.copy()
@@ -177,8 +226,13 @@ def install_professional_results_tab(notebook):
     field_var = tk.StringVar(value="U_MAG")
     scale_var = tk.StringVar(value="1.0")
     overlay_var = tk.BooleanVar(value=True)
+    clip_enabled_var = tk.BooleanVar(value=False)
+    clip_axis_var = tk.StringVar(value="X")
+    clip_offset_var = tk.StringVar(value="0.0")
+    clip_side_var = tk.StringVar(value="POSITIVE")
     legend_var = tk.StringVar(value="No solved result bound")
     probe_var = tk.StringVar(value="Click the result to probe raw solver-derived values.")
+
     ttk.Label(toolbar, text="Field").pack(side="left")
     field_box = ttk.Combobox(toolbar, textvariable=field_var, values=("U_MAG", "VON_MISES_IP_MAX"), state="readonly", width=22)
     field_box.pack(side="left", padx=(6, 14))
@@ -186,6 +240,21 @@ def install_professional_results_tab(notebook):
     scale_entry = ttk.Entry(toolbar, textvariable=scale_var, width=10)
     scale_entry.pack(side="left", padx=(6, 14))
     ttk.Checkbutton(toolbar, text="Undeformed overlay", variable=overlay_var).pack(side="left")
+
+    clipbar = ttk.Frame(frame)
+    clipbar.pack(fill="x", pady=(6, 0))
+    ttk.Checkbutton(clipbar, text="Clip", variable=clip_enabled_var).pack(side="left")
+    ttk.Label(clipbar, text="Axis").pack(side="left", padx=(10, 0))
+    axis_box = ttk.Combobox(clipbar, textvariable=clip_axis_var, values=("X", "Y", "Z"), state="readonly", width=4)
+    axis_box.pack(side="left", padx=(4, 10))
+    ttk.Label(clipbar, text="Offset [mm]").pack(side="left")
+    clip_offset_entry = ttk.Entry(clipbar, textvariable=clip_offset_var, width=12)
+    clip_offset_entry.pack(side="left", padx=(4, 10))
+    ttk.Label(clipbar, text="Keep side").pack(side="left")
+    side_box = ttk.Combobox(clipbar, textvariable=clip_side_var, values=("POSITIVE", "NEGATIVE"), state="readonly", width=10)
+    side_box.pack(side="left", padx=(4, 10))
+    ttk.Label(clipbar, text="Visibility clip only · absolute global mm").pack(side="left", padx=(8, 0))
+
     canvas = tk.Canvas(frame, background="#111820", highlightthickness=0)
     canvas.pack(fill="both", expand=True, pady=(10, 6))
     ttk.Label(frame, textvariable=legend_var).pack(fill="x")
@@ -198,48 +267,78 @@ def install_professional_results_tab(notebook):
             return
         try:
             scale = float(scale_var.get())
-            payload = build_results_render_payload(
-                bound["workspace"], bound["nodes"], bound["elements"], bound["result"],
-                field=field_var.get(), deformation_scale=scale,
+            display = build_results_display_payload(
+                bound["workspace"],
+                bound["nodes"],
+                bound["elements"],
+                bound["result"],
+                field=field_var.get(),
+                deformation_scale=scale,
+                clip_enabled=bool(clip_enabled_var.get()),
+                clip_axis=clip_axis_var.get(),
+                clip_offset_mm=float(clip_offset_var.get()),
+                keep_side=clip_side_var.get(),
             )
         except Exception as exc:
             probe_var.set(str(exc))
             return
+
+        clipped = hasattr(display, "base_payload")
+        payload = display.base_payload if clipped else display
+        visible_triangles = display.triangles
         bound["payload"] = payload
+        bound["visible_triangles"] = visible_triangles
+        bound["display"] = display
+
         canvas.delete("all")
         width = max(float(canvas.winfo_width()), 600.0)
         height = max(float(canvas.winfo_height()), 420.0)
         points = np.asarray(payload.projected_nodes_xy, dtype=float)
         mapped = _canvas_transform(points, width, height)
         undeformed = _canvas_transform(np.asarray(payload.undeformed_nodes_xy, dtype=float), width, height)
-        for tri in sorted(payload.triangles, key=lambda item: item.element_id, reverse=True):
+        for tri in sorted(visible_triangles, key=lambda item: item.element_id, reverse=True):
             xy = [coord for nid in tri.node_ids for coord in mapped[nid]]
             canvas.create_polygon(*xy, fill=_scalar_hex(tri.value, payload.value_min, payload.value_max), outline="#253443")
         if overlay_var.get():
-            for tri in payload.triangles:
+            for tri in visible_triangles:
                 xy = [coord for nid in tri.node_ids for coord in undeformed[nid]]
                 canvas.create_polygon(*xy, fill="", outline="#d7dde3", dash=(3, 3))
+
+        clip_text = "clip=OFF"
+        if clipped:
+            clip_text = (
+                f"clip={display.clip_plane.normal_unit} @{clip_offset_var.get()}mm {display.clip_plane.keep_side}  "
+                f"visible={display.kept_triangle_count}/{len(payload.triangles)}  clip_sha={display.clip_plane.clip_sha256[:12]}"
+            )
         legend_var.set(
             f"{payload.field} [{payload.unit}]  min={payload.value_min:.6g}  max={payload.value_max:.6g}  "
-            f"scale={payload.deformation_scale:g}  workspace={payload.workspace_sha256[:12]}  solve={payload.solve_evidence_sha256[:12]}"
+            f"scale={payload.deformation_scale:g}  {clip_text}  workspace={payload.workspace_sha256[:12]}  solve={payload.solve_evidence_sha256[:12]}"
         )
         bound["mapped"] = mapped
 
     def click_probe(event) -> None:
         payload = bound.get("payload")
         mapped = bound.get("mapped")
+        visible_triangles = bound.get("visible_triangles")
         result = bound.get("result")
         workspace = bound.get("workspace")
-        if payload is None or mapped is None or result is None or workspace is None:
+        if payload is None or mapped is None or result is None or workspace is None or visible_triangles is None:
             return
         point = np.asarray((float(event.x), float(event.y)))
         if payload.field == "U_MAG":
-            distances = np.linalg.norm(np.asarray(mapped) - point, axis=1)
-            entity_id = int(np.argmin(distances))
+            visible_nodes = sorted({nid for tri in visible_triangles for nid in tri.node_ids})
+            if not visible_nodes:
+                probe_var.set("Clip hides all boundary triangles; no visible entity to probe.")
+                return
+            distances = np.linalg.norm(np.asarray(mapped)[visible_nodes] - point, axis=1)
+            entity_id = int(visible_nodes[int(np.argmin(distances))])
         else:
-            centroids = np.asarray([np.mean(np.asarray(mapped)[list(tri.node_ids)], axis=0) for tri in payload.triangles])
+            if not visible_triangles:
+                probe_var.set("Clip hides all boundary triangles; no visible entity to probe.")
+                return
+            centroids = np.asarray([np.mean(np.asarray(mapped)[list(tri.node_ids)], axis=0) for tri in visible_triangles])
             tri_index = int(np.argmin(np.linalg.norm(centroids - point, axis=1)))
-            entity_id = payload.triangles[tri_index].element_id
+            entity_id = visible_triangles[tri_index].element_id
         probe = probe_result(workspace, result, kind=payload.field, entity_id=entity_id)
         probe_var.set(f"Probe {probe.kind} · entity {probe.entity_id} · {probe.value:.9g} {probe.unit} · raw solver-derived semantics")
 
@@ -248,6 +347,10 @@ def install_professional_results_tab(notebook):
     field_box.bind("<<ComboboxSelected>>", redraw)
     scale_entry.bind("<Return>", redraw)
     overlay_var.trace_add("write", redraw)
+    clip_enabled_var.trace_add("write", redraw)
+    axis_box.bind("<<ComboboxSelected>>", redraw)
+    clip_offset_entry.bind("<Return>", redraw)
+    side_box.bind("<<ComboboxSelected>>", redraw)
 
     def bind_results(workspace, nodes_mm, elements, result) -> ResultsRenderPayloadV1:
         bound.clear()
