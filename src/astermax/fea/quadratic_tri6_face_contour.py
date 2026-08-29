@@ -95,10 +95,29 @@ def _dedupe_reference_points(
 ) -> list[tuple[float, float]]:
     unique: list[tuple[float, float]] = []
     for point in points:
-        if not any(abs(point[0] - other[0]) <= eps and abs(point[1] - other[1]) <= eps for other in unique):
+        if not any(
+            abs(point[0] - other[0]) <= eps and abs(point[1] - other[1]) <= eps
+            for other in unique
+        ):
             unique.append(point)
     unique.sort()
     return unique
+
+
+def _segment_reference_key(
+    element_id: int,
+    face_id: int,
+    points: list[tuple[float, float]],
+) -> tuple[int, int, tuple[tuple[float, float], tuple[float, float]]]:
+    canonical = tuple(
+        sorted(
+            (
+                (_canonical_float(round(float(point[0]), 15)), _canonical_float(round(float(point[1]), 15)))
+                for point in points
+            )
+        )
+    )
+    return int(element_id), int(face_id), canonical
 
 
 def build_quadratic_tri6_face_contour(
@@ -114,15 +133,15 @@ def build_quadratic_tri6_face_contour(
 ) -> QuadraticTri6FaceContourV1:
     """Approximate plane/TRI6 zero contours with a deterministic reference lattice.
 
-    The physical face geometry and signed plane distance are evaluated with the
-    quadratic TRI6 shape functions. Each small reference triangle is contoured by
-    linear interpolation of its vertex signed distances, then every interpolated
-    reference hit is mapped back through the exact quadratic TRI6 geometry. The
-    returned plane residual therefore quantifies the geometric discretization error.
+    Physical face geometry and signed plane distance are evaluated with quadratic
+    TRI6 shape functions. Small reference triangles are contoured by interpolating
+    signed distance along their edges, and each reference hit is mapped back through
+    the quadratic geometry. Exact lattice-edge coincidences are retained once rather
+    than discarded as ambiguous; fully coincident micro-triangles remain ambiguous.
 
-    This is a convergent visualization/reconstruction primitive, not an exact conic
-    solver and not a cut-surface FEA field operator. It does not interpolate stress,
-    smooth/extrapolate von Mises, integrate resultants, or claim ANSYS equivalence.
+    This is a convergent geometry-only reconstruction primitive. It does not
+    interpolate stress, smooth or extrapolate von Mises, integrate section resultants,
+    or claim industrial validation or ANSYS equivalence.
     """
     nodes = np.asarray(nodes_mm, dtype=float)
     elems = np.asarray(elements, dtype=np.int64)
@@ -135,7 +154,12 @@ def build_quadratic_tri6_face_contour(
 
     origin = np.asarray(plane_origin_mm, dtype=float)
     normal = np.asarray(plane_normal, dtype=float)
-    if origin.shape != (3,) or normal.shape != (3,) or not np.all(np.isfinite(origin)) or not np.all(np.isfinite(normal)):
+    if (
+        origin.shape != (3,)
+        or normal.shape != (3,)
+        or not np.all(np.isfinite(origin))
+        or not np.all(np.isfinite(normal))
+    ):
         raise ValueError("QUADRATIC_TRI6_CONTOUR_PLANE")
     norm = float(np.linalg.norm(normal))
     if norm <= 0.0:
@@ -166,6 +190,9 @@ def build_quadratic_tri6_face_contour(
     reference_triangles = _reference_triangles(divisions)
     uv_eps = 1.0e-12
     segments: list[QuadraticTri6ContourSegmentV1] = []
+    segment_keys: set[
+        tuple[int, int, tuple[tuple[float, float], tuple[float, float]]]
+    ] = set()
     ambiguous_cells = 0
 
     for element_id, tet in enumerate(elems):
@@ -176,7 +203,7 @@ def build_quadratic_tri6_face_contour(
                 physical = [_tri6_point(face_nodes, *uv) for uv in tri]
                 distances = [float(np.dot(point - origin, normal_unit)) for point in physical]
                 crossings: list[tuple[float, float]] = []
-                coincident_edge = False
+
                 for a, b in ((0, 1), (1, 2), (2, 0)):
                     da = distances[a]
                     db = distances[b]
@@ -184,8 +211,12 @@ def build_quadratic_tri6_face_contour(
                     uvb = tri[b]
                     a_zero = abs(da) <= tolerance
                     b_zero = abs(db) <= tolerance
+
                     if a_zero and b_zero:
-                        coincident_edge = True
+                        # A valid contour can align exactly with a reference-lattice
+                        # edge. Preserve both endpoints; shared-edge duplicates are
+                        # removed deterministically below.
+                        crossings.extend((uva, uvb))
                         continue
                     if a_zero:
                         crossings.append(uva)
@@ -203,12 +234,19 @@ def build_quadratic_tri6_face_contour(
                         )
 
                 unique = _dedupe_reference_points(crossings, eps=uv_eps)
-                if coincident_edge or len(unique) not in (0, 2):
-                    if coincident_edge or len(unique) > 2:
-                        ambiguous_cells += 1
+                if len(unique) > 2:
+                    # All three reference vertices on the plane (or another
+                    # genuinely multi-branch micro-cell) cannot be represented by
+                    # a single deterministic segment without extra topology logic.
+                    ambiguous_cells += 1
                     continue
-                if not unique:
+                if len(unique) != 2:
                     continue
+
+                segment_key = _segment_reference_key(element_id, face_id, unique)
+                if segment_key in segment_keys:
+                    continue
+                segment_keys.add(segment_key)
 
                 mapped = [_tri6_point(face_nodes, *uv) for uv in unique]
                 residuals = [abs(float(np.dot(point - origin, normal_unit))) for point in mapped]
