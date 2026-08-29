@@ -1,0 +1,31 @@
+name: Windows Physical Fillet Surface Axial QOI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/physical-fillet-surface-axial-qoi-v2.7
+
+jobs:
+  verify-physical-fillet-surface-axial-qoi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Compute physical sampled fillet surface axial QOI
+        run: python benchmarks/physical_fillet_surface_axial_qoi.py
+      - name: Upload C19 surface QOI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physical-fillet-surface-axial-qoi-windows
+          path: |
+            physical_fillet_surface_axial_qoi.step
+            physical_fillet_surface_axial_qoi.json
+          if-no-files-found: error
