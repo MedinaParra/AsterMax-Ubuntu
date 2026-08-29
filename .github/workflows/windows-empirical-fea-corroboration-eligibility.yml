@@ -1,0 +1,35 @@
+name: Windows Empirical FEA Corroboration Eligibility
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/empirical-fea-corroboration-eligibility-v2.5
+
+jobs:
+  verify-empirical-fea-corroboration-eligibility:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Regenerate exact C16 synthetic empirical chain
+        run: python benchmarks/empirical_local_stress_chain.py
+      - name: Verify empirical FEA corroboration eligibility fails closed
+        run: python benchmarks/empirical_fea_corroboration_eligibility.py
+      - name: Upload C17 eligibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: empirical-fea-corroboration-eligibility-windows
+          path: |
+            empirical_local_stress_chain.step
+            empirical_local_stress_chain_synthetic_dataset.json
+            empirical_local_stress_chain.json
+            empirical_fea_corroboration_eligibility.json
+          if-no-files-found: error
