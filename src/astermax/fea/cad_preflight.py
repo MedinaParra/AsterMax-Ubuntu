@@ -12,6 +12,8 @@ from .gmsh_bridge import GmshBridgeError, _gmsh
 class CadPreflightReport:
     source: str
     gmsh_version: str
+    length_unit: str
+    occ_target_unit: str
     solid_count: int
     surface_count: int
     bbox_mm: tuple[float, float, float, float, float, float]
@@ -47,7 +49,13 @@ def _axis_scope_counts(gmsh, surfaces, bbox, tolerance_mm: float) -> dict[str, i
 
 def preflight_step(step_path: str | Path, *, relative_tolerance: float = 1.0e-6,
                    tiny_face_relative_area: float = 1.0e-6) -> CadPreflightReport:
-    """Inspect STEP topology before meshing without healing or mutating source CAD."""
+    """Inspect STEP topology before meshing without healing or mutating source CAD.
+
+    AsterMax's Windows PMV contract is explicitly millimetre-based. Gmsh/OpenCASCADE
+    can convert STEP source units during import, so the target is pinned to ``MM``
+    instead of relying on Gmsh's default. Every dimensional quantity emitted by this
+    report is therefore traceable to the same explicit length-unit contract.
+    """
     path = Path(step_path)
     if path.suffix.lower() not in {".step", ".stp"} or not path.is_file():
         raise GmshBridgeError("preflight input must be an existing STEP/STP file")
@@ -58,6 +66,7 @@ def preflight_step(step_path: str | Path, *, relative_tolerance: float = 1.0e-6,
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.option.setString("Geometry.OCCTargetUnit", "MM")
         gmsh.model.add("astermax_cad_preflight")
         gmsh.model.occ.importShapes(str(path))
         gmsh.model.occ.synchronize()
@@ -103,6 +112,7 @@ def preflight_step(step_path: str | Path, *, relative_tolerance: float = 1.0e-6,
         ready = len(volumes) == 1 and not missing and not ambiguous and not tiny_tags
         return CadPreflightReport(
             source=path.name, gmsh_version=str(getattr(gmsh, "__version__", "unknown")),
+            length_unit="mm", occ_target_unit="MM",
             solid_count=len(volumes), surface_count=len(surfaces),
             bbox_mm=tuple(float(v) for v in bbox), dimensions_mm=tuple(float(v) for v in dims),
             diagonal_mm=diagonal, tolerance_mm=tol,
