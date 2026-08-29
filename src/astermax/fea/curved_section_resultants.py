@@ -24,6 +24,7 @@ class CurvedSectionResultantError(RuntimeError):
 class CurvedSectionResultantSlab:
     schema: str
     mesh_sha256: str
+    section_sha256: str
     coordinate_min_mm: float
     coordinate_max_mm: float
     section_area_mm2: float
@@ -78,6 +79,7 @@ def integrate_curved_tet10_section_resultant_slab(
     nodes_mm: np.ndarray,
     elements: np.ndarray,
     mesh_sha256: str,
+    section_sha256: str,
     integration_point_natural_coordinates: np.ndarray,
     integration_point_weights: np.ndarray,
     integration_point_stress_mpa: np.ndarray,
@@ -93,7 +95,8 @@ def integrate_curved_tet10_section_resultant_slab(
     quadratic cut surface. The solver stress is sampled only at its native TET10
     volume integration points. Values are weighted by w*det(J), averaged over a
     declared slab, then scaled by the exact CAD section area. The moment uses the
-    in-plane lever arm about the supplied CAD section centroid.
+    in-plane lever arm about the supplied CAD section centroid. Both mesh and CAD
+    section evidence identities are carried into the deterministic result hash.
     """
 
     nodes = np.asarray(nodes_mm, dtype=float)
@@ -102,6 +105,7 @@ def integrate_curved_tet10_section_resultant_slab(
     weights = np.asarray(integration_point_weights, dtype=float).reshape(-1)
     stress = np.asarray(integration_point_stress_mpa, dtype=float)
     mesh_sha = str(mesh_sha256).strip().lower()
+    section_sha = str(section_sha256).strip().lower()
     cmin = float(coordinate_min_mm)
     cmax = float(coordinate_max_mm)
     area = float(section_area_mm2)
@@ -110,6 +114,8 @@ def integrate_curved_tet10_section_resultant_slab(
 
     if not _SHA256_RE.fullmatch(mesh_sha):
         raise ValueError("mesh_sha256 must be a lowercase SHA-256 digest")
+    if not _SHA256_RE.fullmatch(section_sha):
+        raise ValueError("section_sha256 must be a lowercase SHA-256 digest")
     if nodes.ndim != 2 or nodes.shape[1] != 3 or not np.all(np.isfinite(nodes)):
         raise ValueError("nodes_mm must be finite with shape (n,3)")
     if elems.ndim != 2 or elems.shape[1] != 10 or elems.shape[0] == 0:
@@ -181,6 +187,7 @@ def integrate_curved_tet10_section_resultant_slab(
     payload = {
         "schema": "AsterMaxCurvedSectionResultantSlabV1",
         "mesh_sha256": mesh_sha,
+        "section_sha256": section_sha,
         "coordinate_min_mm": cmin,
         "coordinate_max_mm": cmax,
         "section_area_mm2": area,
@@ -207,12 +214,15 @@ def integrate_curved_tet10_section_resultant_slab(
 
 def curved_section_resultant_evidence(result: CurvedSectionResultantSlab) -> EvidenceRecord:
     return EvidenceRecord(
-        evidence_id=f"FEA_SECTION_RESULTANT:{result.mesh_sha256[:16]}:{result.evidence_sha256[:16]}",
+        evidence_id=(
+            f"FEA_SECTION_RESULTANT:{result.mesh_sha256[:12]}:"
+            f"{result.section_sha256[:12]}:{result.evidence_sha256[:12]}"
+        ),
         kind="FEA_SECTION_RESULTANT_SLAB",
         status=EvidenceStatus.VERIFIED,
         source=EvidenceSource.DETERMINISTIC_CHECK,
         description=(
-            "Physical-volume-weighted TET10 integration-point traction and in-plane moment density in a declared slab, scaled by exact CAD section area; no nodal stress recovery or smoothing."
+            "Physical-volume-weighted TET10 integration-point traction and in-plane moment density in a declared slab, scaled by exact CAD section area and bound to the CAD section evidence identity; no nodal stress recovery or smoothing."
         ),
         payload_sha256=result.evidence_sha256,
         metadata=result.canonical_without_hash(),
