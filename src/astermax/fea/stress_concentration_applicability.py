@@ -84,9 +84,15 @@ def build_stress_concentration_applicability_domain(
     radius_ratio_min: float,
     radius_ratio_max: float,
     source_locator: str,
-    diameter_ratio_absolute_tolerance: float = 1.0e-9,
+    diameter_ratio_absolute_tolerance: float = 1.0e-6,
     interpolation_policy: str = "EXACT_DECLARED_DIAMETER_RATIO_ONLY_NO_EXTRAPOLATION",
 ) -> StressConcentrationApplicabilityDomain:
+    """Declare an empirical source domain without granting interpolation/extrapolation.
+
+    `diameter_ratio_absolute_tolerance` resolves floating-point/CAD import identity
+    around one explicitly published D/d curve. It is not an empirical interpolation
+    band and must stay tiny relative to spacing between declared source curves.
+    """
     clean_id = str(domain_id).strip()
     clean_sha = str(source_provenance_sha256).strip().lower()
     clean_mode = str(load_mode).strip().upper()
@@ -108,6 +114,8 @@ def build_stress_concentration_applicability_domain(
     tol = _positive("diameter_ratio_absolute_tolerance", diameter_ratio_absolute_tolerance)
     if r_max < r_min:
         raise StressConcentrationApplicabilityError("radius_ratio_max must be >= radius_ratio_min")
+    if tol >= 1.0e-3:
+        raise StressConcentrationApplicabilityError("diameter_ratio_absolute_tolerance is too large for identity matching")
 
     payload = {
         "schema": "AsterMaxStressConcentrationApplicabilityDomainV1",
