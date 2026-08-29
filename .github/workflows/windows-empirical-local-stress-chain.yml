@@ -1,0 +1,32 @@
+name: Windows Empirical Local Stress Chain
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/empirical-local-stress-chain-v2.4
+
+jobs:
+  verify-empirical-local-stress-chain:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Verify CAD-bound synthetic empirical local stress chain
+        run: python benchmarks/empirical_local_stress_chain.py
+      - name: Upload C16 empirical-chain evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: empirical-local-stress-chain-windows
+          path: |
+            empirical_local_stress_chain.step
+            empirical_local_stress_chain_synthetic_dataset.json
+            empirical_local_stress_chain.json
+          if-no-files-found: error
