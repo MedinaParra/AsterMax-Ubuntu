@@ -70,7 +70,8 @@ def test_curved_face_matches_analytic_zero_contour_and_refines_residual():
 
 def test_planar_quadratic_face_reduces_to_machine_close_plane_contour():
     nodes, elements = _curved_tet10_fixture()
-    # Replace face-0 z coordinates by z=x-0.25, while retaining quadratic midside nodes.
+    # x=0.25 lands exactly on the divisions=12 reference lattice. The contour
+    # must be preserved instead of being discarded as an ambiguous coincidence.
     for node_id in (0, 1, 2, 4, 5, 6):
         nodes[node_id, 2] = nodes[node_id, 0] - 0.25
     result = build_quadratic_tri6_face_contour(
@@ -86,6 +87,9 @@ def test_planar_quadratic_face_reduces_to_machine_close_plane_contour():
     assert face
     assert max(segment.max_plane_residual_mm for segment in face) < 1.0e-12
     assert max(abs(point[0] - 0.25) for segment in face for point in segment.points_mm) < 1.0e-12
+
+    keys = [segment.reference_points for segment in face]
+    assert len(keys) == len(set(keys))
 
 
 def test_invalid_contracts_fail_closed():
