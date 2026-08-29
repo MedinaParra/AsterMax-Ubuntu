@@ -39,6 +39,7 @@ def _kwargs():
         nodes_mm=nodes,
         elements=elements,
         mesh_sha256="a" * 64,
+        section_sha256="b" * 64,
         integration_point_natural_coordinates=rule.points,
         integration_point_weights=rule.weights,
         integration_point_stress_mpa=stress,
@@ -59,13 +60,20 @@ def test_uniform_stress_recovers_force_and_zero_centroid_moment():
     assert result.selected_integration_point_count == result.quadrature_point_count
 
 
-def test_evidence_is_deterministic_and_mesh_bound():
+def test_evidence_is_deterministic_and_mesh_and_section_bound():
     a = integrate_curved_tet10_section_resultant_slab(**_kwargs())
     b = integrate_curved_tet10_section_resultant_slab(**_kwargs())
     assert a.evidence_sha256 == b.evidence_sha256
     record = curved_section_resultant_evidence(a)
     assert record.payload_sha256 == a.evidence_sha256
     assert record.metadata["mesh_sha256"] == "a" * 64
+    assert record.metadata["section_sha256"] == "b" * 64
+
+    changed = _kwargs()
+    changed["section_sha256"] = "c" * 64
+    c = integrate_curved_tet10_section_resultant_slab(**changed)
+    assert c.resultant_force_n == pytest.approx(a.resultant_force_n)
+    assert c.evidence_sha256 != a.evidence_sha256
 
 
 def test_changed_stress_changes_resultant_and_evidence():
@@ -83,6 +91,11 @@ def test_fail_closed_for_invalid_provenance_shapes_area_and_normal():
     kwargs = _kwargs()
     kwargs["mesh_sha256"] = "bad"
     with pytest.raises(ValueError, match="mesh_sha256"):
+        integrate_curved_tet10_section_resultant_slab(**kwargs)
+
+    kwargs = _kwargs()
+    kwargs["section_sha256"] = "bad"
+    with pytest.raises(ValueError, match="section_sha256"):
         integrate_curved_tet10_section_resultant_slab(**kwargs)
 
     kwargs = _kwargs()
