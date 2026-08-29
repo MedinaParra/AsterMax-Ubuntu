@@ -1,0 +1,31 @@
+name: Windows Curved TET10 Local Stress Convergence
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-tet10-local-convergence-v1.8
+
+jobs:
+  verify-curved-local-convergence:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Measure predeclared curved TET10 local-stress convergence
+        run: python benchmarks/curved_tet10_local_stress_convergence.py
+      - name: Upload C12 curved local-convergence evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-tet10-local-stress-convergence-windows
+          path: |
+            curved_tet10_local_stress_convergence.step
+            curved_tet10_local_stress_convergence.json
+          if-no-files-found: error
