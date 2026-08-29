@@ -9,7 +9,7 @@ import numpy as np
 
 from .adaptive_tet10_section import build_adaptive_tet10_section
 from .section_polyline_assembly import assemble_section_polylines
-from .section_displacement_field import build_section_displacement_field
+from .section_displacement_field import SectionDisplacementFieldV1, build_section_displacement_field
 
 
 @dataclass(frozen=True)
@@ -130,13 +130,15 @@ def build_section_displacement_contour(nodes_mm: np.ndarray, elements: np.ndarra
     return SectionDisplacementContourV1("AsterMaxSectionDisplacementContourV1","verified_tet10_section_u_mag_contour_and_probe","mm",str(workspace_sha256),str(solve_evidence_sha256),section.geometry_sha256,assembly.assembly_sha256,field_sha,_sha(identity),status,tuple(blockers),str(axis).upper(),float(offset_mm),field.min_displacement_magnitude_mm if field and not blockers else 0.0,field.max_displacement_magnitude_mm if field and not blockers else 0.0,field.max_geometry_residual_mm if field else 0.0,field.max_cross_element_disagreement_mm if field else 0.0,len(polylines),tuple(polylines))
 
 
-def probe_section_displacement(contour: SectionDisplacementContourV1, field_samples, *, canvas_x: float, canvas_y: float, max_distance_px: float = 12.0) -> SectionDisplacementProbeV1:
+def probe_section_displacement(contour: SectionDisplacementContourV1, field: SectionDisplacementFieldV1, *, canvas_x: float, canvas_y: float, max_distance_px: float = 12.0) -> SectionDisplacementProbeV1:
     if contour.status != "READY":
         raise ValueError("SECTION_PROBE_CONTOUR_NOT_READY")
+    if field.status != "READY" or field.field_sha256 != contour.field_sha256 or field.workspace_sha256 != contour.workspace_sha256 or field.solve_evidence_sha256 != contour.solve_evidence_sha256:
+        raise ValueError("SECTION_PROBE_FIELD_PROVENANCE")
     radius = float(max_distance_px)
     if not math.isfinite(radius) or radius <= 0:
         raise ValueError("SECTION_PROBE_RADIUS")
-    sample_map = {(int(s.polyline_index), int(s.point_index)): s for s in field_samples}
+    sample_map = {(int(s.polyline_index), int(s.point_index)): s for s in field.samples}
     best = None
     for pi, poly in enumerate(contour.polylines):
         for ji, (x, y) in enumerate(poly.canvas_xy):
