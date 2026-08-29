@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 import threading
-import webbrowser
 from pathlib import Path
 
 from .fea.arbitrary_picker_review import build_arbitrary_picker_review_snapshot, install_arbitrary_picker_review_tab
@@ -13,6 +12,8 @@ from .fea.face_ownership import mesh_step_tet10_with_face_ownership
 from .fea.native_cad_picker_ui import NativeCadPickerAssignment, install_native_cad_face_picker_tab
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.production_picker_routing import prepare_picker_routed_model, solve_picker_routed_model, verify_picker_route
+from .fea.production_results import build_production_results_bundle, production_results_metadata
+from .fea.results_workspace_ui import install_professional_results_tab
 from .fea.viewer_tet10 import write_tet10_offline_viewer
 
 RESULT_CLASS = "PMV_UNCONVERGED_USER_MODEL_NOT_INDUSTRIAL_RESULT"
@@ -79,6 +80,26 @@ def verify_desktop_picker_model(prepared: dict, contract: dict) -> None:
         raise ValueError("DESKTOP_PICKER_REVIEW_LOAD_STALE")
 
 
+def verify_desktop_live_results(summary: dict) -> None:
+    metadata = summary.get("production_results")
+    runtime = summary.get("_runtime_results")
+    solve = summary.get("solve_evidence")
+    if not isinstance(metadata, dict) or not isinstance(runtime, dict) or not isinstance(solve, dict):
+        raise ValueError("DESKTOP_RESULTS_PROVENANCE_REQUIRED")
+    workspace = runtime.get("workspace")
+    initial_payload = runtime.get("initial_payload")
+    if workspace is None or initial_payload is None:
+        raise ValueError("DESKTOP_RESULTS_RUNTIME_REQUIRED")
+    if metadata.get("workspace_sha256") != workspace.workspace_sha256:
+        raise ValueError("DESKTOP_RESULTS_WORKSPACE_STALE")
+    if metadata.get("solve_evidence_sha256") != solve.get("solve_evidence_sha256"):
+        raise ValueError("DESKTOP_RESULTS_SOLVE_STALE")
+    if initial_payload.workspace_sha256 != workspace.workspace_sha256:
+        raise ValueError("DESKTOP_RESULTS_RENDER_WORKSPACE_STALE")
+    if initial_payload.solve_evidence_sha256 != solve.get("solve_evidence_sha256"):
+        raise ValueError("DESKTOP_RESULTS_RENDER_SOLVE_STALE")
+
+
 def solve_desktop_picker_model(prepared: dict, contract: dict, output_dir: str | Path) -> dict:
     verify_desktop_picker_model(prepared, contract)
     solved = solve_picker_routed_model(
@@ -93,6 +114,13 @@ def solve_desktop_picker_model(prepared: dict, contract: dict, output_dir: str |
     review = prepared["desktop_picker_review"]
     evidence = prepared["evidence"]
     solve_evidence = solved["solve_evidence"]
+    bundle, workspace, displacement_payload, _stress_payload = build_production_results_bundle(
+        inventory.nodes_mm,
+        inventory.elements,
+        result,
+        solve_evidence,
+        deformation_scale=1.0,
+    )
 
     output = Path(output_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -117,7 +145,7 @@ def solve_desktop_picker_model(prepared: dict, contract: dict, output_dir: str |
         industrial_validation_claim=False,
     )
     summary = {
-        "schema": "AsterMaxDesktopPickerResultV1",
+        "schema": "AsterMaxDesktopPickerResultV2",
         "result_class": RESULT_CLASS,
         "source_step": contract["step_path"],
         "source_step_sha256": contract["step_sha256"],
@@ -135,6 +163,7 @@ def solve_desktop_picker_model(prepared: dict, contract: dict, output_dir: str |
         "preparation": asdict(evidence),
         "review": asdict(review),
         "solve_evidence": asdict(solve_evidence),
+        "production_results": production_results_metadata(bundle),
         "mesh": {
             "family": "TET10",
             "target_size_mm": contract["mesh_size_mm"],
@@ -162,6 +191,14 @@ def solve_desktop_picker_model(prepared: dict, contract: dict, output_dir: str |
     summary_path = output / "astermax_result_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary["artifacts"]["summary"] = str(summary_path)
+    summary["_runtime_results"] = {
+        "workspace": workspace,
+        "initial_payload": displacement_payload,
+        "nodes_mm": inventory.nodes_mm,
+        "elements": inventory.elements,
+        "result": result,
+    }
+    verify_desktop_live_results(summary)
     return summary
 
 
@@ -170,7 +207,7 @@ def desktop_main() -> int:
     from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
-    root.title("AsterMax PMV · Native CAD Picker · Evidence-Gated TET10")
+    root.title("AsterMax PMV · CAD Picker · Provenance-Bound Professional Results")
     root.geometry("1240x880")
     root.minsize(980, 740)
 
@@ -180,7 +217,7 @@ def desktop_main() -> int:
     notebook.add(analysis, text="Analysis")
 
     state: dict[str, object] = {"assignment": None, "prepared": None, "contract": None}
-    status_var = tk.StringVar(value="1) Select STEP and build CAD picker. 2) Pick Support/Load. 3) Prepare review. 4) Solve.")
+    status_var = tk.StringVar(value="1) Select STEP and build CAD picker. 2) Pick Support/Load. 3) Prepare review. 4) Solve and inspect native Results.")
     step_var = tk.StringVar()
     out_var = tk.StringVar(value=str((Path.home() / "AsterMaxResults").resolve()))
     mesh_var = tk.StringVar(value="10.0")
@@ -218,12 +255,13 @@ def desktop_main() -> int:
 
     bind_picker = install_native_cad_face_picker_tab(notebook, on_assignment=on_assignment)
     bind_review = install_arbitrary_picker_review_tab(notebook)
+    bind_results = install_professional_results_tab(notebook)
 
     analysis.columnconfigure(1, weight=1)
     ttk.Label(analysis, text="AsterMax PMV", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
     ttk.Label(
         analysis,
-        text="STEP [mm] → CAD Face Picker → Persistent Support/Load → Review → Sparse TET10 Solve",
+        text="STEP [mm] → CAD Face Picker → Persistent Support/Load → Review → Sparse TET10 Solve → Native Results",
     ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 16))
 
     def browse_step() -> None:
@@ -257,8 +295,8 @@ def desktop_main() -> int:
         var.trace_add("write", invalidate)
 
     warning = (
-        "Production desktop authoring uses persistent arbitrary CAD-face picks; X/Y/Z MIN/MAX comboboxes are no longer in the main workflow. "
-        "AsterMax tetra mean-ratio is not ANSYS Element Quality. Arbitrary-model convergence, industrial validation and ANSYS equivalence are not claimed."
+        "Production authoring uses persistent arbitrary CAD-face picks. Results are bound to the exact solve-evidence/workspace SHA chain. "
+        "Von Mises is the explicit per-element maximum of 4 TET10 integration points; no nodal stress smoothing. Arbitrary-model convergence, industrial validation and ANSYS equivalence are not claimed."
     )
     ttk.Label(analysis, text=warning, wraplength=1040).grid(row=10, column=0, columnspan=3, sticky="ew", pady=(14, 8))
     progress = ttk.Progressbar(analysis, mode="indeterminate")
@@ -268,7 +306,7 @@ def desktop_main() -> int:
     picker_button.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(12, 4))
     review_button = ttk.Button(analysis, text="2 · Prepare exact picker route + review", state="disabled")
     review_button.grid(row=14, column=0, columnspan=3, sticky="ew", pady=4)
-    solve_button = ttk.Button(analysis, text="3 · Solve exact reviewed picker route", state="disabled")
+    solve_button = ttk.Button(analysis, text="3 · Solve exact reviewed route + open native Results", state="disabled")
     solve_button.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(4, 6))
 
     def set_busy(busy: bool) -> None:
@@ -346,7 +384,7 @@ def desktop_main() -> int:
             state["prepared"] = None; state["contract"] = None; solve_button.configure(state="disabled")
             messagebox.showerror("Review invalidated", str(exc)); return
         set_busy(True)
-        status_var.set("Solving exact reviewed FaceSignature/TRI6 bindings through sparse TET10 path…")
+        status_var.set("Solving reviewed FaceSignature/TRI6 bindings and constructing provenance-bound Results workspace…")
 
         def worker() -> None:
             try:
@@ -355,15 +393,30 @@ def desktop_main() -> int:
                 root.after(0, lambda: (set_busy(False), messagebox.showerror("AsterMax solve", str(exc))))
                 return
             def finished() -> None:
+                try:
+                    verify_desktop_live_results(summary)
+                    runtime = summary["_runtime_results"]
+                    payload = bind_results(runtime["workspace"], runtime["nodes_mm"], runtime["elements"], runtime["result"])
+                    metadata = summary["production_results"]
+                    if payload.workspace_sha256 != metadata["workspace_sha256"]:
+                        raise ValueError("DESKTOP_RESULTS_BOUND_WORKSPACE_STALE")
+                    if payload.solve_evidence_sha256 != metadata["solve_evidence_sha256"]:
+                        raise ValueError("DESKTOP_RESULTS_BOUND_SOLVE_STALE")
+                except Exception as exc:
+                    set_busy(False)
+                    messagebox.showerror("AsterMax Results", str(exc))
+                    return
                 set_busy(False); state["prepared"] = None; state["contract"] = None; solve_button.configure(state="disabled")
                 checks = summary["checks"]
                 status_var.set(
-                    f"Completed picker-routed model: {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm"
+                    f"Native Results bound · {summary['mesh']['nodes']} nodes / {summary['mesh']['elements']} TET10 · "
+                    f"Umax {metadata['displacement_value_max_mm']:.6g} mm · VM(IP max) {metadata['von_mises_value_max_mpa']:.6g} MPa · "
+                    f"force residual {checks['force_residual_n']:.3e} N · moment residual {checks['moment_residual_nmm']:.3e} N·mm"
                 )
-                webbrowser.open(Path(summary["artifacts"]["viewer"]).as_uri())
+                notebook.select(3)
                 messagebox.showinfo(
                     "AsterMax",
-                    "Solve completed from native CAD face picks through persistent FaceSignature/TRI6 bindings. No arbitrary-model convergence or ANSYS-equivalence claim is made.",
+                    "Solve completed and bound to native Results through the exact solve-evidence/workspace provenance chain. No arbitrary-model convergence, industrial-validation or ANSYS-equivalence claim is made.",
                 )
             root.after(0, finished)
         threading.Thread(target=worker, daemon=True).start()
