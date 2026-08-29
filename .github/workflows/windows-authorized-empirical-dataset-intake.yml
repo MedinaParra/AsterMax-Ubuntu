@@ -1,0 +1,31 @@
+name: Windows Authorized Empirical Dataset Intake
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/authorized-empirical-dataset-intake-v2.3
+
+jobs:
+  verify-authorized-empirical-dataset-intake:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Verify authorized empirical dataset intake
+        run: python benchmarks/authorized_empirical_dataset_intake.py
+      - name: Upload C15 dataset-intake evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: authorized-empirical-dataset-intake-windows
+          path: |
+            authorized_synthetic_stress_concentration_dataset.json
+            authorized_empirical_dataset_intake.json
+          if-no-files-found: error
