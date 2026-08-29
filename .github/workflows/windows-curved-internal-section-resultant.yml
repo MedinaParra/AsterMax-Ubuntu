@@ -1,0 +1,33 @@
+name: Windows Curved Internal Section Resultant Corroboration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/internal-section-resultant-c15
+
+jobs:
+  verify-curved-internal-section-resultant:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Compile warnings as errors
+        run: python -W error -m compileall -q src tests benchmarks
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Corroborate internal section resultants from native curved TET10 integration-point stress
+        run: python benchmarks/curved_internal_section_resultant_corroboration.py
+      - name: Upload C15 internal section resultant evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-internal-section-resultant-corroboration-windows
+          path: |
+            curved_internal_section_resultant_corroboration.step
+            curved_internal_section_resultant_corroboration.json
+          if-no-files-found: error
