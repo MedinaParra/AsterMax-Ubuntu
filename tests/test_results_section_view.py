@@ -110,5 +110,14 @@ def test_invalid_canvas_and_reference_fail_closed():
     with pytest.raises(ValueError, match="SECTION_VIEW_REFERENCE_EMPTY"):
         build_native_section_view_payload(nodes, elements, projected_view_xy=np.empty((0, 2)), **common)
     with pytest.raises(ValueError, match="SECTION_VIEW_CANVAS"):
-        build_native_section_view_payload(nodes, elements, projected_view_xy=projected, canvas_width=-1.0, canvas_height=600.0,
-            workspace_sha256="1" * 64, solve_evidence_sha256="2" * 64, axis="X", offset_mm=0.25)
+        build_native_section_view_payload(
+            nodes,
+            elements,
+            projected_view_xy=projected,
+            canvas_width=-1.0,
+            canvas_height=600.0,
+            workspace_sha256="1" * 64,
+            solve_evidence_sha256="2" * 64,
+            axis="X",
+            offset_mm=0.25,
+        )
