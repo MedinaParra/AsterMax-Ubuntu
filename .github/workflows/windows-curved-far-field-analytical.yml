@@ -1,0 +1,31 @@
+name: Windows Curved Far Field Analytical Corroboration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/curved-far-field-analytical-witness-v2.1
+
+jobs:
+  verify-curved-far-field-analytical:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Compare curved far-field FEA tensor to CAD analytical witness
+        run: python benchmarks/curved_far_field_analytical_corroboration.py
+      - name: Upload C13 analytical corroboration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: curved-far-field-analytical-corroboration-windows
+          path: |
+            curved_far_field_analytical_corroboration.step
+            curved_far_field_analytical_corroboration.json
+          if-no-files-found: error
