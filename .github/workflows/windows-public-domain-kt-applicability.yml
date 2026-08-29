@@ -1,0 +1,31 @@
+name: Windows Public Domain Kt Applicability Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/public-domain-kt-applicability-v2.2
+
+jobs:
+  verify-public-domain-kt-applicability:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic regression harness
+        run: python -m pytest -q
+      - name: Verify public-domain Kt source applicability fails closed
+        run: python benchmarks/public_domain_kt_applicability.py
+      - name: Upload C14 applicability evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-domain-kt-applicability-windows
+          path: |
+            public_domain_kt_applicability.step
+            public_domain_kt_applicability.json
+          if-no-files-found: error
