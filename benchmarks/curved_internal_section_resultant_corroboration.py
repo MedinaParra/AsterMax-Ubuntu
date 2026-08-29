@@ -155,6 +155,7 @@ def main() -> int:
             nodes_mm=mesh.nodes_mm,
             elements=mesh.elements,
             mesh_sha256=mesh.mesh_sha256,
+            section_sha256=section.section_sha256,
             integration_point_natural_coordinates=result.integration_point_natural_coordinates,
             integration_point_weights=result.integration_point_weights,
             integration_point_stress_mpa=result.integration_point_stress_mpa,
@@ -277,7 +278,7 @@ def main() -> int:
         "industrial_validation_claim": False,
         "ansys_equivalence_claim": False,
         "interpretation_boundary": (
-            "C15 corroborates internal axial-force equilibrium and small parasitic shear/moment in three declared far-field section-centered slabs of this generated linear-elastic verification fixture. The QOI uses only native curved-TET10 integration-point stresses with w*det(J), the exact CAD section area and CAD centroid. No nodal stress recovery, averaging-to-nodes, smoothing or invented cut-surface field participates. This is numerical solution verification, not physical or industrial validation."
+            "C15 corroborates internal axial-force equilibrium and small parasitic shear/moment in three declared far-field section-centered slabs of this generated linear-elastic verification fixture. The QOI uses only native curved-TET10 integration-point stresses with w*det(J), the exact CAD section area, CAD centroid and section evidence SHA. No nodal stress recovery, averaging-to-nodes, smoothing or invented cut-surface field participates. This is numerical solution verification, not physical or industrial validation."
         ),
     }
     payload["benchmark_sha256"] = canonical_sha256(payload)
