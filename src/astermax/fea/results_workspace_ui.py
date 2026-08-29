@@ -71,10 +71,10 @@ def build_results_render_payload(
 ) -> ResultsRenderPayloadV1:
     nodes = np.asarray(nodes_mm, dtype=float)
     elems = np.asarray(elements, dtype=np.int64)
-    if nodes.shape != np.asarray(result.displacement_mm).shape:
-        raise ValueError("RESULTS_UI_DISPLACEMENT_SHAPE")
     if workspace.node_count != int(nodes.shape[0]) or workspace.tet10_count != int(elems.shape[0]):
         raise ValueError("RESULTS_UI_WORKSPACE_MESH_STALE")
+    if nodes.shape != np.asarray(result.displacement_mm).shape:
+        raise ValueError("RESULTS_UI_DISPLACEMENT_SHAPE")
     scale = workspace.deformation_scale if deformation_scale is None else float(deformation_scale)
     if not math.isfinite(scale) or scale < 0.0:
         raise ValueError("RESULTS_UI_DEFORMATION_SCALE")
