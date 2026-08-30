@@ -1,4 +1,5 @@
 from dataclasses import replace
+import inspect
 
 import pytest
 
@@ -8,6 +9,7 @@ from astermax.fea.live_project_capture import (
     verify_live_project_capture_receipt,
 )
 from astermax.fea.project_authoring import ProjectAuthoringError, create_project_from_verified_results
+from astermax.fea.project_session_shell import install_project_session_tab
 from astermax.fea.unified_project_model import open_unified_project, verify_unified_project
 from test_project_session_shell import _real_package
 
@@ -93,3 +95,11 @@ def test_capture_receipt_tamper_and_overclaim_fail_closed(tmp_path):
         verify_live_project_capture_receipt(replace(receipt, revision=99))
     with pytest.raises(LiveProjectCaptureError, match="VALIDATION_OVERCLAIM"):
         verify_live_project_capture_receipt(replace(receipt, ansys_equivalence=True))
+
+
+def test_shipping_projects_shell_exposes_capture_bridge_without_breaking_return_contract():
+    source = inspect.getsource(install_project_session_tab)
+    assert 'setattr(notebook, "_astermax_live_project_capture", capture_coordinator)' in source
+    assert "on_active_project_changed=capture_coordinator.set_active_project" in source
+    assert "return open_path, refresh" in source
+    assert "capture_verified_results(" not in source, "opening an old Results package must not silently append it"
