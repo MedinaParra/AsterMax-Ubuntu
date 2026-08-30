@@ -1,0 +1,26 @@
+name: Windows C5.5s Project Session Shell
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  project-session-shell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/project_session_shell.py src/astermax/app.py
+      - name: C5.5s real portable project-session harness
+        run: python -m pytest -q tests/test_project_session_shell.py
+      - name: Portable package and adaptive Results regressions
+        run: python -m pytest -q tests/test_portable_adaptive_results.py tests/test_adaptive_execution_bundle.py tests/test_adaptive_hotspot_visualization.py tests/test_adaptive_stress_comparison.py
+      - name: CAD STEP and desktop regressions
+        run: python -m pytest -q tests/test_step_to_solve.py tests/test_cad_face_picker.py tests/test_production_results.py tests/test_adaptive_results_dashboard.py
+      - name: Full regression suite
+        run: python -m pytest -q
