@@ -118,6 +118,7 @@ def install_project_authoring_controls(
     parent: Any,
     *,
     on_project_changed: Callable[[str], None],
+    on_active_project_changed: Callable[[str], None] | None = None,
 ):
     """Install New Project / Add Revision actions without solving or remeshing.
 
@@ -133,6 +134,11 @@ def install_project_authoring_controls(
     active_project = tk.StringVar(value="")
     status = tk.StringVar(value="No active .astermax project")
 
+    def publish_active_project(path: str) -> None:
+        active_project.set(str(Path(path).resolve()))
+        if on_active_project_changed is not None:
+            on_active_project_changed(active_project.get())
+
     def new_project() -> None:
         result_path = filedialog.askopenfilename(filetypes=[("AsterMax Results", "*.astermaxr")])
         if not result_path:
@@ -146,7 +152,7 @@ def install_project_authoring_controls(
             verify_project_authoring_receipt(receipt)
         except Exception as exc:
             messagebox.showerror("AsterMax project authoring", str(exc)); return
-        active_project.set(str(Path(project_path).resolve()))
+        publish_active_project(project_path)
         status.set(f"ACTIVE · {project.project_name} · Revision {len(project.revisions):02d} · VERIFIED")
         on_project_changed(active_project.get())
 
@@ -158,7 +164,7 @@ def install_project_authoring_controls(
             project = open_unified_project(path); verify_unified_project(project, verify_revision_files=True)
         except Exception as exc:
             messagebox.showerror("AsterMax project authoring", str(exc)); return
-        active_project.set(str(Path(path).resolve()))
+        publish_active_project(path)
         status.set(f"ACTIVE · {project.project_name} · {len(project.revisions)} revision(s) · VERIFIED")
         on_project_changed(active_project.get())
 
@@ -174,6 +180,8 @@ def install_project_authoring_controls(
         except Exception as exc:
             messagebox.showerror("AsterMax project authoring", str(exc)); return
         status.set(f"ACTIVE · {project.project_name} · Revision {len(project.revisions):02d} appended · VERIFIED")
+        if on_active_project_changed is not None:
+            on_active_project_changed(active_project.get())
         on_project_changed(active_project.get())
 
     buttons = ttk.Frame(frame); buttons.pack(fill="x")

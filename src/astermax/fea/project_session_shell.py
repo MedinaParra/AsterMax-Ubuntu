@@ -266,6 +266,7 @@ def install_project_session_tab(
     hotspot_binder: Callable[[AdaptiveHotspotVisualizationV1], None],
     stress_binder: Callable[[AdaptiveStressComparisonV1], None],
     recent_store_path: str | Path | None = None,
+    capture_coordinator: Any | None = None,
 ):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
@@ -286,6 +287,7 @@ def install_project_session_tab(
     tree.column("status", width=100, stretch=False); tree.column("path", width=780, stretch=True)
     tree.grid(row=3, column=0, sticky="nsew")
     ttk.Label(panel, textvariable=status_var, wraplength=1000).grid(row=4, column=0, sticky="ew", pady=(8, 0))
+    authoring_host = ttk.Frame(panel); authoring_host.grid(row=5, column=0, sticky="ew", pady=(10, 0))
     current_paths: list[str] = []
 
     def refresh() -> None:
@@ -331,15 +333,31 @@ def install_project_session_tab(
     tree.bind("<Double-1>", lambda _event: open_selected())
     refresh()
 
-    # C5.5u packaged desktop cutover: install the unified project tree from the
-    # same verified hotspot/stress binders already owned by the shipping shell.
-    # The import stays local to avoid a module-import cycle because
-    # unified_project_model itself reuses open_verified_project_session().
     from .unified_project_model import install_unified_project_tab
-
-    install_unified_project_tab(
+    populate_project_tree = install_unified_project_tab(
         notebook,
         hotspot_binder=hotspot_binder,
         stress_binder=stress_binder,
+    )
+
+    # C5.5w: the shipping Projects shell owns one capture coordinator. Native
+    # authoring publishes the active `.astermax` identity into it; an upstream
+    # adaptive run can then call notebook._astermax_live_project_capture with a
+    # newly verified `.astermaxr`. Opening old results never auto-appends them.
+    if capture_coordinator is None:
+        from .live_project_capture import LiveProjectCaptureCoordinatorV1
+        capture_coordinator = LiveProjectCaptureCoordinatorV1(
+            hotspot_binder=hotspot_binder,
+            stress_binder=stress_binder,
+            recent_store_path=recent_store_path,
+        )
+    capture_coordinator.configure_project_refresh(populate_project_tree)
+    setattr(notebook, "_astermax_live_project_capture", capture_coordinator)
+
+    from .project_authoring import install_project_authoring_controls
+    install_project_authoring_controls(
+        authoring_host,
+        on_project_changed=populate_project_tree,
+        on_active_project_changed=capture_coordinator.set_active_project,
     )
     return open_path, refresh
