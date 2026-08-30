@@ -337,9 +337,9 @@ def install_project_session_tab(
     # unified_project_model itself reuses open_verified_project_session().
     from .unified_project_model import install_unified_project_tab
 
-    populate_unified_project = install_unified_project_tab(
+    install_unified_project_tab(
         notebook,
         hotspot_binder=hotspot_binder,
         stress_binder=stress_binder,
     )
-    return open_path, refresh, populate_unified_project
+    return open_path, refresh
