@@ -8,11 +8,14 @@ from pathlib import Path
 
 import numpy as np
 
+from .fea.adaptive_hotspot_visualization import install_adaptive_hotspot_tab
+from .fea.adaptive_stress_comparison import install_adaptive_stress_comparison_tab
 from .fea.gmsh_bridge import distribute_resultant_on_tri6, fixed_dofs_for_nodes, force_and_moment, unique_surface_nodes
 from .fea.live_analysis_evidence import install_live_analysis_evidence_tab
 from .fea.native_credibility import install_native_credibility_tab
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.pre_solve_review import accept_model_preparation, prepare_model_for_review, verify_acceptance, visual_preparation_payload
+from .fea.project_session_shell import install_project_session_tab
 from .fea.solver import solve_linear_static_tet10
 from .fea.tet4 import IsotropicMaterial
 from .fea.viewer_tet10 import write_tet10_offline_viewer
@@ -152,6 +155,13 @@ def _desktop_main() -> int:
     bind_visual_preparation = install_visual_model_preparation_tab(notebook)
     bind_worst_quality = install_worst_element_quality_tab(notebook)
     install_native_credibility_tab(notebook)
+    bind_adaptive_hotspots = install_adaptive_hotspot_tab(notebook)
+    bind_stress_compare = install_adaptive_stress_comparison_tab(notebook)
+    install_project_session_tab(
+        notebook,
+        hotspot_binder=bind_adaptive_hotspots,
+        stress_binder=bind_stress_compare,
+    )
 
     step_var = tk.StringVar()
     out_var = tk.StringVar(value=str((Path.home() / "AsterMaxResults").resolve()))
