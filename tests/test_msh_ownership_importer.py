@@ -17,7 +17,7 @@ def _write_box_step(tmp_path):
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("c55f_step")
+        gmsh.model.add("c55h_step")
         gmsh.model.occ.addBox(0, 0, 0, 20, 20, 20)
         gmsh.model.occ.synchronize()
         gmsh.write(str(path))
@@ -58,7 +58,7 @@ def _make_artifact(tmp_path):
     gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("c55f_loaded_step")
+        gmsh.model.add("c55h_loaded_step")
         gmsh.model.occ.importShapes(str(step))
         gmsh.model.occ.synchronize()
         evidence = execute_configured_tet10_mesh(gmsh, plan=plan, approval=approval, output_path=msh)
@@ -67,7 +67,7 @@ def _make_artifact(tmp_path):
     return step, msh, evidence
 
 
-def test_exact_approved_msh_is_imported_into_rebindable_tet10_ownership(tmp_path):
+def test_exact_approved_msh_is_imported_with_robust_association_and_rebindable_ownership(tmp_path):
     step, msh, remesh_evidence = _make_artifact(tmp_path)
     inventory, import_evidence = import_tet10_ownership_from_msh(
         step, msh, expected_mesh_sha256=remesh_evidence.output_mesh_sha256
@@ -81,6 +81,7 @@ def test_exact_approved_msh_is_imported_into_rebindable_tet10_ownership(tmp_path
     assert import_evidence.transient_tags_are_identity is False
     assert import_evidence.ready_for_rebinding is True
     assert import_evidence.source_mesh_sha256 == remesh_evidence.output_mesh_sha256
+    assert import_evidence.association_mode == "ROBUST_MULTI_INVARIANT_TRI6_TO_PERSISTENT_CAD_SIGNATURE_V1"
 
     ordered = sorted(inventory.faces, key=lambda f: f.center_mm[0])
     support = capture_named_selection(step, [ordered[0].face_tag], "Fixed X-", "SUPPORT")
@@ -100,7 +101,7 @@ def test_importer_rejects_modified_or_wrongly_admitted_mesh_artifact(tmp_path):
         import_tet10_ownership_from_msh(step, msh, expected_mesh_sha256=evidence.output_mesh_sha256)
 
 
-def test_importer_fails_closed_on_ambiguous_spatial_identity(tmp_path, monkeypatch):
+def test_importer_fails_closed_on_ambiguous_persistent_identity(tmp_path, monkeypatch):
     step, msh, evidence = _make_artifact(tmp_path)
     import astermax.fea.msh_ownership_importer as module
     original = module.list_face_signatures
