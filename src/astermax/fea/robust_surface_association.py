@@ -65,6 +65,24 @@ def build_mesh_surface_descriptor(nodes_mm: np.ndarray, tri6: np.ndarray) -> Sur
     return SurfaceDescriptorV1(**core, descriptor_sha256=canonical_sha256(core))
 
 
+def _axis_aligned_plane_normal_from_bbox(cad_bbox: np.ndarray, model_diagonal_mm: float) -> np.ndarray | None:
+    """Return an axis normal only when the CAD bbox proves the plane is axis-aligned.
+
+    A sloped planar face can have non-zero spans in X, Y and Z, so inferring its
+    normal from the smallest span is invalid. In that case the V1 association must
+    rely on the other independent invariants until an OCC-derived CAD normal is
+    added to the persistent FaceSignature contract.
+    """
+    spans = np.asarray(cad_bbox[3:] - cad_bbox[:3], dtype=float)
+    tol = max(float(model_diagonal_mm) * 1.0e-9, 1.0e-9)
+    collapsed = np.flatnonzero(np.abs(spans) <= tol)
+    if collapsed.size != 1:
+        return None
+    expected = np.zeros(3)
+    expected[int(collapsed[0])] = 1.0
+    return expected
+
+
 def score_planar_cad_match(descriptor: SurfaceDescriptorV1, signature, model_diagonal_mm: float) -> tuple[float, dict]:
     diagonal = float(model_diagonal_mm)
     if not math.isfinite(diagonal) or diagonal <= 0.0:
@@ -81,19 +99,25 @@ def score_planar_cad_match(descriptor: SurfaceDescriptorV1, signature, model_dia
     if not math.isfinite(cad_area) or cad_area <= 0.0:
         raise SurfaceAssociationError("SURFACE_ASSOC_CAD_AREA")
     area_error = abs(descriptor.area_mm2 - cad_area) / cad_area
-    spans = cad_bbox[3:] - cad_bbox[:3]
+
     normal_error = 0.0
+    normal_checked = False
     if str(signature.surface_type).upper().startswith("PLANE"):
-        expected = np.zeros(3)
-        expected[int(np.argmin(np.abs(spans)))] = 1.0
-        normal_error = float(np.linalg.norm(np.asarray(descriptor.normal_abs) - expected))
+        expected = _axis_aligned_plane_normal_from_bbox(cad_bbox, diagonal)
+        if expected is not None:
+            normal_checked = True
+            normal_error = float(np.linalg.norm(np.asarray(descriptor.normal_abs) - expected))
+
     metrics = {
         "bbox_error_rel": bbox_error,
         "centroid_error_rel": centroid_error,
         "area_error_rel": area_error,
         "normal_error": normal_error,
+        "normal_checked": normal_checked,
     }
-    score = bbox_error / 1e-6 + centroid_error / 1e-6 + area_error / 5e-3 + normal_error / 2e-3
+    score = bbox_error / 1e-6 + centroid_error / 1e-6 + area_error / 5e-3
+    if normal_checked:
+        score += normal_error / 2e-3
     return float(score), metrics
 
 
@@ -117,7 +141,7 @@ def choose_unique_cad_face(
         best[2]["bbox_error_rel"] > 1e-6
         or best[2]["centroid_error_rel"] > 1e-6
         or best[2]["area_error_rel"] > 5e-3
-        or best[2]["normal_error"] > 2e-3
+        or (best[2]["normal_checked"] and best[2]["normal_error"] > 2e-3)
     ):
         raise SurfaceAssociationError("SURFACE_ASSOC_NO_MATCH")
     if len(ranked) > 1:
