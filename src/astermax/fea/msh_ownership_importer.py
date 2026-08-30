@@ -10,6 +10,11 @@ from .evidence import sha256_file
 from .face_ownership import OwnedCadFaceTri6, Tet10FaceOwnershipInventory
 from .gmsh_bridge import _gmsh, _node_table, _remap_connectivity
 from .persistent_geometry import list_face_signatures
+from .robust_surface_association import (
+    SurfaceAssociationError,
+    build_mesh_surface_descriptor,
+    choose_unique_cad_face,
+)
 
 
 class MshOwnershipImportError(ValueError):
@@ -32,18 +37,6 @@ class MshOwnershipImportEvidenceV1:
     evidence_sha256: str
 
 
-def _surface_bbox(nodes: np.ndarray, triangles: np.ndarray) -> tuple[float, float, float, float, float, float]:
-    used = np.unique(np.asarray(triangles, dtype=np.int64).reshape(-1))
-    xyz = np.asarray(nodes[used], dtype=float)
-    lo = xyz.min(axis=0); hi = xyz.max(axis=0)
-    return (float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2]))
-
-
-def _bbox_close(a: tuple[float, ...], b: tuple[float, ...], diagonal: float, rel: float) -> bool:
-    atol = max(float(diagonal) * float(rel), 1.0e-10)
-    return all(abs(float(x) - float(y)) <= atol for x, y in zip(a, b))
-
-
 def import_tet10_ownership_from_msh(
     step_path: str | Path,
     msh_path: str | Path,
@@ -51,14 +44,19 @@ def import_tet10_ownership_from_msh(
     expected_mesh_sha256: str,
     bbox_relative_tolerance: float = 1.0e-7,
 ) -> tuple[Tet10FaceOwnershipInventory, MshOwnershipImportEvidenceV1]:
-    """Build face ownership by reading the exact approved Gmsh .msh artifact.
+    """Build TET10 ownership from the exact approved Gmsh artifact.
 
-    CAD identity is recovered by strict, unique spatial association of mesh-surface
-    bounding boxes to persistent STEP face signatures. Gmsh entity tags are used
-    only to retrieve local mesh blocks and are never accepted as persistent identity.
-    This V1 deliberately fails closed if the geometry is spatially ambiguous.
+    C5.5h production cutover: persistent CAD identity is recovered through the
+    robust multi-invariant surface descriptor (bbox + area-weighted centroid +
+    linearized TRI6 area + planar normal + uniqueness gate). Transient Gmsh
+    surface tags remain retrieval handles only and are never persistent identity.
+
+    ``bbox_relative_tolerance`` is retained for API compatibility with C5.5f;
+    its validity is checked, while acceptance thresholds are owned by the robust
+    association contract so there is only one production matching policy.
     """
-    step = Path(step_path); msh = Path(msh_path)
+    step = Path(step_path)
+    msh = Path(msh_path)
     if step.suffix.lower() not in {".step", ".stp"} or not step.is_file():
         raise MshOwnershipImportError("MSH_IMPORT_STEP_REQUIRED")
     if msh.suffix.lower() != ".msh" or not msh.is_file() or msh.stat().st_size <= 0:
@@ -76,7 +74,8 @@ def import_tet10_ownership_from_msh(
     if len(cad_by_sha) != len(cad_faces):
         raise MshOwnershipImportError("MSH_IMPORT_CAD_SIGNATURE_NOT_UNIQUE")
 
-    gmsh = _gmsh(); gmsh.initialize()
+    gmsh = _gmsh()
+    gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         gmsh.open(str(msh))
@@ -99,9 +98,10 @@ def import_tet10_ownership_from_msh(
             raise MshOwnershipImportError("MSH_IMPORT_TET10_REQUIRED")
         elements = _remap_connectivity(np.vstack(tet_blocks), tag_to_index)
 
-        lo = nodes.min(axis=0); hi = nodes.max(axis=0)
+        lo = nodes.min(axis=0)
+        hi = nodes.max(axis=0)
         bbox = (float(lo[0]), float(lo[1]), float(lo[2]), float(hi[0]), float(hi[1]), float(hi[2]))
-        dimensions = (bbox[3]-bbox[0], bbox[4]-bbox[1], bbox[5]-bbox[2])
+        dimensions = (bbox[3] - bbox[0], bbox[4] - bbox[1], bbox[5] - bbox[2])
         diagonal = float(np.linalg.norm(np.asarray(dimensions, dtype=float)))
         if not np.isfinite(diagonal) or diagonal <= 0.0:
             raise MshOwnershipImportError("MSH_IMPORT_INVALID_DIMENSIONS")
@@ -117,36 +117,41 @@ def import_tet10_ownership_from_msh(
                 if int(etype) == 9:
                     blocks.append(raw.reshape((-1, 6)))
                 elif raw.size:
-                    raise MshOwnershipImportError(f"MSH_IMPORT_NON_TRI6_SURFACE:{int(surface_tag)}:{int(etype)}")
+                    raise MshOwnershipImportError(
+                        f"MSH_IMPORT_NON_TRI6_SURFACE:{int(surface_tag)}:{int(etype)}"
+                    )
             if not blocks:
                 continue
             triangles = _remap_connectivity(np.vstack(blocks), tag_to_index)
-            mesh_bbox = _surface_bbox(nodes, triangles)
-            matches = [(tag, sig) for tag, sig in cad_faces if _bbox_close(mesh_bbox, sig.bbox_mm, diagonal, bbox_relative_tolerance)]
-            if not matches:
-                raise MshOwnershipImportError(f"MSH_IMPORT_CAD_FACE_NOT_FOUND:{int(surface_tag)}")
-            if len(matches) != 1:
-                raise MshOwnershipImportError(f"MSH_IMPORT_CAD_FACE_AMBIGUOUS:{int(surface_tag)}")
-            _, sig = matches[0]
+            try:
+                descriptor = build_mesh_surface_descriptor(nodes, triangles)
+                sig, _metrics = choose_unique_cad_face(descriptor, cad_faces, diagonal)
+            except SurfaceAssociationError as exc:
+                raise MshOwnershipImportError(
+                    f"MSH_IMPORT_ROBUST_ASSOCIATION:{int(surface_tag)}:{exc}"
+                ) from exc
             if sig.sha256 in used_signatures:
                 raise MshOwnershipImportError("MSH_IMPORT_CAD_FACE_DUPLICATED")
             used_signatures.add(sig.sha256)
             total_tri6 += int(triangles.shape[0])
-            owned.append(OwnedCadFaceTri6(
-                face_tag=int(surface_tag),
-                signature_sha256=sig.sha256,
-                surface_type=sig.surface_type,
-                area_mm2=float(sig.area_mm2),
-                center_mm=tuple(float(v) for v in sig.center_mm),
-                bbox_mm=tuple(float(v) for v in sig.bbox_mm),
-                tri6_count=int(triangles.shape[0]),
-                triangles=np.asarray(triangles, dtype=np.int64),
-            ))
+            owned.append(
+                OwnedCadFaceTri6(
+                    face_tag=int(surface_tag),
+                    signature_sha256=sig.sha256,
+                    surface_type=sig.surface_type,
+                    area_mm2=float(sig.area_mm2),
+                    center_mm=tuple(float(v) for v in sig.center_mm),
+                    bbox_mm=tuple(float(v) for v in sig.bbox_mm),
+                    tri6_count=int(triangles.shape[0]),
+                    triangles=np.asarray(triangles, dtype=np.int64),
+                )
+            )
         if not owned or total_tri6 <= 0:
             raise MshOwnershipImportError("MSH_IMPORT_OWNED_TRI6_REQUIRED")
         if len(owned) != len(cad_faces):
             raise MshOwnershipImportError("MSH_IMPORT_INCOMPLETE_CAD_FACE_COVERAGE")
 
+        association_mode = "ROBUST_MULTI_INVARIANT_TRI6_TO_PERSISTENT_CAD_SIGNATURE_V1"
         core = {
             "schema": "AsterMaxTet10FaceOwnershipInventoryV1",
             "source_step_sha256": sha256_file(step),
@@ -154,15 +159,18 @@ def import_tet10_ownership_from_msh(
             "source_mesh_sha256": mesh_sha,
             "node_count": int(nodes.shape[0]),
             "tet10_count": int(elements.shape[0]),
-            "faces": [{
-                "signature_sha256": f.signature_sha256,
-                "surface_type": f.surface_type,
-                "area_mm2": f.area_mm2,
-                "center_mm": list(f.center_mm),
-                "bbox_mm": list(f.bbox_mm),
-                "tri6_count": f.tri6_count,
-            } for f in sorted(owned, key=lambda item: item.signature_sha256)],
-            "association_mode": "MESH_SURFACE_BBOX_TO_PERSISTENT_CAD_SIGNATURE_V1",
+            "faces": [
+                {
+                    "signature_sha256": f.signature_sha256,
+                    "surface_type": f.surface_type,
+                    "area_mm2": f.area_mm2,
+                    "center_mm": list(f.center_mm),
+                    "bbox_mm": list(f.bbox_mm),
+                    "tri6_count": f.tri6_count,
+                }
+                for f in sorted(owned, key=lambda item: item.signature_sha256)
+            ],
+            "association_mode": association_mode,
         }
         ownership_sha = canonical_sha256(core)
         inventory = Tet10FaceOwnershipInventory(
@@ -185,12 +193,15 @@ def import_tet10_ownership_from_msh(
             "tet10_count": int(elements.shape[0]),
             "tri6_count": int(total_tri6),
             "face_count": len(owned),
-            "association_mode": core["association_mode"],
+            "association_mode": association_mode,
             "exact_mesh_artifact_consumed": True,
             "transient_tags_are_identity": False,
             "ready_for_rebinding": True,
         }
-        evidence = MshOwnershipImportEvidenceV1(**evidence_core, evidence_sha256=canonical_sha256(evidence_core))
+        evidence = MshOwnershipImportEvidenceV1(
+            **evidence_core,
+            evidence_sha256=canonical_sha256(evidence_core),
+        )
         return inventory, evidence
     finally:
         gmsh.finalize()
