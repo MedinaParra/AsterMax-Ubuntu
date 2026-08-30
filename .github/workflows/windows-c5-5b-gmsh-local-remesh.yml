@@ -1,0 +1,26 @@
+name: Windows C5.5b Gmsh Local Remesh Execution
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gmsh-local-remesh:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/gmsh_local_refinement.py
+      - name: C5.5b real Gmsh local remesh harness
+        run: python -m pytest -q tests/test_gmsh_local_refinement.py
+      - name: Local refinement and QoI regressions
+        run: python -m pytest -q tests/test_local_refinement_plan.py tests/test_qoi_convergence.py tests/test_worst_element_inspector.py tests/test_tet_quality.py
+      - name: Validator ACEA desktop STEP solve and results regression
+        run: python -m pytest -q tests/test_engineering_validator_corrective.py tests/test_engineering_control_architecture.py tests/test_desktop_picker_app.py tests/test_step_to_solve.py tests/test_production_results.py tests/test_demo_session.py tests/test_demo_dashboard.py
+      - name: Full regression suite
+        run: python -m pytest -q
