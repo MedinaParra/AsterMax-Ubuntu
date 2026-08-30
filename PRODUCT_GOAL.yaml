@@ -1,0 +1,57 @@
+schema: AsterMaxProductGoalV1
+release: C6.0
+name: AsterMax Integrated Windows Release Candidate
+status: SCOPE_FROZEN
+product_done: >-
+  An engineer who has never used AsterMax can open a STEP model, pick arbitrary
+  persistent CAD faces for Support and Load, define material and resultant,
+  review the frozen physics, execute baseline and approved adaptive TET10 FEA,
+  inspect native engineering results, save a verified project revision, and use
+  the Engineering AI Copilot for evidence-aware guidance without touching Python,
+  a console, or internal files.
+units: [mm, N, MPa]
+gates:
+  G1:
+    name: CAD and physics authoring
+    required: true
+  G2:
+    name: Adaptive TET10 FEA
+    required: true
+  G3:
+    name: Native 3D engineering results
+    required: true
+  G4:
+    name: Project, evidence, and Engineering AI Copilot
+    required: true
+  G5:
+    name: Packaged Windows release candidate
+    required: true
+frozen_capabilities:
+  - STEP geometry
+  - persistent arbitrary CAD face picker
+  - Support and Load named selections
+  - isotropic linear elastic material
+  - resultant load
+  - TET10 sparse linear static solve
+  - solution-driven approved local adaptive remesh
+  - native results, hotspots, baseline vs refined comparison
+  - .astermax unified project
+  - .astermaxr verified result package
+  - Engineering AI Copilot with adaptive educational guidance
+excluded_until_after_c6:
+  - new element families
+  - nonlinear material models
+  - new advanced contact physics
+  - CFD
+  - topology optimization
+  - biocomputing integration
+  - architecture redesign absent a blocking defect
+truth_boundary:
+  certified_error_estimator: false
+  global_analysis_converged: false
+  industrial_validation: false
+  ansys_equivalence: false
+integration_rule: >-
+  Repair red CI before stacking the next gate. Prefer integration and usability
+  over new capability. Never convert passing software tests into an engineering
+  validation claim.
