@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 from typing import Any
 
@@ -90,6 +90,12 @@ def _shared_face_neighbor_jumps(elements: np.ndarray, element_mean: np.ndarray) 
     return jumps
 
 
+def _identity_core(evidence: SolutionDrivenRefinementEvidenceV1) -> dict[str, Any]:
+    core = asdict(evidence)
+    core.pop("evidence_sha256")
+    return core
+
+
 def build_solution_driven_refinement_evidence(
     *,
     source_step_sha256: str,
@@ -156,7 +162,7 @@ def build_solution_driven_refinement_evidence(
             )
         )
 
-    core = {
+    payload = {
         "schema": "AsterMaxSolutionDrivenRefinementEvidenceV1",
         "source_step_sha256": source,
         "mesh_identity_sha256": mesh,
@@ -174,7 +180,9 @@ def build_solution_driven_refinement_evidence(
         "industrial_validation": False,
         "ansys_equivalence": False,
     }
-    return SolutionDrivenRefinementEvidenceV1(**core, evidence_sha256=canonical_sha256(core))
+    identity = dict(payload)
+    identity["candidates"] = tuple(asdict(row) for row in rows)
+    return SolutionDrivenRefinementEvidenceV1(**payload, evidence_sha256=canonical_sha256(identity))
 
 
 def build_solution_driven_local_refinement_review(
@@ -182,8 +190,7 @@ def build_solution_driven_local_refinement_review(
 ) -> LocalRefinementReviewV1:
     if evidence.schema != "AsterMaxSolutionDrivenRefinementEvidenceV1":
         raise SolutionDrivenAdaptivityError("SOLUTION_ADAPTIVITY_EVIDENCE_SCHEMA")
-    core_evidence = evidence.__dict__.copy(); core_evidence.pop("evidence_sha256")
-    if canonical_sha256(core_evidence) != evidence.evidence_sha256:
+    if canonical_sha256(_identity_core(evidence)) != evidence.evidence_sha256:
         raise SolutionDrivenAdaptivityError("SOLUTION_ADAPTIVITY_EVIDENCE_TAMPERED")
     if evidence.estimator_certified or evidence.solution_error_bound_claimed:
         raise SolutionDrivenAdaptivityError("SOLUTION_ADAPTIVITY_ESTIMATOR_OVERCLAIM")
