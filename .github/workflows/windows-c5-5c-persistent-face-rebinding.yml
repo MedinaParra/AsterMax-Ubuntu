@@ -1,0 +1,26 @@
+name: Windows C5.5c Persistent STEP Face Rebinding
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  persistent-face-rebinding:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/remesh_face_rebinding.py
+      - name: C5.5c persistent STEP face rebinding harness
+        run: python -m pytest -q tests/test_remesh_face_rebinding.py
+      - name: Adaptive remesh and QoI regressions
+        run: python -m pytest -q tests/test_gmsh_local_refinement.py tests/test_local_refinement_plan.py tests/test_qoi_convergence.py tests/test_face_ownership.py tests/test_named_selections.py
+      - name: CAD BC solve results regression
+        run: python -m pytest -q tests/test_cad_face_picker.py tests/test_desktop_picker_app.py tests/test_step_to_solve.py tests/test_production_results.py tests/test_engineering_control_architecture.py
+      - name: Full regression suite
+        run: python -m pytest -q
