@@ -12,6 +12,7 @@ from .fea.adaptive_hotspot_visualization import install_adaptive_hotspot_tab
 from .fea.adaptive_stress_comparison import install_adaptive_stress_comparison_tab
 from .fea.gmsh_bridge import distribute_resultant_on_tri6, fixed_dofs_for_nodes, force_and_moment, unique_surface_nodes
 from .fea.live_analysis_evidence import install_live_analysis_evidence_tab
+from .fea.native_adaptive_analysis import execute_native_adaptive_analysis, prepare_native_adaptive_analysis, verify_native_adaptive_analysis_receipt
 from .fea.native_credibility import install_native_credibility_tab
 from .fea.postprocess_tet10 import write_tet10_linear_static_vtu
 from .fea.pre_solve_review import accept_model_preparation, prepare_model_for_review, verify_acceptance, visual_preparation_payload
@@ -162,6 +163,7 @@ def _desktop_main() -> int:
         hotspot_binder=bind_adaptive_hotspots,
         stress_binder=bind_stress_compare,
     )
+    live_project_capture = getattr(notebook, "_astermax_live_project_capture", None)
 
     step_var = tk.StringVar()
     out_var = tk.StringVar(value=str((Path.home() / "AsterMaxResults").resolve()))
@@ -178,11 +180,12 @@ def _desktop_main() -> int:
 
     frame.columnconfigure(1, weight=1)
     ttk.Label(frame, text="AsterMax PMV", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
-    ttk.Label(frame, text="Named Selections → Prepare → Review → Accept & Solve · Linear static TET10 · N-mm-MPa").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 16))
+    ttk.Label(frame, text="Named Selections → Prepare → Review → Solve or Adaptive Solve · Linear static TET10 · N-mm-MPa").grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 16))
 
     def invalidate_review(*_args) -> None:
         prepared_holder.clear()
         solve_button.configure(state="disabled")
+        adaptive_button.configure(state="disabled")
 
     def browse_step() -> None:
         path = filedialog.askopenfilename(filetypes=[("STEP geometry", "*.step *.stp"), ("All files", "*.*")])
@@ -212,15 +215,17 @@ def _desktop_main() -> int:
     support_combo.bind("<<ComboboxSelected>>", invalidate_review)
     load_combo.bind("<<ComboboxSelected>>", invalidate_review)
 
-    warning = "C5.1: Support and Load are now persistent named selections bound to the exact STEP and reviewed TRI6 boundary groups before solve. The native authoring surface currently covers the six unique X/Y/Z MIN/MAX boundary faces; arbitrary sloped/internal face picking remains outside this increment. No industrial validation or ANSYS equivalence is claimed."
+    warning = "C5.5x: adaptive desktop route preserves persistent STEP-bound Support/Load selections, freezes physics before baseline solve, requires a second human approval before solution-driven local remesh, and packages verified Results as .astermaxr. Global convergence, industrial validation and ANSYS equivalence remain unclaimed."
     ttk.Label(frame, text=warning, wraplength=980).grid(row=12, column=0, columnspan=3, sticky="ew", pady=(14, 8))
     progress = ttk.Progressbar(frame, mode="indeterminate")
     progress.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(6, 8))
     ttk.Label(frame, textvariable=status_var, wraplength=980).grid(row=14, column=0, columnspan=3, sticky="w")
     prepare_button = ttk.Button(frame, text="1 · Prepare named scopes + model for review")
     prepare_button.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(12, 4))
-    solve_button = ttk.Button(frame, text="2 · Accept exact preparation & Solve", state="disabled")
-    solve_button.grid(row=16, column=0, columnspan=3, sticky="ew", pady=(4, 6))
+    solve_button = ttk.Button(frame, text="2A · Accept exact preparation & Solve once", state="disabled")
+    solve_button.grid(row=16, column=0, columnspan=3, sticky="ew", pady=(4, 4))
+    adaptive_button = ttk.Button(frame, text="2B · Adaptive Solve · baseline → hotspot → approved local remesh → refined Results", state="disabled")
+    adaptive_button.grid(row=17, column=0, columnspan=3, sticky="ew", pady=(4, 6))
 
     def current_args() -> dict:
         support_key = support_var.get().strip().upper()
@@ -241,9 +246,34 @@ def _desktop_main() -> int:
         prepare_button.configure(state="disabled" if busy else "normal")
         if busy:
             solve_button.configure(state="disabled")
+            adaptive_button.configure(state="disabled")
             progress.start(10)
         else:
             progress.stop()
+
+    def enable_reviewed_actions() -> None:
+        solve_button.configure(state="normal")
+        adaptive_button.configure(state="normal")
+
+    def reviewed_inputs_unchanged() -> tuple[dict, dict] | None:
+        prepared = prepared_holder.get("prepared")
+        original_args = prepared_holder.get("args")
+        if prepared is None or original_args is None:
+            messagebox.showerror("AsterMax", "Prepare the model first.")
+            return None
+        try:
+            now = current_args()
+        except ValueError as exc:
+            messagebox.showerror("Invalid input", str(exc))
+            return None
+        if now != original_args:
+            prepared_holder.clear()
+            solve_button.configure(state="disabled")
+            adaptive_button.configure(state="disabled")
+            status_var.set("Analysis inputs or named selections changed after review. Prepare the model again.")
+            messagebox.showerror("Review invalidated", "STEP/material/mesh/load/named-selection inputs changed after preparation. Re-run Prepare before Solve.")
+            return None
+        return prepared, original_args
 
     def prepare_clicked() -> None:
         try:
@@ -270,26 +300,18 @@ def _desktop_main() -> int:
                     messagebox.showerror("AsterMax evidence", str(exc)); return
                 prepared_holder["prepared"] = prepared
                 prepared_holder["args"] = args
-                solve_button.configure(state="normal")
+                enable_reviewed_actions()
                 review = prepared["review"]
-                status_var.set(f"REVIEW REQUIRED: Support={','.join(review.support_surface_keys)} · Load={','.join(review.load_surface_keys)} · {review.node_count} nodes / {review.tet10_count} TET10 · mean ratio min {review.tetra_mean_ratio_minimum:.3f}. Inspect evidence, then accept & solve.")
+                status_var.set(f"REVIEW REQUIRED: Support={','.join(review.support_surface_keys)} · Load={','.join(review.load_surface_keys)} · {review.node_count} nodes / {review.tet10_count} TET10 · mean ratio min {review.tetra_mean_ratio_minimum:.3f}. Inspect evidence, then choose Solve once or Adaptive Solve.")
                 notebook.select(3)
             root.after(0, finished)
         threading.Thread(target=worker, daemon=True).start()
 
     def solve_clicked() -> None:
-        prepared = prepared_holder.get("prepared")
-        original_args = prepared_holder.get("args")
-        if prepared is None or original_args is None:
-            messagebox.showerror("AsterMax", "Prepare the model first."); return
-        try:
-            now = current_args()
-        except ValueError as exc:
-            messagebox.showerror("Invalid input", str(exc)); return
-        if now != original_args:
-            prepared_holder.clear(); solve_button.configure(state="disabled")
-            status_var.set("Analysis inputs or named selections changed after review. Prepare the model again.")
-            messagebox.showerror("Review invalidated", "STEP/material/mesh/load/named-selection inputs changed after preparation. Re-run Prepare before Solve."); return
+        reviewed = reviewed_inputs_unchanged()
+        if reviewed is None:
+            return
+        prepared, _original_args = reviewed
         acceptance = accept_model_preparation(prepared["review"])
         set_busy(True); status_var.set("MODEL_PREPARATION_ACCEPTED · solving exact reviewed named-selection bindings…")
 
@@ -300,7 +322,7 @@ def _desktop_main() -> int:
                 root.after(0, lambda: (set_busy(False), status_var.set("Solve blocked or failed."), messagebox.showerror("AsterMax", str(exc))))
                 return
             def finished() -> None:
-                set_busy(False); solve_button.configure(state="disabled"); prepared_holder.clear()
+                set_busy(False); solve_button.configure(state="disabled"); adaptive_button.configure(state="disabled"); prepared_holder.clear()
                 try:
                     bind_live_evidence(summary)
                     payload = summary["_visual_preparation_payload"]
@@ -315,8 +337,91 @@ def _desktop_main() -> int:
             root.after(0, finished)
         threading.Thread(target=worker, daemon=True).start()
 
+    def adaptive_clicked() -> None:
+        reviewed = reviewed_inputs_unchanged()
+        if reviewed is None:
+            return
+        prepared, _original_args = reviewed
+        accepted = messagebox.askyesno(
+            "AsterMax adaptive analysis · Gate 1",
+            "Approve the reviewed STEP/material/Support/Load physics for the baseline solve? This approval freezes physics; only mesh discretization may change afterward.",
+        )
+        if not accepted:
+            status_var.set("Adaptive analysis not started: Gate 1 approval denied.")
+            return
+        acceptance = accept_model_preparation(prepared["review"])
+        set_busy(True)
+        status_var.set("ADAPTIVE GATE 1 APPROVED · solving verified baseline and computing solution-driven refinement candidates…")
+
+        def baseline_worker() -> None:
+            try:
+                context = prepare_native_adaptive_analysis(
+                    prepared,
+                    acceptance,
+                    approver="AsterMax Desktop Engineer",
+                    approved=True,
+                    refined_size_factor=0.5,
+                    maximum_relative_qoi_change=0.05,
+                    maximum_candidates=4,
+                    influence_radius_factor=2.0,
+                )
+            except Exception as exc:
+                root.after(0, lambda: (set_busy(False), enable_reviewed_actions(), status_var.set("Adaptive baseline/proposal failed."), messagebox.showerror("AsterMax adaptive baseline", str(exc))))
+                return
+
+            def request_refinement_approval() -> None:
+                set_busy(False)
+                approved = messagebox.askyesno(
+                    "AsterMax adaptive analysis · Gate 2",
+                    f"Baseline solve and solution-driven review are complete. {context.candidate_count} local refinement candidate(s) were identified. Approve mesh-only local refinement and the refined solve?",
+                )
+                if not approved:
+                    enable_reviewed_actions()
+                    status_var.set("Baseline evidence preserved; local remesh/refined solve not executed because Gate 2 was denied.")
+                    return
+                set_busy(True)
+                status_var.set("ADAPTIVE GATE 2 APPROVED · executing local TET10 remesh, refined solve, verified Results package and project capture…")
+
+                def refined_worker() -> None:
+                    try:
+                        receipt = execute_native_adaptive_analysis(
+                            prepared,
+                            acceptance,
+                            context,
+                            refinement_approver="AsterMax Desktop Engineer",
+                            refinement_approved=True,
+                            output_dir=out_var.get(),
+                            hotspot_binder=bind_adaptive_hotspots,
+                            stress_binder=bind_stress_compare,
+                            capture_coordinator=live_project_capture,
+                        )
+                        verify_native_adaptive_analysis_receipt(receipt)
+                    except Exception as exc:
+                        root.after(0, lambda: (set_busy(False), enable_reviewed_actions(), status_var.set("Adaptive refined execution failed or was blocked."), messagebox.showerror("AsterMax adaptive execution", str(exc))))
+                        return
+
+                    def finished() -> None:
+                        set_busy(False)
+                        prepared_holder.clear()
+                        solve_button.configure(state="disabled")
+                        adaptive_button.configure(state="disabled")
+                        project_text = f" · captured as project Revision {receipt.captured_revision:02d}" if receipt.captured_to_active_project and receipt.captured_revision is not None else ""
+                        status_var.set(
+                            f"VERIFIED ADAPTIVE RESULTS · QoI {receipt.qoi_status} · indicator {receipt.indicator_status}{project_text} · package {Path(receipt.result_package_path).name}"
+                        )
+                        messagebox.showinfo(
+                            "AsterMax adaptive analysis",
+                            "Adaptive execution completed and verified. Hotspots and Stress Compare are bound from the same execution artifact chain. Global convergence, industrial validation and ANSYS equivalence remain unclaimed.",
+                        )
+                    root.after(0, finished)
+                threading.Thread(target=refined_worker, daemon=True).start()
+
+            root.after(0, request_refinement_approval)
+        threading.Thread(target=baseline_worker, daemon=True).start()
+
     prepare_button.configure(command=prepare_clicked)
     solve_button.configure(command=solve_clicked)
+    adaptive_button.configure(command=adaptive_clicked)
     root.mainloop()
     return 0
 
