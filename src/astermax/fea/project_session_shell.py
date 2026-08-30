@@ -340,18 +340,24 @@ def install_project_session_tab(
         stress_binder=stress_binder,
     )
 
-    # C5.5w: keep native project authoring and the live capture coordinator on
-    # the same verified active-project identity, without changing this function's
-    # long-standing two-value return contract.
-    from .project_authoring import install_project_authoring_controls
+    # C5.5w: the shipping Projects shell owns one capture coordinator. Native
+    # authoring publishes the active `.astermax` identity into it; an upstream
+    # adaptive run can then call notebook._astermax_live_project_capture with a
+    # newly verified `.astermaxr`. Opening old results never auto-appends them.
+    if capture_coordinator is None:
+        from .live_project_capture import LiveProjectCaptureCoordinatorV1
+        capture_coordinator = LiveProjectCaptureCoordinatorV1(
+            hotspot_binder=hotspot_binder,
+            stress_binder=stress_binder,
+            recent_store_path=recent_store_path,
+        )
+    capture_coordinator.configure_project_refresh(populate_project_tree)
+    setattr(notebook, "_astermax_live_project_capture", capture_coordinator)
 
-    active_callback = None
-    if capture_coordinator is not None:
-        capture_coordinator.configure_project_refresh(populate_project_tree)
-        active_callback = capture_coordinator.set_active_project
+    from .project_authoring import install_project_authoring_controls
     install_project_authoring_controls(
         authoring_host,
         on_project_changed=populate_project_tree,
-        on_active_project_changed=active_callback,
+        on_active_project_changed=capture_coordinator.set_active_project,
     )
     return open_path, refresh
