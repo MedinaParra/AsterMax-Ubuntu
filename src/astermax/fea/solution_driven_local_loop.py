@@ -187,7 +187,14 @@ def execute_solution_driven_local_loop(
     *,
     output_msh_path: str | Path,
     maximum_indicator_candidates: int = 4,
-) -> tuple[SolutionDrivenLocalLoopEvidenceV1, Tet10FaceOwnershipInventory]:
+    return_artifacts: bool = False,
+):
+    """Execute the approved solution-driven local loop.
+
+    `return_artifacts=False` preserves the original C5.5n two-value API. C5.5q may
+    request the already-computed refined solve/indicator/QoI artifacts directly,
+    eliminating deterministic replay solely for post-processing.
+    """
     _verify_run(step_path, support, load, run, run_approval)
     pcore = proposal.__dict__.copy(); pcore.pop("proposal_sha256")
     if canonical_sha256(pcore) != proposal.proposal_sha256:
@@ -292,4 +299,6 @@ def execute_solution_driven_local_loop(
         "ansys_equivalence": False,
     }
     evidence = SolutionDrivenLocalLoopEvidenceV1(**core, evidence_sha256=canonical_sha256(core))
+    if return_artifacts:
+        return evidence, refined, refined_solved, refined_indicator, coarse_qoi, fine_qoi, qoi
     return evidence, refined

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 import math
 from typing import Any
@@ -58,7 +59,10 @@ class AdaptiveStressComparisonV1:
 
 
 def _require_solved(solved: Any, mesh: Tet10FaceOwnershipInventory, expected_solve_sha: str, displacement_scale: float) -> VerifiedStressContourFieldV1:
-    if not isinstance(solved, dict) or "result" not in solved or "solve_evidence" not in solved:
+    # C5.5q carries solved payloads as MappingProxyType to make accidental mutation
+    # impossible. Accept the Mapping protocol rather than only mutable dicts, while
+    # still requiring the exact result/evidence keys and provenance below.
+    if not isinstance(solved, Mapping) or "result" not in solved or "solve_evidence" not in solved:
         raise AdaptiveStressComparisonError("STRESS_COMPARE_SOLVED_PAYLOAD")
     result = solved["result"]
     evidence = solved["solve_evidence"]
@@ -117,8 +121,8 @@ def build_verified_adaptive_stress_comparison(
     loop_evidence: SolutionDrivenLocalLoopEvidenceV1,
     baseline_mesh: Tet10FaceOwnershipInventory,
     refined_mesh: Tet10FaceOwnershipInventory,
-    baseline_solved: dict[str, Any],
-    refined_solved: dict[str, Any],
+    baseline_solved: Mapping[str, Any],
+    refined_solved: Mapping[str, Any],
     displacement_scale: float = 1.0,
 ) -> AdaptiveStressComparisonV1:
     if loop_evidence.schema != "AsterMaxSolutionDrivenLocalLoopEvidenceV1":
