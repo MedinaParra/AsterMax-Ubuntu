@@ -7,15 +7,10 @@ from typing import Any, Iterable
 import numpy as np
 
 from astermax.credibility import canonical_sha256
-from .cad_face_picker import (
-    CadFacePickerCatalog,
-    PickerNamedSelectionEvidence,
-    build_cad_face_picker_catalog,
-    capture_picker_named_selection,
-)
+from .cad_face_picker import CadFacePickerCatalog, build_cad_face_picker_catalog, capture_picker_named_selection
 from .evidence import sha256_file
 from .face_ownership import Tet10FaceOwnershipInventory, mesh_step_tet10_with_face_ownership
-from .pre_solve_review import PreSolveReviewError, PreSolveReviewSnapshot
+from .pre_solve_review import PreSolveReviewSnapshot
 from .tet_quality import build_tet10_corner_quality_snapshot, require_quality_crosscheck
 
 
@@ -36,6 +31,7 @@ class AdaptivePickerAuthoringEvidenceV1:
     support_binding_sha256: str
     load_binding_sha256: str
     mesh_target_size_mm: float
+    minimum_det_jacobian_mm3: float
     material_young_modulus_mpa: float
     material_poisson_ratio: float
     resultant_n: tuple[float, float, float]
@@ -60,6 +56,23 @@ def _validate_inputs(mesh_size_mm: float, young_modulus_mpa: float, poisson_rati
     if load.shape != (3,) or not np.all(np.isfinite(load)) or float(np.linalg.norm(load)) == 0.0:
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_RESULTANT")
     return mesh, young, poisson, tuple(float(v) for v in load)
+
+
+def _minimum_corner_det_jacobian_mm3(inventory: Tet10FaceOwnershipInventory) -> float:
+    elements = np.asarray(inventory.elements, dtype=np.int64)
+    nodes = np.asarray(inventory.nodes_mm, dtype=float)
+    if elements.ndim != 2 or elements.shape[1] != 10 or elements.shape[0] == 0:
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_TET10_INVENTORY_INVALID")
+    corners = elements[:, :4]
+    if np.any(corners < 0) or np.any(corners >= nodes.shape[0]):
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_TET10_CONNECTIVITY_INVALID")
+    xyz = nodes[corners]
+    edge_matrix = np.stack((xyz[:, 1] - xyz[:, 0], xyz[:, 2] - xyz[:, 0], xyz[:, 3] - xyz[:, 0]), axis=1)
+    det = np.linalg.det(edge_matrix)
+    absolute_det = np.abs(det)
+    if not np.all(np.isfinite(absolute_det)) or np.any(absolute_det <= 0.0):
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_NONPOSITIVE_CORNER_JACOBIAN")
+    return float(absolute_det.min())
 
 
 def build_adaptive_picker_catalog(step_path: str | Path, *, mesh_size_mm: float, viewport_width_px: int = 760, viewport_height_px: int = 560) -> tuple[Tet10FaceOwnershipInventory, CadFacePickerCatalog]:
@@ -92,10 +105,10 @@ def prepare_adaptive_model_from_picker(
     poisson_ratio: float,
     resultant_n: tuple[float, float, float],
 ) -> tuple[dict[str, Any], AdaptivePickerAuthoringEvidenceV1]:
-    """Create the reviewed payload consumed by the native adaptive solver from arbitrary picked CAD faces.
+    """Create the reviewed payload consumed by native adaptive FEA from arbitrary picked CAD faces.
 
-    The picked persistent FaceSignatures, not axis MIN/MAX aliases, become the actual
-    SUPPORT/LOAD named selections used by the baseline and refined solve chain.
+    Persistent FaceSignatures, not axis MIN/MAX aliases, become the actual SUPPORT/LOAD
+    named selections used by the baseline and refined solve chain.
     """
     source = Path(step_path).expanduser().resolve()
     mesh, young, poisson, load = _validate_inputs(mesh_size_mm, young_modulus_mpa, poisson_ratio, resultant_n)
@@ -117,6 +130,7 @@ def prepare_adaptive_model_from_picker(
 
     quality = build_tet10_corner_quality_snapshot(inventory.nodes_mm, inventory.elements)
     require_quality_crosscheck(quality)
+    minimum_det = _minimum_corner_det_jacobian_mm3(inventory)
     preparation_core = {
         "schema": "AsterMaxAdaptivePickerPreparationV1",
         "source_step_sha256": inventory.source_step_sha256,
@@ -125,6 +139,7 @@ def prepare_adaptive_model_from_picker(
         "support_picker_evidence_sha256": support_pick.evidence_sha256,
         "load_picker_evidence_sha256": load_pick.evidence_sha256,
         "tetra_quality_sha256": quality.snapshot_sha256,
+        "minimum_det_jacobian_mm3": minimum_det,
     }
     preparation_sha = canonical_sha256(preparation_core)
     review_core = {
@@ -143,7 +158,7 @@ def prepare_adaptive_model_from_picker(
         "mesh_target_size_mm": mesh,
         "node_count": int(inventory.nodes_mm.shape[0]),
         "tet10_count": int(inventory.elements.shape[0]),
-        "minimum_det_jacobian_mm3": 1.0,
+        "minimum_det_jacobian_mm3": minimum_det,
         "edge_ratio_minimum": float(quality.minimum),
         "tetra_mean_ratio_minimum": float(quality.minimum),
         "tetra_mean_ratio_p10": float(quality.percentile_10),
@@ -186,6 +201,7 @@ def prepare_adaptive_model_from_picker(
         "support_binding_sha256": support_binding.binding_sha256,
         "load_binding_sha256": load_binding.binding_sha256,
         "mesh_target_size_mm": mesh,
+        "minimum_det_jacobian_mm3": minimum_det,
         "material_young_modulus_mpa": young,
         "material_poisson_ratio": poisson,
         "resultant_n": load,
@@ -208,10 +224,14 @@ def verify_adaptive_picker_authoring(prepared: dict[str, Any], evidence: Adaptiv
     catalog = prepared.get("picker_catalog")
     if not isinstance(review, PreSolveReviewSnapshot):
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_REVIEW_MISSING")
-    if review.review_sha256 != evidence.review_sha256:
+    if review.review_sha256 != evidence.review_sha256 or review.minimum_det_jacobian_mm3 != evidence.minimum_det_jacobian_mm3:
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_REVIEW_STALE")
     if support_binding.binding_sha256 != evidence.support_binding_sha256 or load_binding.binding_sha256 != evidence.load_binding_sha256:
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_BINDING_STALE")
+    if tuple(support_binding.face_signature_sha256) != evidence.support_face_signature_sha256:
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_SUPPORT_SIGNATURE_STALE")
+    if tuple(load_binding.face_signature_sha256) != evidence.load_face_signature_sha256:
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_LOAD_SIGNATURE_STALE")
     if catalog.catalog_sha256 != evidence.catalog_sha256:
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_CATALOG_STALE")
     core = evidence.__dict__.copy(); core.pop("evidence_sha256")
