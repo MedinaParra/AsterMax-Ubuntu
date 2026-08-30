@@ -252,7 +252,8 @@ def execute_native_adaptive_analysis(
         refined_indicator=refined_indicator,
         displacement_scale=displacement_scale,
     )
-    package_path = write_portable_adaptive_results_package(bundle, output / "astermax_adaptive_results.astermaxr")
+    package_name = f"astermax_adaptive_{bundle.bundle_sha256[:16]}.astermaxr"
+    package_path = write_portable_adaptive_results_package(bundle, output / package_name)
     package = open_portable_adaptive_results_package(package_path)
     verify_portable_adaptive_results_package(package)
 
