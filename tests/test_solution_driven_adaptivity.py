@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import numpy as np
 import pytest
@@ -100,7 +100,7 @@ def test_solution_indicator_is_bound_to_real_solver_evidence(tmp_path):
     with pytest.raises(SolutionDrivenAdaptivityError, match="ESTIMATOR_OVERCLAIM"):
         tampered = replace(evidence, estimator_certified=True)
         from astermax.credibility import canonical_sha256
-        core = tampered.__dict__.copy(); core.pop("evidence_sha256")
+        core = asdict(tampered); core.pop("evidence_sha256")
         tampered = replace(tampered, evidence_sha256=canonical_sha256(core))
         build_solution_driven_local_refinement_review(tampered)
 
