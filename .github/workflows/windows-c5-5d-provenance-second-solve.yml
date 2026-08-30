@@ -19,7 +19,7 @@ jobs:
       - name: C5.5d real provenance-matched second solve harness
         run: python -m pytest -q tests/test_adaptive_second_solve.py
       - name: Remesh rebind and QoI regression
-        run: python -m pytest -q tests/test_remesh_face_rebinding.py tests/test_gmsh_local_remesh.py tests/test_local_refinement_plan.py tests/test_qoi_convergence.py
+        run: python -m pytest -q tests/test_remesh_face_rebinding.py tests/test_gmsh_local_refinement.py tests/test_local_refinement_plan.py tests/test_qoi_convergence.py
       - name: Solver CAD BC and Results regression
         run: python -m pytest -q tests/test_arbitrary_bc.py tests/test_production_picker_routing.py tests/test_step_to_solve.py tests/test_production_results.py tests/test_desktop_picker_app.py
       - name: ACEA and demo regression
