@@ -1,0 +1,26 @@
+name: Windows C6.0 G1 Integrated Picker Workspace
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  integrated-picker-workspace:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/integrated_picker_workspace.py src/astermax/fea/adaptive_picker_authoring.py src/astermax/fea/native_cad_picker_ui.py
+      - name: C6.0 G1 integrated picker harness
+        run: python -m pytest -q tests/test_integrated_picker_workspace.py
+      - name: Picker authoring regressions
+        run: python -m pytest -q tests/test_adaptive_picker_authoring.py tests/test_native_cad_picker_ui.py tests/test_cad_face_picker.py
+      - name: Native adaptive regressions
+        run: python -m pytest -q tests/test_native_adaptive_analysis.py tests/test_face_ownership.py tests/test_persistent_geometry.py
+      - name: Full regression suite
+        run: python -m pytest -q
