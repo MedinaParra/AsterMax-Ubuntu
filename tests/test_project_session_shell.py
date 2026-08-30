@@ -1,3 +1,5 @@
+from zipfile import ZIP_DEFLATED, ZipFile
+
 import pytest
 
 from astermax.fea.adaptive_execution_bundle import build_adaptive_execution_artifact_bundle
@@ -108,8 +110,15 @@ def test_recent_identity_reports_stale_for_different_valid_file_sha(tmp_path):
 
 def test_project_shell_reports_tampered_and_missing_fail_closed(tmp_path):
     path = _real_package(tmp_path)
-    with path.open("ab") as handle:
-        handle.write(b"tamper")
+    with ZipFile(path, "r") as archive:
+        manifest = archive.read("manifest.json")
+        views = bytearray(archive.read("views.json"))
+        payload = archive.read("results.npz")
+    views[-1] = ord("!")
+    with ZipFile(path, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", manifest)
+        archive.writestr("views.json", bytes(views))
+        archive.writestr("results.npz", payload)
     tampered = inspect_analysis_path(path)
     assert tampered.status == "TAMPERED"
     missing = inspect_analysis_path(tmp_path / "gone.astermaxr")
