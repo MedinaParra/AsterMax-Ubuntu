@@ -28,6 +28,15 @@ def _square_tri6():
     return nodes, tris
 
 
+def _sloped_tri6():
+    nodes = np.array([
+        [0.,0.,0.], [40.,0.,20.], [40.,12.,20.], [0.,12.,0.],
+        [20.,0.,10.], [40.,6.,20.], [20.,6.,10.], [20.,12.,10.], [0.,6.,0.]
+    ])
+    tris = np.array([[0,1,2,4,5,6],[0,2,3,6,7,8]], dtype=np.int64)
+    return nodes, tris
+
+
 def test_descriptor_recovers_planar_geometry():
     nodes, tris = _square_tri6()
     d = build_mesh_surface_descriptor(nodes, tris)
@@ -44,6 +53,19 @@ def test_unique_match_uses_bbox_centroid_area_and_plane_normal():
     match, metrics = choose_unique_cad_face(d, [(1, wrong),(2, good)], 30.0)
     assert match.sha256 == good.sha256
     assert metrics['area_error_rel'] == pytest.approx(0.0)
+    assert metrics['normal_checked'] is True
+
+
+def test_sloped_plane_does_not_invent_axis_normal_from_bbox():
+    nodes, tris = _sloped_tri6()
+    d = build_mesh_surface_descriptor(nodes, tris)
+    area = 12.0 * np.sqrt(40.0**2 + 20.0**2)
+    good = Sig('s'*64, 'Plane', float(area), (20,6,10), (0,0,0,40,12,20))
+    wrong = Sig('w'*64, 'Plane', float(area), (20,6,30), (0,0,20,40,12,40))
+    match, metrics = choose_unique_cad_face(d, [(1, wrong),(2, good)], 60.0)
+    assert match.sha256 == good.sha256
+    assert metrics['normal_checked'] is False
+    assert metrics['normal_error'] == pytest.approx(0.0)
 
 
 def test_ambiguous_match_fails_closed():
