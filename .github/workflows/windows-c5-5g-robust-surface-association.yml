@@ -1,0 +1,26 @@
+name: Windows C5.5g Robust Surface Association
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  robust-surface-association:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/robust_surface_association.py
+      - name: C5.5g robust surface association harness
+        run: python -m pytest -q tests/test_robust_surface_association.py
+      - name: Ownership and adaptive regressions
+        run: python -m pytest -q tests/test_msh_ownership_importer.py tests/test_adaptive_mesh_provenance.py tests/test_adaptive_second_solve.py tests/test_remesh_face_rebinding.py tests/test_gmsh_local_refinement.py tests/test_face_ownership.py tests/test_named_selections.py
+      - name: CAD solve results regression
+        run: python -m pytest -q tests/test_cad_face_picker.py tests/test_desktop_picker_app.py tests/test_step_to_solve.py tests/test_production_results.py tests/test_demo_session.py tests/test_demo_dashboard.py
+      - name: Full regression suite
+        run: python -m pytest -q
