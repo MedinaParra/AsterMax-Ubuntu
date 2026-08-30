@@ -83,6 +83,7 @@ def append_verified_results_revision(
     result_package_path: str | Path,
     *,
     label: str | None = None,
+    allow_duplicate_package: bool = False,
 ) -> tuple[UnifiedProjectV1, ProjectAuthoringReceiptV1]:
     project_file = Path(project_path).expanduser().resolve()
     result_file = Path(result_package_path).expanduser().resolve()
@@ -92,8 +93,11 @@ def append_verified_results_revision(
     verify_portable_adaptive_results_package(package)
     if package.source_step_sha256 != current.source_step_sha256:
         raise ProjectAuthoringError("PROJECT_AUTHORING_STEP_IDENTITY_MISMATCH")
-    if any(row.result_package_sha256 == package.package_sha256 for row in current.revisions):
+    duplicate = any(row.result_package_sha256 == package.package_sha256 for row in current.revisions)
+    if duplicate and not allow_duplicate_package:
         raise ProjectAuthoringError("PROJECT_AUTHORING_DUPLICATE_RESULTS_REVISION")
+    if duplicate and not (label and label.strip()):
+        raise ProjectAuthoringError("PROJECT_AUTHORING_DUPLICATE_LABEL_REQUIRED")
     updated = append_project_revision(project_file, result_file, label=label)
     return updated, _receipt("APPEND_VERIFIED_RESULTS_REVISION", project_file, result_file, updated)
 
@@ -125,7 +129,7 @@ def install_project_authoring_controls(
     from tkinter import filedialog, messagebox, simpledialog, ttk
 
     frame = ttk.LabelFrame(parent, text="Project Authoring", padding=8)
-    frame.pack(side="left", padx=(12, 0))
+    frame.pack(fill="x")
     active_project = tk.StringVar(value="")
     status = tk.StringVar(value="No active .astermax project")
 
@@ -172,8 +176,9 @@ def install_project_authoring_controls(
         status.set(f"ACTIVE · {project.project_name} · Revision {len(project.revisions):02d} appended · VERIFIED")
         on_project_changed(active_project.get())
 
-    ttk.Button(frame, text="New Project…", command=new_project).pack(side="left")
-    ttk.Button(frame, text="Open Project…", command=open_project).pack(side="left", padx=(6, 0))
-    ttk.Button(frame, text="Add Analysis Revision…", command=add_revision).pack(side="left", padx=(6, 0))
-    ttk.Label(parent, textvariable=status).pack(side="left", padx=(12, 0))
+    buttons = ttk.Frame(frame); buttons.pack(fill="x")
+    ttk.Button(buttons, text="New Project…", command=new_project).pack(side="left")
+    ttk.Button(buttons, text="Open Project…", command=open_project).pack(side="left", padx=(6, 0))
+    ttk.Button(buttons, text="Add Analysis Revision…", command=add_revision).pack(side="left", padx=(6, 0))
+    ttk.Label(frame, textvariable=status).pack(anchor="w", pady=(6, 0))
     return active_project
