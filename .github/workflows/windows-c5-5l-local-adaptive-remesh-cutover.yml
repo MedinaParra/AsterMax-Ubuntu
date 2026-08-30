@@ -1,0 +1,26 @@
+name: Windows C5.5l Local Adaptive Remesh Cutover
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  local-adaptive-remesh-cutover:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/local_adaptive_one_click.py
+      - name: C5.5l real local adaptive remesh harness
+        run: python -m pytest -q tests/test_local_adaptive_one_click.py
+      - name: Adaptive remesh and exact ownership regressions
+        run: python -m pytest -q tests/test_one_click_adaptive_loop.py tests/test_gmsh_local_refinement.py tests/test_msh_ownership_importer.py tests/test_robust_surface_association.py tests/test_remesh_face_rebinding.py tests/test_adaptive_second_solve.py tests/test_qoi_convergence.py
+      - name: CAD STEP and professional Results regressions
+        run: python -m pytest -q tests/test_cad_face_picker.py tests/test_desktop_picker_app.py tests/test_step_to_solve.py tests/test_production_results.py tests/test_adaptive_demo_session.py tests/test_adaptive_results_dashboard.py
+      - name: Full regression suite
+        run: python -m pytest -q
