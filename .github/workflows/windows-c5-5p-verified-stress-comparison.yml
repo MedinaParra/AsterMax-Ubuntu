@@ -1,0 +1,26 @@
+name: Windows C5.5p Verified Stress Comparison
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verified-stress-comparison:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Compile warnings as errors
+        run: python -W error -m py_compile src/astermax/fea/adaptive_stress_comparison.py
+      - name: C5.5p real verified stress comparison harness
+        run: python -m pytest -q tests/test_adaptive_stress_comparison.py
+      - name: Adaptive visualization and local loop regressions
+        run: python -m pytest -q tests/test_adaptive_hotspot_visualization.py tests/test_solution_driven_local_loop.py tests/test_solution_driven_adaptivity.py tests/test_gmsh_local_refinement.py tests/test_msh_ownership_importer.py
+      - name: CAD STEP and professional Results regressions
+        run: python -m pytest -q tests/test_step_to_solve.py tests/test_cad_face_picker.py tests/test_production_results.py tests/test_adaptive_results_dashboard.py tests/test_adaptive_demo_session.py
+      - name: Full regression suite
+        run: python -m pytest -q
