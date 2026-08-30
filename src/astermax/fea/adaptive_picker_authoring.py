@@ -32,6 +32,7 @@ class AdaptivePickerAuthoringEvidenceV1:
     load_binding_sha256: str
     mesh_target_size_mm: float
     minimum_det_jacobian_mm3: float
+    edge_ratio_minimum: float
     material_young_modulus_mpa: float
     material_poisson_ratio: float
     resultant_n: tuple[float, float, float]
@@ -58,7 +59,7 @@ def _validate_inputs(mesh_size_mm: float, young_modulus_mpa: float, poisson_rati
     return mesh, young, poisson, tuple(float(v) for v in load)
 
 
-def _minimum_corner_det_jacobian_mm3(inventory: Tet10FaceOwnershipInventory) -> float:
+def _tet10_corners(inventory: Tet10FaceOwnershipInventory) -> tuple[np.ndarray, np.ndarray]:
     elements = np.asarray(inventory.elements, dtype=np.int64)
     nodes = np.asarray(inventory.nodes_mm, dtype=float)
     if elements.ndim != 2 or elements.shape[1] != 10 or elements.shape[0] == 0:
@@ -66,13 +67,28 @@ def _minimum_corner_det_jacobian_mm3(inventory: Tet10FaceOwnershipInventory) -> 
     corners = elements[:, :4]
     if np.any(corners < 0) or np.any(corners >= nodes.shape[0]):
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_TET10_CONNECTIVITY_INVALID")
+    return nodes, corners
+
+
+def _minimum_corner_det_jacobian_mm3(inventory: Tet10FaceOwnershipInventory) -> float:
+    nodes, corners = _tet10_corners(inventory)
     xyz = nodes[corners]
     edge_matrix = np.stack((xyz[:, 1] - xyz[:, 0], xyz[:, 2] - xyz[:, 0], xyz[:, 3] - xyz[:, 0]), axis=1)
-    det = np.linalg.det(edge_matrix)
-    absolute_det = np.abs(det)
+    absolute_det = np.abs(np.linalg.det(edge_matrix))
     if not np.all(np.isfinite(absolute_det)) or np.any(absolute_det <= 0.0):
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_NONPOSITIVE_CORNER_JACOBIAN")
     return float(absolute_det.min())
+
+
+def _minimum_corner_edge_ratio(inventory: Tet10FaceOwnershipInventory) -> float:
+    nodes, corners = _tet10_corners(inventory)
+    xyz = nodes[corners]
+    pairs = ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
+    lengths = np.column_stack([np.linalg.norm(xyz[:, a] - xyz[:, b], axis=1) for a, b in pairs])
+    if not np.all(np.isfinite(lengths)) or np.any(lengths <= 0.0):
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_EDGE_LENGTH_INVALID")
+    ratios = lengths.min(axis=1) / lengths.max(axis=1)
+    return float(ratios.min())
 
 
 def build_adaptive_picker_catalog(step_path: str | Path, *, mesh_size_mm: float, viewport_width_px: int = 760, viewport_height_px: int = 560) -> tuple[Tet10FaceOwnershipInventory, CadFacePickerCatalog]:
@@ -131,6 +147,7 @@ def prepare_adaptive_model_from_picker(
     quality = build_tet10_corner_quality_snapshot(inventory.nodes_mm, inventory.elements)
     require_quality_crosscheck(quality)
     minimum_det = _minimum_corner_det_jacobian_mm3(inventory)
+    edge_ratio = _minimum_corner_edge_ratio(inventory)
     preparation_core = {
         "schema": "AsterMaxAdaptivePickerPreparationV1",
         "source_step_sha256": inventory.source_step_sha256,
@@ -140,6 +157,7 @@ def prepare_adaptive_model_from_picker(
         "load_picker_evidence_sha256": load_pick.evidence_sha256,
         "tetra_quality_sha256": quality.snapshot_sha256,
         "minimum_det_jacobian_mm3": minimum_det,
+        "edge_ratio_minimum": edge_ratio,
     }
     preparation_sha = canonical_sha256(preparation_core)
     review_core = {
@@ -159,7 +177,7 @@ def prepare_adaptive_model_from_picker(
         "node_count": int(inventory.nodes_mm.shape[0]),
         "tet10_count": int(inventory.elements.shape[0]),
         "minimum_det_jacobian_mm3": minimum_det,
-        "edge_ratio_minimum": float(quality.minimum),
+        "edge_ratio_minimum": edge_ratio,
         "tetra_mean_ratio_minimum": float(quality.minimum),
         "tetra_mean_ratio_p10": float(quality.percentile_10),
         "tetra_mean_ratio_median": float(quality.median),
@@ -202,6 +220,7 @@ def prepare_adaptive_model_from_picker(
         "load_binding_sha256": load_binding.binding_sha256,
         "mesh_target_size_mm": mesh,
         "minimum_det_jacobian_mm3": minimum_det,
+        "edge_ratio_minimum": edge_ratio,
         "material_young_modulus_mpa": young,
         "material_poisson_ratio": poisson,
         "resultant_n": load,
@@ -224,8 +243,10 @@ def verify_adaptive_picker_authoring(prepared: dict[str, Any], evidence: Adaptiv
     catalog = prepared.get("picker_catalog")
     if not isinstance(review, PreSolveReviewSnapshot):
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_REVIEW_MISSING")
-    if review.review_sha256 != evidence.review_sha256 or review.minimum_det_jacobian_mm3 != evidence.minimum_det_jacobian_mm3:
+    if review.review_sha256 != evidence.review_sha256:
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_REVIEW_STALE")
+    if review.minimum_det_jacobian_mm3 != evidence.minimum_det_jacobian_mm3 or review.edge_ratio_minimum != evidence.edge_ratio_minimum:
+        raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_MESH_METRICS_STALE")
     if support_binding.binding_sha256 != evidence.support_binding_sha256 or load_binding.binding_sha256 != evidence.load_binding_sha256:
         raise AdaptivePickerAuthoringError("ADAPTIVE_PICKER_BINDING_STALE")
     if tuple(support_binding.face_signature_sha256) != evidence.support_face_signature_sha256:
