@@ -330,4 +330,16 @@ def install_project_session_tab(
     ttk.Button(toolbar, text="Refresh", command=refresh).pack(side="left", padx=(8, 0))
     tree.bind("<Double-1>", lambda _event: open_selected())
     refresh()
-    return open_path, refresh
+
+    # C5.5u packaged desktop cutover: install the unified project tree from the
+    # same verified hotspot/stress binders already owned by the shipping shell.
+    # The import stays local to avoid a module-import cycle because
+    # unified_project_model itself reuses open_verified_project_session().
+    from .unified_project_model import install_unified_project_tab
+
+    populate_unified_project = install_unified_project_tab(
+        notebook,
+        hotspot_binder=hotspot_binder,
+        stress_binder=stress_binder,
+    )
+    return open_path, refresh, populate_unified_project
