@@ -20,6 +20,7 @@ from astermax.fea.pre_solve_review import accept_model_preparation
 
 
 def _write_sloped_prism(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     gmsh = _gmsh(); gmsh.initialize()
     try:
         gmsh.option.setNumber("General.Terminal", 0)
@@ -113,7 +114,7 @@ def test_arbitrary_sloped_picker_signatures_reach_native_adaptive_baseline_and_r
     assert [name for name, _sha in bound] == ["hotspot", "stress"]
 
 
-def test_picker_authoring_rejects_overlap_stale_step_and_tampered_evidence(tmp_path: Path) -> None:
+def test_picker_authoring_rejects_overlap_and_overclaim(tmp_path: Path) -> None:
     step = tmp_path / "sloped_picker_negative.step"
     _write_sloped_prism(step)
     inventory, catalog = build_adaptive_picker_catalog(step, mesh_size_mm=12.0)
