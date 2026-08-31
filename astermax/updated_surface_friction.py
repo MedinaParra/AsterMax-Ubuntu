@@ -10,8 +10,9 @@ motion is
 
 STICK contributes kt * B^T P B. SLIP applies a capped physical friction force
 |Ft| = mu*Fn opposite r_t and distributes the equal/opposite master reaction by the
-same barycentric weights. This is a Picard verification solver, not a production
-consistent-tangent large-sliding algorithm.
+same barycentric weights. A geometry-safe backtracking line search prevents a transient
+Picard iterate from losing an otherwise valid master projection. This remains a
+verification solver, not a production consistent-tangent large-sliding algorithm.
 """
 
 from dataclasses import dataclass
@@ -164,9 +165,27 @@ def _solve_linear(k, f, fixed):
     except GlobalStaticError as exc:
         raise UpdatedSurfaceFrictionError(str(exc)) from exc
     u = [0.0]*ndof
-    for d, v in fixed.items(): u[d] = v
-    for d, v in zip(free, ur): u[d] = v
+    for d, v in fixed.items():
+        u[d] = v
+    for d, v in zip(free, ur):
+        u[d] = v
     return u
+
+
+def _geometry_safe_step(nodes, u, trial, slaves, masters, hint, search_distance,
+                        activation_tol, allow_unmatched, min_fraction):
+    """Backtrack a nonlinear update until all required slave/master projections survive."""
+    fraction = 1.0
+    while fraction + 1e-15 >= min_fraction:
+        candidate = [a + fraction*(b-a) for a, b in zip(u, trial)]
+        _, unmatched = _search(_deformed(nodes, candidate), slaves, masters, hint,
+                               search_distance, activation_tol)
+        if allow_unmatched or not unmatched:
+            return candidate, fraction
+        fraction *= 0.5
+    raise UpdatedSurfaceFrictionError(
+        "nonlinear contact update could not preserve master projection during line search"
+    )
 
 
 def _validate(nodes, stiffness, slaves, masters, kp, kt, mu, search):
@@ -198,9 +217,9 @@ def solve_updated_surface_coulomb_from_stiffness(
     slave_nodes: Sequence[int], master_triangles: Sequence[Sequence[int]],
     master_normal_hint: Sequence[float], normal_penalty_n_per_mm: float,
     tangential_penalty_n_per_mm: float, friction_coefficient: float,
-    search_distance_mm: float, max_iterations: int = 60,
+    search_distance_mm: float, max_iterations: int = 80,
     activation_tolerance_mm: float = 1e-10, displacement_tolerance_mm: float = 1e-9,
-    allow_unmatched: bool = False,
+    allow_unmatched: bool = False, min_line_search_fraction: float = 1.0/64.0,
 ) -> UpdatedSurfaceFrictionResult:
     """Solve updated node-to-TRI3 contact with Coulomb STICK/SLIP."""
     slaves = tuple(sorted(set(int(i) for i in slave_nodes)))
@@ -208,8 +227,11 @@ def solve_updated_surface_coulomb_from_stiffness(
     kp, kt, mu, search = map(float, (normal_penalty_n_per_mm, tangential_penalty_n_per_mm,
                                       friction_coefficient, search_distance_mm))
     ndof = _validate(nodes, stiffness, slaves, masters, kp, kt, mu, search)
-    if max_iterations <= 0 or displacement_tolerance_mm < 0.0 or activation_tolerance_mm < 0.0:
-        raise UpdatedSurfaceFrictionError("iterations/tolerances are invalid")
+    if (max_iterations <= 0 or displacement_tolerance_mm < 0.0 or
+            activation_tolerance_mm < 0.0 or
+            not math.isfinite(float(min_line_search_fraction)) or
+            min_line_search_fraction <= 0.0 or min_line_search_fraction > 1.0):
+        raise UpdatedSurfaceFrictionError("iterations/tolerances/line-search fraction are invalid")
     hint = _unit(master_normal_hint)
     fixed = {int(d): float(v) for d, v in constraints.items()}
     force = [0.0]*ndof
@@ -231,20 +253,24 @@ def solve_updated_surface_coulomb_from_stiffness(
             raise UpdatedSurfaceFrictionError("updated friction search lost master projection for slave nodes: " + ", ".join(map(str, unmatched)))
         current_master = {c.slave: c.master for c in candidates}
         for s, t in current_master.items():
-            if s in previous_master and previous_master[s] != t: switches += 1
+            if s in previous_master and previous_master[s] != t:
+                switches += 1
         previous_master = current_master
         k_eff, f_eff = [row[:] for row in base_k], force[:]
         signature = []
         for c in candidates:
             if not c.active:
-                signature.append((c.slave, c.master, "OPEN")); continue
+                signature.append((c.slave, c.master, "OPEN"))
+                continue
             q = _q_normal(c, ndof)
             c0 = c.gap - sum(qi*ui for qi, ui in zip(q, u))
             for i, qi in enumerate(q):
-                if qi == 0.0: continue
+                if qi == 0.0:
+                    continue
                 f_eff[i] -= kp*c0*qi
                 for j, qj in enumerate(q):
-                    if qj != 0.0: k_eff[i][j] += kp*qi*qj
+                    if qj != 0.0:
+                        k_eff[i][j] += kp*qi*qj
             fn = kp*max(0.0, -c.gap)
             rel = _relative_u(c, u)
             fr = evaluate_coulomb_friction(rel, c.normal, normal_force_n=fn,
@@ -252,17 +278,21 @@ def solve_updated_surface_coulomb_from_stiffness(
             signature.append((c.slave, c.master, fr.regime))
             B, P = _B(c, ndof), _projector(c.normal)
             if fr.regime == "STICK":
-                # Kt = kt * B^T P B
                 for a in range(ndof):
                     for b in range(ndof):
                         value = sum(B[i][a]*P[i][j]*B[j][b] for i in range(3) for j in range(3))
-                        if value: k_eff[a][b] += kt*value
+                        if value:
+                            k_eff[a][b] += kt*value
             elif fr.regime == "SLIP":
-                # Physical Ft acts on slave; master gets -N_i Ft. Add B^T Ft to RHS.
                 for a in range(ndof):
                     value = sum(B[i][a]*fr.tangential_force_n[i] for i in range(3))
-                    if value: f_eff[a] += value
-        u_new = _solve_linear(k_eff, f_eff, fixed)
+                    if value:
+                        f_eff[a] += value
+        u_trial = _solve_linear(k_eff, f_eff, fixed)
+        u_new, _ = _geometry_safe_step(
+            nodes, u, u_trial, slaves, masters, hint, search,
+            activation_tolerance_mm, allow_unmatched, float(min_line_search_fraction)
+        )
         delta = max(abs(a-b) for a, b in zip(u_new, u))
         u = u_new
         sig = tuple(signature)
@@ -292,7 +322,8 @@ def _finish(nodes, base_k, force, fixed, slaves, masters, hint, kp, kt, mu, sear
         if c.active:
             q = _q_normal(c, len(u))
             B = _B(c, len(u))
-            for a, qa in enumerate(q): contact_internal[a] += kp*c.gap*qa
+            for a, qa in enumerate(q):
+                contact_internal[a] += kp*c.gap*qa
             for a in range(len(u)):
                 contact_internal[a] -= sum(B[i][a]*fr.tangential_force_n[i] for i in range(3))
         master_ft = tuple(tuple(-w*x for x in fr.tangential_force_n) for w in c.barycentric)
