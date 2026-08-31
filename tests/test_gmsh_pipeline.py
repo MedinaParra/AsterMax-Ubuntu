@@ -149,6 +149,12 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
                 mesh.surface_group("LOAD").node_indices,
             )
             axial_error = relative_error(numerical_ux, reference.displacement_mm)
+            print(
+                "ASTERMAX_BENCHMARK "
+                f"mean_load_face_ux_mm={numerical_ux:.12g} "
+                f"closed_form_FL_EA_mm={reference.displacement_mm:.12g} "
+                f"relative_error={axial_error:.8%}"
+            )
             self.assertLess(
                 axial_error,
                 0.05,
