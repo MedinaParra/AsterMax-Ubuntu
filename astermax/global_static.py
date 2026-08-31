@@ -30,10 +30,16 @@ def _solve_dense(a: Sequence[Sequence[float]], b: Sequence[float]) -> list[float
     n = len(a)
     if n == 0 or len(b) != n or any(len(row) != n for row in a):
         raise GlobalStaticError("reduced stiffness system must be non-empty and square")
+    matrix_scale = max(abs(value) for row in a for value in row)
+    if matrix_scale == 0.0:
+        raise GlobalStaticError("singular reduced stiffness matrix; check constraints")
+    # A relative threshold is essential for stiffness matrices: an absolute pivot
+    # threshold can mistake floating-point remnants of rigid-body modes for rank.
+    pivot_tolerance = max(1e-14, matrix_scale * 1e-12)
     aug = [list(map(float, row)) + [float(b[i])] for i, row in enumerate(a)]
     for col in range(n):
         pivot = max(range(col, n), key=lambda row: abs(aug[row][col]))
-        if abs(aug[pivot][col]) < 1e-12:
+        if abs(aug[pivot][col]) <= pivot_tolerance:
             raise GlobalStaticError("singular reduced stiffness matrix; check constraints")
         aug[col], aug[pivot] = aug[pivot], aug[col]
         scale = aug[col][col]
