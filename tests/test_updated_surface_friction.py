@@ -53,6 +53,7 @@ class UpdatedSurfaceFrictionTests(unittest.TestCase):
 
     def test_slip_matches_closed_form_coulomb_cap(self):
         r = self._solve(500.0)
+        self.assertTrue(r.converged)
         s = r.contact_states[0]
         self.assertEqual(s.regime, "SLIP")
         self.assertAlmostEqual(s.normal_force_n, 810.0, places=7)
@@ -60,6 +61,20 @@ class UpdatedSurfaceFrictionTests(unittest.TestCase):
         self.assertAlmostEqual(s.tangential_force_magnitude_n, 162.0, places=7)
         self.assertAlmostEqual(s.tangential_force_n[0], -162.0, places=7)
         self.assertAlmostEqual(r.displacements[9], 0.338, places=8)
+        self.assertAlmostEqual(max(abs(r.residual[d]) for d in (9, 10, 11)), 0.0, places=6)
+
+    def test_geometry_safe_line_search_prevents_transient_master_loss(self):
+        # The raw unconstrained/Picard predictor can temporarily overestimate Fn and
+        # overshoot tangentially. Final Coulomb equilibrium remains inside the TRI3.
+        r = self._solve(700.0)
+        self.assertTrue(r.converged)
+        self.assertEqual(r.unmatched_slave_nodes, ())
+        s = r.contact_states[0]
+        self.assertEqual(s.regime, "SLIP")
+        self.assertEqual(s.master_nodes, (0, 1, 2))
+        self.assertAlmostEqual(s.normal_force_n, 810.0, places=7)
+        self.assertAlmostEqual(s.friction_limit_n, 162.0, places=7)
+        self.assertAlmostEqual(r.displacements[9], 0.538, places=8)
         self.assertAlmostEqual(max(abs(r.residual[d]) for d in (9, 10, 11)), 0.0, places=6)
 
     def test_mu_zero_recovers_frictionless_tangent(self):
@@ -93,6 +108,7 @@ class UpdatedSurfaceFrictionTests(unittest.TestCase):
             ("tangential_penalty_n_per_mm", 0.0),
             ("friction_coefficient", -0.1),
             ("search_distance_mm", -1.0),
+            ("min_line_search_fraction", 0.0),
         ):
             args = dict(common)
             args[key] = value
