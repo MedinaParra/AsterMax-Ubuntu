@@ -1,15 +1,13 @@
-"""Minimal auditable Gmsh v2 ASCII importer for the AsterMax PMV.
+"""Auditable Gmsh v2 ASCII importer for the AsterMax PMV.
 
-This module intentionally supports only the subset needed by the current verified
-linear-static kernel: 3D nodes plus first-order tetrahedra (Gmsh element type 4).
-Geometry is assumed to have been generated in millimetres and the caller must state
-that unit basis explicitly; Gmsh v2 does not encode a reliable engineering length
-unit in the mesh file itself.
+The verified kernel consumes first-order tetrahedra (Gmsh type 4).  Triangular
+surface elements (type 2) are also retained when they belong to named physical
+groups so CAD/meshing intent can survive into boundary-condition preparation.
+Coordinates are accepted only when the caller explicitly resolves the source to mm.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 class GmshImportError(ValueError):
@@ -17,25 +15,78 @@ class GmshImportError(ValueError):
 
 
 @dataclass(frozen=True)
+class SurfaceGroup:
+    """Named triangular surface group using compact zero-based node indices."""
+
+    name: str
+    physical_tag: int
+    triangles: tuple[tuple[int, int, int], ...]
+
+    @property
+    def node_indices(self) -> tuple[int, ...]:
+        return tuple(sorted({node for tri in self.triangles for node in tri}))
+
+
+@dataclass(frozen=True)
 class TetraMesh:
     nodes: tuple[tuple[float, float, float], ...]
     elements: tuple[tuple[int, int, int, int], ...]
     source_unit: str
+    surface_groups: tuple[SurfaceGroup, ...] = ()
+
+    def surface_group(self, name: str) -> SurfaceGroup:
+        matches = [group for group in self.surface_groups if group.name == name]
+        if not matches:
+            raise GmshImportError(f"unknown physical surface group: {name}")
+        if len(matches) != 1:
+            raise GmshImportError(f"physical surface group name is ambiguous: {name}")
+        return matches[0]
 
 
-def _section(lines: list[str], name: str) -> list[str]:
+def _section(lines: list[str], name: str, *, required: bool = True) -> list[str]:
     start_token = f"${name}"
     end_token = f"$End{name}"
     try:
         start = lines.index(start_token) + 1
         end = lines.index(end_token, start)
     except ValueError as exc:
-        raise GmshImportError(f"missing Gmsh section: {name}") from exc
+        if required:
+            raise GmshImportError(f"missing Gmsh section: {name}") from exc
+        return []
     return lines[start:end]
 
 
+def _physical_names(lines: list[str]) -> dict[tuple[int, int], str]:
+    section = _section(lines, "PhysicalNames", required=False)
+    if not section:
+        return {}
+    try:
+        expected = int(section[0])
+    except (IndexError, ValueError) as exc:
+        raise GmshImportError("invalid PhysicalNames count") from exc
+    if len(section[1:]) != expected:
+        raise GmshImportError("physical-name count does not match section")
+
+    names: dict[tuple[int, int], str] = {}
+    for line in section[1:]:
+        parts = line.split(maxsplit=2)
+        if len(parts) != 3:
+            raise GmshImportError("malformed physical-name record")
+        dimension = int(parts[0])
+        tag = int(parts[1])
+        raw_name = parts[2].strip()
+        if len(raw_name) < 2 or raw_name[0] != '"' or raw_name[-1] != '"':
+            raise GmshImportError("physical group names must be quoted")
+        name = raw_name[1:-1]
+        key = (dimension, tag)
+        if key in names:
+            raise GmshImportError("duplicate physical-name tag")
+        names[key] = name
+    return names
+
+
 def parse_gmsh_v2_ascii(text: str, *, declared_unit: str) -> TetraMesh:
-    """Parse a first-order tetrahedral Gmsh v2 ASCII mesh declared in mm."""
+    """Parse first-order TET4 plus named triangular surface groups in Gmsh v2 ASCII."""
     if declared_unit != "mm":
         raise GmshImportError("mesh length unit must be explicitly resolved to mm")
 
@@ -46,6 +97,8 @@ def parse_gmsh_v2_ascii(text: str, *, declared_unit: str) -> TetraMesh:
     tokens = mesh_format[0].split()
     if len(tokens) < 3 or not tokens[0].startswith("2.") or tokens[1] != "0":
         raise GmshImportError("only Gmsh v2 ASCII meshes are supported")
+
+    physical_names = _physical_names(lines)
 
     node_lines = _section(lines, "Nodes")
     try:
@@ -74,12 +127,16 @@ def parse_gmsh_v2_ascii(text: str, *, declared_unit: str) -> TetraMesh:
         raise GmshImportError("element count does not match Elements section")
 
     tetra_node_ids: list[tuple[int, int, int, int]] = []
+    surface_by_tag: dict[int, list[tuple[int, int, int]]] = {}
     for line in element_lines[1:]:
         parts = line.split()
         if len(parts) < 3:
             raise GmshImportError("malformed element record")
         element_type = int(parts[1])
         tag_count = int(parts[2])
+        if tag_count < 0 or len(parts) < 3 + tag_count:
+            raise GmshImportError("malformed element tags")
+        tags = [int(value) for value in parts[3 : 3 + tag_count]]
         connectivity = parts[3 + tag_count :]
         if element_type == 4:
             if len(connectivity) != 4:
@@ -88,6 +145,15 @@ def parse_gmsh_v2_ascii(text: str, *, declared_unit: str) -> TetraMesh:
             if len(set(ids)) != 4:
                 raise GmshImportError("TET4 connectivity contains duplicate nodes")
             tetra_node_ids.append(ids)  # type: ignore[arg-type]
+        elif element_type == 2 and tags:
+            if len(connectivity) != 3:
+                raise GmshImportError("TRI3 surface element must reference three nodes")
+            physical_tag = tags[0]
+            if (2, physical_tag) in physical_names:
+                ids = tuple(int(value) for value in connectivity)
+                if len(set(ids)) != 3:
+                    raise GmshImportError("TRI3 connectivity contains duplicate nodes")
+                surface_by_tag.setdefault(physical_tag, []).append(ids)  # type: ignore[arg-type]
 
     if not tetra_node_ids:
         raise GmshImportError("mesh contains no first-order tetrahedra")
@@ -97,15 +163,36 @@ def parse_gmsh_v2_ascii(text: str, *, declared_unit: str) -> TetraMesh:
     if missing:
         raise GmshImportError(f"elements reference unknown node ids: {missing}")
 
-    # Compact to exactly the nodes used by supported tetrahedra. This prevents line,
-    # triangle, or higher-order support entities from leaking unused DOFs into solve.
+    # Surface groups must be genuine boundary entities of the supported volume mesh;
+    # retaining an orphan surface node would create an invalid BC-to-volume mapping.
+    surface_nodes = {node_id for tris in surface_by_tag.values() for tri in tris for node_id in tri}
+    orphan_surface_nodes = sorted(surface_nodes.difference(referenced))
+    if orphan_surface_nodes:
+        raise GmshImportError(
+            f"physical surfaces reference nodes outside TET4 volume mesh: {orphan_surface_nodes}"
+        )
+
     ordered_ids = sorted(referenced)
     compact = {node_id: index for index, node_id in enumerate(ordered_ids)}
     nodes = tuple(node_by_id[node_id] for node_id in ordered_ids)
-    elements = tuple(
-        tuple(compact[node_id] for node_id in tet) for tet in tetra_node_ids
+    elements = tuple(tuple(compact[node_id] for node_id in tet) for tet in tetra_node_ids)
+
+    groups = []
+    for physical_tag, tris in sorted(surface_by_tag.items()):
+        groups.append(
+            SurfaceGroup(
+                name=physical_names[(2, physical_tag)],
+                physical_tag=physical_tag,
+                triangles=tuple(tuple(compact[node] for node in tri) for tri in tris),
+            )
+        )
+
+    return TetraMesh(
+        nodes=nodes,
+        elements=elements,
+        source_unit="mm",
+        surface_groups=tuple(groups),
     )
-    return TetraMesh(nodes=nodes, elements=elements, source_unit="mm")
 
 
 def read_gmsh_v2_ascii(path: str | Path, *, declared_unit: str) -> TetraMesh:
