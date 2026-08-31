@@ -1,17 +1,16 @@
 """Geometry-updated frictionless node-to-TRI3 contact verification solver.
 
 Unlike ``global_surface_contact`` (small sliding), this solver re-searches the master
-TRI3 on the *deformed* geometry every iteration and refreshes the contact normal and
-barycentric coordinates.  Each active contact uses a first-order gap linearization
-about the current iterate::
+TRI3 on the deformed geometry every iteration and refreshes the contact normal and
+barycentric coordinates. Each active contact uses a first-order gap linearization::
 
     g(u_new) ~= c + q^T u_new
     c = g(u_k) - q^T u_k
     q = [n, -N1*n, -N2*n, -N3*n]
 
-The resulting penalty contribution is ``Kc = kp*q*q^T`` and
-``f_contact = -kp*c*q``.  This is an auditable Picard/updated-geometry increment,
-not a production large-sliding Newton contact algorithm.
+with ``Kc = kp*q*q^T`` and ``f_contact = -kp*c*q``. This is an auditable
+updated-geometry/Picard verification increment, not a production large-sliding Newton
+contact algorithm. Missing master projections fail closed by default.
 """
 
 from dataclasses import dataclass
@@ -94,8 +93,7 @@ def _oriented_triangle(points, tri, hint):
 
 
 def _search(points, slave_nodes, master_triangles, hint, search_distance, activation_tol):
-    found = []
-    unmatched = []
+    found, unmatched = [], []
     oriented = tuple(sorted(_oriented_triangle(points, tri, hint) for tri in master_triangles))
     for slave in sorted(set(int(i) for i in slave_nodes)):
         candidates = []
@@ -116,6 +114,14 @@ def _search(points, slave_nodes, master_triangles, hint, search_distance, activa
         found.append(_Candidate(slave, tri, p.signed_gap_mm, p.barycentric, p.normal,
                                 p.signed_gap_mm < -activation_tol))
     return tuple(found), tuple(unmatched)
+
+
+def _require_matches(unmatched, allow_unmatched):
+    if unmatched and not allow_unmatched:
+        raise UpdatedSurfaceContactError(
+            "updated contact search lost master projection for slave nodes: " +
+            ", ".join(str(i) for i in unmatched)
+        )
 
 
 def _q(candidate: _Candidate, ndof: int) -> tuple[float, ...]:
@@ -148,21 +154,19 @@ def _solve_linear(k, f, fixed):
 
 
 def solve_updated_surface_contact_from_stiffness(
-    nodes: Sequence[Sequence[float]],
-    stiffness: Sequence[Sequence[float]],
-    constraints: Mapping[int, float],
-    loads: Mapping[int, float],
-    *,
-    slave_nodes: Sequence[int],
-    master_triangles: Sequence[Sequence[int]],
-    master_normal_hint: Sequence[float],
-    penalty_stiffness_n_per_mm: float,
-    search_distance_mm: float,
-    max_iterations: int = 30,
-    activation_tolerance_mm: float = 1e-10,
-    geometry_tolerance_mm: float = 1e-9,
+    nodes: Sequence[Sequence[float]], stiffness: Sequence[Sequence[float]],
+    constraints: Mapping[int, float], loads: Mapping[int, float], *,
+    slave_nodes: Sequence[int], master_triangles: Sequence[Sequence[int]],
+    master_normal_hint: Sequence[float], penalty_stiffness_n_per_mm: float,
+    search_distance_mm: float, max_iterations: int = 30,
+    activation_tolerance_mm: float = 1e-10, geometry_tolerance_mm: float = 1e-9,
+    allow_unmatched: bool = False,
 ) -> UpdatedSurfaceContactResult:
-    """Solve frictionless contact while updating master search on deformed geometry."""
+    """Solve frictionless contact with deformed-geometry master re-search.
+
+    ``allow_unmatched=False`` is the engineering-safe default. Set it True only for
+    diagnostics where intentionally lost contact candidates must remain observable.
+    """
     ndof = len(stiffness)
     if ndof == 0 or any(len(row) != ndof for row in stiffness) or ndof % 3:
         raise UpdatedSurfaceContactError("stiffness matrix must be square with 3 DOFs per node")
@@ -179,8 +183,7 @@ def solve_updated_surface_contact_from_stiffness(
         raise UpdatedSurfaceContactError("slave surface references an unknown node")
     if any(len(tri) != 3 or len(set(tri)) != 3 or any(i < 0 or i >= node_count for i in tri) for tri in masters):
         raise UpdatedSurfaceContactError("master surface contains invalid TRI3 connectivity")
-    kp = float(penalty_stiffness_n_per_mm)
-    search = float(search_distance_mm)
+    kp, search = float(penalty_stiffness_n_per_mm), float(search_distance_mm)
     if not math.isfinite(kp) or kp <= 0.0:
         raise UpdatedSurfaceContactError("contact penalty stiffness must be finite and positive")
     if not math.isfinite(search) or search < 0.0:
@@ -205,19 +208,18 @@ def solve_updated_surface_contact_from_stiffness(
 
     base_k = [list(map(float, row)) for row in stiffness]
     u = _solve_linear(base_k, force, fixed)
-    previous_master = {}
-    switches = 0
+    previous_master, switches = {}, 0
 
     for iteration in range(1, max_iterations+1):
-        candidates, _ = _search(_deformed(nodes, u), slaves, masters, hint, search, activation_tolerance_mm)
+        candidates, unmatched = _search(_deformed(nodes, u), slaves, masters, hint, search, activation_tolerance_mm)
+        _require_matches(unmatched, allow_unmatched)
         current_master = {c.slave: c.master for c in candidates}
         for slave, tri in current_master.items():
             if slave in previous_master and previous_master[slave] != tri:
                 switches += 1
         previous_master = current_master
 
-        k_eff = [row[:] for row in base_k]
-        f_eff = force[:]
+        k_eff, f_eff = [row[:] for row in base_k], force[:]
         for candidate in candidates:
             if not candidate.active:
                 continue
@@ -231,7 +233,8 @@ def solve_updated_surface_contact_from_stiffness(
                     if qj != 0.0:
                         k_eff[i][j] += kp*qi*qj
         u_new = _solve_linear(k_eff, f_eff, fixed)
-        new_candidates, _ = _search(_deformed(nodes, u_new), slaves, masters, hint, search, activation_tolerance_mm)
+        new_candidates, new_unmatched = _search(_deformed(nodes, u_new), slaves, masters, hint, search, activation_tolerance_mm)
+        _require_matches(new_unmatched, allow_unmatched)
         sig = tuple((c.slave, c.master, c.active) for c in candidates)
         new_sig = tuple((c.slave, c.master, c.active) for c in new_candidates)
         delta = max(abs(a-b) for a, b in zip(u_new, u))
@@ -240,11 +243,13 @@ def solve_updated_surface_contact_from_stiffness(
             break
     else:
         final_candidates, unmatched = _search(_deformed(nodes, u), slaves, masters, hint, search, activation_tolerance_mm)
-        states = _states(final_candidates, kp)
+        _require_matches(unmatched, allow_unmatched)
         return UpdatedSurfaceContactResult(tuple(u), tuple(0.0 for _ in range(ndof)),
-            tuple(float("nan") for _ in range(ndof)), states, unmatched, max_iterations, False, switches)
+            tuple(float("nan") for _ in range(ndof)), _states(final_candidates, kp), unmatched,
+            max_iterations, False, switches)
 
     final_candidates, unmatched = _search(_deformed(nodes, u), slaves, masters, hint, search, activation_tolerance_mm)
+    _require_matches(unmatched, allow_unmatched)
     states = _states(final_candidates, kp)
     contact_internal = [0.0]*ndof
     for candidate in final_candidates:
@@ -271,10 +276,10 @@ def _states(candidates, kp):
     return tuple(result)
 
 
-def solve_tet4_with_updated_surface_contact(
-    nodes, elements, young, poisson, constraints, loads, **contact_kwargs
-) -> UpdatedSurfaceContactResult:
-    """Assemble the verified TET4 stiffness and solve with updated-geometry contact."""
+def solve_tet4_with_updated_surface_contact(nodes, elements, young, poisson,
+                                             constraints, loads, **contact_kwargs):
+    """Assemble verified TET4 stiffness then solve with updated-geometry contact."""
     return solve_updated_surface_contact_from_stiffness(
-        nodes, assemble_stiffness(nodes, elements, young, poisson), constraints, loads, **contact_kwargs
+        nodes, assemble_stiffness(nodes, elements, young, poisson), constraints, loads,
+        **contact_kwargs
     )
