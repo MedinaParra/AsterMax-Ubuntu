@@ -100,7 +100,10 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
 
             constraints = fixed_surface_constraints(mesh, "FIXED")
             loads = surface_total_force_loads(mesh, "LOAD", (100.0, 0.0, 0.0))
-            self.assertEqual(resultant_from_nodal_loads(loads), (100.0, 0.0, 0.0))
+            applied = resultant_from_nodal_loads(loads)
+            self.assertAlmostEqual(applied[0], 100.0, places=12)
+            self.assertAlmostEqual(applied[1], 0.0, places=12)
+            self.assertAlmostEqual(applied[2], 0.0, places=12)
 
             result = solve_linear_static(
                 mesh.nodes,
