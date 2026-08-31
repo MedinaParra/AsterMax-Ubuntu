@@ -8,7 +8,8 @@ emit a deterministic Gmsh v2 ASCII TET4 mesh consumed by :mod:`astermax.gmsh_asc
 
 It is a verification bridge, not a production CAD repair/healing layer. Surface
 selection remains explicit and auditable; failed/empty selections are rejected by
-Gmsh rather than silently remapped.
+Gmsh rather than silently remapped. Imported TET4 meshes pass a dimensionless shape
+quality gate before they can enter the verified solve chain.
 """
 
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ import subprocess
 import tempfile
 
 from .gmsh_ascii import TetraMesh, read_gmsh_v2_ascii
+from .mesh_quality import MeshQualityError, require_tet4_mesh_quality
 from .step_units import require_step_mm
 
 
@@ -61,12 +63,7 @@ def build_step_meshing_geo(
     surface_boxes: tuple[SurfaceBox, ...] | list[SurfaceBox],
     mesh_size_mm: float,
 ) -> str:
-    """Create the auditable Gmsh program used to mesh one STEP solid.
-
-    The STEP file itself is validated separately before this program is executed.
-    Physical surfaces are selected only from caller-supplied bounding boxes so the
-    engineering intent remains visible in the generated artifact.
-    """
+    """Create the auditable Gmsh program used to mesh one STEP solid."""
     source = Path(step_path)
     if mesh_size_mm <= 0.0:
         raise ValueError("mesh_size_mm must be positive")
@@ -107,8 +104,9 @@ def mesh_step_with_gmsh(
     surface_boxes: tuple[SurfaceBox, ...] | list[SurfaceBox],
     mesh_size_mm: float,
     gmsh_executable: str = "gmsh",
+    minimum_tet_quality: float = 0.05,
 ) -> TetraMesh:
-    """Validate a mm STEP, tetrahedralize it with Gmsh and import the v2 ASCII mesh."""
+    """Validate mm STEP, tetrahedralize it and reject poor TET4 shape quality."""
     source = Path(step_path)
     destination = Path(msh_path)
     if not source.is_file():
@@ -151,4 +149,13 @@ def mesh_step_with_gmsh(
     if not destination.is_file() or destination.stat().st_size == 0:
         raise GmshPipelineError("Gmsh reported success but produced no mesh artifact")
 
-    return read_gmsh_v2_ascii(destination, declared_unit="mm")
+    mesh = read_gmsh_v2_ascii(destination, declared_unit="mm")
+    try:
+        require_tet4_mesh_quality(
+            mesh.nodes,
+            mesh.elements,
+            minimum_quality=minimum_tet_quality,
+        )
+    except MeshQualityError as exc:
+        raise GmshPipelineError(f"Gmsh mesh rejected before solve: {exc}") from exc
+    return mesh
