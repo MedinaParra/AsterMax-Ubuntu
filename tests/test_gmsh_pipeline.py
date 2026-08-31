@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
+from astermax.benchmark import axial_bar_reference, mean_surface_displacement_x, relative_error
 from astermax.global_static import solve_linear_static
 from astermax.gmsh_pipeline import SurfaceBox, build_step_meshing_geo, mesh_step_with_gmsh
 from astermax.mesh_bc import fixed_surface_constraints, resultant_from_nodal_loads, surface_total_force_loads
@@ -43,11 +44,13 @@ class GmshPipelineUnitTests(unittest.TestCase):
 @unittest.skipUnless(GMSH, "real CAD/mesh integration requires the Gmsh CLI")
 class GmshStepRoundTripIntegrationTests(unittest.TestCase):
     def test_real_step_mesh_solve_and_vtk_pipeline(self):
-        """Exercise CAD -> STEP -> mesh -> BC/load -> solve -> VM -> VTK with real Gmsh.
+        """Exercise CAD -> STEP -> mesh -> BC/load -> solve -> verify -> VM -> VTK.
 
-        No stress magnitude is asserted against an invented reference. Verification is
-        instead based on independent geometric volume, applied/resultant force,
-        equilibrium, free-DOF residual and artifact semantics.
+        The 3D solution is compared to the classical Saint-Venant axial-bar
+        displacement u=FL/(EA).  Because the numerical model fully clamps one end
+        (suppressing Poisson contraction locally), the oracle is used as a benchmark
+        with an explicit relative-error tolerance rather than claimed as an exact 3D
+        solution.  Stress contours remain numerical outputs, not invented references.
         """
         with tempfile.TemporaryDirectory(prefix="astermax-step-e2e-") as temporary:
             root = Path(temporary)
@@ -56,10 +59,17 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
             msh_path = root / "benchmark.msh"
             vtk_path = root / "benchmark.vtk"
 
+            length_mm = 10.0
+            width_mm = 2.0
+            thickness_mm = 1.0
+            area_mm2 = width_mm * thickness_mm
+            young_mpa = 210000.0
+            force_n = 100.0
+
             source_geo.write_text(
                 '\n'.join([
                     'SetFactory("OpenCASCADE");',
-                    'Box(1) = {0, 0, 0, 10, 2, 1};',
+                    f'Box(1) = {{0, 0, 0, {length_mm}, {width_mm}, {thickness_mm}}};',
                 ]) + '\n',
                 encoding="utf-8",
             )
@@ -81,8 +91,8 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
                 step_path,
                 msh_path,
                 surface_boxes=[
-                    SurfaceBox("FIXED", (-eps, -eps, -eps), (eps, 2 + eps, 1 + eps)),
-                    SurfaceBox("LOAD", (10 - eps, -eps, -eps), (10 + eps, 2 + eps, 1 + eps)),
+                    SurfaceBox("FIXED", (-eps, -eps, -eps), (eps, width_mm + eps, thickness_mm + eps)),
+                    SurfaceBox("LOAD", (length_mm - eps, -eps, -eps), (length_mm + eps, width_mm + eps, thickness_mm + eps)),
                 ],
                 mesh_size_mm=2.0,
                 gmsh_executable=GMSH,
@@ -96,19 +106,19 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
                 _tet_volume(*(mesh.nodes[index] for index in tet))
                 for tet in mesh.elements
             )
-            self.assertAlmostEqual(volume, 20.0, places=7)
+            self.assertAlmostEqual(volume, length_mm * area_mm2, places=7)
 
             constraints = fixed_surface_constraints(mesh, "FIXED")
-            loads = surface_total_force_loads(mesh, "LOAD", (100.0, 0.0, 0.0))
+            loads = surface_total_force_loads(mesh, "LOAD", (force_n, 0.0, 0.0))
             applied = resultant_from_nodal_loads(loads)
-            self.assertAlmostEqual(applied[0], 100.0, places=12)
+            self.assertAlmostEqual(applied[0], force_n, places=12)
             self.assertAlmostEqual(applied[1], 0.0, places=12)
             self.assertAlmostEqual(applied[2], 0.0, places=12)
 
             result = solve_linear_static(
                 mesh.nodes,
                 mesh.elements,
-                young=210000.0,
+                young=young_mpa,
                 poisson=0.30,
                 constraints=constraints,
                 loads=loads,
@@ -116,7 +126,7 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
             reaction = [0.0, 0.0, 0.0]
             for dof, value in enumerate(result.reactions):
                 reaction[dof % 3] += value
-            self.assertAlmostEqual(reaction[0], -100.0, places=7)
+            self.assertAlmostEqual(reaction[0], -force_n, places=7)
             self.assertAlmostEqual(reaction[1], 0.0, places=7)
             self.assertAlmostEqual(reaction[2], 0.0, places=7)
 
@@ -127,6 +137,27 @@ class GmshStepRoundTripIntegrationTests(unittest.TestCase):
             ]
             self.assertLess(max(free_residual, default=0.0), 1e-7)
             self.assertTrue(all(math.isfinite(value) for value in result.displacements))
+
+            reference = axial_bar_reference(
+                length_mm=length_mm,
+                area_mm2=area_mm2,
+                young_mpa=young_mpa,
+                force_n=force_n,
+            )
+            numerical_ux = mean_surface_displacement_x(
+                result.displacements,
+                mesh.surface_group("LOAD").node_indices,
+            )
+            axial_error = relative_error(numerical_ux, reference.displacement_mm)
+            self.assertLess(
+                axial_error,
+                0.05,
+                msg=(
+                    f"3D STEP benchmark displacement error {axial_error:.3%}: "
+                    f"FEA={numerical_ux:.12g} mm, FL/EA={reference.displacement_mm:.12g} mm"
+                ),
+            )
+
             self.assertGreater(max(element_von_mises(result)), 0.0)
 
             write_legacy_vtk(vtk_path, mesh.nodes, mesh.elements, result)
