@@ -1,7 +1,8 @@
 """Frozen Windows entry point for AsterMax PMV.
 
 Default: launch the full-screen CAE workspace with immediate STEP 3D preview,
-operation tree, ribbon commands and integrated engineering agent panel.
+direct surface selection, operation tree, ribbon commands and integrated
+engineering agent proposal authoring.
 Compatibility: --verified-demo runs the deterministic joint evidence demo.
 Automation: --run-step executes the same real STEP pipeline headlessly for CI.
 """
@@ -18,7 +19,7 @@ def main() -> int:
     if "--run-step" in sys.argv:
         from astermax.windows_step_cli import main as step_main
         return step_main(sys.argv[1:])
-    from astermax.windows_cae_workspace import main as desktop_main
+    from astermax.windows_cae_workspace_next import main as desktop_main
     return desktop_main(sys.argv[1:])
 
 
