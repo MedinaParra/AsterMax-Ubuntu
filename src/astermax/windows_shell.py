@@ -9,13 +9,38 @@ from .desktop_picker_app import desktop_main
 _ORIGINAL_TK = tk.Tk
 
 
+def build_project_tree_spec() -> tuple[tuple[str, str, str | None], ...]:
+    """Stable Mechanical-like information architecture for the Windows PMV.
+
+    Each tuple is (node_id, visible_label, target_notebook_tab_substring).
+    Nodes with a None target are structural only and must not imply capability.
+    """
+    return (
+        ("model", "Model", None),
+        ("geometry", "Geometry · STEP [mm]", "Analysis"),
+        ("materials", "Materials", "Analysis"),
+        ("connections", "Connections · not enabled", None),
+        ("mesh", "Mesh · TET10", "Review"),
+        ("static", "Static Structural", None),
+        ("supports", "Supports · CAD faces", "Picker"),
+        ("loads", "Loads · CAD faces", "Picker"),
+        ("solution", "Solution", None),
+        ("review", "Model Review", "Review"),
+        ("results", "Results", "Results"),
+        ("provenance", "Evidence / Provenance", "Results"),
+    )
+
+
 class AsterMaxWindowsRoot(_ORIGINAL_TK):
     """Classic Windows application shell around the verified AsterMax desktop workspace."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.option_add("*Font", "Segoe UI 9")
+        self._tree: ttk.Treeview | None = None
+        self._workspace_host: ttk.Panedwindow | None = None
         self._build_menubar()
+        self.after_idle(self._install_mechanical_workspace)
 
     def _find_notebook(self):
         stack = list(self.winfo_children())
@@ -35,6 +60,95 @@ class AsterMaxWindowsRoot(_ORIGINAL_TK):
             if needle in notebook.tab(tab_id, "text").lower():
                 notebook.select(tab_id)
                 return
+
+    def _tree_target(self, node_id: str) -> str | None:
+        for candidate, _label, target in build_project_tree_spec():
+            if candidate == node_id:
+                return target
+        return None
+
+    def _tree_open(self, _event=None) -> None:
+        if self._tree is None:
+            return
+        selected = self._tree.selection()
+        if not selected:
+            return
+        target = self._tree_target(selected[0])
+        if target:
+            self._select_tab_contains(target)
+
+    def _install_mechanical_workspace(self) -> None:
+        """Re-parent the existing verified notebook into a Windows CAE-style split workspace."""
+        if self._workspace_host is not None:
+            return
+        notebook = self._find_notebook()
+        if notebook is None:
+            self.after(50, self._install_mechanical_workspace)
+            return
+
+        # desktop_main packs the notebook directly in the root. Preserve the exact
+        # verified tabs and callbacks; only alter presentation/navigation.
+        notebook.pack_forget()
+        host = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
+        host.pack(fill="both", expand=True, padx=8, pady=(8, 8))
+
+        navigator = ttk.Frame(host, padding=(6, 8))
+        navigator.columnconfigure(0, weight=1)
+        navigator.rowconfigure(1, weight=1)
+        ttk.Label(navigator, text="Outline", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 6))
+        tree = ttk.Treeview(navigator, show="tree", selectmode="browse", height=24)
+        tree.grid(row=1, column=0, sticky="nsew")
+        tree.bind("<<TreeviewSelect>>", self._tree_open)
+        self._tree = tree
+
+        parents = {
+            "geometry": "model",
+            "materials": "model",
+            "connections": "model",
+            "mesh": "model",
+            "supports": "static",
+            "loads": "static",
+            "review": "solution",
+            "results": "solution",
+            "provenance": "solution",
+        }
+        for node_id, label, _target in build_project_tree_spec():
+            parent = parents.get(node_id, "")
+            tree.insert(parent, "end", iid=node_id, text=label, open=True)
+
+        details = ttk.Frame(navigator, padding=(0, 8, 0, 0))
+        details.grid(row=2, column=0, sticky="ew")
+        ttk.Separator(details, orient=tk.HORIZONTAL).pack(fill="x", pady=(0, 8))
+        ttk.Label(details, text="Verified workflow", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        ttk.Label(
+            details,
+            text="STEP [mm] → persistent CAD faces → TET10 → review → sparse solve → evidence-bound results",
+            wraplength=245,
+            justify="left",
+        ).pack(anchor="w", pady=(3, 0))
+        ttk.Label(
+            details,
+            text="No arbitrary-model convergence, industrial-validation or ANSYS-equivalence claim.",
+            wraplength=245,
+            justify="left",
+        ).pack(anchor="w", pady=(5, 0))
+
+        workspace = ttk.Frame(host)
+        workspace.columnconfigure(0, weight=1)
+        workspace.rowconfigure(1, weight=1)
+        header = ttk.Frame(workspace, padding=(10, 5))
+        header.grid(row=0, column=0, sticky="ew")
+        ttk.Label(header, text="AsterMax Mechanical Workspace", font=("Segoe UI", 11, "bold")).pack(side="left")
+        ttk.Label(header, text="   Length: mm   Force: N   Stress: MPa").pack(side="left")
+        notebook.grid(in_=workspace, row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
+
+        host.add(navigator, weight=0)
+        host.add(workspace, weight=1)
+        self._workspace_host = host
+        try:
+            host.sashpos(0, 285)
+        except tk.TclError:
+            pass
 
     def _not_ready(self, feature: str) -> None:
         messagebox.showinfo(
