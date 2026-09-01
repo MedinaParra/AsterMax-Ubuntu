@@ -165,10 +165,19 @@ def commit_integrated_picker_assignment(
         resultant_n=resultant_n,
     )
     verify_adaptive_picker_authoring(prepared, evidence)
-    if evidence.support_binding_sha256 != assignment.support_binding.binding_sha256:
+
+    # C6.1 continuity contract: the UI assignment and adaptive authoring may
+    # intentionally use different human-readable selection labels. A binding
+    # hash includes those authoring labels, so hash equality is too strict for
+    # geometric identity. Continuity is instead proven by the immutable mesh
+    # ownership identity plus the ordered persistent CAD face signatures.
+    support_assignment_signatures = tuple(assignment.support_binding.face_signature_sha256)
+    load_assignment_signatures = tuple(assignment.load_binding.face_signature_sha256)
+    if support_assignment_signatures != tuple(evidence.support_face_signature_sha256):
         raise IntegratedPickerWorkspaceError("INTEGRATED_PICKER_SUPPORT_REBIND_MISMATCH")
-    if evidence.load_binding_sha256 != assignment.load_binding.binding_sha256:
+    if load_assignment_signatures != tuple(evidence.load_face_signature_sha256):
         raise IntegratedPickerWorkspaceError("INTEGRATED_PICKER_LOAD_REBIND_MISMATCH")
+
     return IntegratedPickerPreparedV1(
         schema="AsterMaxIntegratedPickerPreparedV1",
         snapshot_sha256=snapshot.snapshot_sha256,
