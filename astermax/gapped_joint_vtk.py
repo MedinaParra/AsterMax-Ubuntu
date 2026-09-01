@@ -72,7 +72,7 @@ def gapped_joint_nodal_fields(
         zone = zone_by_node[node]
         initial_gap[node] = float(zone.initial_gap_mm)
         final_gap[node] = float(zone.final_signed_gap_mm)
-        gap_closure[node] = float(zone.gap_closure_mm)
+        gap_closure[node] = float(zone.closure_mm)
         support_state[node] = 1.0 if zone.active else 0.0
 
     if len(connectors) != len(report.redistribution.bolt_states):
