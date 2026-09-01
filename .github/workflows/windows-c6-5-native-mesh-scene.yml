@@ -1,0 +1,63 @@
+name: Windows C6.5 Native Mesh Scene
+on:
+  push:
+    branches: [agent/c6-5-native-mesh-results-scene]
+  workflow_dispatch:
+jobs:
+  verify-scene:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pyinstaller
+      - name: Run full regression suite
+        shell: pwsh
+        run: python -m pytest -q
+      - name: Build Windows application
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onedir --windowed --name AsterMax --paths src --collect-all gmsh --collect-submodules scipy packaging/windows_entry.py
+      - name: Execute frozen numerical self-test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path packaged-self-test | Out-Null
+          $p=Start-Process -FilePath '.\dist\AsterMax\AsterMax.exe' -ArgumentList '--self-test',(Resolve-Path '.\packaged-self-test') -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Frozen self-test failed: $($p.ExitCode)"}
+          Get-Content packaged-self-test\exe_self_test.json
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'packaging\AsterMaxSetup.iss'
+          if(-not(Test-Path '.\installer-dist\AsterMaxSetup-x64.exe')){throw 'Installer missing'}
+      - name: Silent clean-install acceptance test
+        shell: pwsh
+        run: |
+          $target=Join-Path $env:RUNNER_TEMP 'AsterMaxInstalled'; New-Item -ItemType Directory -Force -Path $target|Out-Null
+          $p=Start-Process -FilePath (Resolve-Path '.\installer-dist\AsterMaxSetup-x64.exe') -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',("/DIR=$target") -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Installer failed: $($p.ExitCode)"}
+          $post=Join-Path $env:RUNNER_TEMP 'installed-self-test'; New-Item -ItemType Directory -Force -Path $post|Out-Null
+          $q=Start-Process -FilePath (Join-Path $target 'AsterMax.exe') -ArgumentList '--self-test',$post -Wait -PassThru
+          if($q.ExitCode -ne 0){throw "Installed self-test failed: $($q.ExitCode)"}
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $h=Get-FileHash '.\installer-dist\AsterMaxSetup-x64.exe' -Algorithm SHA256
+          "$($h.Hash.ToLower())  AsterMaxSetup-x64.exe"|Set-Content '.\installer-dist\SHA256SUMS.txt'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMaxSetup-C6.5-x64
+          path: |
+            installer-dist/AsterMaxSetup-x64.exe
+            installer-dist/SHA256SUMS.txt
+            packaged-self-test/exe_self_test.json
+          if-no-files-found: error
