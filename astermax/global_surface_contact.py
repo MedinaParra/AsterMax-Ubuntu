@@ -2,26 +2,29 @@
 
 This module bridges the verified node/TRI3 geometry kernel to the global structural
 assembler. It intentionally implements a *small-sliding* penalty formulation: the
-master TRI3 normal and barycentric projection are frozen from the reference geometry
-for each candidate pair. The active set is updated from the current displacement.
+master contact frame and barycentric projection are frozen from the reference
+geometry for each candidate pair. The active set is updated from displacement.
 
 Two explicit reference-projection policies are supported:
 
 ``strict``
     Legacy orthogonal plane projection. Contact can activate only when the projected
-    point lies inside the finite TRI3.
+    point lies inside the finite TRI3. The master face normal is used.
 
 ``closest_feature``
     Exact closest point on the finite TRI3, including edge and vertex regions. This
-    mode requires an explicit ``max_reference_distance_mm`` association gate so a
-    slave node cannot be attracted to an arbitrarily distant edge/vertex.
+    mode requires an explicit ``max_reference_distance_mm`` association gate. Its
+    frozen contact normal follows the oriented closest-point-to-slave line and its
+    signed reference gap is the signed Euclidean distance. This makes the slave and
+    barycentrically distributed master forces collinear, preserving resultant and
+    moment for edge/vertex associations.
 
 For one slave node s and master TRI3 nodes m_i, define
 
     g(u) = g0 + q^T u
     q = [ n, -N1*n, -N2*n, -N3*n ]
 
-where g0 is the signed reference gap, n is the oriented master normal and N_i are the
+where g0 is the signed reference gap, n is the frozen contact normal and N_i are the
 frozen reference barycentric coordinates. The penalty potential gives
 
     r_c = k_p * g * q
@@ -31,9 +34,8 @@ so for a fixed active set
 
     (K + K_c) u = F - k_p*g0*q.
 
-The physical contact force vector is -r_c and therefore has equal/opposite slave and
-master resultants. This is an auditable verification solver, not a production
-large-sliding or frictional contact algorithm.
+This is an auditable verification solver, not a production large-sliding or
+frictional contact algorithm.
 """
 
 from dataclasses import dataclass
@@ -111,8 +113,16 @@ def _validate_matrix(stiffness: Sequence[Sequence[float]]) -> int:
     return ndof
 
 
-def _distance(a: Sequence[float], b: Sequence[float]) -> float:
-    return math.sqrt(sum((float(a[i]) - float(b[i])) ** 2 for i in range(3)))
+def _sub3(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float]:
+    return tuple(float(a[i]) - float(b[i]) for i in range(3))
+
+
+def _dot3(a: Sequence[float], b: Sequence[float]) -> float:
+    return sum(float(a[i]) * float(b[i]) for i in range(3))
+
+
+def _norm3(a: Sequence[float]) -> float:
+    return math.sqrt(_dot3(a, a))
 
 
 def _prepare_pair(
@@ -151,24 +161,35 @@ def _prepare_pair(
             projection = project_point_to_triangle(
                 nodes[slave], nodes[masters[0]], nodes[masters[1]], nodes[masters[2]]
             )
+            normal = projection.normal
+            reference_gap = projection.signed_gap_mm
+            associated = bool(projection.inside_triangle)
         else:
             projection = closest_point_to_triangle(
                 nodes[slave], nodes[masters[0]], nodes[masters[1]], nodes[masters[2]]
             )
+            delta = _sub3(nodes[slave], projection.projected_point_mm)
+            reference_distance = _norm3(delta)
+            if reference_distance > float(max_distance) + 1e-12:
+                associated = False
+            else:
+                associated = True
+            if reference_distance <= 1e-15:
+                normal = projection.normal
+                reference_gap = 0.0
+            else:
+                orientation = 1.0 if projection.signed_gap_mm >= 0.0 else -1.0
+                normal = tuple(orientation * value / reference_distance for value in delta)
+                reference_gap = orientation * reference_distance
     except (SurfaceContactError, IndexError) as exc:
         raise GlobalSurfaceContactError(str(exc)) from exc
 
-    associated = bool(projection.inside_triangle)
-    if mode == "closest_feature":
-        reference_distance = _distance(nodes[slave], projection.projected_point_mm)
-        associated = reference_distance <= float(max_distance) + 1e-12
-
     q = [0.0] * ndof
     for component in range(3):
-        q[3 * slave + component] = projection.normal[component]
+        q[3 * slave + component] = normal[component]
     for weight, master in zip(projection.barycentric, masters):
         for component in range(3):
-            q[3 * master + component] -= weight * projection.normal[component]
+            q[3 * master + component] -= weight * normal[component]
     definition = NodeTriangleContactPair(
         slave,
         masters,
@@ -178,9 +199,9 @@ def _prepare_pair(
     )
     return _PreparedPair(
         definition=definition,
-        reference_gap_mm=projection.signed_gap_mm,
+        reference_gap_mm=reference_gap,
         barycentric=projection.barycentric,
-        normal=projection.normal,
+        normal=normal,
         q=tuple(q),
         inside_triangle=associated,
     )
