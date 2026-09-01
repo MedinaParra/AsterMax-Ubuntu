@@ -37,11 +37,33 @@ jobs:
       - name: Bundle portable Gmsh runtime
         shell: pwsh
         run: |
-          $gmsh = Get-ChildItem "$env:ChocolateyInstall\lib\gmsh" -Filter gmsh.exe -Recurse | Select-Object -First 1
-          if (-not $gmsh) { throw "Cannot locate Chocolatey Gmsh runtime" }
-          $target = ".\dist\AsterMax-Windows\tools\gmsh"
+          $gmshCommand = Get-Command gmsh -ErrorAction Stop
+          $gmshExe = $gmshCommand.Source
+          if (-not (Test-Path $gmshExe)) { throw "Resolved gmsh command is not a file: $gmshExe" }
+          $resolved = (Get-Item $gmshExe).FullName
+          # Chocolatey may expose a shim. Ask the command itself for version, then locate
+          # the deployed runtime in known roots and finally fall back to the command directory.
+          & $resolved --version
+          $candidates = @(
+            'C:\gmsh\gmsh-4.12.1-Windows64\gmsh.exe',
+            'C:\gmsh\gmsh-4.12.1-windows64\gmsh.exe',
+            $resolved
+          )
+          $runtimeExe = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+              $item = Get-Item $candidate
+              if ($item.DirectoryName -notlike '*chocolatey\bin*') { $runtimeExe = $item.FullName; break }
+            }
+          }
+          if (-not $runtimeExe) {
+            $runtimeExe = (Get-ChildItem 'C:\gmsh' -Filter gmsh.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $runtimeExe) { throw "Cannot locate deployed Gmsh runtime" }
+          $runtimeDir = Split-Path -Parent $runtimeExe
+          $target = '.\dist\AsterMax-Windows\tools\gmsh'
           New-Item -ItemType Directory -Force -Path $target | Out-Null
-          Copy-Item -Path (Join-Path $gmsh.Directory.FullName '*') -Destination $target -Recurse -Force
+          Copy-Item -Path (Join-Path $runtimeDir '*') -Destination $target -Recurse -Force
           if (-not (Test-Path "$target\gmsh.exe")) { throw "Portable gmsh.exe missing" }
           & "$target\gmsh.exe" --version
 
