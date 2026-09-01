@@ -40,3 +40,8 @@ def test_project_tree_exposes_units_and_persistent_cad_semantics():
     assert "CAD faces" in labels
     assert "TET10" in labels
     assert "Evidence / Provenance" in labels
+
+
+def test_project_tree_labels_are_unique_for_deterministic_navigation():
+    labels = [label for _node_id, label, _target in build_project_tree_spec()]
+    assert len(labels) == len(set(labels))
