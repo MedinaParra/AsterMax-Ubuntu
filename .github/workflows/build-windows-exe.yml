@@ -17,37 +17,80 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller
-        run: python -m pip install --upgrade pip pyinstaller
-
-      - name: Build one-file executable
+      - name: Install PyInstaller and real CAD mesher
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --name AsterMax-PMV --collect-submodules astermax astermax_windows_entry.py
+          python -m pip install --upgrade pip pyinstaller
+          choco install gmsh --version=4.12.1 -y --no-progress
+          gmsh --version
+          python -c "import tkinter; print('Tk', tkinter.TkVersion)"
 
-      - name: Smoke test frozen executable
+      - name: Run harness before freezing
+        run: python -m unittest discover -s tests -v
+
+      - name: Build desktop executable
         shell: pwsh
         run: |
-          .\dist\AsterMax-PMV.exe --no-viewer --output exe_smoke_evidence
-          if (-not (Test-Path "exe_smoke_evidence\manifest.json")) { throw "manifest.json missing after EXE smoke test" }
-          if (-not (Test-Path "exe_smoke_evidence\astermax_viewer.html")) { throw "AsterMax viewer missing after EXE smoke test" }
-          if (-not (Test-Path "exe_smoke_evidence\verified_multigap_joint.vtk")) { throw "VTK evidence missing after EXE smoke test" }
+          New-Item -ItemType Directory -Force -Path .\dist\AsterMax-Windows | Out-Null
+          pyinstaller --noconfirm --clean --onefile --windowed --name AsterMax --distpath .\dist\AsterMax-Windows --collect-submodules astermax astermax_windows_entry.py
+
+      - name: Bundle portable Gmsh runtime
+        shell: pwsh
+        run: |
+          $gmsh = Get-ChildItem "$env:ChocolateyInstall\lib\gmsh" -Filter gmsh.exe -Recurse | Select-Object -First 1
+          if (-not $gmsh) { throw "Cannot locate Chocolatey Gmsh runtime" }
+          $target = ".\dist\AsterMax-Windows\tools\gmsh"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item -Path (Join-Path $gmsh.Directory.FullName '*') -Destination $target -Recurse -Force
+          if (-not (Test-Path "$target\gmsh.exe")) { throw "Portable gmsh.exe missing" }
+          & "$target\gmsh.exe" --version
+
+      - name: Create real STEP smoke geometry
+        shell: pwsh
+        run: |
+          @'
+          SetFactory("OpenCASCADE");
+          Box(1) = {0, 0, 0, 10, 2, 1};
+          Save "exe_real_step.step";
+          '@ | Out-File -FilePath .\exe_real_step.geo -Encoding ascii
+          .\dist\AsterMax-Windows\tools\gmsh\gmsh.exe .\exe_real_step.geo -0
+          if (-not (Test-Path .\exe_real_step.step)) { throw "real STEP smoke geometry was not created" }
+
+      - name: Smoke test frozen EXE with real STEP to FEA
+        shell: pwsh
+        run: |
+          .\dist\AsterMax-Windows\AsterMax.exe --run-step .\exe_real_step.step --output .\exe_step_smoke_evidence --axis x --fixed-side min --load-side max --force 100,0,0 --mesh-size 2
+          if (-not (Test-Path ".\exe_step_smoke_evidence\manifest.json")) { throw "manifest.json missing after real STEP EXE solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\summary.json")) { throw "summary.json missing after real STEP EXE solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\astermax_step_viewer.html")) { throw "STEP result viewer missing after real STEP EXE solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\result.vtk")) { throw "VTK result missing after real STEP EXE solve" }
+          $summary = Get-Content .\exe_step_smoke_evidence\summary.json | ConvertFrom-Json
+          if ($summary.step_unit -ne 'mm') { throw "STEP unit gate did not resolve mm" }
+          if ($summary.tet4_count -lt 1) { throw "real STEP smoke solve produced no TET4 elements" }
+          if ([math]::Abs($summary.recovered_applied_force_N[0] - 100.0) -gt 1e-7) { throw "applied force recovery failed" }
+          if ($summary.free_residual_max_N -gt 1e-7) { throw "free residual trust gate failed" }
+          Get-Content .\exe_step_smoke_evidence\summary.json
+
+      - name: Smoke test deterministic verified joint demo
+        shell: pwsh
+        run: |
+          .\dist\AsterMax-Windows\AsterMax.exe --verified-demo --no-viewer --output .\exe_joint_demo_evidence
+          if (-not (Test-Path ".\exe_joint_demo_evidence\manifest.json")) { throw "verified joint demo manifest missing" }
 
       - name: Record executable SHA-256
         shell: pwsh
         run: |
-          $hash = (Get-FileHash .\dist\AsterMax-PMV.exe -Algorithm SHA256).Hash.ToLower()
-          "sha256=$hash" | Out-File -FilePath .\dist\AsterMax-PMV.sha256.txt -Encoding ascii
-          Get-Item .\dist\AsterMax-PMV.exe | Format-List Name,Length,LastWriteTime
-          Get-Content .\dist\AsterMax-PMV.sha256.txt
+          $hash = (Get-FileHash .\dist\AsterMax-Windows\AsterMax.exe -Algorithm SHA256).Hash.ToLower()
+          "sha256=$hash" | Out-File -FilePath .\dist\AsterMax-Windows\AsterMax.sha256.txt -Encoding ascii
+          Get-Item .\dist\AsterMax-Windows\AsterMax.exe | Format-List Name,Length,LastWriteTime
+          Get-Content .\dist\AsterMax-Windows\AsterMax.sha256.txt
 
-      - name: Upload Windows executable
+      - name: Upload portable Windows application
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-PMV-Windows-x64
+          name: AsterMax-Windows-STEP-FEA-x64
           path: |
-            dist/AsterMax-PMV.exe
-            dist/AsterMax-PMV.sha256.txt
-            exe_smoke_evidence/manifest.json
-            exe_smoke_evidence/summary.json
+            dist/AsterMax-Windows/**
+            exe_step_smoke_evidence/manifest.json
+            exe_step_smoke_evidence/summary.json
           if-no-files-found: error
