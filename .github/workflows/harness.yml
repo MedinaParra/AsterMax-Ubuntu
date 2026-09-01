@@ -1,0 +1,57 @@
+name: AsterMax Harness
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  case-context:
+    name: Harness (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install real CAD mesher (Ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gmsh
+          gmsh --version
+
+      - name: Install real CAD mesher (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install gmsh --version=4.12.1 -y --no-progress
+          $gmsh = (Get-Command gmsh -ErrorAction Stop).Source
+          Write-Host "Gmsh executable: $gmsh"
+          gmsh --version
+
+      - name: Verify runtime and mesher visibility
+        shell: python
+        run: |
+          import platform
+          import shutil
+          import subprocess
+          import sys
+
+          gmsh = shutil.which("gmsh")
+          if gmsh is None:
+              raise SystemExit("Gmsh is not visible on PATH")
+          version = subprocess.run(
+              [gmsh, "--version"], capture_output=True, text=True, check=True
+          ).stdout.strip()
+          print(f"ASTERMAX_PLATFORM os={platform.system()} python={sys.version.split()[0]} gmsh={version}")
+
+      - name: Run verifiable engineering-context harness
+        run: python -m unittest discover -s tests -v

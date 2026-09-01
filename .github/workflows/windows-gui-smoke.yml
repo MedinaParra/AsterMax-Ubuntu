@@ -1,0 +1,81 @@
+name: AsterMax Windows GUI Smoke
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  windows-gui-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build runtime
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          choco install gmsh --version=4.12.1 -y --no-progress
+          python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+
+      - name: Build AsterMax desktop EXE
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .\dist\AsterMax-Windows | Out-Null
+          pyinstaller --noconfirm --clean --onefile --windowed --name AsterMax --distpath .\dist\AsterMax-Windows --collect-submodules astermax astermax_windows_entry.py
+
+      - name: Bundle portable Gmsh
+        shell: pwsh
+        run: |
+          $resolved = (Get-Command gmsh -ErrorAction Stop).Source
+          $runtimeExe = (Get-ChildItem 'C:\gmsh' -Filter gmsh.exe -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.DirectoryName -notlike '*chocolatey\bin*' } | Select-Object -First 1).FullName
+          if (-not $runtimeExe) { $runtimeExe = $resolved }
+          if (-not (Test-Path $runtimeExe)) { throw "Cannot locate Gmsh runtime" }
+          $runtimeDir = Split-Path -Parent $runtimeExe
+          $target = '.\dist\AsterMax-Windows\tools\gmsh'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item -Path (Join-Path $runtimeDir '*') -Destination $target -Recurse -Force
+          if (-not (Test-Path "$target\gmsh.exe")) { throw "Portable gmsh.exe missing" }
+
+      - name: Launch frozen GUI and prove startup survives
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            throw "Frozen AsterMax GUI exited during startup. ExitCode=$($proc.ExitCode)"
+          }
+          Write-Host "ASTERMAX_GUI_SMOKE PASS pid=$($proc.Id) alive_after_seconds=8"
+          Stop-Process -Id $proc.Id -Force
+          $proc.WaitForExit()
+
+      - name: Verify command-line frozen core too
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $proc = Start-Process -FilePath $exe -ArgumentList @('--verified-demo','--no-viewer','--output','.\gui_smoke_demo') -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Frozen verified core failed: $($proc.ExitCode)" }
+          if (-not (Test-Path '.\gui_smoke_demo\manifest.json')) { throw "Verified demo manifest missing" }
+
+      - name: Record SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash .\dist\AsterMax-Windows\AsterMax.exe -Algorithm SHA256).Hash.ToLower()
+          "sha256=$hash" | Out-File .\dist\AsterMax-Windows\AsterMax.sha256.txt -Encoding ascii
+          Get-Item .\dist\AsterMax-Windows\AsterMax.exe | Format-List Name,Length,LastWriteTime
+          Get-Content .\dist\AsterMax-Windows\AsterMax.sha256.txt
+
+      - name: Upload GUI-verified Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Windows-GUI-Verified-x64
+          path: dist/AsterMax-Windows/**
+          if-no-files-found: error
