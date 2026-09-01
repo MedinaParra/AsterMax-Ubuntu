@@ -21,23 +21,24 @@ class ViewportSnapshot:
     scene_triangle_count: int | None = None
 
 
-# TET10 local nodes: 0..3 corners; midsides 4:(0,1), 5:(1,2), 6:(0,2),
-# 7:(0,3), 8:(1,3), 9:(2,3). Each quadratic face is rendered as 4 triangles.
+# Exact Gmsh Tetrahedron10 order, kept identical to fea.solver:
+# 0..3 corners; 4:(0,1), 5:(1,2), 6:(2,0), 7:(0,3), 8:(2,3), 9:(1,3).
+# Each six-node quadratic boundary face is rendered as four linear display triangles.
 _TET10_FACES = (
     (0, 1, 2, 4, 5, 6),
-    (0, 1, 3, 4, 8, 7),
-    (0, 2, 3, 6, 9, 7),
-    (1, 2, 3, 5, 9, 8),
+    (0, 1, 3, 4, 9, 7),
+    (0, 2, 3, 6, 8, 7),
+    (1, 2, 3, 5, 8, 9),
 )
 _FACE_TRIANGLES = ((0, 3, 5), (3, 1, 4), (5, 4, 2), (3, 4, 5))
 
 
 def extract_tet10_surface(inventory) -> tuple[np.ndarray, np.ndarray]:
-    """Extract the actual external quadratic TET10 surface as linear display triangles.
+    """Extract the actual external quadratic TET10 surface as display triangles.
 
-    Boundary ownership is determined only from the four corner node IDs, while the
-    six-node quadratic face is retained for rendering. This is visualization
-    geometry derived from the solver mesh, not a reconstructed/fake CAD surface.
+    Boundary ownership is determined from the four corner IDs. The six-node Gmsh
+    quadratic face is then retained for rendering. No CAD surface is reconstructed
+    and no solver connectivity is altered.
     """
     nodes = np.asarray(inventory.nodes_mm, dtype=float)
     elements = np.asarray(inventory.elements, dtype=int)

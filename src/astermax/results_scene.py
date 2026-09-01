@@ -11,6 +11,7 @@ class ResultsFieldBinding:
     von_mises_mpa: np.ndarray
     workspace_sha256: str
     solve_evidence_sha256: str
+    stress_representation: str = "BOUND_NODAL_DISPLAY_FIELD"
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class ResultsScene:
     deformation_scale: float
     workspace_sha256: str
     solve_evidence_sha256: str
+    stress_representation: str
 
 
 def _require_hash(value: str | None, code: str) -> str:
@@ -47,6 +49,8 @@ def validate_results_binding(nodes_mm: np.ndarray, binding: ResultsFieldBinding)
         raise ValueError("RESULTS_SCENE_VON_MISES_NEGATIVE")
     _require_hash(binding.workspace_sha256, "RESULTS_SCENE_WORKSPACE_PROVENANCE_REQUIRED")
     _require_hash(binding.solve_evidence_sha256, "RESULTS_SCENE_SOLVE_PROVENANCE_REQUIRED")
+    if not isinstance(binding.stress_representation, str) or not binding.stress_representation.strip():
+        raise ValueError("RESULTS_SCENE_STRESS_REPRESENTATION_REQUIRED")
 
 
 def build_results_scene(nodes_mm: np.ndarray, binding: ResultsFieldBinding, *, deformation_scale: float = 1.0) -> ResultsScene:
@@ -67,6 +71,7 @@ def build_results_scene(nodes_mm: np.ndarray, binding: ResultsFieldBinding, *, d
         deformation_scale=float(deformation_scale),
         workspace_sha256=binding.workspace_sha256,
         solve_evidence_sha256=binding.solve_evidence_sha256,
+        stress_representation=binding.stress_representation,
     )
 
 
