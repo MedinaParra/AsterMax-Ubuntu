@@ -10,14 +10,21 @@ from astermax.gmsh_ascii import SurfaceGroup, TetraMesh
 
 
 def cylindrical_interface_mesh(segments: int, length: float = 5.0) -> TetraMesh:
-    """Two concentric triangulated cylinders plus caps in one auditable boundary."""
+    """Two concentric triangulated cylinders plus caps in one auditable boundary.
+
+    The slave mesh is rotated by half a circumferential cell.  That intentionally
+    places each slave radial line opposite the interior of a master facet rather than
+    exactly on a master polygon edge, avoiding a discretization singularity while
+    still exercising independent slave/master tessellations.
+    """
     nodes = []
     triangles = []
-    for radius in (1.0, 1.2):
+    for surface_index, radius in enumerate((1.0, 1.2)):
         offset = len(nodes)
+        angular_offset = 0.0 if surface_index == 0 else math.pi / segments
         for z in (0.0, length):
             for i in range(segments):
-                angle = 2.0 * math.pi * i / segments
+                angle = 2.0 * math.pi * i / segments + angular_offset
                 nodes.append((radius * math.cos(angle), radius * math.sin(angle), z))
         # Side wall: two TRI3 per circumferential quad.
         for i in range(segments):
@@ -91,8 +98,13 @@ class CylindricalFeatureContactHarness(unittest.TestCase):
         # engineering feature intent rather than retained mesh/face IDs.
         self.assertEqual(pair_counts, [24, 72])
         self.assertNotEqual(reports[0].master_triangle_count, reports[1].master_triangle_count)
-        self.assertAlmostEqual(reports[0].max_reference_distance_mm, 0.2, delta=0.02)
-        self.assertAlmostEqual(reports[1].max_reference_distance_mm, 0.2, delta=0.005)
+        # For a polygonal master the radial reference distance is R_slave minus the
+        # master apothem R_master*cos(pi/n), which converges to the physical 0.2 mm gap.
+        expected_coarse = 1.2 - math.cos(math.pi / 12.0)
+        expected_fine = 1.2 - math.cos(math.pi / 36.0)
+        self.assertAlmostEqual(reports[0].max_reference_distance_mm, expected_coarse, places=10)
+        self.assertAlmostEqual(reports[1].max_reference_distance_mm, expected_fine, places=10)
+        self.assertGreater(reports[0].max_reference_distance_mm, reports[1].max_reference_distance_mm)
 
     def test_inward_orientation_is_also_local_and_deterministic(self):
         mesh = cylindrical_interface_mesh(24)
