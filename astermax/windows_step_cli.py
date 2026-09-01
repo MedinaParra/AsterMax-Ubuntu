@@ -1,7 +1,8 @@
 """Headless companion for the AsterMax Windows desktop STEP workflow.
 
 Used by CI to prove that the frozen Windows executable can consume a real STEP file,
-mesh it with the bundled Gmsh, solve it and create result/evidence artifacts.
+pass the same human-approval trust gate, mesh it with bundled Gmsh, solve it and
+create result/evidence artifacts.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ def _force(text: str) -> tuple[float, float, float]:
 
 
 def main(argv=None) -> int:
-    parser=argparse.ArgumentParser(description="Run a verified AsterMax STEP case headlessly")
+    parser=argparse.ArgumentParser(description="Run an approved, verified AsterMax STEP case headlessly")
     parser.add_argument("--run-step", required=True)
     parser.add_argument("--output", default="astermax_step_evidence")
     parser.add_argument("--axis", choices=("x","y","z"), default="x")
@@ -33,6 +34,7 @@ def main(argv=None) -> int:
     parser.add_argument("--young", type=float, default=210000.0)
     parser.add_argument("--poisson", type=float, default=0.30)
     parser.add_argument("--minimum-quality", type=float, default=0.05)
+    parser.add_argument("--approved-by", required=True, help="engineer/approver identity recorded in preparation evidence")
     parser.add_argument("--gmsh", default=None)
     args=parser.parse_args(argv)
     config=StepCaseConfig(
@@ -42,12 +44,15 @@ def main(argv=None) -> int:
         minimum_tet_quality=args.minimum_quality,
     )
     try:
-        result=run_windows_step_case(config, gmsh_executable=args.gmsh)
+        result=run_windows_step_case(config, approved_by=args.approved_by, gmsh_executable=args.gmsh)
     except WindowsAppError as exc:
         parser.error(str(exc))
     summary=result["summary"]
     manifest=result["manifest"]
+    prep=result["model_preparation"]
     print("ASTERMAX_STEP_SOLVE_OK")
+    print(f"approval_ready={prep['solve_gate']['ready']} approved={','.join(prep['approved_proposal_ids'])}")
+    print(f"engineering_intent_sha256={prep['engineering_intent_sha256']}")
     print(f"nodes={summary['node_count']} tet4={summary['tet4_count']}")
     print(f"max_displacement_mm={summary['max_displacement_mm']}")
     print(f"max_element_von_mises_MPa={summary['max_element_von_mises_MPa']}")
