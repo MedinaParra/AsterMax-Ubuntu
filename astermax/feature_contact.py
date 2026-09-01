@@ -1,15 +1,12 @@
 """Feature-aware cylindrical contact pairing for persistent AsterMax workflows.
 
-This module closes an important limitation of the planar contact bridge: a cylinder
-cannot be represented by one global normal hint because its surface normal varies
-with circumferential position.  Here each master TRI3 is oriented from a declared
-cylindrical feature axis/center using its own local radial direction, then every
-slave node is paired to the nearest finite master triangle projection.
+This module prepares deterministic node-to-TRI3 pairs for cylindrical interfaces.
+Each master TRI3 uses a local radial normal. Candidate discovery can use either the
+reference exhaustive route or a deterministic AABB/BVH accelerator; both feed the
+same finite-triangle projection and gap calculation, so the accelerated path changes
+no constitutive contact physics.
 
-The routine adds no contact constitutive physics.  It only prepares deterministic
-``NodeTriangleContactPair`` objects for the already verified contact solvers. Units
-are mm and N.  The implementation remains verification-level and deliberately uses
-exhaustive search rather than a spatial acceleration structure.
+Units: mm and N.
 """
 from __future__ import annotations
 
@@ -17,6 +14,7 @@ from dataclasses import dataclass
 import math
 from typing import Literal
 
+from .contact_spatial_index import ContactSpatialIndexError, build_triangle_aabb_tree
 from .feature_surface import CylindricalSurfaceResolution
 from .global_surface_contact import NodeTriangleContactPair
 from .gmsh_ascii import TetraMesh
@@ -38,6 +36,15 @@ class CylindricalFeatureContactReport:
     mean_reference_distance_mm: float
     minimum_master_radial_alignment: float
     master_normal_direction: str
+    search_strategy: str
+    candidate_triangle_tests: int
+    exhaustive_triangle_tests: int
+
+    @property
+    def candidate_reduction_fraction(self) -> float:
+        if self.exhaustive_triangle_tests <= 0:
+            return 0.0
+        return 1.0 - self.candidate_triangle_tests / self.exhaustive_triangle_tests
 
 
 def _dot(a, b) -> float:
@@ -97,13 +104,15 @@ def build_cylindrical_feature_contact_pairs(
     penalty_stiffness_n_per_mm: float,
     search_distance_mm: float,
     master_normal_direction: Literal["outward", "inward"] = "outward",
+    search_strategy: Literal["bvh", "exhaustive"] = "bvh",
+    bvh_leaf_size: int = 8,
 ) -> tuple[tuple[NodeTriangleContactPair, ...], CylindricalFeatureContactReport]:
     """Build persistent node-to-TRI3 pairs using local cylindrical master normals.
 
-    The slave/master resolutions must refer to the same cylinder axis and center.
-    Every slave node must project inside a finite master TRI3 within the declared
-    search distance.  A missing projection fails closed instead of silently dropping
-    contact.  Ties are resolved deterministically by triangle connectivity.
+    ``exhaustive`` is retained as a verification oracle. ``bvh`` only removes master
+    triangles that cannot be within the declared search distance according to an exact
+    point-to-AABB lower bound. Final projection, inside-TRI3 testing, gap evaluation,
+    and deterministic tie-breaking are identical for both strategies.
     """
     penalty = float(penalty_stiffness_n_per_mm)
     distance = float(search_distance_mm)
@@ -113,6 +122,8 @@ def build_cylindrical_feature_contact_pairs(
         raise FeatureContactError("contact search distance must be finite and non-negative")
     if master_normal_direction not in ("outward", "inward"):
         raise FeatureContactError("master_normal_direction must be outward or inward")
+    if search_strategy not in ("bvh", "exhaustive"):
+        raise FeatureContactError("search_strategy must be bvh or exhaustive")
     if slave.axis_index != master.axis_index or slave.transverse_axes != master.transverse_axes:
         raise FeatureContactError("slave and master cylindrical features must use the same axis")
     center_delta = math.sqrt(sum((float(a) - float(b)) ** 2 for a, b in zip(slave.center_mm, master.center_mm)))
@@ -124,13 +135,29 @@ def build_cylindrical_feature_contact_pairs(
         raise FeatureContactError("cylindrical slave feature contains no nodes")
 
     masters, alignments = _oriented_master_triangles(mesh, master, master_normal_direction)
+    tree = None
+    if search_strategy == "bvh":
+        try:
+            tree = build_triangle_aabb_tree(mesh.nodes, masters, leaf_size=bvh_leaf_size)
+        except ContactSpatialIndexError as exc:
+            raise FeatureContactError(str(exc)) from exc
+
     pairs = []
     distances = []
+    candidate_tests = 0
     for slave_node in slave_nodes:
+        if tree is None:
+            candidate_masters = masters
+        else:
+            try:
+                candidate_masters = tree.query_point(mesh.nodes[slave_node], distance_mm=distance)
+            except ContactSpatialIndexError as exc:
+                raise FeatureContactError(str(exc)) from exc
         candidates = []
-        for tri in masters:
+        for tri in candidate_masters:
             if slave_node in tri:
                 continue
+            candidate_tests += 1
             try:
                 projection = project_point_to_triangle(
                     mesh.nodes[slave_node], *(mesh.nodes[index] for index in tri)
@@ -148,6 +175,7 @@ def build_cylindrical_feature_contact_pairs(
         pairs.append(NodeTriangleContactPair(int(slave_node), tri, penalty))
         distances.append(reference_distance)
 
+    exhaustive_tests = len(slave_nodes) * len(masters)
     return tuple(pairs), CylindricalFeatureContactReport(
         slave_group=slave.group.name,
         master_group=master.group.name,
@@ -158,4 +186,7 @@ def build_cylindrical_feature_contact_pairs(
         mean_reference_distance_mm=sum(distances) / len(distances),
         minimum_master_radial_alignment=min(alignments),
         master_normal_direction=master_normal_direction,
+        search_strategy=search_strategy,
+        candidate_triangle_tests=candidate_tests,
+        exhaustive_triangle_tests=exhaustive_tests,
     )
