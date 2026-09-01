@@ -1,10 +1,10 @@
 """Auditable STEP -> mesh -> BC/load -> linear-static FEA -> viewer/evidence pipeline.
 
 Accepts an actual STEP Part 21 file, gates units to mm, meshes with Gmsh/OpenCASCADE,
-applies engineer-provided FIXED/LOAD surface selectors, solves verified linear elastic
-TET4 FEA, exports VTK and a self-contained browser viewer, then fingerprints every
-artifact. Numerical values are recovered from the actual solve; no industrial result
-is invented. Units: mm, N, MPa.
+applies either explicit bounding-box selectors or topology-robust semantic surface
+intents, solves verified linear elastic TET4 FEA, exports VTK and a self-contained
+browser viewer, then fingerprints every artifact. Numerical values are recovered from
+the actual solve; no industrial result is invented. Units: mm, N, MPa.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from .global_static import solve_linear_static
 from .gmsh_pipeline import GmshPipelineError, SurfaceBox, mesh_step_with_gmsh
 from .mesh_bc import fixed_surface_constraints, resultant_from_nodal_loads, surface_total_force_loads
 from .postprocess import element_von_mises, write_legacy_vtk
+from .semantic_surface import SemanticSurfaceError, SemanticSurfaceIntent, apply_semantic_surfaces
 from .static_result_viewer import StaticResultViewerError, write_static_result_viewer
 from .step_units import require_step_mm
 
@@ -52,8 +53,10 @@ def run_step_static_demo(
     step_path: str | Path,
     output_dir: str | Path,
     *,
-    fixed_box: SurfaceBox,
-    load_box: SurfaceBox,
+    fixed_box: SurfaceBox | None = None,
+    load_box: SurfaceBox | None = None,
+    fixed_intent: SemanticSurfaceIntent | None = None,
+    load_intent: SemanticSurfaceIntent | None = None,
     total_force_n: Sequence[float],
     mesh_size_mm: float,
     young_mpa: float,
@@ -61,7 +64,7 @@ def run_step_static_demo(
     gmsh_executable: str = "gmsh",
     minimum_tet_quality: float = 0.05,
 ) -> dict:
-    """Run real STEP -> mesh -> static solve -> viewer -> fingerprint evidence."""
+    """Run real STEP -> preparation -> mesh -> static solve -> viewer -> evidence."""
     source = Path(step_path)
     if not source.is_file():
         raise StepStaticDemoError(f"STEP file does not exist: {source}")
@@ -70,8 +73,23 @@ def run_step_static_demo(
         raise StepStaticDemoError("young_mpa must be finite and positive")
     if not math.isfinite(float(poisson)) or not (-1.0 < float(poisson) < 0.5):
         raise StepStaticDemoError("poisson must satisfy -1 < nu < 0.5")
-    if fixed_box.name != "FIXED" or load_box.name != "LOAD":
-        raise StepStaticDemoError("surface selectors must be named FIXED and LOAD")
+
+    box_mode = fixed_box is not None or load_box is not None
+    semantic_mode = fixed_intent is not None or load_intent is not None
+    if box_mode == semantic_mode:
+        raise StepStaticDemoError("choose exactly one surface preparation mode: boxes or semantic intents")
+    if box_mode:
+        if fixed_box is None or load_box is None:
+            raise StepStaticDemoError("both FIXED and LOAD bounding boxes are required")
+        if fixed_box.name != "FIXED" or load_box.name != "LOAD":
+            raise StepStaticDemoError("surface selectors must be named FIXED and LOAD")
+        surface_mode = "explicit_bounding_boxes"
+    else:
+        if fixed_intent is None or load_intent is None:
+            raise StepStaticDemoError("both FIXED and LOAD semantic intents are required")
+        if fixed_intent.name != "FIXED" or load_intent.name != "LOAD":
+            raise StepStaticDemoError("semantic intents must be named FIXED and LOAD")
+        surface_mode = "semantic_normalized_boundary_intent"
 
     try:
         unit = require_step_mm(source.read_text(encoding="utf-8"))
@@ -82,19 +100,30 @@ def run_step_static_demo(
     root.mkdir(parents=True, exist_ok=True)
     msh_path = root / "model.msh"
     vtk_path = root / "result.vtk"
+    semantic_resolution = None
     try:
-        mesh = mesh_step_with_gmsh(
-            source, msh_path, surface_boxes=(fixed_box, load_box),
-            mesh_size_mm=float(mesh_size_mm), gmsh_executable=gmsh_executable,
-            minimum_tet_quality=float(minimum_tet_quality),
-        )
+        if box_mode:
+            mesh = mesh_step_with_gmsh(
+                source, msh_path, surface_boxes=(fixed_box, load_box),
+                mesh_size_mm=float(mesh_size_mm), gmsh_executable=gmsh_executable,
+                minimum_tet_quality=float(minimum_tet_quality),
+            )
+        else:
+            raw_mesh = mesh_step_with_gmsh(
+                source, msh_path, surface_boxes=(), include_all_boundary=True,
+                mesh_size_mm=float(mesh_size_mm), gmsh_executable=gmsh_executable,
+                minimum_tet_quality=float(minimum_tet_quality),
+            )
+            mesh, semantic_resolution = apply_semantic_surfaces(
+                raw_mesh, (fixed_intent, load_intent), boundary_group="ALL_BOUNDARY"
+            )
         constraints = fixed_surface_constraints(mesh, "FIXED")
         loads = surface_total_force_loads(mesh, "LOAD", force)
         result = solve_linear_static(
             mesh.nodes, mesh.elements, young=float(young_mpa), poisson=float(poisson),
             constraints=constraints, loads=loads,
         )
-    except (GmshPipelineError, ValueError) as exc:
+    except (GmshPipelineError, SemanticSurfaceError, ValueError) as exc:
         raise StepStaticDemoError(str(exc)) from exc
 
     applied = resultant_from_nodal_loads(loads)
@@ -122,6 +151,7 @@ def run_step_static_demo(
         "unit_system": "mm-N-MPa",
         "step_unit": unit.name,
         "step_sha256": _sha256_file(source),
+        "surface_selection_mode": surface_mode,
         "node_count": len(mesh.nodes),
         "tet4_count": len(mesh.elements),
         "fixed_surface_triangle_count": len(mesh.surface_group("FIXED").triangles),
@@ -136,6 +166,20 @@ def run_step_static_demo(
         "max_displacement_mm": max(displacement_magnitudes, default=0.0),
         "max_element_von_mises_MPa": max(vm, default=0.0),
     }
+    if semantic_resolution is not None:
+        summary["semantic_surfaces"] = [
+            {
+                "name": resolution.intent.name,
+                "axis": resolution.intent.axis,
+                "side": resolution.intent.side,
+                "band_fraction": float(resolution.intent.band_fraction),
+                "minimum_normal_alignment": float(resolution.intent.minimum_normal_alignment),
+                "selected_triangle_count": int(resolution.selected_triangle_count),
+                "selected_area_mm2": float(resolution.selected_area),
+            }
+            for resolution in semantic_resolution
+        ]
+
     summary_path = root / "summary.json"
     summary_path.write_text(_canonical_json(summary) + "\n", encoding="utf-8")
     summary_sha = _sha256_file(summary_path)
@@ -153,8 +197,9 @@ def run_step_static_demo(
         artifacts[path.name] = {"sha256": _sha256_file(path), "bytes": path.stat().st_size}
     fingerprint = sha256(_canonical_json(artifacts).encode("utf-8")).hexdigest()
     manifest = {
-        "format_version": 2,
+        "format_version": 3,
         "source_step_sha256": summary["step_sha256"],
+        "surface_selection_mode": surface_mode,
         "artifacts": artifacts,
         "evidence_fingerprint_sha256": fingerprint,
     }
@@ -176,8 +221,12 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Run AsterMax verified STEP linear-static demo")
     parser.add_argument("step")
     parser.add_argument("--output", default="astermax_step_evidence")
-    parser.add_argument("--fixed-box", required=True)
-    parser.add_argument("--load-box", required=True)
+    parser.add_argument("--fixed-box")
+    parser.add_argument("--load-box")
+    parser.add_argument(
+        "--semantic-x-ends", action="store_true",
+        help="persist FIXED at X-min and LOAD at X-max using normalized boundary intent",
+    )
     parser.add_argument("--force", default="100,0,0", help="Fx,Fy,Fz total N")
     parser.add_argument("--mesh-size", type=float, required=True)
     parser.add_argument("--young", type=float, default=210000.0)
@@ -185,15 +234,30 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         force = tuple(float(v.strip()) for v in args.force.split(","))
-        fixed = _parse_box(args.fixed_box, "FIXED")
-        load = _parse_box(args.load_box, "LOAD")
+        kwargs = {}
+        if args.semantic_x_ends:
+            if args.fixed_box or args.load_box:
+                raise StepStaticDemoError("semantic mode cannot be combined with bounding boxes")
+            kwargs.update(
+                fixed_intent=SemanticSurfaceIntent("FIXED", "x", "min"),
+                load_intent=SemanticSurfaceIntent("LOAD", "x", "max"),
+            )
+        else:
+            if not args.fixed_box or not args.load_box:
+                raise StepStaticDemoError("provide --fixed-box/--load-box or use --semantic-x-ends")
+            kwargs.update(
+                fixed_box=_parse_box(args.fixed_box, "FIXED"),
+                load_box=_parse_box(args.load_box, "LOAD"),
+            )
         evidence = run_step_static_demo(
-            args.step, args.output, fixed_box=fixed, load_box=load, total_force_n=force,
+            args.step, args.output, total_force_n=force,
             mesh_size_mm=args.mesh_size, young_mpa=args.young, poisson=args.poisson,
+            **kwargs,
         )
     except (ValueError, StepStaticDemoError, argparse.ArgumentTypeError) as exc:
         parser.error(str(exc))
     print(f"evidence_fingerprint_sha256={evidence['manifest']['evidence_fingerprint_sha256']}")
+    print(f"surface_selection_mode={evidence['summary']['surface_selection_mode']}")
     print(f"viewer={Path(args.output) / 'astermax_step_viewer.html'}")
     return 0
 
