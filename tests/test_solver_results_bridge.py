@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import numpy as np
 import pytest
 
@@ -8,6 +9,7 @@ from astermax.results_scene import build_results_scene
 from astermax.solver_results_bridge import (
     STRESS_REPRESENTATION,
     bind_verified_tet10_solver_results,
+    build_results_scene_from_desktop_summary,
     incident_element_ipmax_to_nodes,
 )
 
@@ -22,18 +24,7 @@ def _single_tet10():
     return nodes, elements
 
 
-def test_gmsh_tet10_surface_uses_solver_midside_order():
-    nodes, elements = _single_tet10()
-    _, triangles = extract_tet10_surface(type("Inventory", (), {"nodes_mm": nodes, "elements": elements})())
-    assert triangles.shape == (16, 3)
-    # Face (0,1,3) must use edges 0-1=node4, 1-3=node9, 0-3=node7.
-    face_nodes = {0,1,3,4,7,9}
-    rendered = [set(map(int, tri)) for tri in triangles]
-    assert any(9 in tri and tri.issubset(face_nodes) for tri in rendered)
-    assert not any(8 in tri and tri.issubset(face_nodes | {8}) and tri.intersection({0,1,3}) for tri in rendered if tri.issubset({0,1,3,4,7,8,9}))
-
-
-def test_actual_tet10_solver_binds_exact_displacement_and_traceable_stress_projection():
+def _solve_fixture():
     nodes, elements = _single_tet10()
     loads = np.zeros((len(nodes), 3), dtype=float)
     loads[3, 2] = -100.0
@@ -46,6 +37,22 @@ def test_actual_tet10_solver_binds_exact_displacement_and_traceable_stress_proje
         loads,
         fixed_dofs,
     )
+    return nodes, elements, result
+
+
+def test_gmsh_tet10_surface_uses_solver_midside_order():
+    nodes, elements = _single_tet10()
+    _, triangles = extract_tet10_surface(SimpleNamespace(nodes_mm=nodes, elements=elements))
+    assert triangles.shape == (16, 3)
+    # Geometric face y=0 is corners (0,1,3) with midsides 4:(0,1), 7:(0,3), 9:(1,3).
+    plane_triangles = [tri for tri in triangles if np.allclose(nodes[tri, 1], 0.0)]
+    assert len(plane_triangles) == 4
+    assert set(np.unique(np.asarray(plane_triangles))) == {0, 1, 3, 4, 7, 9}
+    assert 8 not in set(np.unique(np.asarray(plane_triangles)))
+
+
+def test_actual_tet10_solver_binds_exact_displacement_and_traceable_stress_projection():
+    nodes, elements, result = _solve_fixture()
     assert np.isfinite(result.displacement_mm).all()
     assert result.integration_point_von_mises_mpa.shape == (1, 4)
 
@@ -69,8 +76,32 @@ def test_actual_tet10_solver_binds_exact_displacement_and_traceable_stress_proje
     assert scene.scalar_max == pytest.approx(expected)
 
 
+def test_existing_desktop_runtime_summary_cuts_over_without_field_synthesis():
+    nodes, elements, result = _solve_fixture()
+    workspace_sha = "workspace-sha-verified"
+    solve_sha = "solve-sha-verified"
+    summary = {
+        "production_results": {"workspace_sha256": workspace_sha, "solve_evidence_sha256": solve_sha},
+        "solve_evidence": {"solve_evidence_sha256": solve_sha},
+        "_runtime_results": {
+            "workspace": SimpleNamespace(workspace_sha256=workspace_sha),
+            "nodes_mm": nodes,
+            "elements": elements,
+            "result": result,
+        },
+    }
+    scene, evidence = build_results_scene_from_desktop_summary(summary, deformation_scale=2.0)
+    np.testing.assert_allclose(scene.deformed_nodes_mm, nodes + 2.0 * result.displacement_mm)
+    assert evidence.displacement_source == "Tet10LinearStaticResult.displacement_mm"
+    assert evidence.stress_representation == STRESS_REPRESENTATION
+
+    stale = dict(summary)
+    stale["production_results"] = dict(summary["production_results"], workspace_sha256="different")
+    with pytest.raises(ValueError, match="SOLVER_RESULTS_DESKTOP_WORKSPACE_STALE"):
+        build_results_scene_from_desktop_summary(stale)
+
+
 def test_incident_element_projection_uses_max_not_average_and_fails_closed():
-    # Two artificial connectivity rows are enough to validate the projection rule.
     elements = np.array([
         [0,1,2,3,4,5,6,7,8,9],
         [0,1,2,10,4,5,6,11,12,13],
