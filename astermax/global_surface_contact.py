@@ -1,9 +1,20 @@
 """Coupled small-sliding frictionless node-to-TRI3 contact for AsterMax PMV.
 
 This module bridges the verified node/TRI3 geometry kernel to the global structural
-assembler.  It intentionally implements a *small-sliding* penalty formulation: the
+assembler. It intentionally implements a *small-sliding* penalty formulation: the
 master TRI3 normal and barycentric projection are frozen from the reference geometry
-for each candidate pair.  The active set is updated from the current displacement.
+for each candidate pair. The active set is updated from the current displacement.
+
+Two explicit reference-projection policies are supported:
+
+``strict``
+    Legacy orthogonal plane projection. Contact can activate only when the projected
+    point lies inside the finite TRI3.
+
+``closest_feature``
+    Exact closest point on the finite TRI3, including edge and vertex regions. This
+    mode requires an explicit ``max_reference_distance_mm`` association gate so a
+    slave node cannot be attracted to an arbitrarily distant edge/vertex.
 
 For one slave node s and master TRI3 nodes m_i, define
 
@@ -11,8 +22,7 @@ For one slave node s and master TRI3 nodes m_i, define
     q = [ n, -N1*n, -N2*n, -N3*n ]
 
 where g0 is the signed reference gap, n is the oriented master normal and N_i are the
-reference barycentric coordinates of the orthogonal projection.  Contact is active
-only for an inside-triangle candidate with g < 0.  The penalty potential gives
+frozen reference barycentric coordinates. The penalty potential gives
 
     r_c = k_p * g * q
     K_c = k_p * q*q^T
@@ -22,7 +32,7 @@ so for a fixed active set
     (K + K_c) u = F - k_p*g0*q.
 
 The physical contact force vector is -r_c and therefore has equal/opposite slave and
-master resultants.  This is an auditable verification solver, not a production
+master resultants. This is an auditable verification solver, not a production
 large-sliding or frictional contact algorithm.
 """
 
@@ -31,7 +41,11 @@ import math
 from typing import Mapping, Sequence
 
 from .global_static import GlobalStaticError, _solve_dense, assemble_stiffness
-from .surface_contact import SurfaceContactError, project_point_to_triangle
+from .surface_contact import (
+    SurfaceContactError,
+    closest_point_to_triangle,
+    project_point_to_triangle,
+)
 
 
 class GlobalSurfaceContactError(ValueError):
@@ -43,6 +57,8 @@ class NodeTriangleContactPair:
     slave_node: int
     master_nodes: tuple[int, int, int]
     penalty_stiffness_n_per_mm: float
+    projection_mode: str = "strict"
+    max_reference_distance_mm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +111,10 @@ def _validate_matrix(stiffness: Sequence[Sequence[float]]) -> int:
     return ndof
 
 
+def _distance(a: Sequence[float], b: Sequence[float]) -> float:
+    return math.sqrt(sum((float(a[i]) - float(b[i])) ** 2 for i in range(3)))
+
+
 def _prepare_pair(
     nodes: Sequence[Sequence[float]],
     pair: NodeTriangleContactPair,
@@ -112,12 +132,36 @@ def _prepare_pair(
     penalty = float(pair.penalty_stiffness_n_per_mm)
     if not math.isfinite(penalty) or penalty <= 0.0:
         raise GlobalSurfaceContactError("contact penalty stiffness must be finite and positive")
-    try:
-        projection = project_point_to_triangle(
-            nodes[slave], nodes[masters[0]], nodes[masters[1]], nodes[masters[2]]
+
+    mode = str(pair.projection_mode)
+    if mode not in ("strict", "closest_feature"):
+        raise GlobalSurfaceContactError("projection_mode must be 'strict' or 'closest_feature'")
+    max_distance = pair.max_reference_distance_mm
+    if max_distance is not None:
+        max_distance = float(max_distance)
+        if not math.isfinite(max_distance) or max_distance < 0.0:
+            raise GlobalSurfaceContactError("max reference distance must be finite and non-negative")
+    if mode == "closest_feature" and max_distance is None:
+        raise GlobalSurfaceContactError(
+            "closest_feature projection requires max_reference_distance_mm"
         )
+
+    try:
+        if mode == "strict":
+            projection = project_point_to_triangle(
+                nodes[slave], nodes[masters[0]], nodes[masters[1]], nodes[masters[2]]
+            )
+        else:
+            projection = closest_point_to_triangle(
+                nodes[slave], nodes[masters[0]], nodes[masters[1]], nodes[masters[2]]
+            )
     except (SurfaceContactError, IndexError) as exc:
         raise GlobalSurfaceContactError(str(exc)) from exc
+
+    associated = bool(projection.inside_triangle)
+    if mode == "closest_feature":
+        reference_distance = _distance(nodes[slave], projection.projected_point_mm)
+        associated = reference_distance <= float(max_distance) + 1e-12
 
     q = [0.0] * ndof
     for component in range(3):
@@ -125,14 +169,20 @@ def _prepare_pair(
     for weight, master in zip(projection.barycentric, masters):
         for component in range(3):
             q[3 * master + component] -= weight * projection.normal[component]
-    definition = NodeTriangleContactPair(slave, masters, penalty)
+    definition = NodeTriangleContactPair(
+        slave,
+        masters,
+        penalty,
+        projection_mode=mode,
+        max_reference_distance_mm=max_distance,
+    )
     return _PreparedPair(
         definition=definition,
         reference_gap_mm=projection.signed_gap_mm,
         barycentric=projection.barycentric,
         normal=projection.normal,
         q=tuple(q),
-        inside_triangle=projection.inside_triangle,
+        inside_triangle=associated,
     )
 
 
