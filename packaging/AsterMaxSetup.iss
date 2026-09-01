@@ -39,8 +39,8 @@ Name: "{autodesktop}\AsterMax Mechanical"; Filename: "{app}\{#MyAppExeName}"; Wo
 Name: "desktopicon"; Description: "Crear acceso directo en el escritorio"; GroupDescription: "Accesos directos:"; Flags: unchecked
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File \"{app}\installer\bootstrap_dependencies.ps1\""; StatusMsg: "Comprobando e instalando dependencias de Windows…"; Flags: runhidden waituntilterminated
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--self-test \"{localappdata}\AsterMax\packaged-self-test\""; StatusMsg: "Verificando el motor FEA empaquetado…"; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\installer\bootstrap_dependencies.ps1"""; StatusMsg: "Comprobando e instalando dependencias de Windows…"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--self-test ""{localappdata}\AsterMax\packaged-self-test"""; StatusMsg: "Verificando el motor FEA empaquetado…"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "Iniciar AsterMax Mechanical"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
