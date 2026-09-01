@@ -2,22 +2,22 @@
 
 The bundle is intentionally self-contained and auditable. It executes the verified
 multi-GAP / multi-bolt benchmark, exports professional VTK fields, writes a compact
-engineering summary, and fingerprints every artifact with SHA-256. No industrial
-simulation result is embedded here: all numerical values come from the analytical
-verification case already exercised by the harness.
+engineering summary, emits an offline AsterMax viewer, and fingerprints every
+artifact with SHA-256. No industrial simulation result is embedded here: all
+numerical values come from the analytical verification case exercised by the harness.
 
 Units: mm, N, MPa.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from hashlib import sha256
 import argparse
 import json
 from pathlib import Path
 
 from .bolt_pretension import BoltPretensionConnector
+from .browser_viewer import write_self_contained_viewer
 from .gapped_joint_diagnostics import evaluate_gapped_joint
 from .gapped_joint_vtk import write_gapped_joint_legacy_vtk
 from .gapped_preloaded_joint import solve_gapped_preloaded_joint_from_stiffness
@@ -115,10 +115,11 @@ def generate_demo_bundle(output_dir: str | Path) -> dict:
         destination / "verified_multigap_joint.vtk", mesh, connectors, result
     )
 
+    constrained = {i for i in range(9)} | {9, 10, 12, 13, 15, 16}
     free_residual_max = max(
         abs(float(v))
         for dof, v in enumerate(result.joint.residual)
-        if dof not in {i for i in range(9)} | {9, 10, 12, 13, 15, 16}
+        if dof not in constrained
     )
     summary = {
         "case_id": DEMO_CASE_ID,
@@ -134,14 +135,8 @@ def generate_demo_bundle(output_dir: str | Path) -> dict:
         "support_loss_fraction": float(diagnostics.support_loss_fraction),
         "total_normal_contact_force_N": float(diagnostics.total_normal_contact_force_n),
         "total_friction_capacity_N": float(diagnostics.total_friction_capacity_n),
-        "bolt_axial_force_N": [
-            float(state.final_axial_force_n)
-            for state in diagnostics.redistribution.bolt_states
-        ],
-        "bolt_load_share": [
-            float(state.tensile_load_share)
-            for state in diagnostics.redistribution.bolt_states
-        ],
+        "bolt_axial_force_N": [float(state.final_axial_force_n) for state in diagnostics.redistribution.bolt_states],
+        "bolt_load_share": [float(state.tensile_load_share) for state in diagnostics.redistribution.bolt_states],
         "verification_oracle": {
             "expected_final_gap_mm": [-0.052189781021898, 0.004014598540146, 0.200364963503650],
             "expected_bolt_force_N": [391.240875912409, 216.058394160584, 201.459854014599],
@@ -150,6 +145,16 @@ def generate_demo_bundle(output_dir: str | Path) -> dict:
     }
     summary_path = destination / "summary.json"
     summary_path.write_text(_canonical_json(summary) + "\n", encoding="utf-8")
+    summary_hash = _sha256_file(summary_path)
+
+    viewer_path = write_self_contained_viewer(
+        destination / "astermax_viewer.html",
+        mesh,
+        connectors,
+        result,
+        summary,
+        summary_sha256=summary_hash,
+    )
 
     readme = (
         "AsterMax Verified Technical Demo Bundle\n"
@@ -157,9 +162,10 @@ def generate_demo_bundle(output_dir: str | Path) -> dict:
         f"Case: {DEMO_CASE_ID}\n"
         "Units: mm-N-MPa\n"
         "Scope: analytical verification benchmark, not an industrial simulation result.\n"
-        "Open verified_multigap_joint.vtk in ParaView and inspect initial_gap_mm, "
-        "final_gap_mm, support_state, contact_pressure_MPa, friction_utilization, "
-        "bolt_axial_force_N and bolt_load_share.\n"
+        "Open astermax_viewer.html for the dependency-free AsterMax presentation layer.\n"
+        "verified_multigap_joint.vtk remains available for independent ParaView inspection.\n"
+        "The viewer exposes initial/final GAP, support state, contact pressure, friction "
+        "utilization, bolt force/load share and the SHA-256 of summary.json.\n"
         "summary.json contains the numerical evidence and analytical oracle.\n"
         "manifest.json contains SHA-256 fingerprints for reproducibility.\n"
     )
@@ -167,15 +173,16 @@ def generate_demo_bundle(output_dir: str | Path) -> dict:
     readme_path.write_text(readme, encoding="utf-8")
 
     artifacts = {}
-    for path in (vtk_path, summary_path, readme_path):
-        artifacts[path.name] = {
-            "sha256": _sha256_file(path),
-            "bytes": path.stat().st_size,
+    for artifact_path in (vtk_path, summary_path, viewer_path, readme_path):
+        artifacts[artifact_path.name] = {
+            "sha256": _sha256_file(artifact_path),
+            "bytes": artifact_path.stat().st_size,
         }
     evidence_fingerprint = sha256(_canonical_json(artifacts).encode("utf-8")).hexdigest()
     manifest = {
         "case_id": DEMO_CASE_ID,
-        "format_version": 1,
+        "format_version": 2,
+        "viewer": "astermax_viewer.html",
         "artifacts": artifacts,
         "evidence_fingerprint_sha256": evidence_fingerprint,
     }
