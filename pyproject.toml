@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astermax-pmv"
-version = "0.1.0"
-description = "AsterMax PMV finite-element verification core"
+version = "0.6.2"
+description = "AsterMax Mechanical evidence-native finite-element Windows PMV"
 requires-python = ">=3.11"
-dependencies = ["numpy>=2.0,<3", "scipy>=1.14,<2"]
+dependencies = ["numpy>=2.0,<3", "scipy>=1.14,<2", "gmsh==4.13.1"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9", "gmsh==4.13.1"]
+test = ["pytest>=8,<9"]
+
+[project.scripts]
+astermax = "astermax.windows_shell:windows_desktop_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
