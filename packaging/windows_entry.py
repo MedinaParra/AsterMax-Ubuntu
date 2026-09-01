@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from astermax.app import run_step_analysis
-from astermax.desktop_picker_app import desktop_main
+from packaging.windows_shell import windows_desktop_main
 
 
 def _write_fixture_step(path: Path) -> None:
@@ -71,7 +71,7 @@ def main() -> int:
     if len(sys.argv) >= 2 and sys.argv[1] == "--self-test":
         target = Path(sys.argv[2] if len(sys.argv) >= 3 else "astermax_exe_self_test")
         return _self_test(target.resolve())
-    return desktop_main()
+    return windows_desktop_main()
 
 
 if __name__ == "__main__":
