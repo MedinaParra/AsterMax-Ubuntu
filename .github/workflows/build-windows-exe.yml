@@ -99,7 +99,7 @@ jobs:
         shell: pwsh
         run: |
           $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
-          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_step_smoke_evidence', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2', '--approved-by', 'AsterMax CI Engineer')
+          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_step_smoke_evidence', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2', '--approved-by', 'AsterMax-CI-Engineer')
           $proc = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "Frozen AsterMax approved STEP solve failed with exit code $($proc.ExitCode)" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\model_preparation.json")) { throw "model_preparation.json missing after approved STEP solve" }
