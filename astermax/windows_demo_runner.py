@@ -1,12 +1,13 @@
 """Windows-oriented one-click runner for the verified AsterMax technical demo.
 
-The runner intentionally separates three responsibilities:
+The runner separates four responsibilities:
 1) generate the deterministic evidence bundle,
 2) verify every SHA-256 entry in the manifest before presentation,
-3) optionally launch the VTK result in ParaView when a viewer is available.
+3) open the self-contained AsterMax HTML viewer by default,
+4) optionally fall back to ParaView for independent VTK inspection.
 
-CI never requires a GUI. Viewer discovery/launch is an optional presentation layer;
-solver evidence remains valid and independently verifiable without ParaView.
+CI never requires a GUI. Presentation is optional; solver evidence remains valid and
+independently verifiable without any viewer.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from pathlib import Path
 import shutil
 import subprocess
 from typing import Mapping
+import webbrowser
 
 from .demo_bundle import generate_demo_bundle
 
@@ -37,6 +39,8 @@ class DemoRunResult:
     evidence_verified: bool
     viewer_executable: str | None
     viewer_launched: bool
+    astermax_viewer_path: Path | None = None
+    astermax_viewer_launched: bool = False
 
 
 def _sha256_file(path: Path) -> str:
@@ -114,8 +118,7 @@ def find_paraview(explicit: str | None = None) -> str | None:
     return None
 
 
-def launch_viewer(viewer_executable: str, vtk_path: str | Path) -> None:
-    """Launch viewer only after evidence verification has succeeded."""
+def launch_paraview(viewer_executable: str, vtk_path: str | Path) -> None:
     viewer = Path(viewer_executable)
     vtk = Path(vtk_path)
     if not viewer.is_file():
@@ -128,52 +131,80 @@ def launch_viewer(viewer_executable: str, vtk_path: str | Path) -> None:
         raise WindowsDemoRunnerError("failed to launch ParaView") from exc
 
 
+def launch_astermax_viewer(viewer_path: str | Path) -> bool:
+    """Open the fingerprinted self-contained viewer using the OS default browser."""
+    path = Path(viewer_path).resolve()
+    if not path.is_file():
+        raise WindowsDemoRunnerError("AsterMax viewer artifact does not exist")
+    try:
+        return bool(webbrowser.open(path.as_uri(), new=1))
+    except (OSError, webbrowser.Error) as exc:
+        raise WindowsDemoRunnerError("failed to open the AsterMax self-contained viewer") from exc
+
+
 def run_verified_demo(
     output_dir: str | Path = "astermax_demo_evidence",
     *,
     open_viewer: bool = True,
     paraview_executable: str | None = None,
+    prefer_paraview: bool = False,
 ) -> DemoRunResult:
     """Generate, verify, then optionally present the professional demo bundle."""
     root = Path(output_dir)
     generate_demo_bundle(root)
     manifest = verify_evidence_bundle(root)
     vtk = root / "verified_multigap_joint.vtk"
-    viewer = find_paraview(paraview_executable) if open_viewer else None
-    launched = False
-    if open_viewer and viewer is not None:
-        launch_viewer(viewer, vtk)
-        launched = True
+    html = root / str(manifest.get("viewer", "astermax_viewer.html"))
+    if not html.is_file():
+        raise WindowsDemoRunnerError("verified manifest does not resolve an AsterMax viewer")
+
+    paraview = find_paraview(paraview_executable) if (open_viewer and prefer_paraview) else None
+    paraview_launched = False
+    astermax_launched = False
+    if open_viewer:
+        if prefer_paraview and paraview is not None:
+            launch_paraview(paraview, vtk)
+            paraview_launched = True
+        else:
+            astermax_launched = launch_astermax_viewer(html)
+
     return DemoRunResult(
         output_dir=root.resolve(),
         vtk_path=vtk.resolve(),
         manifest_path=(root / "manifest.json").resolve(),
         evidence_fingerprint_sha256=str(manifest["evidence_fingerprint_sha256"]),
         evidence_verified=True,
-        viewer_executable=viewer,
-        viewer_launched=launched,
+        viewer_executable=paraview,
+        viewer_launched=paraview_launched or astermax_launched,
+        astermax_viewer_path=html.resolve(),
+        astermax_viewer_launched=astermax_launched,
     )
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Run the verified AsterMax Windows technical demo")
     parser.add_argument("--output", default="astermax_demo_evidence")
-    parser.add_argument("--no-viewer", action="store_true", help="generate/verify evidence without opening ParaView")
+    parser.add_argument("--no-viewer", action="store_true", help="generate/verify evidence without opening a viewer")
     parser.add_argument("--paraview", default=None, help="explicit path to paraview.exe")
+    parser.add_argument("--prefer-paraview", action="store_true", help="use ParaView instead of the integrated viewer when available")
     args = parser.parse_args(argv)
     result = run_verified_demo(
         args.output,
         open_viewer=not args.no_viewer,
         paraview_executable=args.paraview,
+        prefer_paraview=args.prefer_paraview,
     )
     print("AsterMax Windows Technical Demo")
     print(f"evidence: {result.output_dir}")
     print(f"verified: {result.evidence_verified}")
     print(f"fingerprint: {result.evidence_fingerprint_sha256}")
-    if result.viewer_launched:
-        print(f"viewer: {result.viewer_executable}")
+    print(f"AsterMax viewer: {result.astermax_viewer_path}")
+    if result.astermax_viewer_launched:
+        print("presentation: integrated AsterMax viewer launched")
+    elif result.viewer_executable and result.viewer_launched:
+        print(f"presentation: ParaView launched ({result.viewer_executable})")
     else:
-        print("viewer: not launched; evidence remains valid and can be opened manually")
+        print("presentation: not launched; evidence remains valid and can be opened manually")
     return 0
 
 
