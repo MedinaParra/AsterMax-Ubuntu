@@ -1,18 +1,11 @@
-"""Auditable STEP -> mesh -> BC/load -> linear-static FEA -> evidence pipeline.
+"""Auditable STEP -> mesh -> BC/load -> linear-static FEA -> viewer/evidence pipeline.
 
-This is the first reusable AsterMax demo entry point that accepts an actual STEP
-Part 21 file instead of constructing the analysis mesh in Python.  It deliberately
-keeps the verified PMV scope narrow: one solid, explicit mm units, two engineer-
-provided surface bounding boxes, isotropic linear elasticity, a fixed surface and a
-total force on a named load surface.  The result is exported to VTK plus a
-fingerprinted JSON evidence bundle.
-
-No numerical reference is invented.  Values in summary.json are recovered from the
-actual mesh/solve performed in this run.  An optional closed-form reference may be
-added by a higher-level verification harness when its assumptions are justified.
-Units: mm, N, MPa.
+Accepts an actual STEP Part 21 file, gates units to mm, meshes with Gmsh/OpenCASCADE,
+applies engineer-provided FIXED/LOAD surface selectors, solves verified linear elastic
+TET4 FEA, exports VTK and a self-contained browser viewer, then fingerprints every
+artifact. Numerical values are recovered from the actual solve; no industrial result
+is invented. Units: mm, N, MPa.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -26,6 +19,7 @@ from .global_static import solve_linear_static
 from .gmsh_pipeline import GmshPipelineError, SurfaceBox, mesh_step_with_gmsh
 from .mesh_bc import fixed_surface_constraints, resultant_from_nodal_loads, surface_total_force_loads
 from .postprocess import element_von_mises, write_legacy_vtk
+from .static_result_viewer import StaticResultViewerError, write_static_result_viewer
 from .step_units import require_step_mm
 
 
@@ -67,7 +61,7 @@ def run_step_static_demo(
     gmsh_executable: str = "gmsh",
     minimum_tet_quality: float = 0.05,
 ) -> dict:
-    """Run the verified linear-static chain from a real STEP file and fingerprint it."""
+    """Run real STEP -> mesh -> static solve -> viewer -> fingerprint evidence."""
     source = Path(step_path)
     if not source.is_file():
         raise StepStaticDemoError(f"STEP file does not exist: {source}")
@@ -90,22 +84,15 @@ def run_step_static_demo(
     vtk_path = root / "result.vtk"
     try:
         mesh = mesh_step_with_gmsh(
-            source,
-            msh_path,
-            surface_boxes=(fixed_box, load_box),
-            mesh_size_mm=float(mesh_size_mm),
-            gmsh_executable=gmsh_executable,
+            source, msh_path, surface_boxes=(fixed_box, load_box),
+            mesh_size_mm=float(mesh_size_mm), gmsh_executable=gmsh_executable,
             minimum_tet_quality=float(minimum_tet_quality),
         )
         constraints = fixed_surface_constraints(mesh, "FIXED")
         loads = surface_total_force_loads(mesh, "LOAD", force)
         result = solve_linear_static(
-            mesh.nodes,
-            mesh.elements,
-            young=float(young_mpa),
-            poisson=float(poisson),
-            constraints=constraints,
-            loads=loads,
+            mesh.nodes, mesh.elements, young=float(young_mpa), poisson=float(poisson),
+            constraints=constraints, loads=loads,
         )
     except (GmshPipelineError, ValueError) as exc:
         raise StepStaticDemoError(str(exc)) from exc
@@ -114,18 +101,19 @@ def run_step_static_demo(
     reaction = [0.0, 0.0, 0.0]
     for dof, value in enumerate(result.reactions):
         reaction[dof % 3] += float(value)
-    free_residual = [
-        abs(float(value))
-        for dof, value in enumerate(result.residual)
-        if dof not in constraints
-    ]
-    free_residual_max = max(free_residual, default=0.0)
+    free_residual_max = max(
+        (abs(float(value)) for dof, value in enumerate(result.residual) if dof not in constraints),
+        default=0.0,
+    )
     displacement_magnitudes = []
     for node in range(len(mesh.nodes)):
         base = 3 * node
-        displacement_magnitudes.append(math.sqrt(sum(float(result.displacements[base+i]) ** 2 for i in range(3))))
+        displacement_magnitudes.append(
+            math.sqrt(sum(float(result.displacements[base+i]) ** 2 for i in range(3)))
+        )
     vm = tuple(float(value) for value in element_von_mises(result))
-    if not all(math.isfinite(v) for v in (*applied, *reaction, free_residual_max, *displacement_magnitudes, *vm)):
+    finite_values = (*applied, *reaction, free_residual_max, *displacement_magnitudes, *vm)
+    if not all(math.isfinite(v) for v in finite_values):
         raise StepStaticDemoError("non-finite solve output cannot enter evidence bundle")
 
     write_legacy_vtk(vtk_path, mesh.nodes, mesh.elements, result)
@@ -150,13 +138,23 @@ def run_step_static_demo(
     }
     summary_path = root / "summary.json"
     summary_path.write_text(_canonical_json(summary) + "\n", encoding="utf-8")
+    summary_sha = _sha256_file(summary_path)
+    viewer_path = root / "astermax_step_viewer.html"
+    try:
+        write_static_result_viewer(
+            viewer_path, mesh.nodes, mesh.elements, result, summary,
+            summary_sha256=summary_sha,
+        )
+    except StaticResultViewerError as exc:
+        raise StepStaticDemoError(f"viewer generation failed: {exc}") from exc
 
     artifacts = {}
-    for path in (msh_path, vtk_path, summary_path):
+    for path in (msh_path, vtk_path, summary_path, viewer_path):
         artifacts[path.name] = {"sha256": _sha256_file(path), "bytes": path.stat().st_size}
     fingerprint = sha256(_canonical_json(artifacts).encode("utf-8")).hexdigest()
     manifest = {
-        "format_version": 1,
+        "format_version": 2,
+        "source_step_sha256": summary["step_sha256"],
         "artifacts": artifacts,
         "evidence_fingerprint_sha256": fingerprint,
     }
@@ -190,18 +188,13 @@ def main(argv=None) -> int:
         fixed = _parse_box(args.fixed_box, "FIXED")
         load = _parse_box(args.load_box, "LOAD")
         evidence = run_step_static_demo(
-            args.step,
-            args.output,
-            fixed_box=fixed,
-            load_box=load,
-            total_force_n=force,
-            mesh_size_mm=args.mesh_size,
-            young_mpa=args.young,
-            poisson=args.poisson,
+            args.step, args.output, fixed_box=fixed, load_box=load, total_force_n=force,
+            mesh_size_mm=args.mesh_size, young_mpa=args.young, poisson=args.poisson,
         )
     except (ValueError, StepStaticDemoError, argparse.ArgumentTypeError) as exc:
         parser.error(str(exc))
     print(f"evidence_fingerprint_sha256={evidence['manifest']['evidence_fingerprint_sha256']}")
+    print(f"viewer={Path(args.output) / 'astermax_step_viewer.html'}")
     return 0
 
 
