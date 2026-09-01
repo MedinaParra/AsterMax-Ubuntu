@@ -89,7 +89,10 @@ jobs:
       - name: Smoke test frozen EXE with real STEP to FEA
         shell: pwsh
         run: |
-          .\dist\AsterMax-Windows\AsterMax.exe --run-step .\exe_real_step.step --output .\exe_step_smoke_evidence --axis x --fixed-side min --load-side max --force 100,0,0 --mesh-size 2
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_step_smoke_evidence', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2')
+          $proc = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Frozen AsterMax STEP solve failed with exit code $($proc.ExitCode)" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\manifest.json")) { throw "manifest.json missing after real STEP EXE solve" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\summary.json")) { throw "summary.json missing after real STEP EXE solve" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\astermax_step_viewer.html")) { throw "STEP result viewer missing after real STEP EXE solve" }
@@ -104,7 +107,9 @@ jobs:
       - name: Smoke test deterministic verified joint demo
         shell: pwsh
         run: |
-          .\dist\AsterMax-Windows\AsterMax.exe --verified-demo --no-viewer --output .\exe_joint_demo_evidence
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $proc = Start-Process -FilePath $exe -ArgumentList @('--verified-demo', '--no-viewer', '--output', '.\exe_joint_demo_evidence') -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Frozen verified demo failed with exit code $($proc.ExitCode)" }
           if (-not (Test-Path ".\exe_joint_demo_evidence\manifest.json")) { throw "verified joint demo manifest missing" }
 
       - name: Record executable SHA-256
