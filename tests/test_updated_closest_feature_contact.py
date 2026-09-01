@@ -1,3 +1,4 @@
+import math
 import unittest
 from astermax.updated_surface_contact import UpdatedSurfaceContactError, _search
 
@@ -22,7 +23,12 @@ class UpdatedClosestFeatureHarness(unittest.TestCase):
         a,_=_search(left,[0],self.tris,self.hint,0.3,1e-10,"closest_feature")
         b,_=_search(right,[0],self.tris,self.hint,0.3,1e-10,"closest_feature")
         self.assertEqual(len(a),1); self.assertEqual(len(b),1)
-        self.assertAlmostEqual(abs(a[0].gap),0.2,places=12); self.assertAlmostEqual(abs(b[0].gap),0.2,places=12)
+        # The finite-feature oracle is Euclidean closest-point distance. Once the
+        # slave moves 0.01 mm off the shared edge, the correct distance is not
+        # the plane gap 0.2 mm but sqrt(0.2^2 + 0.01^2).
+        expected=math.hypot(0.2,0.01)
+        self.assertAlmostEqual(abs(a[0].gap),expected,places=12)
+        self.assertAlmostEqual(abs(b[0].gap),expected,places=12)
     def test_search_distance_fails_closed(self):
         found,unmatched=_search(self.points,[0],self.tris,self.hint,0.1,1e-10,"closest_feature")
         self.assertEqual(found,()); self.assertEqual(unmatched,(0,))
