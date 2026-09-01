@@ -23,12 +23,12 @@ class UpdatedClosestFeatureHarness(unittest.TestCase):
         a,_=_search(left,[0],self.tris,self.hint,0.3,1e-10,"closest_feature")
         b,_=_search(right,[0],self.tris,self.hint,0.3,1e-10,"closest_feature")
         self.assertEqual(len(a),1); self.assertEqual(len(b),1)
-        # The finite-feature oracle is Euclidean closest-point distance. Once the
-        # slave moves 0.01 mm off the shared edge, the correct distance is not
-        # the plane gap 0.2 mm but sqrt(0.2^2 + 0.01^2).
-        expected=math.hypot(0.2,0.01)
-        self.assertAlmostEqual(abs(a[0].gap),expected,places=12)
-        self.assertAlmostEqual(abs(b[0].gap),expected,places=12)
+        # x=0.99 is still inside the left TRI3, so its closest feature remains the
+        # face and the distance is the 0.2 mm plane gap. x=1.01 has crossed the
+        # shared edge but is not yet inside the right TRI3; its finite-feature
+        # distance is therefore sqrt(0.2^2 + 0.01^2).
+        self.assertAlmostEqual(abs(a[0].gap),0.2,places=12)
+        self.assertAlmostEqual(abs(b[0].gap),math.hypot(0.2,0.01),places=12)
     def test_search_distance_fails_closed(self):
         found,unmatched=_search(self.points,[0],self.tris,self.hint,0.1,1e-10,"closest_feature")
         self.assertEqual(found,()); self.assertEqual(unmatched,(0,))
