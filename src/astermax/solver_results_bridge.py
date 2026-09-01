@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import numpy as np
 
-from .results_scene import ResultsFieldBinding, build_results_scene
+from .results_scene import ResultsFieldBinding, ResultsScene, build_results_scene
 from .fea.solver import Tet10LinearStaticResult
 
 
@@ -85,7 +85,6 @@ def bind_verified_tet10_solver_results(
         solve_evidence_sha256=solve_evidence_sha256,
         stress_representation=STRESS_REPRESENTATION,
     )
-    # Force the same fail-closed validation used by the actual scene before return.
     build_results_scene(nodes, binding, deformation_scale=1.0)
     evidence = SolverResultsBridgeEvidence(
         node_count=int(len(nodes)),
@@ -97,3 +96,42 @@ def bind_verified_tet10_solver_results(
         solve_evidence_sha256=solve_evidence_sha256,
     )
     return binding, evidence
+
+
+def build_results_scene_from_desktop_summary(
+    summary: dict,
+    *,
+    deformation_scale: float = 1.0,
+) -> tuple[ResultsScene, SolverResultsBridgeEvidence]:
+    """Cut over the existing desktop solve runtime into the evidence-bound scene.
+
+    The desktop summary already carries the exact runtime nodes/elements/result plus
+    production workspace and solve hashes. This adapter refuses stale/missing
+    provenance before exposing deformation or Von Mises display modes.
+    """
+    if not isinstance(summary, dict):
+        raise ValueError("SOLVER_RESULTS_DESKTOP_SUMMARY_REQUIRED")
+    runtime = summary.get("_runtime_results")
+    production = summary.get("production_results")
+    solve = summary.get("solve_evidence")
+    if not isinstance(runtime, dict) or not isinstance(production, dict) or not isinstance(solve, dict):
+        raise ValueError("SOLVER_RESULTS_DESKTOP_PROVENANCE_REQUIRED")
+    workspace_sha = production.get("workspace_sha256")
+    solve_sha = solve.get("solve_evidence_sha256")
+    runtime_workspace = runtime.get("workspace")
+    if runtime_workspace is None or getattr(runtime_workspace, "workspace_sha256", None) != workspace_sha:
+        raise ValueError("SOLVER_RESULTS_DESKTOP_WORKSPACE_STALE")
+    if production.get("solve_evidence_sha256") != solve_sha:
+        raise ValueError("SOLVER_RESULTS_DESKTOP_SOLVE_STALE")
+
+    nodes = runtime.get("nodes_mm")
+    elements = runtime.get("elements")
+    result = runtime.get("result")
+    binding, evidence = bind_verified_tet10_solver_results(
+        nodes,
+        elements,
+        result,
+        workspace_sha256=workspace_sha,
+        solve_evidence_sha256=solve_sha,
+    )
+    return build_results_scene(nodes, binding, deformation_scale=deformation_scale), evidence
