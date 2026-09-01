@@ -66,15 +66,25 @@ jobs:
           & "$target\gmsh.exe" --version
 
       - name: Create real STEP smoke geometry
-        shell: pwsh
+        shell: python
         run: |
-          @'
-          SetFactory("OpenCASCADE");
-          Box(1) = {0, 0, 0, 10, 2, 1};
-          '@ | Out-File -FilePath .\exe_real_step.geo -Encoding ascii
-          .\dist\AsterMax-Windows\tools\gmsh\gmsh.exe .\exe_real_step.geo -0 -format step -o .\exe_real_step.step
-          if ($LASTEXITCODE -ne 0) { throw "Gmsh STEP export failed with exit code $LASTEXITCODE" }
-          if (-not (Test-Path .\exe_real_step.step)) { throw "real STEP smoke geometry was not created" }
+          from pathlib import Path
+          import subprocess
+          gmsh = Path('dist/AsterMax-Windows/tools/gmsh/gmsh.exe').resolve()
+          geo = Path('exe_real_step.geo').resolve()
+          step = Path('exe_real_step.step').resolve()
+          geo.write_text('SetFactory("OpenCASCADE");\nBox(1) = {0, 0, 0, 10, 2, 1};\n', encoding='utf-8')
+          completed = subprocess.run(
+              [str(gmsh), str(geo), '-0', '-format', 'step', '-o', str(step)],
+              capture_output=True, text=True, check=False,
+          )
+          print(completed.stdout)
+          print(completed.stderr)
+          if completed.returncode != 0:
+              raise SystemExit(f'Gmsh STEP export failed: {completed.returncode}')
+          if not step.is_file():
+              raise SystemExit('real STEP smoke geometry was not created')
+          print(f'ASTERMAX_STEP_SMOKE bytes={step.stat().st_size} path={step}')
 
       - name: Smoke test frozen EXE with real STEP to FEA
         shell: pwsh
