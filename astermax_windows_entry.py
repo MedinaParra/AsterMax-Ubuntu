@@ -1,7 +1,8 @@
 """Frozen Windows entry point for AsterMax PMV.
 
 Default: launch the real STEP desktop workflow.
-Compatibility: --verified-demo dispatches to the deterministic joint evidence demo.
+Compatibility: --verified-demo runs the deterministic joint evidence demo.
+Automation: --run-step executes the same real STEP pipeline headlessly for CI.
 """
 from __future__ import annotations
 
@@ -13,6 +14,9 @@ def main() -> int:
         from astermax.windows_demo_runner import main as demo_main
         argv=[arg for arg in sys.argv[1:] if arg != "--verified-demo"]
         return demo_main(argv)
+    if "--run-step" in sys.argv:
+        from astermax.windows_step_cli import main as step_main
+        return step_main(sys.argv[1:])
     from astermax.windows_app import main as desktop_main
     return desktop_main(sys.argv[1:])
 
