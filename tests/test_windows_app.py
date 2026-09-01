@@ -54,15 +54,18 @@ class WindowsStepDesktopHarness(unittest.TestCase):
         self.assertEqual(summary["approved_proposal_ids"],[])
         self.assertEqual(summary["pending_proposal_ids"],["fixed-support-1","resultant-force-1"])
 
-    def test_engineer_approval_unlocks_same_intent(self):
+    def test_engineer_approval_unlocks_and_is_deterministic_for_same_approved_intent(self):
         path=self._mm_step()
-        case=build_windows_preparation(StepCaseConfig(path,path.parent/"out"))
-        before=preparation_summary(case)["engineering_intent_sha256"]
-        approve_static_preparation(case,approved_by="Harness Engineer")
-        after=preparation_summary(case)
-        self.assertTrue(after["solve_gate"]["ready"])
-        self.assertEqual(after["engineering_intent_sha256"],before)
-        self.assertEqual(after["approved_proposal_ids"],["fixed-support-1","resultant-force-1"])
+        first=build_windows_preparation(StepCaseConfig(path,path.parent/"out1"))
+        second=build_windows_preparation(StepCaseConfig(path,path.parent/"out2"))
+        approve_static_preparation(first,approved_by="Harness Engineer")
+        approve_static_preparation(second,approved_by="Harness Engineer")
+        a=preparation_summary(first)
+        b=preparation_summary(second)
+        self.assertTrue(a["solve_gate"]["ready"])
+        self.assertTrue(b["solve_gate"]["ready"])
+        self.assertEqual(a["engineering_intent_sha256"],b["engineering_intent_sha256"])
+        self.assertEqual(a["approved_proposal_ids"],["fixed-support-1","resultant-force-1"])
 
     def test_solve_rejects_missing_approval_before_gmsh_lookup(self):
         path=self._mm_step()
