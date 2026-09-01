@@ -41,8 +41,6 @@ jobs:
           $gmshExe = $gmshCommand.Source
           if (-not (Test-Path $gmshExe)) { throw "Resolved gmsh command is not a file: $gmshExe" }
           $resolved = (Get-Item $gmshExe).FullName
-          # Chocolatey may expose a shim. Ask the command itself for version, then locate
-          # the deployed runtime in known roots and finally fall back to the command directory.
           & $resolved --version
           $candidates = @(
             'C:\gmsh\gmsh-4.12.1-Windows64\gmsh.exe',
@@ -73,9 +71,9 @@ jobs:
           @'
           SetFactory("OpenCASCADE");
           Box(1) = {0, 0, 0, 10, 2, 1};
-          Save "exe_real_step.step";
           '@ | Out-File -FilePath .\exe_real_step.geo -Encoding ascii
-          .\dist\AsterMax-Windows\tools\gmsh\gmsh.exe .\exe_real_step.geo -0
+          .\dist\AsterMax-Windows\tools\gmsh\gmsh.exe .\exe_real_step.geo -0 -format step -o .\exe_real_step.step
+          if ($LASTEXITCODE -ne 0) { throw "Gmsh STEP export failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path .\exe_real_step.step)) { throw "real STEP smoke geometry was not created" }
 
       - name: Smoke test frozen EXE with real STEP to FEA
