@@ -86,22 +86,36 @@ jobs:
               raise SystemExit('real STEP smoke geometry was not created')
           print(f'ASTERMAX_STEP_SMOKE bytes={step.stat().st_size} path={step}')
 
-      - name: Smoke test frozen EXE with real STEP to FEA
+      - name: Prove frozen EXE blocks unapproved STEP solve
         shell: pwsh
         run: |
           $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
-          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_step_smoke_evidence', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2')
+          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_unapproved_should_not_exist', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2')
           $proc = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
-          if ($proc.ExitCode -ne 0) { throw "Frozen AsterMax STEP solve failed with exit code $($proc.ExitCode)" }
+          if ($proc.ExitCode -eq 0) { throw "Frozen AsterMax incorrectly accepted an unapproved STEP solve" }
+          if (Test-Path '.\exe_unapproved_should_not_exist\manifest.json') { throw "Unapproved solve produced solver evidence" }
+
+      - name: Smoke test frozen EXE with approved real STEP to FEA
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_step_smoke_evidence', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2', '--approved-by', 'AsterMax CI Engineer')
+          $proc = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Frozen AsterMax approved STEP solve failed with exit code $($proc.ExitCode)" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\model_preparation.json")) { throw "model_preparation.json missing after approved STEP solve" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\manifest.json")) { throw "manifest.json missing after real STEP EXE solve" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\summary.json")) { throw "summary.json missing after real STEP EXE solve" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\astermax_step_viewer.html")) { throw "STEP result viewer missing after real STEP EXE solve" }
           if (-not (Test-Path ".\exe_step_smoke_evidence\result.vtk")) { throw "VTK result missing after real STEP EXE solve" }
+          $prep = Get-Content .\exe_step_smoke_evidence\model_preparation.json | ConvertFrom-Json
+          if (-not $prep.solve_gate.ready) { throw "approved preparation solve gate is not ready" }
+          if ($prep.approved_proposal_ids.Count -ne 2) { throw "expected two approved model-preparation proposals" }
           $summary = Get-Content .\exe_step_smoke_evidence\summary.json | ConvertFrom-Json
           if ($summary.step_unit -ne 'mm') { throw "STEP unit gate did not resolve mm" }
           if ($summary.tet4_count -lt 1) { throw "real STEP smoke solve produced no TET4 elements" }
           if ([math]::Abs($summary.recovered_applied_force_N[0] - 100.0) -gt 1e-7) { throw "applied force recovery failed" }
           if ($summary.free_residual_max_N -gt 1e-7) { throw "free residual trust gate failed" }
+          Get-Content .\exe_step_smoke_evidence\model_preparation.json
           Get-Content .\exe_step_smoke_evidence\summary.json
 
       - name: Smoke test deterministic verified joint demo
@@ -126,6 +140,7 @@ jobs:
           name: AsterMax-Windows-STEP-FEA-x64
           path: |
             dist/AsterMax-Windows/**
+            exe_step_smoke_evidence/model_preparation.json
             exe_step_smoke_evidence/manifest.json
             exe_step_smoke_evidence/summary.json
           if-no-files-found: error
