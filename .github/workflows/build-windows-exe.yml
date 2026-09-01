@@ -1,0 +1,53 @@
+name: Build AsterMax Windows EXE
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Build one-file executable
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --name AsterMax-PMV --collect-submodules astermax astermax_windows_entry.py
+
+      - name: Smoke test frozen executable
+        shell: pwsh
+        run: |
+          .\dist\AsterMax-PMV.exe --no-viewer --output exe_smoke_evidence
+          if (-not (Test-Path "exe_smoke_evidence\manifest.json")) { throw "manifest.json missing after EXE smoke test" }
+          if (-not (Test-Path "exe_smoke_evidence\astermax_viewer.html")) { throw "AsterMax viewer missing after EXE smoke test" }
+          if (-not (Test-Path "exe_smoke_evidence\verified_multigap_joint.vtk")) { throw "VTK evidence missing after EXE smoke test" }
+
+      - name: Record executable SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash .\dist\AsterMax-PMV.exe -Algorithm SHA256).Hash.ToLower()
+          "sha256=$hash" | Out-File -FilePath .\dist\AsterMax-PMV.sha256.txt -Encoding ascii
+          Get-Item .\dist\AsterMax-PMV.exe | Format-List Name,Length,LastWriteTime
+          Get-Content .\dist\AsterMax-PMV.sha256.txt
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-PMV-Windows-x64
+          path: |
+            dist/AsterMax-PMV.exe
+            dist/AsterMax-PMV.sha256.txt
+            exe_smoke_evidence/manifest.json
+            exe_smoke_evidence/summary.json
+          if-no-files-found: error
