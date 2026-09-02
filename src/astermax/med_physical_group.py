@@ -71,11 +71,13 @@ def write_med_with_surface_group(
     surface_group: str,
     volume_group: str = "SOLID",
 ) -> Path:
-    """Write a real MED file with a named surface physical group using Gmsh.
+    """Write a real MED file with named surface and volume groups using Gmsh.
 
-    C7.7 intentionally uses linear TET4/TRI3 as a minimal transport proof. It
-    proves physical-group persistence in MED; it does not claim production
-    TET10 export or a Code_Aster solve.
+    Every solver-relevant element is explicitly assigned to a physical group.
+    Do not enable Mesh.SaveAll here: for interchange formats such as MED, forcing
+    all elements can drop or alter physical-group metadata on round trip. The
+    contract requires the named groups themselves to be the exported ownership
+    boundary.
     """
     nodes, volume, surface = _validate_mesh(nodes_mm, tetra4, surface_tri3)
     surf_name = _validate_group_name(surface_group)
@@ -103,8 +105,6 @@ def write_med_with_surface_group(
         surface_set = set(surface_nodes)
         interior_nodes = [i for i in range(nodes.shape[0]) if i not in surface_set]
         if not interior_nodes:
-            # A tetra may have all nodes on its boundary; classify one node on
-            # the volume entity only when necessary to keep node tags unique.
             interior_nodes = [int(volume.reshape(-1)[-1])]
             surface_nodes = [i for i in surface_nodes if i != interior_nodes[0]]
 
@@ -126,7 +126,6 @@ def write_med_with_surface_group(
         gmsh.model.setPhysicalName(2, surf_phys, surf_name)
         vol_phys = gmsh.model.addPhysicalGroup(3, [volume_entity])
         gmsh.model.setPhysicalName(3, vol_phys, vol_name)
-        gmsh.option.setNumber("Mesh.SaveAll", 1)
         gmsh.write(str(path))
     except Exception as exc:
         raise MedPhysicalGroupError("MED_WRITE_FAILED") from exc
