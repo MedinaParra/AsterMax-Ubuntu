@@ -1,0 +1,62 @@
+name: Windows C8.6 Code_Aster Diagnostic Evidence Gate
+on:
+  push:
+    branches: [agent/c8-6-code-aster-diagnostic-evidence-gate]
+  workflow_dispatch:
+jobs:
+  diagnostic-evidence:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify result, runtime and diagnostic contracts
+        shell: pwsh
+        run: |
+          python -m pytest -q tests/test_code_aster_result_contract.py
+          python -m pytest -q tests/test_code_aster_wsl_runtime.py
+          python -m pytest -q tests/test_code_aster_diagnostic.py
+          python -m pytest -q tests/test_code_aster_reference_run.py
+      - name: Build qualified unsolved export witness
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import json
+          from hashlib import sha256
+          from astermax.code_aster_diagnostic import bind_message_output
+          from astermax.code_aster_result_contract import render_reference_export
+
+          root = Path('c8-6-witness')
+          root.mkdir(exist_ok=True)
+          export = root / 'astermax.export'
+          export.write_text(render_reference_export(), encoding='utf-8', newline='\n')
+          bind_message_output(export)
+          text = export.read_text(encoding='utf-8')
+          assert 'F mess astermax.mess R 6' in text
+          evidence = {
+              'increment': 'C8.6',
+              'export_sha256': sha256(export.read_bytes()).hexdigest(),
+              'message_binding_verified': True,
+              'solver_message_verified': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+          }
+          (root / 'diagnostic_contract_evidence.json').write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding='utf-8')
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.6-diagnostic-contract
+          path: |
+            c8-6-witness/astermax.export
+            c8-6-witness/diagnostic_contract_evidence.json
+          if-no-files-found: error
