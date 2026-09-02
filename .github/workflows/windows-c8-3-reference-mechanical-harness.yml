@@ -1,0 +1,31 @@
+name: Windows C8.3 Reference Mechanical Harness
+on:
+  push:
+    branches: [agent/c8-3-reference-mechanical-harness]
+  workflow_dispatch:
+jobs:
+  verify-reference-mechanics:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest pyinstaller
+      - name: Verify analytical reference oracle and evidence gates
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_mechanics.py
+      - name: Preserve Code_Aster MED semantic contract
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_med_writer.py
+      - name: Preserve Code_Aster study export solve-gate contracts
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_study.py tests/test_code_aster_export.py tests/test_code_aster_solve_gate.py
+      - name: Run full regression suite
+        shell: pwsh
+        run: python -m pytest -q
