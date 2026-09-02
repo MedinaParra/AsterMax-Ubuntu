@@ -6,6 +6,7 @@ from astermax.code_aster_result_contract import (
     CodeAsterResultContractError,
     ResultTableSpec,
     parse_reference_result_tables,
+    render_reference_export,
     render_reference_linear_static_comm,
 )
 from astermax.code_aster_study import LinearStaticStudy
@@ -33,11 +34,21 @@ def test_comm_requests_solver_fields_and_auditable_scalar_tables():
     assert "NOM_CHAM='SIGM_NOEU'" in comm
     assert "NOM_CMP='SIXX'" in comm
     assert "REFERENCE_MEAN_SIXX" in comm
-    assert "DEFI_FICHIER(ACTION='ASSOCIER', UNITE=91" in comm
-    assert "reference_displacement.table" in comm
-    assert "reference_reaction.table" in comm
-    assert "reference_stress.table" in comm
+    assert "IMPR_TABLE(TABLE=displ" in comm and "UNITE=91" in comm
+    assert "IMPR_TABLE(TABLE=reaction" in comm and "UNITE=92" in comm
+    assert "IMPR_TABLE(TABLE=stress" in comm and "UNITE=93" in comm
+    assert "DEFI_FICHIER" not in comm
     assert "NOM_CHAM=('DEPL','SIGM_ELNO','SIGM_NOEU','SIEQ_ELNO','SIEQ_NOEU','REAC_NODA')" in comm
+
+
+def test_export_binds_all_verification_files_to_logical_units():
+    export = render_reference_export()
+    assert "F comm astermax.comm D 1" in export
+    assert "F libr astermax.med D 20" in export
+    assert "F rmed astermax_result.med R 80" in export
+    assert "F libr reference_displacement.table R 91" in export
+    assert "F libr reference_reaction.table R 92" in export
+    assert "F libr reference_stress.table R 93" in export
 
 
 def test_table_contract_rejects_reserved_or_duplicate_units():
