@@ -62,6 +62,28 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _add_named_physical_group(gmsh, dim: int, entities: list[int], name: str) -> int:
+    """Create the physical group and its name atomically, then prove Gmsh owns it.
+
+    Gmsh's MED writer serializes each entity's physical membership by looking up
+    getPhysicalName().  A nameless membership is therefore not good enough for
+    Code_Aster GROUP_MA provenance: fail before writing instead of emitting a
+    numeric-only MED family.
+    """
+    try:
+        tag = int(gmsh.model.addPhysicalGroup(dim, entities, -1, name))
+    except TypeError:
+        # Compatibility fallback for older Python bindings, still verified below.
+        tag = int(gmsh.model.addPhysicalGroup(dim, entities))
+        gmsh.model.setPhysicalName(dim, tag, name)
+    if gmsh.model.getPhysicalName(dim, tag) != name:
+        raise MedPhysicalGroupError("MED_PHYSICAL_NAME_BINDING_FAILED")
+    owned = [int(v) for v in gmsh.model.getPhysicalGroupsForEntity(dim, int(entities[0]))]
+    if tag not in owned:
+        raise MedPhysicalGroupError("MED_PHYSICAL_ENTITY_OWNERSHIP_FAILED")
+    return tag
+
+
 def write_med_with_surface_group(
     destination: str | Path,
     *,
@@ -73,11 +95,10 @@ def write_med_with_surface_group(
 ) -> Path:
     """Write a real MED file with named surface and volume groups using Gmsh.
 
-    Every solver-relevant element is explicitly assigned to a physical group.
-    Do not enable Mesh.SaveAll here: for interchange formats such as MED, forcing
-    all elements can drop or alter physical-group metadata on round trip. The
-    contract requires the named groups themselves to be the exported ownership
-    boundary.
+    Every solver-relevant element is explicitly assigned to a named physical
+    group.  Names are bound and verified before export because Code_Aster rebuilds
+    GROUP_MA from MED families/groups; numeric family membership alone is not a
+    sufficient solver contract.
     """
     nodes, volume, surface = _validate_mesh(nodes_mm, tetra4, surface_tri3)
     surf_name = _validate_group_name(surface_group)
@@ -122,11 +143,11 @@ def write_med_with_surface_group(
         gmsh.model.mesh.addElementsByType(surface_entity, 2, tri_tags, (surface + 1).reshape(-1).tolist())
         gmsh.model.mesh.addElementsByType(volume_entity, 4, tet_tags, (volume + 1).reshape(-1).tolist())
 
-        surf_phys = gmsh.model.addPhysicalGroup(2, [surface_entity])
-        gmsh.model.setPhysicalName(2, surf_phys, surf_name)
-        vol_phys = gmsh.model.addPhysicalGroup(3, [volume_entity])
-        gmsh.model.setPhysicalName(3, vol_phys, vol_name)
+        _add_named_physical_group(gmsh, 2, [surface_entity], surf_name)
+        _add_named_physical_group(gmsh, 3, [volume_entity], vol_name)
         gmsh.write(str(path))
+    except MedPhysicalGroupError:
+        raise
     except Exception as exc:
         raise MedPhysicalGroupError("MED_WRITE_FAILED") from exc
     finally:
