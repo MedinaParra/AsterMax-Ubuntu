@@ -7,10 +7,16 @@ name = "astermax-pmv"
 version = "0.6.2"
 description = "AsterMax Mechanical evidence-native finite-element Windows PMV"
 requires-python = ">=3.11"
-dependencies = ["numpy>=2.0,<3", "scipy>=1.14,<2", "gmsh==4.13.1"]
+dependencies = [
+  "numpy>=2.0,<3",
+  "scipy>=1.14,<2",
+  "gmsh==4.13.1",
+  "meshio==5.3.5",
+  "h5py>=3.11,<4",
+]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
+test = ["pytest>=8,<10"]
 
 [project.scripts]
 astermax = "astermax.windows_shell:windows_desktop_main"
