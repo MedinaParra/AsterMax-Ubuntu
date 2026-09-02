@@ -1,0 +1,46 @@
+name: Windows C8.3 Code_Aster Reference Mechanical Harness
+on:
+  push:
+    branches: [agent/c8-3-code-aster-reference-mechanical-harness]
+  workflow_dispatch:
+jobs:
+  verify-reference-mechanics:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax and harness dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify Code_Aster MED semantics
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_med_writer.py
+      - name: Verify analytical reference mechanics harness
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_harness.py
+      - name: Generate real TET10/TRI6 reference solver bundle
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          from astermax.code_aster_reference_harness import UniaxialPrismSpec, prepare_reference_solver_bundle
+          evidence = prepare_reference_solver_bundle(UniaxialPrismSpec(mesh_size_mm=20.0), Path('reference-bundle'))
+          print(evidence)
+          assert evidence['fea_solve_executed'] is False
+          assert evidence['numerical_verification'] is False
+          assert evidence['results_verified'] is False
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.3-reference-mechanical-bundle
+          path: |
+            reference-bundle/astermax.med
+            reference-bundle/astermax.comm
+            reference-bundle/reference_case_evidence.json
+          if-no-files-found: error
