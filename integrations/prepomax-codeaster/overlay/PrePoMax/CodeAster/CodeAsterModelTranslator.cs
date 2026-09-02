@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using CaeGlobals;
 using CaeModel;
 using CaeMesh;
 
@@ -22,12 +23,6 @@ namespace PrePoMax.CodeAster
         }
     }
 
-    /// <summary>
-    /// Semantic adapter from the PrePoMax object model to a Code_Aster command study.
-    /// Phase 1 covers linear 3-D solid statics, elastic materials, fixed/prescribed
-    /// displacement BCs, nodal forces, pressure and gravity. Unsupported entities are
-    /// reported explicitly instead of being silently approximated.
-    /// </summary>
     public static class CodeAsterModelTranslator
     {
         public static CodeAsterTranslationResult WriteStudy(FeModel model, CodeAsterCaseOptions options)
