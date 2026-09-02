@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 import json
 
+from .code_aster_diagnostic import verify_code_aster_message
 from .code_aster_reference_harness import (
     ReferenceObservedMetrics,
     UniaxialPrismSpec,
@@ -42,11 +43,14 @@ class GenuineReferenceSolveEvidence:
     command_sha256: str
     input_med_sha256: str
     result_med_sha256: str
+    message_sha256: str
     displacement_table_sha256: str
     reaction_table_sha256: str
     stress_table_sha256: str
     solver_stdout_sha256: str
     returncode: int
+    message_diagnostic_ok: bool
+    message_execution_exit_code: int | None
     fea_solve_executed: bool
     numerical_verification: bool
     results_verified: bool
@@ -64,32 +68,44 @@ def execute_and_verify_reference_wsl(
     directory: str | Path,
     *,
     tables: ResultTableSpec | None = None,
+    message_filename: str = "astermax.mess",
     timeout_s: float = 300.0,
 ) -> GenuineReferenceSolveEvidence:
-    """Run the reference study through real WSL2 Code_Aster and verify mechanics.
+    """Run a WSL2 Code_Aster reference study and verify solver plus mechanics.
 
-    This is the only C8.5 path allowed to emit fea_solve_executed=True. It first
-    probes the real WSL distribution/run_aster identity, rejects stale outputs,
-    executes the .export study, requires all result files, then compares scalar
-    evidence against the closed-form uniaxial solution.
+    A successful process exit is necessary but not sufficient. C8.6 additionally
+    requires a fresh Code_Aster message file with an explicit successful solver
+    diagnostic, a fresh result MED, three fresh scalar evidence tables, and the
+    analytical displacement/reaction/stress checks. Only this combined gate may
+    emit fea_solve_executed=True for the reference case.
     """
     spec.validate()
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         raise CodeAsterReferenceRunError("REFERENCE_RUN_DIRECTORY_NOT_FOUND")
+    if Path(message_filename).name != message_filename or not message_filename.lower().endswith(".mess"):
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_MESSAGE_FILENAME_INVALID")
 
     export = _require(root / "astermax.export", "REFERENCE_RUN_EXPORT_MISSING")
     command = _require(root / "astermax.comm", "REFERENCE_RUN_COMMAND_MISSING")
     input_med = _require(root / "astermax.med", "REFERENCE_RUN_INPUT_MED_MISSING")
     result_med = root / "astermax_result.med"
+    message = root / message_filename
     table_spec = tables or ResultTableSpec()
     table_spec.validate()
     displacement = root / table_spec.displacement_filename
     reaction = root / table_spec.reaction_filename
     stress = root / table_spec.stress_filename
-    outputs = (result_med, displacement, reaction, stress)
+    outputs = (result_med, message, displacement, reaction, stress)
     if any(path.exists() for path in outputs):
         raise CodeAsterReferenceRunError("REFERENCE_RUN_STALE_OUTPUT_PRESENT")
+
+    # The explicit F mess binding prevents a launcher stdout-only success from
+    # being treated as durable solver evidence.
+    export_text = export.read_text(encoding="utf-8", errors="strict")
+    expected_binding = f"F mess {message_filename} R 6"
+    if expected_binding not in {line.strip() for line in export_text.splitlines()}:
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_MESSAGE_BINDING_MISSING")
 
     probe_wsl_runtime(runtime, timeout_s=min(timeout_s, 30.0))
     workdir_linux = windows_path_to_wsl(runtime, root, timeout_s=min(timeout_s, 30.0))
@@ -101,12 +117,14 @@ def execute_and_verify_reference_wsl(
 
     for path, code in (
         (result_med, "REFERENCE_RUN_RESULT_MED_MISSING"),
+        (message, "REFERENCE_RUN_MESSAGE_MISSING"),
         (displacement, "REFERENCE_RUN_DISPLACEMENT_TABLE_MISSING"),
         (reaction, "REFERENCE_RUN_REACTION_TABLE_MISSING"),
         (stress, "REFERENCE_RUN_STRESS_TABLE_MISSING"),
     ):
         _require(path, code)
 
+    diagnostic = verify_code_aster_message(message)
     parsed = parse_reference_result_tables(displacement, reaction, stress)
     observed = ReferenceObservedMetrics(
         load_face_mean_ux_mm=parsed.load_face_mean_ux_mm,
@@ -115,6 +133,8 @@ def execute_and_verify_reference_wsl(
     )
     verified = verify_uniaxial_reference_results(spec, observed, fea_solve_executed=True)
 
+    # fea_solve_executed means both launcher success and a positive durable
+    # Code_Aster diagnostic. results_verified remains the stricter mechanics gate.
     return GenuineReferenceSolveEvidence(
         engine_kind=runtime.engine_kind,
         distribution=runtime.distribution,
@@ -122,11 +142,14 @@ def execute_and_verify_reference_wsl(
         command_sha256=_sha(command),
         input_med_sha256=_sha(input_med),
         result_med_sha256=_sha(result_med),
+        message_sha256=diagnostic.sha256,
         displacement_table_sha256=_sha(displacement),
         reaction_table_sha256=_sha(reaction),
         stress_table_sha256=_sha(stress),
         solver_stdout_sha256=sha256(combined.encode("utf-8", errors="replace")).hexdigest(),
         returncode=completed.returncode,
+        message_diagnostic_ok=diagnostic.diagnostic_ok,
+        message_execution_exit_code=diagnostic.execution_exit_code,
         fea_solve_executed=True,
         numerical_verification=verified.numerical_verification,
         results_verified=verified.results_verified,
