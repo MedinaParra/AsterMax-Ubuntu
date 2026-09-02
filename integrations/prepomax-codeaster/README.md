@@ -6,7 +6,7 @@ This directory contains the first integration layer for running Code_Aster from 
 
 - Repository: `tsvilans/PrePoMax`
 - Branch: `master`
-- Pinned commit: `728878efac852da5b988eeb65385eb2249611eb6`
+- Pinned commit: `3669e65581650e5d9d868aa761db9efd856f8571`
 - License: GPL-3.0 (the integration must remain license-compatible when distributed with PrePoMax-derived code)
 
 The user repository does not currently contain a writable fork of `tsvilans/PrePoMax`, therefore this branch stores a reproducible overlay/patch. `tools/bootstrap.py` checks out the pinned upstream revision and applies this integration locally.
@@ -34,17 +34,20 @@ PrePoMax model / mesh / GUI
 
 - `AnalysisSolverTypeEnum`: `Calculix` or `CodeAster`.
 - Code_Aster settings model (`as_run`, Python/catalog interpreter, work directory, CPU/memory/time limits, version and environment variables).
+- Global `SettingsContainer.CodeAster` section with backward-compatible loading of old settings files.
 - Code_Aster job file generator for `.export` and `.comm`.
+- `AnalysisJob` execution semantics for `.comm/.export/.mess/.rmed`, while retaining `.inp/.sta/.cvg/.frd` for CalculiX.
 - Dynamic Code_Aster command catalog discovery from the installed `code_aster.Cata.Commands` package.
-- Searchable WinForms command-catalog window for the PrePoMax GUI.
-- Idempotent source patcher that adds the solver selector to the Analysis property grid and makes `AnalysisJob` execute either CalculiX or Code_Aster conventions.
-- Bootstrap script pinned to the reviewed PrePoMax commit.
+- Searchable WinForms command-catalog window available from the Analysis property-grid context menu.
+- Solver selector, CPU count and Code_Aster resource limits exposed in the Analysis property grid.
+- Automatic switch of executable/arguments/work directory/resource values when `Analysis solver` changes.
+- Idempotent source patcher and bootstrap script pinned to the reviewed PrePoMax commit.
 
 ## Code_Aster command coverage
 
 The catalog is **not hard-coded** to one Code_Aster release. `scripts/codeaster_catalog.py` queries the actual installed package and returns the available command modules as JSON. This means the GUI can expose commands present in the user's installed Code_Aster version, including future additions.
 
-The integration also tags common mechanical workflows as first-class groups:
+The integration also recognizes the common mechanical workflow operators:
 
 - Study: `DEBUT`, `POURSUITE`, `FIN`
 - Mesh/model: `LIRE_MAILLAGE`, `ASSE_MAILLAGE`, `MODI_MAILLAGE`, `AFFE_MODELE`
@@ -62,21 +65,23 @@ Everything else discovered in the installed catalog remains available through th
 
 ## Bootstrap
 
-Prerequisites: Git, Python 3, Visual Studio 2022 with the .NET Framework toolchain required by PrePoMax, and a working Code_Aster installation (`as_run`).
+Prerequisites: Git, Python 3, Visual Studio with the .NET Framework toolchain required by this PrePoMax revision, and a working Code_Aster installation (`as_run`).
 
 ```bash
 cd integrations/prepomax-codeaster
 python tools/bootstrap.py --destination ../../build/PrePoMax-CodeAster
 ```
 
-To point the generated PrePoMax tree at a specific Code_Aster installation, configure the executable in the Analysis job property grid (`Analysis solver = CodeAster`, `Executable = .../as_run`) or wire the settings class into the global settings UI.
+After building the patched source, configure the `Code_Aster` section in PrePoMax Settings. In an Analysis job choose `Analysis solver = CodeAster`. The GUI then switches the job to the configured `as_run`, working directory, CPU, memory, time-limit and version values.
+
+The Analysis property-grid context menu contains `Code_Aster command catalog...`. It runs the catalog helper with the configured Code_Aster Python interpreter and displays the operators actually available in that installation.
 
 ## Execution semantics
 
 CalculiX remains:
 
 ```text
-ccx -i <job-name>
+ccx <existing PrePoMax argument convention>
 ```
 
 Code_Aster becomes:
@@ -85,13 +90,13 @@ Code_Aster becomes:
 as_run <job-name>.export
 ```
 
-A Code_Aster job is considered to have produced a native result when `<job-name>.rmed` exists. Its diagnostic output is read from `<job-name>.mess`.
+The runner generates the `.export` study definition from the selected job settings. A Code_Aster job is considered to have produced a native result when `<job-name>.rmed` exists. Live/diagnostic status is read from `<job-name>.mess`; fatal Code_Aster diagnostics are treated separately from CalculiX `*ERROR` output.
 
 ## Important current boundary
 
-This milestone makes the **GUI/job runner, Code_Aster case files and command catalog** real. Native PrePoMax post-processing is still FRD-oriented. Code_Aster produces MED/RMED, so visualizing Code_Aster fields inside the existing PrePoMax result tree requires the next adapter: `RMED -> CaeResults` (preferred) or a controlled conversion layer. The integration deliberately does not fake FRD results.
+This milestone makes the **GUI selection/settings, Code_Aster runner semantics, study files and dynamic command catalog** real. Native PrePoMax post-processing is still FRD-oriented. Code_Aster produces MED/RMED, so visualizing Code_Aster fields inside the existing PrePoMax result tree requires the next adapter: `RMED -> CaeResults` (preferred) or a controlled conversion layer. The integration deliberately does not fake FRD results.
 
-Similarly, a full semantic translation of every PrePoMax load/material/contact/step object into every Code_Aster operator is larger than a one-to-one keyword swap. The included `.comm` builder supports a valid 3D linear-static skeleton and an advanced raw-command body; additional translators should be added by object type while keeping the catalog available for unsupported commands.
+A full semantic translation of every PrePoMax material/load/contact/step object into every Code_Aster operator is also larger than a keyword substitution. The included `.comm` builder supports a real 3D elastic linear-static study plus an advanced raw-command body. Additional translators should be added by PrePoMax object type while the dynamic catalog keeps all installed Code_Aster commands discoverable.
 
 ## Design rule
 
