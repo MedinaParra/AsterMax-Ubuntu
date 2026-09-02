@@ -24,9 +24,9 @@ namespace PrePoMax.CodeAster
     }
 
     /// <summary>
-    /// Writes the Code_Aster files owned by the solver adapter. Mesh creation
-    /// is deliberately separate: the .med file must be produced by the mesh
-    /// adapter before the job is submitted.
+    /// Writes the Code_Aster command/export files owned by the solver adapter.
+    /// The model adapter writes a native ASTER .mail input mesh; MED is retained
+    /// as the result format (.rmed) for post-processing interoperability.
     /// </summary>
     public static class CodeAsterCaseWriter
     {
@@ -43,7 +43,7 @@ namespace PrePoMax.CodeAster
             sb.AppendLine("P memory_limit " + Math.Max(256, options.MemoryMB).ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("P ncpus " + Math.Max(1, options.NumCpus).ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("F comm " + options.JobName + ".comm D 1");
-            sb.AppendLine("F mmed " + options.JobName + ".med D 20");
+            sb.AppendLine("F libr " + options.JobName + ".mail D 20");
             sb.AppendLine("F mess " + options.JobName + ".mess R 6");
             sb.AppendLine("F rmed " + options.JobName + ".rmed R 80");
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
@@ -63,8 +63,8 @@ namespace PrePoMax.CodeAster
         }
 
         /// <summary>
-        /// Writes a minimal, valid 3D elastic static study. Group names refer
-        /// to groups present in the MED mesh.
+        /// Writes a minimal 3D elastic static study for adapter smoke tests.
+        /// Group names refer to groups present in the ASTER .mail mesh.
         /// </summary>
         public static string WriteLinearStatic3D(CodeAsterCaseOptions options,
                                                   double youngModulus,
@@ -86,19 +86,19 @@ namespace PrePoMax.CodeAster
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("DEBUT()");
             sb.AppendLine();
-            sb.AppendLine("mesh = LIRE_MAILLAGE(FORMAT='MED', UNITE=20)");
+            sb.AppendLine("mesh = LIRE_MAILLAGE(FORMAT='ASTER', UNITE=20)");
             sb.AppendLine("model = AFFE_MODELE(");
             sb.AppendLine("    MAILLAGE=mesh,");
-            sb.AppendLine("    AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'))");
+            sb.AppendLine("    AFFE=_F(GROUP_MA='VOLUME_ALL', PHENOMENE='MECANIQUE', MODELISATION='3D'))");
             sb.AppendLine();
             sb.AppendLine("material = DEFI_MATERIAU(ELAS=_F(E=" + e + ", NU=" + nu + "))");
             sb.AppendLine("material_field = AFFE_MATERIAU(");
             sb.AppendLine("    MAILLAGE=mesh,");
-            sb.AppendLine("    AFFE=_F(TOUT='OUI', MATER=material))");
+            sb.AppendLine("    AFFE=_F(GROUP_MA='VOLUME_ALL', MATER=material))");
             sb.AppendLine();
             sb.AppendLine("load = AFFE_CHAR_MECA(");
             sb.AppendLine("    MODELE=model,");
-            sb.AppendLine("    DDL_IMPO=_F(GROUP_MA='" + EscapeAster(fixedGroup) + "', DX=0.0, DY=0.0, DZ=0.0),");
+            sb.AppendLine("    DDL_IMPO=_F(GROUP_NO='" + EscapeAster(fixedGroup) + "', DX=0.0, DY=0.0, DZ=0.0),");
             sb.AppendLine("    PRES_REP=_F(GROUP_MA='" + EscapeAster(pressureGroup) + "', PRES=" + p + "))");
             sb.AppendLine();
             sb.AppendLine("result = MECA_STATIQUE(");
@@ -110,9 +110,13 @@ namespace PrePoMax.CodeAster
             sb.AppendLine("    reuse=result,");
             sb.AppendLine("    RESULTAT=result,");
             sb.AppendLine("    CONTRAINTE=('SIGM_ELNO', 'SIGM_NOEU'),");
-            sb.AppendLine("    DEFORMATION=('EPSI_ELNO', 'EPSI_NOEU'))");
+            sb.AppendLine("    DEFORMATION=('EPSI_ELNO', 'EPSI_NOEU'),");
+            sb.AppendLine("    CRITERES=('SIEQ_ELNO', 'SIEQ_NOEU'))");
             sb.AppendLine();
-            sb.AppendLine("IMPR_RESU(FORMAT='MED', UNITE=80, RESU=_F(RESULTAT=result))");
+            sb.AppendLine("IMPR_RESU(");
+            sb.AppendLine("    FORMAT='MED', UNITE=80,");
+            sb.AppendLine("    RESU=_F(MAILLAGE=mesh, RESULTAT=result,");
+            sb.AppendLine("            NOM_CHAM=('DEPL', 'SIGM_NOEU', 'SIEQ_NOEU', 'EPSI_NOEU'), TOUT_ORDRE='OUI'))");
             sb.AppendLine();
             sb.AppendLine("FIN()");
 
