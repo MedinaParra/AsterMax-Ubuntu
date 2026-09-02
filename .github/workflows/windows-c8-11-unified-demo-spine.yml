@@ -2,6 +2,7 @@ name: Windows C8.11 Unified Demo Spine
 
 on:
   push:
+    branches: [agent/c8-11-unified-capability-results-spine]
     paths:
       - 'src/astermax/demo_readiness.py'
       - 'src/astermax/code_aster_capabilities.py'
@@ -23,6 +24,7 @@ on:
       - 'src/astermax/professional_postprocess.py'
       - 'tests/test_c8_11_demo_readiness.py'
       - '.github/workflows/windows-c8-11-unified-demo-spine.yml'
+  workflow_dispatch:
 
 concurrency:
   group: c8-11-${{ github.ref }}
@@ -30,15 +32,21 @@ concurrency:
 
 jobs:
   contract:
-    runs-on: windows-latest
+    runs-on: windows-2025
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install PMV
-        run: python -m pip install -e .
+      - name: Install PMV and test harness
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
       - name: Verify integration contracts
+        shell: pwsh
         run: >-
           python -m pytest -q
           tests/test_code_aster_capabilities.py
