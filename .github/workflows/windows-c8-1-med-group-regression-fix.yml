@@ -16,7 +16,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install pytest pyinstaller
+          python -m pip install pytest pyinstaller h5py
+      - name: Diagnose MED round trip
+        shell: pwsh
+        run: python tools/diagnose_med_roundtrip.py
       - name: Run MED regression witnesses
         shell: pwsh
         run: python -m pytest -q tests/test_med_physical_group.py tests/test_med_quadratic_provenance.py
