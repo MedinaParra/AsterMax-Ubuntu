@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 
 import h5py
+import meshio
 import numpy as np
 import gmsh
 
@@ -45,6 +46,15 @@ def main() -> int:
                     print("ENTITY_NAME_ERROR", dim, tag, repr(exc))
     finally:
         gmsh.finalize()
+
+    try:
+        mesh = meshio.read(med, file_format="med")
+        print("MESHIO_CELLS", [(block.type, len(block.data)) for block in mesh.cells])
+        print("MESHIO_CELL_DATA_KEYS", sorted(mesh.cell_data.keys()))
+        print("MESHIO_CELL_SETS", {name: [None if part is None else np.asarray(part).tolist() for part in parts] for name, parts in mesh.cell_sets.items()})
+        print("MESHIO_FIELD_DATA", mesh.field_data)
+    except Exception as exc:
+        print("MESHIO_ERROR", type(exc).__name__, str(exc))
 
     print("HDF5_BEGIN")
     with h5py.File(med, "r") as handle:
