@@ -1,0 +1,62 @@
+name: Windows C8.4 Code_Aster Result Contract
+on:
+  push:
+    branches: [agent/c8-4-code-aster-result-extraction-contract]
+  workflow_dispatch:
+jobs:
+  verify-result-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify MED and analytical mechanics contracts
+        shell: pwsh
+        run: |
+          python -m pytest -q tests/test_code_aster_med_writer.py tests/test_code_aster_reference_harness.py
+      - name: Verify Code_Aster result extraction contract
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_result_contract.py
+      - name: Generate C8.4 auditable reference comm
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path c8-4-evidence | Out-Null
+          @'
+          from pathlib import Path
+          import json
+          from hashlib import sha256
+          from astermax.code_aster_study import LinearStaticStudy
+          from astermax.code_aster_result_contract import render_reference_linear_static_comm
+          study = LinearStaticStudy(
+              mesh_filename='astermax.med', support_group='FIXED_FACE', load_group='LOAD_FACE',
+              young_mpa=210000.0, poisson=0.0, traction_mpa=(50.0, 0.0, 0.0))
+          text = render_reference_linear_static_comm(study, volume_group='SOLID')
+          path = Path('c8-4-evidence/reference_with_result_contract.comm')
+          path.write_text(text, encoding='utf-8', newline='\n')
+          evidence = {
+              'comm_sha256': sha256(path.read_bytes()).hexdigest(),
+              'requested_fields': ['DEPL','SIGM_ELNO','SIGM_NOEU','SIEQ_ELNO','SIEQ_NOEU','REAC_NODA'],
+              'scalar_outputs': ['LOAD_FACE_MEAN_UX','SUPPORT_REACTION_RESULTANT','REFERENCE_MEAN_SIXX'],
+              'stress_metric_scope': 'UNIFORM_UNIAXIAL_REFERENCE_ONLY',
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+          }
+          Path('c8-4-evidence/result_contract_evidence.json').write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding='utf-8')
+          print(evidence)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.4-result-contract-evidence
+          path: |
+            c8-4-evidence/reference_with_result_contract.comm
+            c8-4-evidence/result_contract_evidence.json
+          if-no-files-found: error
