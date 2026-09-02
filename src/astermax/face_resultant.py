@@ -66,6 +66,12 @@ def bind_force_resultant_to_uniform_traction(
     *,
     atol_n: float = 1.0e-10,
 ) -> FaceResultantBinding:
+    """Convert a requested total face force [N] to uniform vector traction [N/mm^2].
+
+    The preservation gate is evaluated over the exact triangulated face supplied
+    by the caller. It does not claim that the triangulation area equals the exact
+    analytic CAD surface area; that CAD/mesh association remains a separate gate.
+    """
     area = triangulated_face_area_mm2(nodes_mm, triangles)
     force = np.asarray(force_n, dtype=float)
     if force.shape != (3,) or not np.isfinite(force).all():
@@ -91,3 +97,30 @@ def bind_force_resultant_to_uniform_traction(
         residual_n=tuple(float(v) for v in residual),
         residual_norm_n=residual_norm,
     )
+
+
+def build_code_aster_study_from_face_resultant(
+    *,
+    mesh_filename: str,
+    support_group: str,
+    load_group: str,
+    young_mpa: float,
+    poisson: float,
+    face_nodes_mm: np.ndarray,
+    face_triangles: np.ndarray,
+    force_n: tuple[float, float, float] | list[float] | np.ndarray,
+):
+    """Build the C7.4 study only after the total-force preservation gate passes."""
+    from .code_aster_study import LinearStaticStudy
+
+    binding = bind_force_resultant_to_uniform_traction(face_nodes_mm, face_triangles, force_n)
+    study = LinearStaticStudy(
+        mesh_filename=mesh_filename,
+        support_group=support_group,
+        load_group=load_group,
+        young_mpa=young_mpa,
+        poisson=poisson,
+        traction_mpa=binding.traction_n_per_mm2,
+    )
+    study.validate()
+    return study, binding
