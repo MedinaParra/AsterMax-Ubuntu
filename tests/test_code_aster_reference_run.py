@@ -16,7 +16,10 @@ def runtime():
 
 
 def make_inputs(root: Path):
-    (root / "astermax.export").write_text("F comm astermax.comm D 1\n", encoding="utf-8")
+    (root / "astermax.export").write_text(
+        "F comm astermax.comm D 1\nF mess astermax.mess R 6\n",
+        encoding="utf-8",
+    )
     (root / "astermax.comm").write_text("DEBUT()\nFIN()\n", encoding="utf-8")
     (root / "astermax.med").write_bytes(b"MED-input-witness")
 
@@ -26,6 +29,14 @@ def test_stale_output_is_rejected_before_any_runtime_call(tmp_path: Path, monkey
     (tmp_path / "astermax_result.med").write_bytes(b"old")
     monkeypatch.setattr("astermax.code_aster_reference_run.probe_wsl_runtime", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not probe")))
     with pytest.raises(CodeAsterReferenceRunError, match="STALE_OUTPUT"):
+        execute_and_verify_reference_wsl(runtime(), UniaxialPrismSpec(), tmp_path)
+
+
+def test_message_binding_is_required_before_runtime_call(tmp_path: Path, monkeypatch):
+    make_inputs(tmp_path)
+    (tmp_path / "astermax.export").write_text("F comm astermax.comm D 1\n", encoding="utf-8")
+    monkeypatch.setattr("astermax.code_aster_reference_run.probe_wsl_runtime", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not probe")))
+    with pytest.raises(CodeAsterReferenceRunError, match="MESSAGE_BINDING_MISSING"):
         execute_and_verify_reference_wsl(runtime(), UniaxialPrismSpec(), tmp_path)
 
 
@@ -50,6 +61,10 @@ def test_process_double_only_exercises_gate_semantics(tmp_path: Path, monkeypatc
 
     def fake_run(command, *, timeout_s):
         (tmp_path / "astermax_result.med").write_bytes(b"PROCESS-DOUBLE-NOT-SOLVER-EVIDENCE")
+        (tmp_path / "astermax.mess").write_text(
+            "EXECUTION_CODE_ASTER_EXIT_12345=0\n<INFO> Code_Aster run ended, diagnostic : OK\n",
+            encoding="utf-8",
+        )
         (tmp_path / "reference_displacement.table").write_text("MOYENNE;\n2.500000000000E-02;\n", encoding="utf-8")
         (tmp_path / "reference_reaction.table").write_text("RESULT_X;\n-1.000000000000E+04;\n", encoding="utf-8")
         (tmp_path / "reference_stress.table").write_text("MOYENNE;\n5.000000000000E+01;\n", encoding="utf-8")
@@ -57,6 +72,8 @@ def test_process_double_only_exercises_gate_semantics(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr("astermax.code_aster_reference_run._run", fake_run)
     ev = execute_and_verify_reference_wsl(runtime(), spec, tmp_path)
+    assert ev.message_diagnostic_ok is True
+    assert ev.message_execution_exit_code == 0
     assert ev.fea_solve_executed is True
     assert ev.numerical_verification is True
     assert ev.results_verified is True
