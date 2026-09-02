@@ -23,11 +23,6 @@ namespace PrePoMax.CodeAster
         }
     }
 
-    /// <summary>
-    /// Writes the Code_Aster command/export files owned by the solver adapter.
-    /// The model adapter writes a native ASTER .mail input mesh; MED is retained
-    /// as the result format (.rmed) for post-processing interoperability.
-    /// </summary>
     public static class CodeAsterCaseWriter
     {
         public static string WriteExport(CodeAsterCaseOptions options)
@@ -62,10 +57,6 @@ namespace PrePoMax.CodeAster
             return path;
         }
 
-        /// <summary>
-        /// Writes a minimal 3D elastic static study for adapter smoke tests.
-        /// Group names refer to groups present in the ASTER .mail mesh.
-        /// </summary>
         public static string WriteLinearStatic3D(CodeAsterCaseOptions options,
                                                   double youngModulus,
                                                   double poissonRatio,
@@ -89,7 +80,7 @@ namespace PrePoMax.CodeAster
             sb.AppendLine("mesh = LIRE_MAILLAGE(FORMAT='ASTER', UNITE=20)");
             sb.AppendLine("model = AFFE_MODELE(");
             sb.AppendLine("    MAILLAGE=mesh,");
-            sb.AppendLine("    AFFE=_F(GROUP_MA='VOLUME_ALL', PHENOMENE='MECANIQUE', MODELISATION='3D'))");
+            sb.AppendLine("    AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'))");
             sb.AppendLine();
             sb.AppendLine("material = DEFI_MATERIAU(ELAS=_F(E=" + e + ", NU=" + nu + "))");
             sb.AppendLine("material_field = AFFE_MATERIAU(");
