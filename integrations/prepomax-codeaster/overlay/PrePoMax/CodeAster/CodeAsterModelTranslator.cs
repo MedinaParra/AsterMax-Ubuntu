@@ -74,7 +74,11 @@ namespace PrePoMax.CodeAster
             sb.AppendLine("mesh = LIRE_MAILLAGE(FORMAT='ASTER', UNITE=20)");
             sb.AppendLine("model = AFFE_MODELE(");
             sb.AppendLine("    MAILLAGE=mesh,");
-            sb.AppendLine("    AFFE=_F(GROUP_MA='" + Aster(map.VolumeGroup) + "', PHENOMENE='MECANIQUE', MODELISATION='3D'))");
+            // Surface skin elements must be part of the model support for PRES_REP/FORCE_FACE.
+            // With MODELISATION='3D', Code_Aster uses those lower-dimensional cells as the
+            // boundary support of adjacent 3-D volume elements; material assignment remains
+            // restricted to the volume section groups below.
+            sb.AppendLine("    AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'))");
             sb.AppendLine();
 
             Dictionary<string, string> materialVariables = WriteMaterials(sb, model, warnings);
@@ -316,6 +320,8 @@ namespace PrePoMax.CodeAster
                 GravityLoad gravity = load as GravityLoad;
                 if (gravity != null)
                 {
+                    if (blocks.Gravity.Count > 0)
+                        throw new NotSupportedException("Code_Aster phase 1 supports one active GravityLoad per static step. Multiple gravity fields require separate AFFE_CHAR_MECA charges.");
                     double norm = Math.Sqrt(gravity.F1 * gravity.F1 + gravity.F2 * gravity.F2 + gravity.F3 * gravity.F3);
                     if (norm <= 0) continue;
                     string group = map.ResolveElementGroup(gravity.RegionName);
