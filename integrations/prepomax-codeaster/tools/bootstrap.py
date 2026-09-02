@@ -33,6 +33,7 @@ def main():
     run(["git", "checkout", UPSTREAM_SHA], cwd=destination)
     run(["git", "submodule", "update", "--init", "--recursive"], cwd=destination)
     run([sys.executable, HERE / "apply_overlay.py", destination])
+    run([sys.executable, HERE / "apply_model_translation.py", destination])
 
     print()
     print("Prepared:", destination)
