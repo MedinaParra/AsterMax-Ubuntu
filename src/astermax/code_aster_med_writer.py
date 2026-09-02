@@ -14,7 +14,9 @@ class CodeAsterMedWriterError(RuntimeError):
     pass
 
 
-_GROUP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,31}$")
+# Code_Aster catalog keywords GROUP_MA/GROUP_NO accept strings of length <= 24.
+# Keep the MED-side contract at the solver limit instead of the broader MED limit.
+_GROUP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,23}$")
 
 
 @dataclass(frozen=True)
@@ -134,11 +136,11 @@ def write_code_aster_med(
 ) -> Path:
     """Write a MED file with explicit MED family/group semantics for Code_Aster.
 
-    Unlike Gmsh's MED round-trip in the current PMV toolchain, this writer emits
-    the MED FAS/ELEME family table and GRO/NOM group names directly through
-    meshio's MED backend. Those MED group names are the semantics consumed by
-    Code_Aster LIRE_MAILLAGE; no generated Gmsh entity/family name is treated as
-    equivalent to the user's CAD/BC semantic name.
+    This implementation intentionally targets meshio 5.3.5's MED backend, whose
+    writer serializes ``mesh.cell_data['cell_tags']`` into element FAM datasets
+    and ``mesh.cell_tags`` into FAS/<mesh>/ELEME family/group names. The exact
+    meshio version is pinned in pyproject.toml because this is an external file
+    format contract, not a generic convenience dependency.
     """
     nodes, tet, support, load = _validate(nodes_mm, tet10, support_tri6, load_tri6)
     fixed_name, load_name, solid_name = _name(support_group), _name(load_group), _name(volume_group)
@@ -151,8 +153,6 @@ def write_code_aster_med(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     surface = np.vstack((support, load))
-    # MED family identifiers for elements are conventionally negative. Each
-    # family contains exactly one AsterMax solver semantic in this PMV gate.
     fixed_family, load_family, solid_family = -1, -2, -3
     surface_tags = np.concatenate((
         np.full(support.shape[0], fixed_family, dtype=np.int64),
@@ -165,8 +165,6 @@ def write_code_aster_med(
         cells=[("triangle6", surface), ("tetra10", tet)],
         cell_data={"cell_tags": [surface_tags, volume_tags]},
     )
-    # meshio's MED backend stores these in FAS/<mesh>/ELEME/.../GRO/NOM and
-    # connects them to the per-element FAM datasets above.
     mesh.cell_tags = {
         fixed_family: [fixed_name],
         load_family: [load_name],
