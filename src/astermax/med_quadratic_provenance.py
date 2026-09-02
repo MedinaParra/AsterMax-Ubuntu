@@ -83,6 +83,20 @@ def _validate(nodes_mm: np.ndarray, tet10: np.ndarray, tri6: np.ndarray) -> tupl
     return nodes, vols, surfs
 
 
+def _add_named_physical_group(gmsh, dim: int, entities: list[int], name: str) -> int:
+    try:
+        tag = int(gmsh.model.addPhysicalGroup(dim, entities, -1, name))
+    except TypeError:
+        tag = int(gmsh.model.addPhysicalGroup(dim, entities))
+        gmsh.model.setPhysicalName(dim, tag, name)
+    if gmsh.model.getPhysicalName(dim, tag) != name:
+        raise QuadraticMedError("MED_PHYSICAL_NAME_BINDING_FAILED")
+    memberships = [int(v) for v in gmsh.model.getPhysicalGroupsForEntity(dim, int(entities[0]))]
+    if tag not in memberships:
+        raise QuadraticMedError("MED_PHYSICAL_ENTITY_OWNERSHIP_FAILED")
+    return tag
+
+
 def write_quadratic_med(
     destination: str | Path,
     *,
@@ -114,11 +128,11 @@ def write_quadratic_med(
         gmsh.model.mesh.addNodes(3, v, tags, nodes.reshape(-1).tolist())
         gmsh.model.mesh.addElementsByType(s, 9, list(range(1, surfs.shape[0] + 1)), (surfs + 1).reshape(-1).tolist())
         gmsh.model.mesh.addElementsByType(v, 11, list(range(1001, 1001 + vols.shape[0])), (vols + 1).reshape(-1).tolist())
-        ps = gmsh.model.addPhysicalGroup(2, [s]); gmsh.model.setPhysicalName(2, ps, surf_name)
-        pv = gmsh.model.addPhysicalGroup(3, [v]); gmsh.model.setPhysicalName(3, pv, vol_name)
-        # All solver-relevant elements already belong to a named physical group.
-        # Keeping Mesh.SaveAll disabled preserves group metadata in MED round trips.
+        _add_named_physical_group(gmsh, 2, [s], surf_name)
+        _add_named_physical_group(gmsh, 3, [v], vol_name)
         gmsh.write(str(path))
+    except QuadraticMedError:
+        raise
     except Exception as exc:
         raise QuadraticMedError("MED_QUADRATIC_WRITE_FAILED") from exc
     finally:
