@@ -43,6 +43,11 @@ jobs:
             throw 'Code_Aster catalog helper was not copied to the patched source tree.'
           }
 
+      - name: Restore PrePoMax NuGet dependencies
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
       - name: Set up MSBuild
         uses: microsoft/setup-msbuild@v2
 
