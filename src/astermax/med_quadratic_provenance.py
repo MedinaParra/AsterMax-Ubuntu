@@ -116,7 +116,8 @@ def write_quadratic_med(
         gmsh.model.mesh.addElementsByType(v, 11, list(range(1001, 1001 + vols.shape[0])), (vols + 1).reshape(-1).tolist())
         ps = gmsh.model.addPhysicalGroup(2, [s]); gmsh.model.setPhysicalName(2, ps, surf_name)
         pv = gmsh.model.addPhysicalGroup(3, [v]); gmsh.model.setPhysicalName(3, pv, vol_name)
-        gmsh.option.setNumber("Mesh.SaveAll", 1)
+        # All solver-relevant elements already belong to a named physical group.
+        # Keeping Mesh.SaveAll disabled preserves group metadata in MED round trips.
         gmsh.write(str(path))
     except Exception as exc:
         raise QuadraticMedError("MED_QUADRATIC_WRITE_FAILED") from exc
