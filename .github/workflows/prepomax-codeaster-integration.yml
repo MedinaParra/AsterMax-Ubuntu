@@ -1,0 +1,50 @@
+name: PrePoMax Code_Aster integration
+
+on:
+  push:
+    branches:
+      - feature/prepomax-code-aster
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/prepomax-codeaster-integration.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-overlay:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout AsterMax integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate Python helpers
+        shell: pwsh
+        run: |
+          python -m py_compile integrations/prepomax-codeaster/scripts/codeaster_catalog.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_overlay.py
+          python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
+
+      - name: Bootstrap patched PrePoMax tree
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Verify patched source markers
+        shell: pwsh
+        run: |
+          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'AnalysisSolverTypeEnum.CodeAster'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/SettingsContainer.cs -Pattern 'CodeAsterSettings'
+          Test-Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/codeaster_catalog.py | Should -BeTrue
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build PrePoMax solution
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
