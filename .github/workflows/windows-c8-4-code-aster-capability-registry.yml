@@ -1,0 +1,50 @@
+name: Windows C8.4 Code_Aster Capability Registry
+on:
+  push:
+    branches: [agent/c8-4-code-aster-capability-registry]
+  pull_request:
+    branches: [agent/c8-3-code-aster-reference-mechanical-harness]
+  workflow_dispatch:
+jobs:
+  verify-capability-registry:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify capability registry contracts
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_capabilities.py tests/test_code_aster_gui_tree.py
+      - name: Emit GUI capability summary
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          from astermax.code_aster_gui_tree import gui_tree_summary
+          summary = gui_tree_summary()
+          summary.update({
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+              'results_verified': False,
+          })
+          Path('capability-registry-summary.json').write_text(json.dumps(summary, indent=2, sort_keys=True), encoding='utf-8')
+          print(summary)
+          assert summary['enabled_capabilities'] >= 1
+          assert summary['disabled_capabilities'] >= 1
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.4-code-aster-capability-registry
+          path: capability-registry-summary.json
+          if-no-files-found: error
