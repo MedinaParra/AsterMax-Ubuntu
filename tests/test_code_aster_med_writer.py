@@ -16,16 +16,16 @@ def _quadratic_tet_with_two_faces():
     # Gmsh/AsterMax TET10 ordering:
     # 4:01, 5:12, 6:20, 7:03, 8:23, 9:13.
     nodes = np.array([
-        [0.0, 0.0, 0.0],   # 0
-        [20.0, 0.0, 0.0],  # 1
-        [0.0, 10.0, 0.0],  # 2
-        [0.0, 0.0, 15.0],  # 3
-        [10.0, 0.0, 0.0],  # 4 01
-        [10.0, 5.0, 0.0],  # 5 12
-        [0.0, 5.0, 0.0],   # 6 20
-        [0.0, 0.0, 7.5],   # 7 03
-        [0.0, 5.0, 7.5],   # 8 23
-        [10.0, 0.0, 7.5],  # 9 13
+        [0.0, 0.0, 0.0],
+        [20.0, 0.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [0.0, 0.0, 15.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 5.0, 0.0],
+        [0.0, 5.0, 0.0],
+        [0.0, 0.0, 7.5],
+        [0.0, 5.0, 7.5],
+        [10.0, 0.0, 7.5],
     ])
     tet10 = np.array([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]], dtype=int)
     fixed = np.array([[0, 1, 2, 4, 5, 6]], dtype=int)
@@ -60,8 +60,6 @@ def test_real_med_contains_named_families_and_exact_membership(tmp_path: Path):
     assert ev.fea_solve_executed is False
     assert ev.results_verified is False
 
-    # Independent file-level witness: the names must physically exist in MED's
-    # FAS/ELEME family table, not only in an AsterMax sidecar or in memory.
     names = set()
     with h5py.File(med, "r") as handle:
         fas_root = handle["FAS"][next(iter(handle["FAS"].keys()))]["ELEME"]
@@ -124,10 +122,7 @@ def test_tampered_family_name_is_detected(tmp_path: Path):
     )
     with h5py.File(med, "r+") as handle:
         element_families = handle["FAS"][next(iter(handle["FAS"].keys()))]["ELEME"]
-        target = next(
-            family for family in element_families.values()
-            if int(family.attrs["NUM"]) == -2
-        )
+        target = next(family for family in element_families.values() if int(family.attrs["NUM"]) == -2)
         replacement = "WRONG_FACE" + "\x00" * (80 - len("WRONG_FACE"))
         target["GRO"]["NOM"][0] = np.array([ord(v) for v in replacement], dtype=np.int8)
     with pytest.raises(CodeAsterMedWriterError, match="CODE_ASTER_MED_GROUP_MISSING:LOAD_FACE"):
@@ -136,4 +131,28 @@ def test_tampered_family_name_is_detected(tmp_path: Path):
             expected_support_tri6=1,
             expected_load_tri6=1,
             expected_tet10=1,
+        )
+
+
+def test_solver_group_name_limit_is_24_characters(tmp_path: Path):
+    nodes, tet10, fixed, load = _quadratic_tet_with_two_faces()
+    valid_24 = "A" * 24
+    med = write_code_aster_med(
+        tmp_path / "valid.med",
+        nodes_mm=nodes,
+        tet10=tet10,
+        support_tri6=fixed,
+        load_tri6=load,
+        support_group=valid_24,
+    )
+    assert med.is_file()
+
+    with pytest.raises(CodeAsterMedWriterError, match="CODE_ASTER_MED_GROUP_NAME_INVALID"):
+        write_code_aster_med(
+            tmp_path / "invalid.med",
+            nodes_mm=nodes,
+            tet10=tet10,
+            support_tri6=fixed,
+            load_tri6=load,
+            support_group="A" * 25,
         )
