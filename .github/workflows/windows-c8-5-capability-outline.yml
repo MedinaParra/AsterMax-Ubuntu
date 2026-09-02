@@ -18,16 +18,21 @@ concurrency:
 
 jobs:
   capability-outline-contract:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install test dependency
-        run: python -m pip install pytest
+      - name: Install AsterMax and test dependency
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
       - name: Run registry and Windows outline harnesses
+        shell: pwsh
         run: >-
           python -m pytest -q
           tests/test_code_aster_capabilities.py
