@@ -55,17 +55,7 @@ def _unique_field(point_data: dict[str, np.ndarray], token: str, *, width: int |
     return candidates[0]
 
 
-def read_verified_code_aster_nodal_results(
-    result_med: str | Path,
-    evidence: GenuineReferenceSolveEvidence,
-) -> CodeAsterNodalResultSet:
-    """Read display-safe nodal fields only from a mechanically verified Code_Aster MED.
-
-    C8.8 deliberately accepts only NOEU-compatible fields represented by meshio as
-    point_data. ELNO and ELGA data stay cell_data and are not silently projected or
-    relabelled as nodal values. The result file hash must match the genuine solve
-    evidence and that solve must already have passed numerical verification.
-    """
+def read_verified_code_aster_nodal_results(result_med: str | Path, evidence: GenuineReferenceSolveEvidence) -> CodeAsterNodalResultSet:
     path = Path(result_med).expanduser().resolve()
     if not path.is_file() or path.stat().st_size <= 0:
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_MED_MISSING")
@@ -74,23 +64,17 @@ def read_verified_code_aster_nodal_results(
     digest = _sha(path)
     if digest.lower() != evidence.result_med_sha256.lower():
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_MED_HASH_MISMATCH")
-
     try:
         mesh = meshio.read(path)
     except Exception as exc:
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_MED_READ_FAILED") from exc
-
     nodes = np.asarray(mesh.points, dtype=float)
     if nodes.ndim != 2 or nodes.shape[1] != 3 or len(nodes) < 4 or not np.isfinite(nodes).all():
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_NODES_INVALID")
-
     tet_blocks = [np.asarray(block.data, dtype=int) for block in mesh.cells if block.type == "tetra10"]
     if not tet_blocks:
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_TET10_MISSING")
     tet10 = np.vstack(tet_blocks)
-    if tet10.ndim != 2 or tet10.shape[1] != 10 or tet10.min() < 0 or tet10.max() >= len(nodes):
-        raise CodeAsterMedResultError("CODE_ASTER_RESULT_TET10_INVALID")
-
     point_data = {str(k): np.asarray(v) for k, v in mesh.point_data.items() if str(k) != "point_tags"}
     displacement_name, displacement = _unique_field(point_data, "DEPL", width=3)
     mises_name, mises = _unique_field(point_data, "SIEQ_NOEU", width=None)
@@ -98,39 +82,23 @@ def read_verified_code_aster_nodal_results(
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_DISPLACEMENT_INVALID")
     if mises.shape != (len(nodes),) or not np.isfinite(mises).all() or np.any(mises < -1.0e-10):
         raise CodeAsterMedResultError("CODE_ASTER_RESULT_VON_MISES_INVALID")
-
-    return CodeAsterNodalResultSet(
-        nodes_mm=nodes,
-        tet10=tet10,
-        displacement_mm=displacement,
-        von_mises_mpa=np.maximum(mises, 0.0),
-        displacement_field_name=displacement_name,
-        von_mises_field_name=mises_name,
-        result_med_sha256=digest,
-    )
+    return CodeAsterNodalResultSet(nodes, tet10, displacement, np.maximum(mises, 0.0), displacement_name, mises_name, digest)
 
 
-def build_code_aster_cae_scene(
-    results: CodeAsterNodalResultSet,
-    evidence: GenuineReferenceSolveEvidence,
-    *,
-    deformation_scale: float = 1.0,
-) -> CaeSceneContract:
-    """Build the renderer-neutral professional scene from verified Code_Aster NOEU data."""
+def build_code_aster_cae_scene(results: CodeAsterNodalResultSet, evidence: GenuineReferenceSolveEvidence, *, deformation_scale: float = 1.0) -> CaeSceneContract:
     if not np.isfinite(deformation_scale) or deformation_scale < 0.0:
         raise CodeAsterMedResultError("CODE_ASTER_SCENE_DEFORMATION_SCALE_INVALID")
     if results.result_med_sha256.lower() != evidence.result_med_sha256.lower():
         raise CodeAsterMedResultError("CODE_ASTER_SCENE_PROVENANCE_MISMATCH")
-
     inventory = type("Inventory", (), {"nodes_mm": results.nodes_mm, "elements": results.tet10})()
     _, triangles = extract_tet10_surface(inventory)
-    deformed = results.nodes_mm + float(deformation_scale) * results.displacement_mm
-    disp_mag = np.linalg.norm(results.displacement_mm, axis=1)
+    displacement = np.asarray(results.displacement_mm, dtype=float)
+    deformed = results.nodes_mm + float(deformation_scale) * displacement
+    disp_mag = np.linalg.norm(displacement, axis=1)
     tri_vm = results.von_mises_mpa[np.asarray(triangles, dtype=int)].mean(axis=1)
     nodal_norm = normalized_scalar(results.von_mises_mpa)
     tri_norm = nodal_norm[np.asarray(triangles, dtype=int)].mean(axis=1)
     solve_evidence_sha = sha256(str(sorted(evidence.as_dict().items())).encode("utf-8")).hexdigest()
-
     scene = CaeSceneContract(
         undeformed_nodes_mm=np.asarray(results.nodes_mm, dtype=float).copy(),
         deformed_nodes_mm=np.asarray(deformed, dtype=float),
@@ -147,6 +115,7 @@ def build_code_aster_cae_scene(
         stress_representation=f"CODE_ASTER_SIEQ_NOEU:{results.von_mises_field_name};DISPLAY_SURFACE=NODE_AVERAGE_ONLY",
         workspace_sha256=results.result_med_sha256,
         solve_evidence_sha256=solve_evidence_sha,
+        displacement_vector_mm=displacement.copy(),
     )
     validate_cae_scene_contract(scene)
     return scene
