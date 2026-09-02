@@ -31,6 +31,7 @@ jobs:
           python -m py_compile integrations/prepomax-codeaster/scripts/codeaster_catalog.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_overlay.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_model_translation.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_results_bridge.py
           python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
 
       - name: Bootstrap patched PrePoMax tree
@@ -44,11 +45,15 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'AnalysisSolverTypeEnum.CodeAster'
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'F libr.*\.mail D 20'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'CodeAsterModelTranslator.WriteStudy'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'OpenCodeAsterResults'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/SettingsContainer.cs -Pattern 'CodeAsterSettings'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern 'MECA_STATIQUE'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern "AFFE=_F\(TOUT='OUI'.*MODELISATION='3D'"
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern 'CodeAsterResultBridge.AppendResultTables'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterMeshWriter.cs -Pattern 'COOR_3D'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterResultBridge.cs -Pattern 'PPM_STRESS_N'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterCaseWriter.cs -Pattern 'F resu.*\.resu R 8'
           if (-not (Test-Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/codeaster_catalog.py)) {
             throw 'Code_Aster catalog helper was not copied to the patched source tree.'
           }
