@@ -24,13 +24,18 @@ jobs:
       - name: Verify analytical reference mechanics harness
         shell: pwsh
         run: python -m pytest -q tests/test_code_aster_reference_harness.py
-      - name: Generate real TET10/TRI6 reference solver bundle
+      - name: Generate real TET10/TRI6 exact-reference solver bundle
         shell: pwsh
         run: |
           @'
           from pathlib import Path
           from astermax.code_aster_reference_harness import UniaxialPrismSpec, prepare_reference_solver_bundle
-          evidence = prepare_reference_solver_bundle(UniaxialPrismSpec(mesh_size_mm=20.0), Path('reference-bundle'))
+          # The current study contract fully clamps x=0. For an exact uniform
+          # axial analytical state, use nu=0 so the clamp does not suppress
+          # Poisson lateral contraction. A future minimal-constraint benchmark
+          # will support general nu without this restriction.
+          spec = UniaxialPrismSpec(poisson=0.0, mesh_size_mm=20.0)
+          evidence = prepare_reference_solver_bundle(spec, Path('reference-bundle'))
           print(evidence)
           assert evidence['fea_solve_executed'] is False
           assert evidence['numerical_verification'] is False
