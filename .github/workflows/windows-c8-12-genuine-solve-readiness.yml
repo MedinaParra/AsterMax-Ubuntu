@@ -1,0 +1,80 @@
+name: Windows C8.12 Genuine Solve Readiness
+
+on:
+  push:
+    branches: [agent/c8-12-genuine-solve-readiness-and-ci-integrity]
+    paths:
+      - 'src/astermax/code_aster_runtime_discovery.py'
+      - 'src/astermax/code_aster_wsl_runtime.py'
+      - 'src/astermax/code_aster_runtime_qualification.py'
+      - 'tests/test_c8_12_runtime_discovery.py'
+      - '.github/workflows/windows-c8-12-genuine-solve-readiness.yml'
+      - '.github/workflows/windows-c8-5-capability-outline.yml'
+  pull_request:
+    paths:
+      - 'src/astermax/code_aster_runtime_discovery.py'
+      - 'src/astermax/code_aster_wsl_runtime.py'
+      - 'src/astermax/code_aster_runtime_qualification.py'
+      - 'tests/test_c8_12_runtime_discovery.py'
+      - '.github/workflows/windows-c8-12-genuine-solve-readiness.yml'
+      - '.github/workflows/windows-c8-5-capability-outline.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-12-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  genuine-solve-readiness:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax harness
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify C8.12 fail-closed discovery contracts
+        shell: pwsh
+        run: python -m pytest -q tests/test_c8_12_runtime_discovery.py tests/test_code_aster_runtime_qualification.py tests/test_code_aster_wsl_runtime.py
+      - name: Record live Windows runner WSL2 readiness without promoting FEA claims
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          @'
+          import json
+          from pathlib import Path
+          from astermax.code_aster_runtime_discovery import discover_wsl_code_aster_runtimes
+          evidence = {
+              'engine_kind': 'CODE_ASTER_WSL2_WINDOWS_HOST',
+              'host_os': 'Windows',
+              'solver_os': 'Linux/WSL2',
+              'discovery_complete': False,
+              'qualified_runtime_available': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+          }
+          try:
+              evidence = discover_wsl_code_aster_runtimes().as_dict()
+          except Exception as exc:
+              evidence['blocker'] = type(exc).__name__ + ':' + str(exc)
+          assert evidence['qualified_runtime_available'] is False
+          assert evidence['fea_solve_executed'] is False
+          assert evidence['numerical_verification'] is False
+          assert evidence['results_verified'] is False
+          Path('evidence/c8_12_runtime_discovery.json').write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding='utf-8')
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c8-12-runtime-discovery
+          path: evidence/c8_12_runtime_discovery.json
+          if-no-files-found: error
