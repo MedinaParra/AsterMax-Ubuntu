@@ -26,6 +26,7 @@ class CaeSceneContract:
     stress_representation: str
     workspace_sha256: str
     solve_evidence_sha256: str
+    displacement_vector_mm: np.ndarray | None = None
 
 
 def validate_cae_scene_contract(scene: CaeSceneContract) -> None:
@@ -52,6 +53,16 @@ def validate_cae_scene_contract(scene: CaeSceneContract) -> None:
         raise ValueError("CAE_SCENE_NORMALIZED_SCALAR_INVALID")
     if disp.shape != (len(u),) or not np.isfinite(disp).all() or np.any(disp < -1e-12):
         raise ValueError("CAE_SCENE_DISPLACEMENT_INVALID")
+    if scene.displacement_vector_mm is not None:
+        vector = np.asarray(scene.displacement_vector_mm, dtype=float)
+        if vector.shape != u.shape or not np.isfinite(vector).all():
+            raise ValueError("CAE_SCENE_DISPLACEMENT_VECTOR_INVALID")
+        vector_mag = np.linalg.norm(vector, axis=1)
+        if not np.allclose(vector_mag, disp, rtol=1e-10, atol=1e-12):
+            raise ValueError("CAE_SCENE_DISPLACEMENT_VECTOR_MAGNITUDE_MISMATCH")
+        expected_deformed = u + float(scene.deformation_scale) * vector
+        if not np.allclose(expected_deformed, d, rtol=1e-10, atol=1e-12):
+            raise ValueError("CAE_SCENE_DEFORMED_VECTOR_INCONSISTENT")
     if scene.length_unit != "mm" or scene.stress_unit != "MPa":
         raise ValueError("CAE_SCENE_UNITS_INVALID")
     if not math.isfinite(scene.deformation_scale) or scene.deformation_scale < 0.0:
@@ -67,23 +78,13 @@ def validate_cae_scene_contract(scene: CaeSceneContract) -> None:
 
 
 def build_cae_scene_contract(summary: dict, *, deformation_scale: float = 1.0) -> CaeSceneContract:
-    """Build a renderer-neutral CAE scene exclusively from verified live solver data.
-
-    This is the hand-off boundary for Tk, VTK, Qt/VTK or another renderer. It
-    carries physical coordinates, deformation, surface connectivity, scalar field,
-    units and provenance but intentionally contains no screen projection or GUI state.
-    """
-    results_scene, evidence = build_results_scene_from_desktop_summary(
-        summary, deformation_scale=deformation_scale
-    )
+    results_scene, evidence = build_results_scene_from_desktop_summary(summary, deformation_scale=deformation_scale)
     runtime = summary.get("_runtime_results")
     if not isinstance(runtime, dict):
         raise ValueError("CAE_SCENE_RUNTIME_REQUIRED")
     nodes = np.asarray(runtime.get("nodes_mm"), dtype=float)
     elements = np.asarray(runtime.get("elements"), dtype=int)
-    _, triangles = extract_tet10_surface(
-        type("Inventory", (), {"nodes_mm": nodes, "elements": elements})()
-    )
+    _, triangles = extract_tet10_surface(type("Inventory", (), {"nodes_mm": nodes, "elements": elements})())
     nodal_vm = np.asarray(results_scene.von_mises_mpa, dtype=float)
     tri_vm = nodal_vm[triangles].mean(axis=1)
     nodal_norm = normalized_scalar(nodal_vm)
@@ -110,13 +111,13 @@ def build_cae_scene_contract(summary: dict, *, deformation_scale: float = 1.0) -
 
 
 def renderer_capabilities() -> tuple[str, ...]:
-    """Capabilities guaranteed by the scene contract, independent of renderer."""
     return (
         "undeformed_geometry",
         "deformed_geometry",
         "surface_triangles",
         "von_mises_display_scalar",
         "displacement_magnitude",
+        "native_displacement_vector_when_available",
         "mm_units",
         "mpa_units",
         "workspace_provenance",

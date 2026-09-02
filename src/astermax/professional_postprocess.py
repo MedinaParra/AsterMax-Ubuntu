@@ -58,83 +58,57 @@ class ProfessionalPostprocessView:
     deformation_scale: float
     workspace_sha256: str
     solve_evidence_sha256: str
+    displacement_vector_source: str
 
 
 def _field(scene: CaeSceneContract, field: str) -> tuple[np.ndarray, str, str, str]:
     key = str(field).strip().upper()
     if key == "SIEQ_NOEU":
-        return (
-            np.asarray(scene.nodal_von_mises_mpa, dtype=float),
-            "MPa",
-            "NOEU",
-            scene.stress_representation,
-        )
+        return np.asarray(scene.nodal_von_mises_mpa, dtype=float), "MPa", "NOEU", scene.stress_representation
     if key in {"DEPL_MAG", "DEPL_MAGNITUDE"}:
-        return (
-            np.asarray(scene.displacement_magnitude_mm, dtype=float),
-            "mm",
-            "NOEU_DERIVED_FROM_DEPL",
-            "ASTERMAX_NORM_OF_NATIVE_CODE_ASTER_DEPL_NOEU",
-        )
+        return np.asarray(scene.displacement_magnitude_mm, dtype=float), "mm", "NOEU_DERIVED_FROM_DEPL", "ASTERMAX_NORM_OF_NATIVE_CODE_ASTER_DEPL_NOEU"
     raise ProfessionalPostprocessError(f"POSTPROCESS_FIELD_UNSUPPORTED:{key}")
 
 
 def _normalized(values: np.ndarray) -> np.ndarray:
-    lo = float(np.min(values))
-    hi = float(np.max(values))
+    lo = float(np.min(values)); hi = float(np.max(values))
     if hi <= lo:
         return np.zeros(values.shape, dtype=float)
     return (values - lo) / (hi - lo)
 
 
-def build_professional_postprocess_view(
-    scene: CaeSceneContract,
-    *,
-    field: str = "SIEQ_NOEU",
-    deformation_scale: float | None = None,
-    legend_levels: int = 9,
-) -> ProfessionalPostprocessView:
-    """Create a renderer-neutral professional results view without changing solver data.
+def _physical_displacement_vector(scene: CaeSceneContract) -> tuple[np.ndarray, str]:
+    if scene.displacement_vector_mm is not None:
+        vector = np.asarray(scene.displacement_vector_mm, dtype=float)
+        return vector.copy(), "NATIVE_SCENE_DEPL_NOEU"
+    undeformed = np.asarray(scene.undeformed_nodes_mm, dtype=float)
+    deformed = np.asarray(scene.deformed_nodes_mm, dtype=float)
+    if scene.deformation_scale > 0.0:
+        return (deformed - undeformed) / scene.deformation_scale, "LEGACY_RECONSTRUCTED_FROM_DEFORMED_GEOMETRY"
+    if np.any(np.asarray(scene.displacement_magnitude_mm, dtype=float) > 0.0):
+        raise ProfessionalPostprocessError("POSTPROCESS_NATIVE_DISPLACEMENT_VECTOR_UNRECOVERABLE")
+    return np.zeros_like(undeformed), "ZERO_DISPLACEMENT_LEGACY_SCENE"
 
-    Native Code_Aster SIEQ_NOEU stays labelled NOEU. Displacement magnitude is an
-    explicitly derived AsterMax display quantity from native DEPL components; it is
-    never presented as a solver-native scalar field. Triangle values are display-only
-    arithmetic means of nodal values and remain separate from the nodal evidence.
-    """
+
+def build_professional_postprocess_view(scene: CaeSceneContract, *, field: str = "SIEQ_NOEU", deformation_scale: float | None = None, legend_levels: int = 9) -> ProfessionalPostprocessView:
     validate_cae_scene_contract(scene)
     if not isinstance(legend_levels, int) or not (2 <= legend_levels <= 21):
         raise ProfessionalPostprocessError("POSTPROCESS_LEGEND_LEVELS_INVALID")
     scale = scene.deformation_scale if deformation_scale is None else float(deformation_scale)
     if not math.isfinite(scale) or scale < 0.0:
         raise ProfessionalPostprocessError("POSTPROCESS_DEFORMATION_SCALE_INVALID")
-
     nodal, unit, location, provenance = _field(scene, field)
     if nodal.shape != (len(scene.undeformed_nodes_mm),) or not np.isfinite(nodal).all():
         raise ProfessionalPostprocessError("POSTPROCESS_NODAL_FIELD_INVALID")
     triangles = np.asarray(scene.surface_triangles, dtype=int)
     tri_scalar = nodal[triangles].mean(axis=1)
     tri_normalized = _normalized(tri_scalar)
-
     undeformed = np.asarray(scene.undeformed_nodes_mm, dtype=float)
-    displacement = np.asarray(scene.deformed_nodes_mm, dtype=float) - undeformed
-    if scene.deformation_scale > 0.0:
-        displacement = displacement / scene.deformation_scale
-    elif scale != 0.0 and np.any(np.asarray(scene.displacement_magnitude_mm) > 0.0):
-        raise ProfessionalPostprocessError("POSTPROCESS_NATIVE_DISPLACEMENT_VECTOR_UNRECOVERABLE")
+    displacement, vector_source = _physical_displacement_vector(scene)
     display_nodes = undeformed + scale * displacement
-
-    minimum = float(np.min(nodal))
-    maximum = float(np.max(nodal))
+    minimum = float(np.min(nodal)); maximum = float(np.max(nodal))
     levels = tuple(float(v) for v in np.linspace(minimum, maximum, legend_levels))
-    legend = LegendContract(
-        field=str(field).strip().upper(),
-        unit=unit,
-        minimum=minimum,
-        maximum=maximum,
-        levels=levels,
-        field_location=location,
-        provenance=provenance,
-    )
+    legend = LegendContract(str(field).strip().upper(), unit, minimum, maximum, levels, location, provenance)
     return ProfessionalPostprocessView(
         field=legend.field,
         unit=unit,
@@ -148,15 +122,11 @@ def build_professional_postprocess_view(
         deformation_scale=scale,
         workspace_sha256=scene.workspace_sha256,
         solve_evidence_sha256=scene.solve_evidence_sha256,
+        displacement_vector_source=vector_source,
     )
 
 
-def probe_nearest_node(
-    scene: CaeSceneContract,
-    point_mm: tuple[float, float, float] | np.ndarray,
-    *,
-    field: str = "SIEQ_NOEU",
-) -> ProbeResult:
+def probe_nearest_node(scene: CaeSceneContract, point_mm: tuple[float, float, float] | np.ndarray, *, field: str = "SIEQ_NOEU") -> ProbeResult:
     validate_cae_scene_contract(scene)
     point = np.asarray(point_mm, dtype=float)
     if point.shape != (3,) or not np.isfinite(point).all():
@@ -165,28 +135,12 @@ def probe_nearest_node(
     nodes = np.asarray(scene.undeformed_nodes_mm, dtype=float)
     distances2 = np.sum((nodes - point) ** 2, axis=1)
     index = int(np.argmin(distances2))
-    return ProbeResult(
-        node_index=index,
-        position_mm=tuple(float(v) for v in nodes[index]),
-        field=str(field).strip().upper(),
-        value=float(nodal[index]),
-        unit=unit,
-        field_location=location,
-        workspace_sha256=scene.workspace_sha256,
-        solve_evidence_sha256=scene.solve_evidence_sha256,
-    )
+    return ProbeResult(index, tuple(float(v) for v in nodes[index]), str(field).strip().upper(), float(nodal[index]), unit, location, scene.workspace_sha256, scene.solve_evidence_sha256)
 
 
-def build_clip_plane(
-    scene: CaeSceneContract,
-    *,
-    origin_mm: tuple[float, float, float] | np.ndarray,
-    normal: tuple[float, float, float] | np.ndarray,
-) -> ClipPlaneContract:
-    """Return a deterministic display clip mask using undeformed triangle centroids."""
+def build_clip_plane(scene: CaeSceneContract, *, origin_mm: tuple[float, float, float] | np.ndarray, normal: tuple[float, float, float] | np.ndarray) -> ClipPlaneContract:
     validate_cae_scene_contract(scene)
-    origin = np.asarray(origin_mm, dtype=float)
-    vector = np.asarray(normal, dtype=float)
+    origin = np.asarray(origin_mm, dtype=float); vector = np.asarray(normal, dtype=float)
     if origin.shape != (3,) or vector.shape != (3,) or not np.isfinite(origin).all() or not np.isfinite(vector).all():
         raise ProfessionalPostprocessError("POSTPROCESS_CLIP_PLANE_INVALID")
     norm = float(np.linalg.norm(vector))
@@ -199,9 +153,4 @@ def build_clip_plane(
     signed = (centroids - origin) @ unit_normal
     kept = np.flatnonzero(signed >= -1.0e-12).astype(int)
     rejected = np.flatnonzero(signed < -1.0e-12).astype(int)
-    return ClipPlaneContract(
-        origin_mm=tuple(float(v) for v in origin),
-        normal=tuple(float(v) for v in unit_normal),
-        kept_triangle_indices=kept,
-        rejected_triangle_indices=rejected,
-    )
+    return ClipPlaneContract(tuple(float(v) for v in origin), tuple(float(v) for v in unit_normal), kept, rejected)
