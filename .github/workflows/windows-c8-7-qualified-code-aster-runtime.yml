@@ -1,0 +1,53 @@
+name: Windows C8.7 Qualified Code_Aster Runtime Contract
+on:
+  push:
+    branches: [agent/c8-7-qualified-code-aster-runtime]
+  pull_request:
+    branches: [agent/c8-6-code-aster-diagnostic-evidence-gate]
+  workflow_dispatch:
+concurrency:
+  group: c8-7-qualified-runtime-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  qualified-runtime-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify runtime qualification contract
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_runtime_qualification.py
+      - name: Verify qualified genuine-solve gate wiring
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_run.py
+      - name: Emit unsolved contract witness
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          witness = {
+              'increment': 'C8.7',
+              'runtime_qualification_contract_tested': True,
+              'real_runtime_qualified': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+          }
+          Path('c8-7-witness.json').write_text(json.dumps(witness, indent=2, sort_keys=True), encoding='utf-8')
+          print(witness)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.7-qualified-runtime-contract
+          path: c8-7-witness.json
+          if-no-files-found: error

@@ -12,6 +12,7 @@ from .code_aster_reference_harness import (
     verify_uniaxial_reference_results,
 )
 from .code_aster_result_contract import ResultTableSpec, parse_reference_result_tables
+from .code_aster_runtime_qualification import QualifiedCodeAsterRuntime
 from .code_aster_wsl_runtime import (
     CodeAsterWslRuntime,
     _run,
@@ -51,6 +52,10 @@ class GenuineReferenceSolveEvidence:
     returncode: int
     message_diagnostic_ok: bool
     message_execution_exit_code: int | None
+    runtime_qualified: bool
+    run_aster_sha256: str
+    config_sha256: str
+    detected_version: str | None
     fea_solve_executed: bool
     numerical_verification: bool
     results_verified: bool
@@ -62,24 +67,44 @@ class GenuineReferenceSolveEvidence:
         return self.__dict__.copy()
 
 
+def _validate_qualification(runtime: CodeAsterWslRuntime, qualification: QualifiedCodeAsterRuntime) -> None:
+    if not qualification.runtime_qualified:
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_RUNTIME_NOT_QUALIFIED")
+    if qualification.engine_kind != runtime.engine_kind:
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_RUNTIME_ENGINE_MISMATCH")
+    if qualification.distribution != runtime.distribution:
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_RUNTIME_DISTRO_MISMATCH")
+    if qualification.run_aster_linux != runtime.run_aster_linux:
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_RUNTIME_LAUNCHER_MISMATCH")
+    for value, code in (
+        (qualification.run_aster_sha256, "REFERENCE_RUN_RUNTIME_LAUNCHER_HASH_INVALID"),
+        (qualification.config_sha256, "REFERENCE_RUN_RUNTIME_CONFIG_HASH_INVALID"),
+        (qualification.identity_probe_sha256, "REFERENCE_RUN_RUNTIME_IDENTITY_HASH_INVALID"),
+    ):
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value.lower()):
+            raise CodeAsterReferenceRunError(code)
+
+
 def execute_and_verify_reference_wsl(
     runtime: CodeAsterWslRuntime,
     spec: UniaxialPrismSpec,
     directory: str | Path,
     *,
+    qualification: QualifiedCodeAsterRuntime,
     tables: ResultTableSpec | None = None,
     message_filename: str = "astermax.mess",
     timeout_s: float = 300.0,
 ) -> GenuineReferenceSolveEvidence:
-    """Run a WSL2 Code_Aster reference study and verify solver plus mechanics.
+    """Run a qualified WSL2 Code_Aster reference study and verify mechanics.
 
-    A successful process exit is necessary but not sufficient. C8.6 additionally
-    requires a fresh Code_Aster message file with an explicit successful solver
+    A successful host process exit is necessary but insufficient. C8.7 requires
+    an immutable qualified runtime, a fresh Code_Aster message with successful
     diagnostic, a fresh result MED, three fresh scalar evidence tables, and the
-    analytical displacement/reaction/stress checks. Only this combined gate may
-    emit fea_solve_executed=True for the reference case.
+    analytical displacement/reaction/stress gates. Only this combined contract
+    may emit ``fea_solve_executed=True`` for the reference case.
     """
     spec.validate()
+    _validate_qualification(runtime, qualification)
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         raise CodeAsterReferenceRunError("REFERENCE_RUN_DIRECTORY_NOT_FOUND")
@@ -100,13 +125,13 @@ def execute_and_verify_reference_wsl(
     if any(path.exists() for path in outputs):
         raise CodeAsterReferenceRunError("REFERENCE_RUN_STALE_OUTPUT_PRESENT")
 
-    # The explicit F mess binding prevents a launcher stdout-only success from
-    # being treated as durable solver evidence.
     export_text = export.read_text(encoding="utf-8", errors="strict")
     expected_binding = f"F mess {message_filename} R 6"
     if expected_binding not in {line.strip() for line in export_text.splitlines()}:
         raise CodeAsterReferenceRunError("REFERENCE_RUN_MESSAGE_BINDING_MISSING")
 
+    # Re-probe immediately before execution so qualification cannot silently
+    # substitute for current runtime availability/identity.
     probe_wsl_runtime(runtime, timeout_s=min(timeout_s, 30.0))
     workdir_linux = windows_path_to_wsl(runtime, root, timeout_s=min(timeout_s, 30.0))
     launch = build_wsl_run_aster_command(runtime, workdir_linux=workdir_linux, export_filename=export.name)
@@ -133,8 +158,6 @@ def execute_and_verify_reference_wsl(
     )
     verified = verify_uniaxial_reference_results(spec, observed, fea_solve_executed=True)
 
-    # fea_solve_executed means both launcher success and a positive durable
-    # Code_Aster diagnostic. results_verified remains the stricter mechanics gate.
     return GenuineReferenceSolveEvidence(
         engine_kind=runtime.engine_kind,
         distribution=runtime.distribution,
@@ -150,6 +173,10 @@ def execute_and_verify_reference_wsl(
         returncode=completed.returncode,
         message_diagnostic_ok=diagnostic.diagnostic_ok,
         message_execution_exit_code=diagnostic.execution_exit_code,
+        runtime_qualified=True,
+        run_aster_sha256=qualification.run_aster_sha256,
+        config_sha256=qualification.config_sha256,
+        detected_version=qualification.detected_version,
         fea_solve_executed=True,
         numerical_verification=verified.numerical_verification,
         results_verified=verified.results_verified,
