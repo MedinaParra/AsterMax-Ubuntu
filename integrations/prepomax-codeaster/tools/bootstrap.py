@@ -34,6 +34,7 @@ def main():
     run(["git", "submodule", "update", "--init", "--recursive"], cwd=destination)
     run([sys.executable, HERE / "apply_overlay.py", destination])
     run([sys.executable, HERE / "apply_model_translation.py", destination])
+    run([sys.executable, HERE / "apply_results_bridge.py", destination])
 
     print()
     print("Prepared:", destination)
