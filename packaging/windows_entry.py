@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from astermax.app import run_step_analysis
-from astermax.live_contour_viewport import windows_desktop_main
+from astermax.fast_contour_viewport import windows_desktop_main
 
 
 def _write_fixture_step(path: Path) -> None:
