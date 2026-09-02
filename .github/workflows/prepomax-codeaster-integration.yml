@@ -9,6 +9,10 @@ on:
       - '.github/workflows/prepomax-codeaster-integration.yml'
   workflow_dispatch:
 
+concurrency:
+  group: prepomax-codeaster-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-overlay:
     runs-on: windows-latest
@@ -43,6 +47,7 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/SettingsContainer.cs -Pattern 'CodeAsterSettings'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern 'MECA_STATIQUE'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern "AFFE=_F\(TOUT='OUI'.*MODELISATION='3D'"
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterMeshWriter.cs -Pattern 'COOR_3D'
           if (-not (Test-Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/codeaster_catalog.py)) {
             throw 'Code_Aster catalog helper was not copied to the patched source tree.'
