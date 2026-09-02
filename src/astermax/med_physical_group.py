@@ -7,6 +7,13 @@ import re
 
 import numpy as np
 
+from .med_semantic_groups import (
+    MedSemanticGroupError,
+    geometry_fingerprint,
+    resolve_semantic_group,
+    write_semantic_manifest,
+)
+
 
 class MedPhysicalGroupError(RuntimeError):
     pass
@@ -19,9 +26,12 @@ _GROUP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,23}$")
 class MedPhysicalGroupEvidence:
     path: Path
     group_name: str
+    serialized_group_name: str
     dimension: int
+    physical_tag: int
     entity_count: int
     element_count: int
+    geometry_fingerprint: str
     med_sha256: str
     verified: bool = True
     fea_solve_executed: bool = False
@@ -62,6 +72,20 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _add_named_physical_group(gmsh, dim: int, entities: list[int], name: str) -> int:
+    try:
+        tag = int(gmsh.model.addPhysicalGroup(dim, entities, -1, name))
+    except TypeError:
+        tag = int(gmsh.model.addPhysicalGroup(dim, entities))
+        gmsh.model.setPhysicalName(dim, tag, name)
+    if gmsh.model.getPhysicalName(dim, tag) != name:
+        raise MedPhysicalGroupError("MED_PHYSICAL_NAME_BINDING_FAILED")
+    owned = [int(v) for v in gmsh.model.getPhysicalGroupsForEntity(dim, int(entities[0]))]
+    if tag not in owned:
+        raise MedPhysicalGroupError("MED_PHYSICAL_ENTITY_OWNERSHIP_FAILED")
+    return tag
+
+
 def write_med_with_surface_group(
     destination: str | Path,
     *,
@@ -71,11 +95,12 @@ def write_med_with_surface_group(
     surface_group: str,
     volume_group: str = "SOLID",
 ) -> Path:
-    """Write a real MED file with a named surface physical group using Gmsh.
+    """Write MED and a hash-bound semantic group manifest.
 
-    C7.7 intentionally uses linear TET4/TRI3 as a minimal transport proof. It
-    proves physical-group persistence in MED; it does not claim production
-    TET10 export or a Code_Aster solve.
+    Gmsh 4.13.1 can serialize the physical membership while replacing user-facing
+    names with MED family names such as F_2D_1/F_3D_1 on re-import. AsterMax does
+    not pretend the original name survived: it binds logical CAD/BC semantics to
+    the serialized solver group by a numbering-independent geometry fingerprint.
     """
     nodes, volume, surface = _validate_mesh(nodes_mm, tetra4, surface_tri3)
     surf_name = _validate_group_name(surface_group)
@@ -89,7 +114,6 @@ def write_med_with_surface_group(
     path.parent.mkdir(parents=True, exist_ok=True)
 
     import gmsh
-
     owned = not bool(gmsh.isInitialized())
     if owned:
         gmsh.initialize()
@@ -103,31 +127,21 @@ def write_med_with_surface_group(
         surface_set = set(surface_nodes)
         interior_nodes = [i for i in range(nodes.shape[0]) if i not in surface_set]
         if not interior_nodes:
-            # A tetra may have all nodes on its boundary; classify one node on
-            # the volume entity only when necessary to keep node tags unique.
             interior_nodes = [int(volume.reshape(-1)[-1])]
             surface_nodes = [i for i in surface_nodes if i != interior_nodes[0]]
-
         if surface_nodes:
-            tags = [i + 1 for i in surface_nodes]
-            coords = nodes[surface_nodes].reshape(-1).tolist()
-            gmsh.model.mesh.addNodes(2, surface_entity, tags, coords)
+            gmsh.model.mesh.addNodes(2, surface_entity, [i + 1 for i in surface_nodes], nodes[surface_nodes].reshape(-1).tolist())
         if interior_nodes:
-            tags = [i + 1 for i in interior_nodes]
-            coords = nodes[interior_nodes].reshape(-1).tolist()
-            gmsh.model.mesh.addNodes(3, volume_entity, tags, coords)
+            gmsh.model.mesh.addNodes(3, volume_entity, [i + 1 for i in interior_nodes], nodes[interior_nodes].reshape(-1).tolist())
 
-        tri_tags = list(range(1, surface.shape[0] + 1))
-        tet_tags = list(range(1, volume.shape[0] + 1))
-        gmsh.model.mesh.addElementsByType(surface_entity, 2, tri_tags, (surface + 1).reshape(-1).tolist())
-        gmsh.model.mesh.addElementsByType(volume_entity, 4, tet_tags, (volume + 1).reshape(-1).tolist())
-
-        surf_phys = gmsh.model.addPhysicalGroup(2, [surface_entity])
-        gmsh.model.setPhysicalName(2, surf_phys, surf_name)
-        vol_phys = gmsh.model.addPhysicalGroup(3, [volume_entity])
-        gmsh.model.setPhysicalName(3, vol_phys, vol_name)
-        gmsh.option.setNumber("Mesh.SaveAll", 1)
+        gmsh.model.mesh.addElementsByType(surface_entity, 2, list(range(1, surface.shape[0] + 1)), (surface + 1).reshape(-1).tolist())
+        gmsh.model.mesh.addElementsByType(volume_entity, 4, list(range(1, volume.shape[0] + 1)), (volume + 1).reshape(-1).tolist())
+        _add_named_physical_group(gmsh, 2, [surface_entity], surf_name)
+        _add_named_physical_group(gmsh, 3, [volume_entity], vol_name)
+        gmsh.option.setNumber("Mesh.SaveAll", 0)
         gmsh.write(str(path))
+    except MedPhysicalGroupError:
+        raise
     except Exception as exc:
         raise MedPhysicalGroupError("MED_WRITE_FAILED") from exc
     finally:
@@ -136,6 +150,24 @@ def write_med_with_surface_group(
             gmsh.finalize()
     if not path.is_file() or path.stat().st_size <= 0:
         raise MedPhysicalGroupError("MED_WRITE_EMPTY")
+
+    try:
+        write_semantic_manifest(path, {
+            surf_name: {
+                "dimension": 2,
+                "element_type": 2,
+                "element_count": int(surface.shape[0]),
+                "geometry_fingerprint": geometry_fingerprint(nodes, surface),
+            },
+            vol_name: {
+                "dimension": 3,
+                "element_type": 4,
+                "element_count": int(volume.shape[0]),
+                "geometry_fingerprint": geometry_fingerprint(nodes, volume),
+            },
+        })
+    except MedSemanticGroupError as exc:
+        raise MedPhysicalGroupError(str(exc)) from exc
     return path
 
 
@@ -149,33 +181,33 @@ def verify_med_surface_group(path: str | Path, *, expected_group: str, expected_
         raise MedPhysicalGroupError("MED_EXPECTED_ELEMENT_COUNT_INVALID")
 
     import gmsh
-
     owned = not bool(gmsh.isInitialized())
     if owned:
         gmsh.initialize()
     try:
         gmsh.clear()
         gmsh.open(str(med))
-        matches: list[tuple[int, int]] = []
-        for dim, tag in gmsh.model.getPhysicalGroups(2):
-            if gmsh.model.getPhysicalName(dim, tag) == group_name:
-                matches.append((dim, tag))
-        if len(matches) != 1:
-            raise MedPhysicalGroupError("MED_SURFACE_GROUP_NOT_UNIQUE")
-        dim, physical_tag = matches[0]
-        entities = list(gmsh.model.getEntitiesForPhysicalGroup(dim, physical_tag))
-        count = 0
-        for entity in entities:
-            _, element_tags, _ = gmsh.model.mesh.getElements(dim, int(entity))
-            count += sum(len(tags) for tags in element_tags)
+        try:
+            resolved = resolve_semantic_group(gmsh, med, group_name)
+        except MedSemanticGroupError as exc:
+            if "NOT_DECLARED" in str(exc):
+                raise MedPhysicalGroupError("MED_SURFACE_GROUP_NOT_UNIQUE") from exc
+            raise MedPhysicalGroupError(str(exc)) from exc
+        count = int(resolved["element_count"])
         if count != expected:
             raise MedPhysicalGroupError("MED_SURFACE_GROUP_ELEMENT_COUNT_MISMATCH")
+        dim = int(resolved["dimension"])
+        physical_tag = int(resolved["physical_tag"])
+        entities = list(gmsh.model.getEntitiesForPhysicalGroup(dim, physical_tag))
         return MedPhysicalGroupEvidence(
             path=med,
             group_name=group_name,
+            serialized_group_name=str(resolved["serialized_group_name"]),
             dimension=dim,
+            physical_tag=physical_tag,
             entity_count=len(entities),
             element_count=count,
+            geometry_fingerprint=str(resolved["geometry_fingerprint"]),
             med_sha256=_sha256_file(med),
         )
     finally:
