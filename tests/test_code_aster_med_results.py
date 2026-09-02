@@ -116,9 +116,9 @@ def test_unverified_solve_cannot_enter_professional_scene(tmp_path: Path):
 def test_elno_only_stress_is_not_silently_promoted_to_noeu(tmp_path: Path):
     mesh = _mesh()
     mesh.point_data.pop("result_SIEQ_NOEU")
-    # Cell data is deliberately ELNO-like evidence. The C8.8 scene bridge must not
-    # interpolate this and call it a native nodal Code_Aster result.
-    mesh.cell_data["result_SIEQ_ELNO"] = [np.ones((1, 10, 1), dtype=float)]
+    # A cell-supported stress field exists, but the scene bridge must not invent a
+    # nodal projection and call it native Code_Aster NOEU evidence.
+    mesh.cell_data["result_SIEQ_ELNO"] = [np.array([50.0], dtype=float)]
     path = _write(tmp_path, mesh)
     digest = sha256(path.read_bytes()).hexdigest()
     with pytest.raises(CodeAsterMedResultError, match="FIELD_MISSING:SIEQ_NOEU"):
