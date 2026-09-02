@@ -8,6 +8,13 @@ import re
 
 import numpy as np
 
+from .med_semantic_groups import (
+    MedSemanticGroupError,
+    geometry_fingerprint,
+    resolve_semantic_group,
+    write_semantic_manifest,
+)
+
 
 class QuadraticMedError(RuntimeError):
     pass
@@ -20,9 +27,13 @@ _GROUP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,23}$")
 class QuadraticMedEvidence:
     med_path: Path
     surface_group: str
+    serialized_surface_group: str
     volume_group: str
+    serialized_volume_group: str
     tri6_count: int
     tet10_count: int
+    surface_geometry_fingerprint: str
+    volume_geometry_fingerprint: str
     med_sha256: str
     comm_sha256: str
     verified: bool = True
@@ -33,9 +44,13 @@ class QuadraticMedEvidence:
         return {
             "med_path": str(self.med_path),
             "surface_group": self.surface_group,
+            "serialized_surface_group": self.serialized_surface_group,
             "volume_group": self.volume_group,
+            "serialized_volume_group": self.serialized_volume_group,
             "tri6_count": self.tri6_count,
             "tet10_count": self.tet10_count,
+            "surface_geometry_fingerprint": self.surface_geometry_fingerprint,
+            "volume_geometry_fingerprint": self.volume_geometry_fingerprint,
             "med_sha256": self.med_sha256,
             "comm_sha256": self.comm_sha256,
             "verified": self.verified,
@@ -130,6 +145,7 @@ def write_quadratic_med(
         gmsh.model.mesh.addElementsByType(v, 11, list(range(1001, 1001 + vols.shape[0])), (vols + 1).reshape(-1).tolist())
         _add_named_physical_group(gmsh, 2, [s], surf_name)
         _add_named_physical_group(gmsh, 3, [v], vol_name)
+        gmsh.option.setNumber("Mesh.SaveAll", 0)
         gmsh.write(str(path))
     except QuadraticMedError:
         raise
@@ -141,6 +157,23 @@ def write_quadratic_med(
             gmsh.finalize()
     if not path.is_file() or path.stat().st_size <= 0:
         raise QuadraticMedError("MED_WRITE_EMPTY")
+    try:
+        write_semantic_manifest(path, {
+            surf_name: {
+                "dimension": 2,
+                "element_type": 9,
+                "element_count": int(surfs.shape[0]),
+                "geometry_fingerprint": geometry_fingerprint(nodes, surfs),
+            },
+            vol_name: {
+                "dimension": 3,
+                "element_type": 11,
+                "element_count": int(vols.shape[0]),
+                "geometry_fingerprint": geometry_fingerprint(nodes, vols),
+            },
+        })
+    except MedSemanticGroupError as exc:
+        raise QuadraticMedError(str(exc)) from exc
     return path
 
 
@@ -157,24 +190,30 @@ def verify_quadratic_med(path: str | Path, *, surface_group: str, volume_group: 
         gmsh.initialize()
     try:
         gmsh.clear(); gmsh.open(str(med))
-        def count_group(dim: int, name: str, element_type: int) -> int:
-            matches = [(d,t) for d,t in gmsh.model.getPhysicalGroups(dim) if gmsh.model.getPhysicalName(d,t) == name]
-            if len(matches) != 1:
-                raise QuadraticMedError("MED_GROUP_NOT_UNIQUE")
-            total = 0
-            for ent in gmsh.model.getEntitiesForPhysicalGroup(dim, matches[0][1]):
-                types, tags, _ = gmsh.model.mesh.getElements(dim, int(ent))
-                for typ, tagset in zip(types, tags):
-                    if int(typ) == element_type:
-                        total += len(tagset)
-            return total
-        ntri = count_group(2, surf_name, 9)
-        ntet = count_group(3, vol_name, 11)
+        try:
+            surf = resolve_semantic_group(gmsh, med, surf_name)
+            vol = resolve_semantic_group(gmsh, med, vol_name)
+        except MedSemanticGroupError as exc:
+            raise QuadraticMedError("MED_GROUP_NOT_UNIQUE") from exc
+        ntri = int(surf["element_count"])
+        ntet = int(vol["element_count"])
         if ntri != int(expected_tri6):
             raise QuadraticMedError("MED_TRI6_COUNT_MISMATCH")
         if ntet != int(expected_tet10):
             raise QuadraticMedError("MED_TET10_COUNT_MISMATCH")
-        return QuadraticMedEvidence(med, surf_name, vol_name, ntri, ntet, _hash_file(med), _hash_bytes(comm_text.encode("utf-8")))
+        return QuadraticMedEvidence(
+            med,
+            surf_name,
+            str(surf["serialized_group_name"]),
+            vol_name,
+            str(vol["serialized_group_name"]),
+            ntri,
+            ntet,
+            str(surf["geometry_fingerprint"]),
+            str(vol["geometry_fingerprint"]),
+            _hash_file(med),
+            _hash_bytes(comm_text.encode("utf-8")),
+        )
     finally:
         gmsh.clear()
         if owned:
