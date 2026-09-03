@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using CaeJob;
 using Newtonsoft.Json;
@@ -33,6 +32,11 @@ namespace PrePoMax.Harness
 
             string solver = job.AnalysisSolver == AnalysisSolverTypeEnum.CodeAster ? "code_aster" : "calculix";
             string manifestPath = Path.Combine(job.WorkDirectory, job.Name + ".harness.manifest.json");
+            string reportPath = GetReportPath(job.WorkDirectory, job.Name);
+
+            // A previous PASS report must never survive into a new run. If Python cannot
+            // even start, result admission will therefore still fail closed.
+            if (File.Exists(reportPath)) File.Delete(reportPath);
 
             Dictionary<string, object> manifest = new Dictionary<string, object>();
             manifest["schema"] = SchemaVersion;
@@ -88,7 +92,7 @@ namespace PrePoMax.Harness
             job.HarnessExecutable = pythonExecutable;
             job.HarnessScriptPath = harnessScriptPath;
             job.HarnessManifestPath = manifestPath;
-            job.HarnessReportPath = GetReportPath(job.WorkDirectory, job.Name);
+            job.HarnessReportPath = reportPath;
             return manifestPath;
         }
 
@@ -113,6 +117,7 @@ namespace PrePoMax.Harness
         public static string GetReportPathForResult(string resultFileName)
         {
             string directory = Path.GetDirectoryName(resultFileName);
+            if (String.IsNullOrWhiteSpace(directory)) directory = Environment.CurrentDirectory;
             string name = Path.GetFileNameWithoutExtension(resultFileName);
             return GetReportPath(directory, name);
         }
@@ -129,6 +134,13 @@ namespace PrePoMax.Harness
                 }
 
                 JObject report = JObject.Parse(File.ReadAllText(reportPath));
+                int? schema = (int?)report["schema"];
+                if (schema != SchemaVersion)
+                {
+                    reason = "Harness report schema is unsupported: " + (schema.HasValue ? schema.Value.ToString() : "missing") + ".";
+                    return false;
+                }
+
                 string status = (string)report["status"];
                 if (!String.Equals(status, "PASS", StringComparison.OrdinalIgnoreCase))
                 {
@@ -136,8 +148,7 @@ namespace PrePoMax.Harness
                     return false;
                 }
 
-                JToken checksToken = report["checks"];
-                JArray checks = checksToken as JArray;
+                JArray checks = report["checks"] as JArray;
                 if (checks == null || checks.Count == 0)
                 {
                     reason = "Harness report contains no post-run checks.";
