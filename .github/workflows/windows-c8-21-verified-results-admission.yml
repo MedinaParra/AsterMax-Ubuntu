@@ -59,12 +59,13 @@ jobs:
             tests/test_professional_postprocess.py
 
       - name: Write non-solver witness
+        if: always()
         shell: pwsh
         run: |
           @'
           {
-            "schema": "astermax.c8-21.verified-results-admission-harness.v1",
-            "purpose": "software contract validation only",
+            "schema": "astermax.c8-22.results-admission-regression-witness.v1",
+            "purpose": "software contract validation only; emitted even when regression tests fail",
             "real_code_aster_runtime_used": false,
             "fea_solve_executed": false,
             "numerical_verification": false,
@@ -72,11 +73,11 @@ jobs:
             "industrial_validation": false,
             "ansys_equivalence": false
           }
-          '@ | Set-Content -Path c8-21-witness.json -Encoding utf8
+          '@ | Set-Content -Path c8-22-witness.json -Encoding utf8
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: c8-21-verified-results-admission-witness
-          path: c8-21-witness.json
+          name: c8-22-results-admission-regression-witness
+          path: c8-22-witness.json
           if-no-files-found: error
