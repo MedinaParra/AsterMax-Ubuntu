@@ -19,7 +19,7 @@ def test_discovers_identity_confirmed_run_aster_without_promoting_solver_claims(
         assert timeout_s > 0
         if command[:3] == ["wsl.exe", "--list", "--quiet"]:
             return cp(command, out="Ubuntu-24.04\n")
-        if command[-2:] == ["run_aster", "--help"]:
+        if command[-2:] == ["/opt/aster/bin/run_aster", "--help"]:
             return cp(command, out="usage: run_aster export-file\nCode_Aster launcher")
         if "command -v run_aster" in command[-1]:
             return cp(command, out="/opt/aster/bin/run_aster\n")
