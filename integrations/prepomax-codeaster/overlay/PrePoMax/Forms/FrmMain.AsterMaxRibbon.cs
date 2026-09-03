@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -8,39 +9,52 @@ namespace PrePoMax
     {
         private Panel _asterMaxRibbonHost;
         private TabControl _asterMaxRibbonTabs;
+        private ToolTip _asterMaxRibbonToolTip;
         private bool _asterMaxRibbonEnabled = true;
         private bool _asterMaxShowClassicToolbars = false;
+        private bool _asterMaxWorkspaceLayoutApplied = false;
 
         private void InitializeAsterMaxRibbon()
         {
+            _asterMaxRibbonToolTip = new ToolTip();
+            _asterMaxRibbonToolTip.ShowAlways = true;
+            _asterMaxRibbonToolTip.AutoPopDelay = 12000;
+            _asterMaxRibbonToolTip.InitialDelay = 450;
+            _asterMaxRibbonToolTip.ReshowDelay = 100;
+
             _asterMaxRibbonHost = new Panel();
             _asterMaxRibbonHost.Name = "asterMaxRibbonHost";
             _asterMaxRibbonHost.Dock = DockStyle.Top;
-            _asterMaxRibbonHost.Height = 126;
-            _asterMaxRibbonHost.BackColor = Color.FromArgb(245, 247, 250);
+            _asterMaxRibbonHost.Height = 132;
+            _asterMaxRibbonHost.BackColor = Color.FromArgb(244, 247, 250);
             _asterMaxRibbonHost.Padding = new Padding(0, 1, 0, 1);
 
             _asterMaxRibbonTabs = new TabControl();
             _asterMaxRibbonTabs.Name = "asterMaxRibbonTabs";
             _asterMaxRibbonTabs.Dock = DockStyle.Fill;
-            _asterMaxRibbonTabs.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-            _asterMaxRibbonTabs.Padding = new Point(16, 5);
+            _asterMaxRibbonTabs.Font = new Font("Segoe UI", 8.75F, FontStyle.Regular);
+            _asterMaxRibbonTabs.Padding = new Point(11, 5);
             _asterMaxRibbonTabs.SizeMode = TabSizeMode.Normal;
+            _asterMaxRibbonTabs.Multiline = false;
 
             BuildHomeRibbonTab();
-            BuildGeometryRibbonTab();
-            BuildMeshRibbonTab();
-            BuildModelRibbonTab();
-            BuildAnalysisRibbonTab();
-            BuildResultsRibbonTab();
+            BuildMirroredMenuRibbonTabs();
             BuildAsterMaxRibbonTab();
 
             _asterMaxRibbonHost.Controls.Add(_asterMaxRibbonTabs);
             Controls.Add(_asterMaxRibbonHost);
             _asterMaxRibbonHost.BringToFront();
-            if (menuStripMain != null) menuStripMain.BringToFront();
+
+            ConfigureAsterMaxWorkspaceLayout(false);
+            Shown += delegate { ConfigureAsterMaxWorkspaceLayout(true); };
 
             ApplyAsterMaxRibbonVisibility();
+        }
+
+        private string CleanRibbonText(string text)
+        {
+            if (text == null) return "";
+            return text.Replace("&", "").Trim();
         }
 
         private TabPage CreateRibbonTab(string title)
@@ -65,12 +79,15 @@ namespace PrePoMax
             return row;
         }
 
-        private Panel CreateRibbonGroup(string title, params Control[] controls)
+        private Panel CreateRibbonGroup(string title, IList<Control> controls)
         {
-            int width = Math.Max(110, controls.Length * 82 + 12);
+            int width = 116;
+            foreach (Control control in controls) width += control.Width + 4;
+            width = Math.Max(116, width);
+
             Panel group = new Panel();
             group.Width = width;
-            group.Height = 83;
+            group.Height = 86;
             group.Margin = new Padding(2, 0, 5, 0);
             group.BackColor = Color.White;
             group.BorderStyle = BorderStyle.FixedSingle;
@@ -79,71 +96,166 @@ namespace PrePoMax
             buttons.Dock = DockStyle.Fill;
             buttons.FlowDirection = FlowDirection.LeftToRight;
             buttons.WrapContents = false;
-            buttons.Padding = new Padding(4, 3, 4, 17);
+            buttons.AutoScroll = false;
+            buttons.Padding = new Padding(4, 3, 4, 18);
             buttons.BackColor = Color.White;
             foreach (Control control in controls) buttons.Controls.Add(control);
 
             Label label = new Label();
             label.Text = title;
             label.Dock = DockStyle.Bottom;
-            label.Height = 16;
+            label.Height = 17;
             label.TextAlign = ContentAlignment.MiddleCenter;
             label.Font = new Font("Segoe UI", 7.5F, FontStyle.Regular);
-            label.ForeColor = Color.FromArgb(90, 96, 105);
-            label.BackColor = Color.FromArgb(243, 245, 248);
+            label.ForeColor = Color.FromArgb(82, 89, 98);
+            label.BackColor = Color.FromArgb(241, 244, 247);
 
             group.Controls.Add(buttons);
             group.Controls.Add(label);
             return group;
         }
 
-        private Button RibbonCommand(string text, ToolStripItem command)
+        private int GetRibbonButtonWidth(string text)
+        {
+            string clean = CleanRibbonText(text);
+            int measured = TextRenderer.MeasureText(clean, new Font("Segoe UI", 8.25F)).Width + 20;
+            return Math.Max(78, Math.Min(132, measured));
+        }
+
+        private Button CreateRibbonButtonBase(string text)
         {
             Button button = new Button();
-            button.Text = text;
-            button.Width = 76;
-            button.Height = 57;
+            button.Text = CleanRibbonText(text);
+            button.Width = GetRibbonButtonWidth(text);
+            button.Height = 59;
             button.Margin = new Padding(2, 1, 2, 1);
             button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderSize = 0;
             button.BackColor = Color.White;
-            button.ForeColor = Color.FromArgb(32, 38, 46);
+            button.ForeColor = Color.FromArgb(30, 37, 45);
             button.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular);
             button.TextImageRelation = TextImageRelation.ImageAboveText;
             button.ImageAlign = ContentAlignment.MiddleCenter;
             button.TextAlign = ContentAlignment.BottomCenter;
-            button.Image = command == null ? null : command.Image;
-            button.Enabled = command == null || command.Enabled;
-            if (command != null)
-            {
-                button.Click += delegate { command.PerformClick(); };
-                command.EnabledChanged += delegate { button.Enabled = command.Enabled; };
-            }
-            button.MouseEnter += delegate { button.BackColor = Color.FromArgb(232, 240, 250); };
-            button.MouseLeave += delegate { button.BackColor = Color.White; };
+            button.AutoEllipsis = true;
+            button.MouseEnter += delegate { if (button.Enabled) button.BackColor = Color.FromArgb(229, 239, 250); };
+            button.MouseLeave += delegate { SyncRibbonButtonAppearance(button); };
             return button;
+        }
+
+        private void SyncRibbonButtonAppearance(Button button)
+        {
+            ToolStripMenuItem source = button.Tag as ToolStripMenuItem;
+            if (source == null)
+            {
+                button.BackColor = Color.White;
+                return;
+            }
+            button.Enabled = source.Enabled && source.Visible;
+            button.BackColor = source.Checked ? Color.FromArgb(214, 231, 249) : Color.White;
+        }
+
+        private Button RibbonCommand(ToolStripMenuItem command)
+        {
+            Button button = CreateRibbonButtonBase(command == null ? "Command" : command.Text);
+            if (command == null) return button;
+
+            button.Tag = command;
+            button.Image = command.Image;
+            button.Click += delegate { command.PerformClick(); };
+            command.EnabledChanged += delegate { SyncRibbonButtonAppearance(button); };
+            command.VisibleChanged += delegate { SyncRibbonButtonAppearance(button); };
+            command.CheckedChanged += delegate { SyncRibbonButtonAppearance(button); };
+            SyncRibbonButtonAppearance(button);
+            _asterMaxRibbonToolTip.SetToolTip(button, GetRibbonToolTip(command));
+            return button;
+        }
+
+        private Button RibbonDropDown(ToolStripMenuItem command)
+        {
+            Button button = CreateRibbonButtonBase(CleanRibbonText(command.Text) + "  ▼");
+            button.Tag = command;
+            button.Image = command.Image;
+            button.Click += delegate(object sender, EventArgs e)
+            {
+                ShowRibbonDropDown((Control)sender, command);
+            };
+            command.EnabledChanged += delegate { SyncRibbonButtonAppearance(button); };
+            command.VisibleChanged += delegate { SyncRibbonButtonAppearance(button); };
+            command.CheckedChanged += delegate { SyncRibbonButtonAppearance(button); };
+            SyncRibbonButtonAppearance(button);
+            _asterMaxRibbonToolTip.SetToolTip(button, GetRibbonToolTip(command));
+            return button;
+        }
+
+        private string GetRibbonToolTip(ToolStripMenuItem command)
+        {
+            string tip = CleanRibbonText(command.Text);
+            if (!string.IsNullOrWhiteSpace(command.ToolTipText)) tip += Environment.NewLine + command.ToolTipText;
+            if (!string.IsNullOrWhiteSpace(command.ShortcutKeyDisplayString)) tip += Environment.NewLine + command.ShortcutKeyDisplayString;
+            else if (command.ShortcutKeys != Keys.None) tip += Environment.NewLine + command.ShortcutKeys.ToString();
+            return tip;
         }
 
         private Button RibbonAction(string text, EventHandler click)
         {
-            Button button = new Button();
-            button.Text = text;
-            button.Width = 88;
-            button.Height = 57;
-            button.Margin = new Padding(2, 1, 2, 1);
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 0;
-            button.BackColor = Color.White;
-            button.ForeColor = Color.FromArgb(32, 38, 46);
-            button.Font = new Font("Segoe UI", 8.25F, FontStyle.Regular);
+            Button button = CreateRibbonButtonBase(text);
             button.Click += click;
-            button.MouseEnter += delegate { button.BackColor = Color.FromArgb(232, 240, 250); };
-            button.MouseLeave += delegate { button.BackColor = Color.White; };
             return button;
         }
 
-        private void AddGroup(FlowLayoutPanel row, string title, params Control[] controls)
+        private void ShowRibbonDropDown(Control anchor, ToolStripMenuItem source)
         {
+            ContextMenuStrip menu = new ContextMenuStrip();
+            CopyMenuItems(menu.Items, source.DropDownItems);
+            menu.Closed += delegate { menu.Dispose(); };
+            menu.Show(anchor, new Point(0, anchor.Height));
+        }
+
+        private void CopyMenuItems(ToolStripItemCollection target, ToolStripItemCollection source)
+        {
+            foreach (ToolStripItem item in source)
+            {
+                if (item is ToolStripSeparator)
+                {
+                    target.Add(new ToolStripSeparator());
+                    continue;
+                }
+
+                ToolStripMenuItem sourceItem = item as ToolStripMenuItem;
+                if (sourceItem == null) continue;
+
+                ToolStripMenuItem clone = new ToolStripMenuItem();
+                clone.Text = CleanRibbonText(sourceItem.Text);
+                clone.Image = sourceItem.Image;
+                clone.Enabled = sourceItem.Enabled && sourceItem.Visible;
+                clone.Checked = sourceItem.Checked;
+                clone.CheckState = sourceItem.CheckState;
+                clone.ShortcutKeyDisplayString = sourceItem.ShortcutKeyDisplayString;
+                clone.ToolTipText = sourceItem.ToolTipText;
+
+                if (sourceItem.DropDownItems.Count > 0)
+                {
+                    CopyMenuItems(clone.DropDownItems, sourceItem.DropDownItems);
+                }
+                else
+                {
+                    ToolStripMenuItem captured = sourceItem;
+                    clone.Click += delegate { captured.PerformClick(); };
+                }
+                target.Add(clone);
+            }
+        }
+
+        private Control CreateRibbonControlForMenuItem(ToolStripMenuItem item)
+        {
+            if (item.DropDownItems.Count > 0) return RibbonDropDown(item);
+            return RibbonCommand(item);
+        }
+
+        private void AddRibbonGroup(FlowLayoutPanel row, string title, IList<Control> controls)
+        {
+            if (controls == null || controls.Count == 0) return;
             row.Controls.Add(CreateRibbonGroup(title, controls));
         }
 
@@ -151,110 +263,149 @@ namespace PrePoMax
         {
             TabPage page = CreateRibbonTab("Home");
             FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Project",
-                RibbonCommand("New", tsmiNew), RibbonCommand("Open", tsmiOpen),
-                RibbonCommand("Import", tsmiImportFile), RibbonCommand("Save", tsmiSave));
-            AddGroup(row, "History", RibbonCommand("Undo", tsmiUndo), RibbonCommand("Redo", tsmiRedo));
-            AddGroup(row, "View", RibbonCommand("Zoom Fit", tsmiZoomToFit), RibbonCommand("Isometric", tsmiIsometricView));
-            AddGroup(row, "Interface",
-                RibbonAction("Classic Toolbars", delegate
+
+            AddRibbonGroup(row, "Project", new List<Control>
+            {
+                RibbonCommand(tsmiNew), RibbonCommand(tsmiOpen), RibbonCommand(tsmiImportFile), RibbonCommand(tsmiSave)
+            });
+            AddRibbonGroup(row, "History", new List<Control>
+            {
+                RibbonCommand(tsmiUndo), RibbonCommand(tsmiRedo)
+            });
+            AddRibbonGroup(row, "View", new List<Control>
+            {
+                RibbonCommand(tsmiZoomToFit), RibbonCommand(tsmiIsometricView)
+            });
+            AddRibbonGroup(row, "Interface", new List<Control>
+            {
+                RibbonAction("Classic UI", delegate
                 {
                     _asterMaxShowClassicToolbars = !_asterMaxShowClassicToolbars;
                     ApplyAsterMaxRibbonVisibility();
-                }));
+                })
+            });
             _asterMaxRibbonTabs.TabPages.Add(page);
         }
 
-        private void BuildGeometryRibbonTab()
+        private void BuildMirroredMenuRibbonTabs()
         {
-            TabPage page = CreateRibbonTab("Geometry");
-            FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Import", RibbonCommand("Import CAD", tsmiImportFile));
-            AddGroup(row, "Prepare",
-                RibbonCommand("Analyze", tsmiGeometryAnalyze),
-                RibbonCommand("Compound", tsmiCreateAndImportCompoundPart));
-            AddGroup(row, "View",
-                RibbonCommand("Section", tsmiSectionView),
-                RibbonCommand("Exploded", tsmiExplodedView));
-            _asterMaxRibbonTabs.TabPages.Add(page);
+            if (menuStripMain == null) return;
+
+            foreach (ToolStripItem rawTopItem in menuStripMain.Items)
+            {
+                ToolStripMenuItem topMenu = rawTopItem as ToolStripMenuItem;
+                if (topMenu == null) continue;
+
+                string tabTitle = CleanRibbonText(topMenu.Text);
+                if (string.IsNullOrWhiteSpace(tabTitle)) continue;
+
+                TabPage page = CreateRibbonTab(tabTitle);
+                FlowLayoutPanel row = CreateRibbonRow(page);
+                BuildRibbonGroupsFromMenu(row, topMenu);
+                _asterMaxRibbonTabs.TabPages.Add(page);
+            }
         }
 
-        private void BuildMeshRibbonTab()
+        private void BuildRibbonGroupsFromMenu(FlowLayoutPanel row, ToolStripMenuItem topMenu)
         {
-            TabPage page = CreateRibbonTab("Mesh");
-            FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Controls",
-                RibbonCommand("Parameters", tsmiCreateMeshingParameters),
-                RibbonCommand("Refinement", tsmiCreateMeshRefinement));
-            AddGroup(row, "Generate",
-                RibbonCommand("Preview Edge", tsmiPreviewEdgeMesh),
-                RibbonCommand("Create Mesh", tsmiCreateMesh));
-            _asterMaxRibbonTabs.TabPages.Add(page);
-        }
+            List<Control> general = new List<Control>();
+            int generalIndex = 1;
 
-        private void BuildModelRibbonTab()
-        {
-            TabPage page = CreateRibbonTab("Model");
-            FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Materials",
-                RibbonCommand("Library", tsmiMaterialLibrary),
-                RibbonCommand("Material", tsmiCreateMaterial));
-            AddGroup(row, "Definition",
-                RibbonCommand("Section", tsmiCreateSection),
-                RibbonCommand("Surface", tsmiCreateSurface));
-            AddGroup(row, "Sets",
-                RibbonCommand("Node Set", tsmiCreateNodeSet),
-                RibbonCommand("Element Set", tsmiCreateElementSet));
-            _asterMaxRibbonTabs.TabPages.Add(page);
-        }
+            foreach (ToolStripItem rawItem in topMenu.DropDownItems)
+            {
+                if (rawItem is ToolStripSeparator)
+                {
+                    if (general.Count > 0)
+                    {
+                        AddRibbonGroup(row, generalIndex == 1 ? "Commands" : "Commands " + generalIndex.ToString(), general);
+                        general = new List<Control>();
+                        generalIndex++;
+                    }
+                    continue;
+                }
 
-        private void BuildAnalysisRibbonTab()
-        {
-            TabPage page = CreateRibbonTab("Analysis");
-            FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Setup", RibbonCommand("Step", tsmiCreateStep));
-            AddGroup(row, "Loads & BC",
-                RibbonCommand("Boundary", tsmiCreateBC),
-                RibbonCommand("Load", tsmiCreateLoad));
-            AddGroup(row, "Job",
-                RibbonCommand("Analysis", tsmiCreateAnalysis),
-                RibbonCommand("Check", tsmiCheckModel),
-                RibbonCommand("Run", tsmiRunAnalysis));
-            _asterMaxRibbonTabs.TabPages.Add(page);
-        }
+                ToolStripMenuItem item = rawItem as ToolStripMenuItem;
+                if (item == null) continue;
 
-        private void BuildResultsRibbonTab()
-        {
-            TabPage page = CreateRibbonTab("Results");
-            FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Display",
-                RibbonCommand("Undeformed", tsmiResultsUndeformed),
-                RibbonCommand("Deformed", tsmiResultsDeformed),
-                RibbonCommand("Contours", tsmiResultsColorContours));
-            AddGroup(row, "View",
-                RibbonCommand("Section", tsmiSectionView),
-                RibbonCommand("Exploded", tsmiExplodedView));
-            _asterMaxRibbonTabs.TabPages.Add(page);
+                if (item.DropDownItems.Count > 0)
+                {
+                    if (general.Count > 0)
+                    {
+                        AddRibbonGroup(row, generalIndex == 1 ? "Commands" : "Commands " + generalIndex.ToString(), general);
+                        general = new List<Control>();
+                        generalIndex++;
+                    }
+
+                    List<Control> nestedControls = new List<Control>();
+                    foreach (ToolStripItem childRaw in item.DropDownItems)
+                    {
+                        if (childRaw is ToolStripSeparator) continue;
+                        ToolStripMenuItem child = childRaw as ToolStripMenuItem;
+                        if (child != null) nestedControls.Add(CreateRibbonControlForMenuItem(child));
+                    }
+                    if (nestedControls.Count == 0) nestedControls.Add(RibbonDropDown(item));
+                    AddRibbonGroup(row, CleanRibbonText(item.Text), nestedControls);
+                }
+                else
+                {
+                    general.Add(RibbonCommand(item));
+                }
+            }
+
+            if (general.Count > 0)
+                AddRibbonGroup(row, generalIndex == 1 ? "Commands" : "Commands " + generalIndex.ToString(), general);
         }
 
         private void BuildAsterMaxRibbonTab()
         {
             TabPage page = CreateRibbonTab("AsterMax");
             FlowLayoutPanel row = CreateRibbonRow(page);
-            AddGroup(row, "Solver",
-                RibbonCommand("Settings", tsmiSettings),
-                RibbonCommand("Check Model", tsmiCheckModel),
-                RibbonCommand("Run Solver", tsmiRunAnalysis));
-            AddGroup(row, "Workspace",
-                RibbonCommand("Material Library", tsmiMaterialLibrary),
-                RibbonCommand("Query", tsmiQuery));
+            AddRibbonGroup(row, "Solver", new List<Control>
+            {
+                RibbonCommand(tsmiSettings), RibbonCommand(tsmiCheckModel), RibbonCommand(tsmiRunAnalysis)
+            });
+            AddRibbonGroup(row, "Engineering", new List<Control>
+            {
+                RibbonCommand(tsmiMaterialLibrary), RibbonCommand(tsmiQuery)
+            });
+            AddRibbonGroup(row, "Interface", new List<Control>
+            {
+                RibbonAction("Classic UI", delegate
+                {
+                    _asterMaxShowClassicToolbars = !_asterMaxShowClassicToolbars;
+                    ApplyAsterMaxRibbonVisibility();
+                })
+            });
             _asterMaxRibbonTabs.TabPages.Add(page);
+        }
+
+        private void ConfigureAsterMaxWorkspaceLayout(bool finalLayout)
+        {
+            if (splitContainer1 == null) return;
+            if (_asterMaxWorkspaceLayoutApplied && finalLayout) return;
+
+            splitContainer1.Panel1MinSize = 285;
+            splitContainer1.Panel2MinSize = 420;
+            splitContainer1.SplitterWidth = 6;
+            splitContainer1.FixedPanel = FixedPanel.Panel1;
+
+            int available = splitContainer1.Width > 0 ? splitContainer1.Width : ClientSize.Width;
+            int desired = (int)(available * 0.22);
+            desired = Math.Max(330, Math.Min(380, desired));
+            int maximum = available - splitContainer1.Panel2MinSize - splitContainer1.SplitterWidth;
+            if (maximum >= splitContainer1.Panel1MinSize)
+                splitContainer1.SplitterDistance = Math.Max(splitContainer1.Panel1MinSize, Math.Min(desired, maximum));
+
+            if (finalLayout) _asterMaxWorkspaceLayoutApplied = true;
         }
 
         private void ApplyAsterMaxRibbonVisibility()
         {
             if (!_asterMaxRibbonEnabled) return;
+
             bool showClassic = _asterMaxShowClassicToolbars;
+            if (menuStripMain != null) menuStripMain.Visible = showClassic;
+            if (toolStripContainer1 != null) toolStripContainer1.TopToolStripPanelVisible = showClassic;
             if (tsFile != null) tsFile.Visible = showClassic;
             if (tsViews != null) tsViews.Visible = showClassic;
             if (tsModel != null) tsModel.Visible = showClassic;
