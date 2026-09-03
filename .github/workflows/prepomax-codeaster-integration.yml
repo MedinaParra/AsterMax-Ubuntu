@@ -34,7 +34,9 @@ jobs:
           python -m py_compile integrations/prepomax-codeaster/tools/apply_results_bridge.py
           python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
           python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
+          python -m py_compile integrations/prepomax-codeaster/harness/test_harness_contract.py
           python integrations/prepomax-codeaster/harness/astermax_harness.py --self-test
+          python integrations/prepomax-codeaster/harness/test_harness_contract.py
 
       - name: Bootstrap patched PrePoMax tree
         shell: pwsh
