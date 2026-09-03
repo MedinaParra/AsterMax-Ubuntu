@@ -12,12 +12,15 @@ from .code_aster_reference_harness import (
     verify_uniaxial_reference_results,
 )
 from .code_aster_result_contract import ResultTableSpec, parse_reference_result_tables
-from .code_aster_runtime_qualification import QualifiedCodeAsterRuntime
+from .code_aster_runtime_qualification import (
+    CodeAsterRuntimeQualificationError,
+    QualifiedCodeAsterRuntime,
+    attest_qualified_wsl_code_aster_runtime,
+)
 from .code_aster_wsl_runtime import (
     CodeAsterWslRuntime,
     _run,
     build_wsl_run_aster_command,
-    probe_wsl_runtime,
     windows_path_to_wsl,
 )
 
@@ -53,6 +56,7 @@ class GenuineReferenceSolveEvidence:
     message_diagnostic_ok: bool
     message_execution_exit_code: int | None
     runtime_qualified: bool
+    runtime_attested_immediately_before_solve: bool
     run_aster_sha256: str
     config_sha256: str
     detected_version: str | None
@@ -95,14 +99,7 @@ def execute_and_verify_reference_wsl(
     message_filename: str = "astermax.mess",
     timeout_s: float = 300.0,
 ) -> GenuineReferenceSolveEvidence:
-    """Run a qualified WSL2 Code_Aster reference study and verify mechanics.
-
-    A successful host process exit is necessary but insufficient. C8.7 requires
-    an immutable qualified runtime, a fresh Code_Aster message with successful
-    diagnostic, a fresh result MED, three fresh scalar evidence tables, and the
-    analytical displacement/reaction/stress gates. Only this combined contract
-    may emit ``fea_solve_executed=True`` for the reference case.
-    """
+    """Run a qualified and freshly attested WSL2 Code_Aster reference study."""
     spec.validate()
     _validate_qualification(runtime, qualification)
     root = Path(directory).expanduser().resolve()
@@ -130,9 +127,15 @@ def execute_and_verify_reference_wsl(
     if expected_binding not in {line.strip() for line in export_text.splitlines()}:
         raise CodeAsterReferenceRunError("REFERENCE_RUN_MESSAGE_BINDING_MISSING")
 
-    # Re-probe immediately before execution so qualification cannot silently
-    # substitute for current runtime availability/identity.
-    probe_wsl_runtime(runtime, timeout_s=min(timeout_s, 30.0))
+    try:
+        attestation = attest_qualified_wsl_code_aster_runtime(
+            runtime,
+            qualification,
+            timeout_s=min(timeout_s, 30.0),
+        )
+    except CodeAsterRuntimeQualificationError as exc:
+        raise CodeAsterReferenceRunError(f"REFERENCE_RUN_RUNTIME_ATTESTATION_FAILED:{exc}") from exc
+
     workdir_linux = windows_path_to_wsl(runtime, root, timeout_s=min(timeout_s, 30.0))
     launch = build_wsl_run_aster_command(runtime, workdir_linux=workdir_linux, export_filename=export.name)
     completed = _run(launch, timeout_s=timeout_s)
@@ -174,8 +177,9 @@ def execute_and_verify_reference_wsl(
         message_diagnostic_ok=diagnostic.diagnostic_ok,
         message_execution_exit_code=diagnostic.execution_exit_code,
         runtime_qualified=True,
-        run_aster_sha256=qualification.run_aster_sha256,
-        config_sha256=qualification.config_sha256,
+        runtime_attested_immediately_before_solve=attestation.attestation_valid,
+        run_aster_sha256=attestation.run_aster_sha256,
+        config_sha256=attestation.config_sha256,
         detected_version=qualification.detected_version,
         fea_solve_executed=True,
         numerical_verification=verified.numerical_verification,
