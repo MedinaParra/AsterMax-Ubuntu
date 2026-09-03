@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/prepomax-code-aster
+      - feature/prepomax-code-aster-harness-runtime
     paths:
       - 'integrations/prepomax-codeaster/**'
       - '.github/workflows/prepomax-codeaster-integration.yml'
@@ -32,6 +33,7 @@ jobs:
           python -m py_compile integrations/prepomax-codeaster/tools/apply_overlay.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_model_translation.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_results_bridge.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_harness_runtime.py
           python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
           python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
           python -m py_compile integrations/prepomax-codeaster/harness/test_harness_contract.py
@@ -48,8 +50,13 @@ jobs:
         run: |
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'AnalysisSolverTypeEnum.CodeAster'
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'F libr.*\.mail D 20'
+          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'F resu.*\.resu R 8'
+          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'UseSolverHarness'
+          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern '_exe.ExitCode == 0'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'CodeAsterModelTranslator.WriteStudy'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'OpenCodeAsterResults'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'SolverHarnessBridge.Prepare'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'TryValidatePassingReport'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/SettingsContainer.cs -Pattern 'CodeAsterSettings'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern 'MECA_STATIQUE'
@@ -58,8 +65,12 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterMeshWriter.cs -Pattern 'COOR_3D'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterResultBridge.cs -Pattern 'PPM_STRESS_N'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterCaseWriter.cs -Pattern 'F resu.*\.resu R 8'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Harness/SolverHarnessBridge.cs -Pattern 'Harness status is'
           if (-not (Test-Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/codeaster_catalog.py)) {
             throw 'Code_Aster catalog helper was not copied to the patched source tree.'
+          }
+          if (-not (Test-Path build/PrePoMax-CodeAster/PrePoMax/Harness/astermax_harness.py)) {
+            throw 'AsterMax solver harness was not copied to the patched source tree.'
           }
 
       - name: Restore PrePoMax NuGet dependencies
@@ -75,6 +86,15 @@ jobs:
         run: |
           msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 | Tee-Object -FilePath msbuild.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify bundled harness in build output
+        shell: pwsh
+        run: |
+          $matches = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter asternax_harness.py -ErrorAction SilentlyContinue
+          if (-not $matches) {
+            $matches = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter astermax_harness.py -ErrorAction SilentlyContinue
+          }
+          if (-not $matches) { throw 'Bundled AsterMax harness was not copied to build output.' }
 
       - name: Upload MSBuild diagnostics
         if: always()
