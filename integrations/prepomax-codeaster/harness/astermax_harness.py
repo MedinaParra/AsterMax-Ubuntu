@@ -123,6 +123,18 @@ def resolve_executable(executable: str, cwd: Path) -> Optional[str]:
     return shutil.which(executable)
 
 
+def case_path(cwd: Path, relative: str) -> Path:
+    """Resolve a solver-owned artifact while forbidding paths outside the case root."""
+    item = Path(relative)
+    if item.is_absolute():
+        raise HarnessError(f"Artifact paths must be relative to the working directory: {relative}")
+    root = cwd.resolve()
+    target = (root / item).resolve()
+    if target != root and root not in target.parents:
+        raise HarnessError(f"Artifact path escapes the working directory: {relative}")
+    return target
+
+
 def solver_defaults(solver: str, job_name: str) -> Tuple[List[str], List[str]]:
     if solver == "code_aster":
         return (
@@ -161,8 +173,9 @@ def preflight(manifest: Dict[str, Any], manifest_path: Path) -> Tuple[Dict[str, 
         raise HarnessError("solver must be 'code_aster' or 'calculix'.")
 
     job_name = str(manifest.get("job_name", "")).strip()
-    if not job_name or not re.fullmatch(r"[A-Za-z0-9_.-]+", job_name):
-        raise HarnessError("job_name must use only letters, digits, dot, underscore or hyphen.")
+    if (not job_name or not re.fullmatch(r"[A-Za-z0-9_.-]+", job_name)
+            or not re.search(r"[A-Za-z0-9]", job_name)):
+        raise HarnessError("job_name must contain a letter/digit and use only letters, digits, dot, underscore or hyphen.")
 
     cwd_value = manifest.get("working_directory", ".")
     cwd = Path(str(cwd_value))
@@ -180,9 +193,11 @@ def preflight(manifest: Dict[str, Any], manifest_path: Path) -> Tuple[Dict[str, 
         raise HarnessError("Minimum artifact sizes must be at least one byte.")
 
     for relative in required_inputs:
-        item = cwd / relative
+        item = case_path(cwd, relative)
         ok = item.exists() and item.is_file() and item.stat().st_size >= min_input_bytes
         checks.append(Check(f"input:{relative}", ok, f"exists={item.exists()} size={item.stat().st_size if item.exists() else 0}"))
+    for relative in required_outputs:
+        case_path(cwd, relative)
 
     executable = str(manifest.get("solver_executable") or ("as_run" if solver == "code_aster" else "ccx"))
     resolved_executable = resolve_executable(executable, cwd)
@@ -213,7 +228,7 @@ def preflight(manifest: Dict[str, Any], manifest_path: Path) -> Tuple[Dict[str, 
 def remove_owned_outputs(cwd: Path, outputs: Iterable[str]) -> List[str]:
     removed: List[str] = []
     for relative in outputs:
-        target = cwd / relative
+        target = case_path(cwd, relative)
         if target.exists():
             if not target.is_file():
                 raise HarnessError(f"Refusing to remove non-file solver output: {target}")
@@ -317,14 +332,14 @@ def validate_outputs(manifest: Dict[str, Any]) -> Tuple[List[Check], List[Artifa
     min_bytes = int(manifest["min_output_bytes"])
 
     for relative in manifest["required_outputs"]:
-        item = cwd / relative
+        item = case_path(cwd, relative)
         art = artifact(item)
         artifacts.append(art)
         ok = art.exists and art.size >= min_bytes
         checks.append(Check(f"output:{relative}", ok, f"exists={art.exists} size={art.size}"))
 
     if manifest["solver"] == "code_aster":
-        mess = cwd / f"{manifest['job_name']}.mess"
+        mess = case_path(cwd, f"{manifest['job_name']}.mess")
         fatal_patterns = manifest.get(
             "fatal_message_patterns",
             [r"<F>", r"ERREUR\s+FATALE", r"FATAL(?:_|\s)+ERROR", r"ABNORMAL(?:_|\s)+ABORT"],
@@ -338,7 +353,7 @@ def validate_outputs(manifest: Dict[str, Any]) -> Tuple[List[Check], List[Artifa
                 raise HarnessError("result_contract must be an object or false.")
             required_tables = result_contract.get("required_tables", list(CODE_ASTER_TABLES))
             min_rows = int(result_contract.get("min_rows_per_table", 1))
-            checks.extend(validate_code_aster_tables(cwd / f"{manifest['job_name']}.resu", required_tables, min_rows))
+            checks.extend(validate_code_aster_tables(case_path(cwd, f"{manifest['job_name']}.resu"), required_tables, min_rows))
 
     return checks, artifacts
 
@@ -355,9 +370,15 @@ def execute(manifest_path: Path, preflight_only: bool = False, report_override: 
     manifest, preflight_checks = preflight(raw, manifest_path)
     cwd = Path(manifest["working_directory"])
     case_name = str(manifest.get("case_name") or manifest["job_name"])
-    report_path = report_override or cwd / f"{manifest['job_name']}.harness.json"
-    if not report_path.is_absolute():
-        report_path = (manifest_path.parent / report_path).resolve()
+
+    if report_override is not None:
+        report_path = report_override
+        if not report_path.is_absolute():
+            report_path = (manifest_path.parent / report_path).resolve()
+    elif cwd.exists() and cwd.is_dir():
+        report_path = cwd / f"{manifest['job_name']}.harness.json"
+    else:
+        report_path = manifest_path.parent / f"{manifest['job_name']}.harness.json"
 
     report: Dict[str, Any] = {
         "schema": SCHEMA_VERSION,
@@ -380,7 +401,7 @@ def execute(manifest_path: Path, preflight_only: bool = False, report_override: 
         print(json.dumps({"status": "FAIL", "report": str(report_path), "stage": "preflight"}))
         return 2
 
-    report["input_artifacts"] = [asdict(artifact(cwd / item)) for item in manifest["required_inputs"]]
+    report["input_artifacts"] = [asdict(artifact(case_path(cwd, item))) for item in manifest["required_inputs"]]
     if preflight_only:
         report["finished_utc"] = utc_now()
         write_report(report_path, report)
@@ -451,6 +472,11 @@ def self_test() -> int:
             raise HarnessError("Self-test preflight failed.")
         if validate_code_aster_tables(root / "missing.resu", CODE_ASTER_TABLES, 1)[0].passed:
             raise HarnessError("Self-test failed closed-output check.")
+        try:
+            case_path(root, "../outside.rmed")
+            raise HarnessError("Self-test failed workspace escape check.")
+        except HarnessError:
+            pass
     print("AsterMax harness self-test: PASS")
     return 0
 
