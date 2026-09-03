@@ -40,6 +40,7 @@ namespace PrePoMax.CodeAster
             sb.AppendLine("F comm " + options.JobName + ".comm D 1");
             sb.AppendLine("F libr " + options.JobName + ".mail D 20");
             sb.AppendLine("F mess " + options.JobName + ".mess R 6");
+            sb.AppendLine("F resu " + options.JobName + ".resu R 8");
             sb.AppendLine("F rmed " + options.JobName + ".rmed R 80");
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
             return path;
@@ -109,6 +110,7 @@ namespace PrePoMax.CodeAster
             sb.AppendLine("    RESU=_F(MAILLAGE=mesh, RESULTAT=result,");
             sb.AppendLine("            NOM_CHAM=('DEPL', 'SIGM_NOEU', 'SIEQ_NOEU', 'EPSI_NOEU'), TOUT_ORDRE='OUI'))");
             sb.AppendLine();
+            CodeAsterResultBridge.AppendResultTables(sb);
             sb.AppendLine("FIN()");
 
             return WriteRawComm(options, sb.ToString());
