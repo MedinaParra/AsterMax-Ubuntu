@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           python integrations/prepomax-codeaster/harness/astermax_harness.py \
-            --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.manifest.json
 
       - name: Show harness report summary
         if: always()
