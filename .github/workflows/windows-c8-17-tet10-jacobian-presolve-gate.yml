@@ -1,0 +1,80 @@
+name: Windows C8.17 TET10 Jacobian Pre-Solve Gate
+on:
+  push:
+    branches: [agent/c8-17-tet10-jacobian-presolve-gate]
+    paths:
+      - 'src/astermax/code_aster_mesh_quality_gate.py'
+      - 'src/astermax/code_aster_reference_harness.py'
+      - 'src/astermax/fea/tet10.py'
+      - 'src/astermax/fea/tet_quality.py'
+      - 'tests/test_c8_17_tet10_jacobian_presolve_gate.py'
+      - 'tests/test_code_aster_reference_harness.py'
+      - 'tests/test_tet_quality.py'
+      - '.github/workflows/windows-c8-17-tet10-jacobian-presolve-gate.yml'
+  pull_request:
+    branches: [agent/c8-16-professional-evidence-bundle]
+    paths:
+      - 'src/astermax/code_aster_mesh_quality_gate.py'
+      - 'src/astermax/code_aster_reference_harness.py'
+      - 'src/astermax/fea/tet10.py'
+      - 'src/astermax/fea/tet_quality.py'
+      - 'tests/test_c8_17_tet10_jacobian_presolve_gate.py'
+      - 'tests/test_code_aster_reference_harness.py'
+      - 'tests/test_tet_quality.py'
+      - '.github/workflows/windows-c8-17-tet10-jacobian-presolve-gate.yml'
+  workflow_dispatch:
+concurrency:
+  group: c8-17-tet10-jacobian-presolve-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tet10-presolve-quality-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax harness dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify legacy corner quality regression
+        shell: pwsh
+        run: python -m pytest -q tests/test_tet_quality.py
+      - name: Verify C8.17 quadratic Jacobian gate
+        shell: pwsh
+        run: python -m pytest -q tests/test_c8_17_tet10_jacobian_presolve_gate.py
+      - name: Verify reference preparation regression
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_harness.py
+      - name: Emit non-solve mesh-quality witness
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          witness = {
+              'increment': 'C8.17',
+              'tet10_corner_quality_crosscheck_tested': True,
+              'tet10_quadratic_jacobian_sampling_tested': True,
+              'presolve_quality_gate_wired_into_reference_bundle': True,
+              'length_unit': 'mm',
+              'ansys_metric_equivalence': False,
+              'real_runtime_attested': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+          }
+          Path('c8-17-witness.json').write_text(json.dumps(witness, indent=2, sort_keys=True), encoding='utf-8')
+          print(witness)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.17-tet10-jacobian-presolve-gate
+          path: c8-17-witness.json
+          if-no-files-found: error
