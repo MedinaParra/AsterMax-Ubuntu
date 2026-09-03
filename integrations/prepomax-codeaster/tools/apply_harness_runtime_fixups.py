@@ -40,7 +40,19 @@ def patch_analysis_job(text):
                 if (_jobStatus != JobStatus.Killed)
                     _jobStatus = _exe.ExitCode == 0 ? JobStatus.OK : JobStatus.Failed;
             }'''
-    return replace_once(text, old, new, "Run_OldWin exit-code contract")
+    text = replace_once(text, old, new, "Run_OldWin exit-code contract")
+
+    old = '''            string output = (_sbOutput == null ? "" : _sbOutput.ToString()) +
+                            (_sbAllOutput == null ? "" : _sbAllOutput.ToString());
+            if (_analysisSolver == AnalysisSolverTypeEnum.Calculix) return output.Contains("*ERROR");'''
+    new = '''            string output = (_sbOutput == null ? "" : _sbOutput.ToString()) +
+                            (_sbAllOutput == null ? "" : _sbAllOutput.ToString());
+            // When the harness owns execution, its exit code is the single source of
+            // truth. Do not apply a second, solver-specific text heuristic afterward.
+            if (_useSolverHarness) return _lastExitCode.HasValue && _lastExitCode.Value != 0;
+            if (_analysisSolver == AnalysisSolverTypeEnum.Calculix) return output.Contains("*ERROR");'''
+    text = replace_once(text, old, new, "Harness is authoritative solver validator")
+    return text
 
 
 def patch_controller(text):
