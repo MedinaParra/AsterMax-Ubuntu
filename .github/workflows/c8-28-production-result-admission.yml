@@ -61,10 +61,8 @@ jobs:
       - name: Exercise production CodeAsterResultBridge fail closed
         shell: pwsh
         run: |
-          $exe = Get-ChildItem build/PrePoMax-CodeAster -Recurse -Filter PrePoMax.exe |
-            Where-Object { $_.FullName -match '[\\/]bin[\\/]' } |
-            Sort-Object FullName | Select-Object -First 1
-          if (-not $exe) { throw 'Compiled PrePoMax.exe was not found.' }
+          $exe = Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe' -ErrorAction SilentlyContinue
+          if (-not $exe) { throw 'Expected compiled PrePoMax.exe was not found at the Release/x64 output path.' }
 
           $fixtureDir = Join-Path $PWD 'c8-28-fixtures'
           New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
@@ -95,6 +93,18 @@ jobs:
             finally { $w.Dispose() }
           }
 
+          function Invoke-Probe([string]$name, [string]$resu, [string]$rmed) {
+            $stdout = Join-Path $fixtureDir ($name + '.stdout.log')
+            $stderr = Join-Path $fixtureDir ($name + '.stderr.log')
+            $p = Start-Process -FilePath $exe.FullName `
+              -ArgumentList @('--codeaster-import-probe', $rmed, $resu) `
+              -WorkingDirectory $exe.DirectoryName `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr `
+              -NoNewWindow -Wait -PassThru
+            return [ordered]@{ exit_code=$p.ExitCode; stdout=$stdout; stderr=$stderr }
+          }
+
           $rmed = Join-Path $fixtureDir 'dummy.rmed'
           $cases = @(
             @{ name='complete'; mode='complete'; expect=0 },
@@ -108,11 +118,12 @@ jobs:
           foreach ($case in $cases) {
             $resu = Join-Path $fixtureDir ($case.name + '.resu')
             Write-Resu $resu $case.mode
-            & $exe.FullName --codeaster-import-probe $rmed $resu *> (Join-Path $fixtureDir ($case.name + '.log'))
-            $code = $LASTEXITCODE
+            $probe = Invoke-Probe $case.name $resu $rmed
+            $code = [int]$probe.exit_code
             $observed += [ordered]@{ case=$case.name; expected_exit=$case.expect; observed_exit=$code }
             if ($code -ne $case.expect) {
-              Get-Content (Join-Path $fixtureDir ($case.name + '.log'))
+              if (Test-Path $probe.stdout) { Get-Content $probe.stdout }
+              if (Test-Path $probe.stderr) { Get-Content $probe.stderr }
               throw "Production result-admission case '$($case.name)' returned $code; expected $($case.expect)."
             }
           }
