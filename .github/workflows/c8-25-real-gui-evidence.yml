@@ -1,0 +1,156 @@
+name: C8.25 Real Windows GUI evidence
+
+on:
+  push:
+    branches:
+      - agent/c8-25-real-gui-evidence
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/c8-25-real-gui-evidence.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-25-real-gui-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gui-evidence:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bootstrap patched PrePoMax tree
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 | Tee-Object -FilePath c8-25-msbuild.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Locate executable
+        id: locate
+        shell: pwsh
+        run: |
+          $candidates = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter PrePoMax.exe -File -ErrorAction Stop |
+            Where-Object { $_.FullName -match '[\\/]bin[\\/].*[\\/]Release[\\/]' -or $_.FullName -match '[\\/]bin[\\/]Release[\\/]' }
+          if (-not $candidates) { throw 'Release/x64 PrePoMax.exe was not found after successful MSBuild.' }
+          $exe = $candidates | Sort-Object FullName | Select-Object -First 1
+          "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "sha256=$((Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Launch real GUI and capture native window evidence
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeWindowRect {
+              [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+              [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
+
+          New-Item -ItemType Directory -Force -Path artifact/gui-evidence | Out-Null
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $proc = Start-Process -FilePath $exe -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "GUI exited before a main window was created. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'No native main window handle appeared within 30 seconds.' }
+          [NativeWindowRect]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 2
+
+          $rect = New-Object NativeWindowRect+RECT
+          if (-not [NativeWindowRect]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)) { throw 'GetWindowRect failed.' }
+          $width = $rect.Right - $rect.Left
+          $height = $rect.Bottom - $rect.Top
+          if ($width -lt 640 -or $height -lt 480) { throw "Main window is unexpectedly small: ${width}x${height}." }
+
+          $bmp = New-Object System.Drawing.Bitmap $width, $height
+          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          try {
+            $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+            $png = Join-Path $PWD 'artifact/gui-evidence/AsterMax-real-window.png'
+            $bmp.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
+          } finally {
+            $gfx.Dispose()
+            $bmp.Dispose()
+          }
+
+          $pngInfo = Get-Item artifact/gui-evidence/AsterMax-real-window.png
+          if ($pngInfo.Length -lt 10000) { throw "Captured PNG is suspiciously small: $($pngInfo.Length) bytes." }
+          $pngHash = (Get-FileHash $pngInfo.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $title = $proc.MainWindowTitle
+          @{
+            schema = 'astermax.real-windows-gui-evidence.v1'
+            commit = '${{ github.sha }}'
+            executable_sha256 = '${{ steps.locate.outputs.sha256 }}'
+            process_id = $proc.Id
+            native_main_window_handle_observed = $true
+            main_window_title = $title
+            window_width_px = $width
+            window_height_px = $height
+            screenshot = 'AsterMax-real-window.png'
+            screenshot_sha256 = $pngHash
+            screenshot_size_bytes = $pngInfo.Length
+            real_windows_process = $true
+            gui_window_observed = $true
+            fea_solve_executed_by_this_job = $false
+            numerical_verification_by_this_job = $false
+            rendering_semantics_verified = $false
+            industrial_validation = $false
+            ansys_equivalence = $false
+            note = 'Native Windows GUI evidence only. The screenshot is captured from the real compiled process, not generated or mocked.'
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 artifact/gui-evidence/GUI_EVIDENCE.json
+          Stop-Process -Id $proc.Id -Force
+
+      - name: Validate screenshot file signature
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path artifact/gui-evidence/AsterMax-real-window.png))
+          $expected = [byte[]](137,80,78,71,13,10,26,10)
+          for ($i = 0; $i -lt $expected.Length; $i++) {
+            if ($bytes[$i] -ne $expected[$i]) { throw 'Screenshot is not a valid PNG signature.' }
+          }
+          Get-Content artifact/gui-evidence/GUI_EVIDENCE.json
+
+      - name: Upload real GUI evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-real-Windows-GUI-${{ github.sha }}
+          path: artifact/gui-evidence/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c8-25-build-diagnostics-${{ github.sha }}
+          path: c8-25-msbuild.log
+          if-no-files-found: ignore
+          retention-days: 14
