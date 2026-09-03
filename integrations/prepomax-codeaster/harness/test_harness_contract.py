@@ -4,10 +4,7 @@
 import tempfile
 from pathlib import Path
 
-from asternax_harness_import_guard import load_harness
-
-
-harness = load_harness()
+import astermax_harness as harness
 
 
 def expect_harness_error(action, label):
