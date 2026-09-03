@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Clone the reviewed PrePoMax upstream revision and apply the Code_Aster overlay."""
+"""Clone the reviewed PrePoMax upstream revision and apply the Code_Aster overlay.
+
+The bootstrap is intentionally fail-closed and pins an exact upstream commit. Network
+transport failures are retried, but a different upstream revision is never accepted.
+"""
 
 from __future__ import print_function
 
 import argparse
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 UPSTREAM = "https://github.com/tsvilans/PrePoMax.git"
@@ -18,6 +24,58 @@ def run(args, cwd=None):
     subprocess.check_call([str(x) for x in args], cwd=str(cwd) if cwd else None)
 
 
+def remove_destination(destination):
+    if destination.exists():
+        shutil.rmtree(str(destination), ignore_errors=True)
+
+
+def clone_pinned_upstream(upstream, destination, attempts=3):
+    """Clone/fetch the exact reviewed upstream revision with bounded retries.
+
+    Retries only address transport failures. Every successful bootstrap must resolve
+    exactly to UPSTREAM_SHA before any AsterMax overlay is applied.
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        remove_destination(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            # HTTP/1.1 avoids intermittent HTTP/2 stream resets seen on hosted
+            # Windows runners. Partial clone reduces transferred bytes without
+            # changing the pinned source identity.
+            run([
+                "git", "-c", "http.version=HTTP/1.1", "clone",
+                "--filter=blob:none", "--no-checkout", upstream, destination,
+            ])
+            run(["git", "fetch", "--depth", "1", "origin", UPSTREAM_SHA], cwd=destination)
+            run(["git", "checkout", "--detach", UPSTREAM_SHA], cwd=destination)
+            actual = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=str(destination), text=True
+            ).strip()
+            if actual.lower() != UPSTREAM_SHA.lower():
+                raise RuntimeError(
+                    "Pinned upstream mismatch: expected %s, got %s" % (UPSTREAM_SHA, actual)
+                )
+            run(["git", "submodule", "sync", "--recursive"], cwd=destination)
+            run([
+                "git", "-c", "http.version=HTTP/1.1", "submodule", "update",
+                "--init", "--recursive", "--depth", "1",
+            ], cwd=destination)
+            print("Pinned upstream bootstrap PASS on attempt", attempt)
+            return
+        except (subprocess.CalledProcessError, RuntimeError) as exc:
+            last_error = exc
+            print("Pinned upstream bootstrap attempt %d/%d failed: %s" % (attempt, attempts, exc))
+            remove_destination(destination)
+            if attempt < attempts:
+                time.sleep(2 * attempt)
+
+    raise RuntimeError(
+        "Unable to bootstrap exact pinned upstream %s after %d attempts: %s"
+        % (UPSTREAM_SHA, attempts, last_error)
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--destination", required=True)
@@ -28,10 +86,7 @@ def main():
     if destination.exists() and any(destination.iterdir()):
         raise SystemExit("Destination must not exist or must be empty: " + str(destination))
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    run(["git", "clone", "--recursive", args.upstream, destination])
-    run(["git", "checkout", UPSTREAM_SHA], cwd=destination)
-    run(["git", "submodule", "update", "--init", "--recursive"], cwd=destination)
+    clone_pinned_upstream(args.upstream, destination)
     run([sys.executable, HERE / "apply_overlay.py", destination])
     run([sys.executable, HERE / "apply_model_translation.py", destination])
     run([sys.executable, HERE / "apply_results_bridge.py", destination])
