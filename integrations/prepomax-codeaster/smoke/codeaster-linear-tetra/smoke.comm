@@ -7,7 +7,7 @@ model = AFFE_MODELE(
     AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'))
 
 material = DEFI_MATERIAU(
-    ELAS=_F(E=2.10E11, NU=0.30))
+    ELAS=_F(E=210000.0, NU=0.30))
 
 material_field = AFFE_MATERIAU(
     MAILLAGE=mesh,
