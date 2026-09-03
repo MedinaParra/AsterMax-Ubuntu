@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from astermax.code_aster_mesh_attestation import MeshChainOfCustodyEvidence
 from astermax.code_aster_reference_harness import UniaxialPrismSpec
 from astermax.code_aster_reference_run import (
     CodeAsterReferenceRunError,
@@ -15,6 +16,7 @@ from astermax.code_aster_wsl_runtime import CodeAsterWslRuntime
 HEX_A = "a" * 64
 HEX_B = "b" * 64
 HEX_C = "c" * 64
+HEX_D = "d" * 64
 
 
 def runtime():
@@ -51,6 +53,27 @@ def attestation():
     )
 
 
+def mesh_attestation(root: Path):
+    from hashlib import sha256
+
+    return MeshChainOfCustodyEvidence(
+        med_sha256=sha256((root / "astermax.med").read_bytes()).hexdigest(),
+        quality_report_sha256=HEX_D,
+        quality_artifact_sha256=HEX_C,
+        reference_case_evidence_sha256=HEX_B,
+        mesh_quality_gate_passed=True,
+        all_sampled_jacobians_positive=True,
+        length_unit="mm",
+        solver_unit_system="mm-N-MPa",
+        mesh_attested_immediately_before_solve=True,
+        fea_solve_executed=False,
+        numerical_verification=False,
+        results_verified=False,
+        industrial_validation=False,
+        ansys_equivalence=False,
+    )
+
+
 def make_inputs(root: Path):
     (root / "astermax.export").write_text("F comm astermax.comm D 1\nF mess astermax.mess R 6\n", encoding="utf-8")
     (root / "astermax.comm").write_text("DEBUT()\nFIN()\n", encoding="utf-8")
@@ -59,6 +82,10 @@ def make_inputs(root: Path):
 
 def install_attestation_double(monkeypatch):
     monkeypatch.setattr("astermax.code_aster_reference_run.attest_qualified_wsl_code_aster_runtime", lambda *a, **k: attestation())
+
+
+def install_mesh_attestation_double(monkeypatch, root: Path):
+    monkeypatch.setattr("astermax.code_aster_reference_run.attest_reference_mesh_before_solve", lambda *a, **k: mesh_attestation(root))
 
 
 def test_runtime_qualification_mismatch_fails_before_io(tmp_path: Path):
@@ -84,6 +111,7 @@ def test_message_binding_is_required_before_runtime_call(tmp_path: Path, monkeyp
 
 def test_nonzero_solver_exit_fails_closed(tmp_path: Path, monkeypatch):
     make_inputs(tmp_path)
+    install_mesh_attestation_double(monkeypatch, tmp_path)
     install_attestation_double(monkeypatch)
     monkeypatch.setattr("astermax.code_aster_reference_run.windows_path_to_wsl", lambda *a, **k: "/mnt/c/case")
     monkeypatch.setattr("astermax.code_aster_reference_run._run", lambda *a, **k: subprocess.CompletedProcess(a[0], 7, stdout="", stderr="solver failed"))
@@ -95,6 +123,7 @@ def test_process_double_only_exercises_gate_semantics(tmp_path: Path, monkeypatc
     """Not Code_Aster evidence: verifies software wiring with synthetic test data only."""
     make_inputs(tmp_path)
     spec = UniaxialPrismSpec(young_mpa=200000.0, poisson=0.0, total_force_n=10000.0)
+    install_mesh_attestation_double(monkeypatch, tmp_path)
     install_attestation_double(monkeypatch)
     monkeypatch.setattr("astermax.code_aster_reference_run.windows_path_to_wsl", lambda *a, **k: "/mnt/c/case")
 
@@ -110,6 +139,7 @@ def test_process_double_only_exercises_gate_semantics(tmp_path: Path, monkeypatc
     ev = execute_and_verify_reference_wsl(runtime(), spec, tmp_path, qualification=qualification())
     assert ev.runtime_qualified is True
     assert ev.runtime_attested_immediately_before_solve is True
+    assert ev.mesh_attested_immediately_before_solve is True
     assert ev.run_aster_sha256 == HEX_A
     assert ev.config_sha256 == HEX_B
     assert ev.message_diagnostic_ok is True
