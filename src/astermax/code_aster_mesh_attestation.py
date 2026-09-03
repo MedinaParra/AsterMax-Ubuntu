@@ -5,6 +5,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from .credibility import canonical_sha256
+
 
 class CodeAsterMeshAttestationError(RuntimeError):
     pass
@@ -68,10 +70,10 @@ def attest_reference_mesh_before_solve(
 ) -> MeshChainOfCustodyEvidence:
     """Re-attest the exact quality-gated MED immediately before solver launch.
 
-    This gate is intentionally independent from solver/runtime attestation. It
-    proves only that the MED about to be passed to Code_Aster is byte-for-byte
-    the same MED recorded after the TET10 pre-solve quality gate, and that the
-    referenced quality artifact is itself intact. It cannot create FEA claims.
+    The quality report is independently re-hashed canonically, its serialized
+    artifact hash must match the case evidence, and the current MED bytes must
+    match the MED hash recorded by the quality-gated preparation stage. This
+    gate cannot create solver, numerical-verification or ANSYS claims.
     """
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
@@ -103,12 +105,20 @@ def attest_reference_mesh_before_solve(
     if quality.get("ansys_metric_equivalence") is not False:
         raise CodeAsterMeshAttestationError("MESH_ATTESTATION_ANSYS_EQUIVALENCE_CLAIM_FORBIDDEN")
 
-    # A pre-solve quality/case artifact must never itself claim solver results.
     for key in ("fea_solve_executed", "numerical_verification", "results_verified"):
         if quality.get(key) is not False:
             raise CodeAsterMeshAttestationError(f"MESH_ATTESTATION_QUALITY_{key.upper()}_CLAIM_FORBIDDEN")
         if case.get(key) is not False:
             raise CodeAsterMeshAttestationError(f"MESH_ATTESTATION_CASE_{key.upper()}_CLAIM_FORBIDDEN")
+
+    quality_report_sha = _require_hex64(
+        quality.get("report_sha256"),
+        "MESH_ATTESTATION_QUALITY_REPORT_HASH_INVALID",
+    )
+    quality_core = dict(quality)
+    quality_core.pop("report_sha256", None)
+    if canonical_sha256(quality_core) != quality_report_sha:
+        raise CodeAsterMeshAttestationError("MESH_ATTESTATION_QUALITY_REPORT_CANONICAL_HASH_MISMATCH")
 
     actual_med_sha = _sha256(med)
     expected_med_sha = _require_hex64(case.get("med_sha256"), "MESH_ATTESTATION_CASE_MED_HASH_INVALID")
@@ -123,10 +133,6 @@ def attest_reference_mesh_before_solve(
     if actual_quality_artifact_sha != expected_quality_artifact_sha:
         raise CodeAsterMeshAttestationError("MESH_ATTESTATION_QUALITY_ARTIFACT_HASH_MISMATCH")
 
-    quality_report_sha = _require_hex64(
-        quality.get("report_sha256"),
-        "MESH_ATTESTATION_QUALITY_REPORT_HASH_INVALID",
-    )
     case_quality_report_sha = _require_hex64(
         case.get("mesh_quality_report_sha256"),
         "MESH_ATTESTATION_CASE_QUALITY_REPORT_HASH_INVALID",
