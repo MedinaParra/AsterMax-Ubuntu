@@ -60,6 +60,14 @@ jobs:
         with:
           name: c8-30-genuine-${{ github.sha }}
           path: genuine
+      - name: Validate resilient pinned bootstrap
+        shell: pwsh
+        run: |
+          python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
+          $s=Get-Content integrations/prepomax-codeaster/tools/bootstrap.py -Raw
+          foreach($needle in @('UPSTREAM_SHA = "3669e65581650e5d9d868aa761db9efd856f8571"','clone_pinned_upstream','http.version=HTTP/1.1','Pinned upstream mismatch')) {
+            if($s -notmatch [regex]::Escape($needle)){ throw "Missing fail-closed bootstrap contract: $needle" }
+          }
       - name: Bootstrap production AsterMax
         shell: pwsh
         run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
@@ -106,6 +114,7 @@ jobs:
             unit_system='mm-N-MPa'
             genuine_solve=$true
             numerical_oracle=$true
+            pinned_upstream_bootstrap=$true
             production_bridge=$true
             results_workspace_semantics=$true
             displacement_deformation_available=$true
