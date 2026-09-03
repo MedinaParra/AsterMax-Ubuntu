@@ -102,10 +102,11 @@ def create_professional_evidence_bundle(
     solver_unit_system: str = "mm-N-MPa",
     source_step: str | Path | None = None,
 ) -> ProfessionalEvidenceBundle:
-    """Create an immutable, replay-verifiable manifest for a genuine verified solve.
+    """Create a content-addressed, replay-verifiable manifest for a verified solve.
 
     This function does not execute a solver and cannot promote unverified evidence.
-    It only packages artifacts whose content hashes match GenuineReferenceSolveEvidence.
+    It only packages artifacts whose hashes match GenuineReferenceSolveEvidence.
+    The manifest is tamper-evident, not a digital signature or third-party attestation.
     """
     _validate_solve_evidence(evidence)
     if cad_length_unit != "mm":
@@ -130,8 +131,8 @@ def create_professional_evidence_bundle(
         _require_file(step_path, "EVIDENCE_BUNDLE_SOURCE_STEP_MISSING")
         try:
             relative_step = step_path.relative_to(root).as_posix()
-        except ValueError:
-            relative_step = step_path.name
+        except ValueError as exc:
+            raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_SOURCE_STEP_OUTSIDE_ROOT") from exc
         artifacts.append(EvidenceArtifact("source_step", relative_step, _sha(step_path), step_path.stat().st_size))
 
     unsigned: dict[str, object] = {
@@ -205,6 +206,7 @@ def verify_professional_evidence_bundle(
     if not isinstance(artifacts_raw, list) or not artifacts_raw:
         raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_ARTIFACTS_INVALID")
     artifacts: list[EvidenceArtifact] = []
+    roles: set[str] = set()
     for item in artifacts_raw:
         if not isinstance(item, dict):
             raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_ARTIFACT_ENTRY_INVALID")
@@ -214,12 +216,23 @@ def verify_professional_evidence_bundle(
             sha256=str(item["sha256"]),
             size_bytes=int(item["size_bytes"]),
         )
+        if artifact.role in roles:
+            raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_DUPLICATE_ROLE:{artifact.role}")
+        roles.add(artifact.role)
         if Path(artifact.relative_path).is_absolute() or ".." in Path(artifact.relative_path).parts:
             raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_ARTIFACT_PATH_INVALID:{artifact.role}")
         path = _require_file(root / artifact.relative_path, f"EVIDENCE_BUNDLE_ARTIFACT_MISSING:{artifact.role}")
         if path.stat().st_size != artifact.size_bytes or _sha(path) != artifact.sha256:
             raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_ARTIFACT_TAMPERED:{artifact.role}")
         artifacts.append(artifact)
+
+    required_roles = {role for role, _, _ in _expected_artifacts_from_manifest_shape()}
+    if not required_roles.issubset(roles):
+        missing = sorted(required_roles - roles)
+        raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_REQUIRED_ROLES_MISSING:{','.join(missing)}")
+    if not roles.issubset(required_roles | {"source_step"}):
+        unexpected = sorted(roles - required_roles - {"source_step"})
+        raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_UNEXPECTED_ROLES:{','.join(unexpected)}")
 
     return ProfessionalEvidenceBundle(
         schema_version=raw["schema_version"],
@@ -242,4 +255,18 @@ def verify_professional_evidence_bundle(
         stress_relative_error=float(raw["stress_relative_error"]),
         artifacts=tuple(artifacts),
         manifest_sha256=manifest_sha,
+    )
+
+
+def _expected_artifacts_from_manifest_shape() -> tuple[tuple[str, str, str], ...]:
+    """Return required artifact roles without constructing synthetic solve evidence."""
+    return (
+        ("code_aster_export", "astermax.export", ""),
+        ("code_aster_command", "astermax.comm", ""),
+        ("input_med", "astermax.med", ""),
+        ("result_med", "astermax_result.med", ""),
+        ("solver_message", "astermax.mess", ""),
+        ("displacement_table", "reference_displacement.table", ""),
+        ("reaction_table", "reference_reaction.table", ""),
+        ("stress_table", "reference_stress.table", ""),
     )
