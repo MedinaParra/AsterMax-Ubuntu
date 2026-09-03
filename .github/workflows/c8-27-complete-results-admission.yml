@@ -1,0 +1,47 @@
+name: C8.27 Complete Results Admission
+
+on:
+  push:
+    branches:
+      - agent/c8-27-complete-results-admission
+  pull_request:
+    paths:
+      - 'integrations/prepomax-codeaster/tools/validate_result_tables.py'
+      - 'integrations/prepomax-codeaster/tools/test_validate_result_tables.py'
+      - '.github/workflows/c8-27-complete-results-admission.yml'
+  workflow_dispatch:
+
+jobs:
+  result-admission-contract:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install harness dependencies
+        run: python -m pip install pytest
+      - name: Run fail-closed result coverage tests
+        run: python -m pytest integrations/prepomax-codeaster/tools/test_validate_result_tables.py -q
+      - name: Validate production smoke mesh node discovery
+        shell: pwsh
+        run: |
+          python -c "import importlib.util,pathlib; p=pathlib.Path('integrations/prepomax-codeaster/tools/validate_result_tables.py'); s=importlib.util.spec_from_file_location('v',p); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); nodes=m.mesh_nodes(pathlib.Path('integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.mail')); assert len(nodes)==4, nodes; print('production smoke nodes:', sorted(nodes))"
+      - name: Emit claim boundary witness
+        if: always()
+        shell: pwsh
+        run: |
+          @{
+            increment='C8.27'
+            contract='complete finite nodal coverage before GUI admission'
+            fea_solve_executed=$false
+            numerical_verification=$false
+            results_verified=$false
+            industrial_validation=$false
+            ansys_equivalence=$false
+          } | ConvertTo-Json | Set-Content C8_27_WITNESS.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c8-27-results-admission-witness
+          path: C8_27_WITNESS.json
