@@ -44,6 +44,7 @@ class ProfessionalEvidenceBundle:
     solver_unit_system: str
     runtime_qualified: bool
     runtime_attested_immediately_before_solve: bool
+    mesh_attested_immediately_before_solve: bool
     fea_solve_executed: bool
     numerical_verification: bool
     results_verified: bool
@@ -51,6 +52,9 @@ class ProfessionalEvidenceBundle:
     ansys_equivalence: bool
     run_aster_sha256: str
     config_sha256: str
+    mesh_quality_report_sha256: str
+    mesh_quality_artifact_sha256: str
+    reference_case_evidence_sha256: str
     ux_relative_error: float
     reaction_relative_error: float
     stress_relative_error: float
@@ -68,6 +72,8 @@ def _expected_artifacts(evidence: GenuineReferenceSolveEvidence) -> tuple[tuple[
         ("code_aster_export", "astermax.export", evidence.export_sha256),
         ("code_aster_command", "astermax.comm", evidence.command_sha256),
         ("input_med", "astermax.med", evidence.input_med_sha256),
+        ("mesh_quality", "reference_mesh_quality.json", evidence.mesh_quality_artifact_sha256),
+        ("reference_case_evidence", "reference_case_evidence.json", evidence.reference_case_evidence_sha256),
         ("result_med", "astermax_result.med", evidence.result_med_sha256),
         ("solver_message", "astermax.mess", evidence.message_sha256),
         ("displacement_table", "reference_displacement.table", evidence.displacement_table_sha256),
@@ -85,6 +91,8 @@ def _validate_solve_evidence(evidence: GenuineReferenceSolveEvidence) -> None:
         raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_RUNTIME_NOT_QUALIFIED")
     if not evidence.runtime_attested_immediately_before_solve:
         raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_RUNTIME_NOT_ATTESTED")
+    if not evidence.mesh_attested_immediately_before_solve:
+        raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_MESH_NOT_ATTESTED")
     if not evidence.fea_solve_executed:
         raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_SOLVE_NOT_EXECUTED")
     if not evidence.numerical_verification:
@@ -102,11 +110,11 @@ def create_professional_evidence_bundle(
     solver_unit_system: str = "mm-N-MPa",
     source_step: str | Path | None = None,
 ) -> ProfessionalEvidenceBundle:
-    """Create a content-addressed, replay-verifiable manifest for a verified solve.
+    """Create a tamper-evident replay manifest for an already verified solve.
 
-    This function does not execute a solver and cannot promote unverified evidence.
-    It only packages artifacts whose hashes match GenuineReferenceSolveEvidence.
-    The manifest is tamper-evident, not a digital signature or third-party attestation.
+    The bundle cannot promote solver claims. C8.19 additionally binds the exact
+    quality artifact and reference-case evidence that attested the input MED
+    immediately before launch.
     """
     _validate_solve_evidence(evidence)
     if cad_length_unit != "mm":
@@ -136,7 +144,7 @@ def create_professional_evidence_bundle(
         artifacts.append(EvidenceArtifact("source_step", relative_step, _sha(step_path), step_path.stat().st_size))
 
     unsigned: dict[str, object] = {
-        "schema_version": "astermax.professional-evidence-bundle.v1",
+        "schema_version": "astermax.professional-evidence-bundle.v2",
         "engine_kind": evidence.engine_kind,
         "distribution": evidence.distribution,
         "detected_version": evidence.detected_version,
@@ -144,6 +152,7 @@ def create_professional_evidence_bundle(
         "solver_unit_system": solver_unit_system,
         "runtime_qualified": evidence.runtime_qualified,
         "runtime_attested_immediately_before_solve": evidence.runtime_attested_immediately_before_solve,
+        "mesh_attested_immediately_before_solve": evidence.mesh_attested_immediately_before_solve,
         "fea_solve_executed": evidence.fea_solve_executed,
         "numerical_verification": evidence.numerical_verification,
         "results_verified": evidence.results_verified,
@@ -151,6 +160,9 @@ def create_professional_evidence_bundle(
         "ansys_equivalence": False,
         "run_aster_sha256": evidence.run_aster_sha256,
         "config_sha256": evidence.config_sha256,
+        "mesh_quality_report_sha256": evidence.mesh_quality_report_sha256,
+        "mesh_quality_artifact_sha256": evidence.mesh_quality_artifact_sha256,
+        "reference_case_evidence_sha256": evidence.reference_case_evidence_sha256,
         "ux_relative_error": evidence.ux_relative_error,
         "reaction_relative_error": evidence.reaction_relative_error,
         "stress_relative_error": evidence.stress_relative_error,
@@ -168,17 +180,14 @@ def create_professional_evidence_bundle(
     return bundle
 
 
-def verify_professional_evidence_bundle(
-    manifest: str | Path,
-    directory: str | Path,
-) -> ProfessionalEvidenceBundle:
+def verify_professional_evidence_bundle(manifest: str | Path, directory: str | Path) -> ProfessionalEvidenceBundle:
     manifest_path = _require_file(Path(manifest), "EVIDENCE_BUNDLE_MANIFEST_MISSING")
     root = Path(directory).expanduser().resolve()
     if not root.is_dir():
         raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_DIRECTORY_NOT_FOUND")
 
     raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if raw.get("schema_version") != "astermax.professional-evidence-bundle.v1":
+    if raw.get("schema_version") != "astermax.professional-evidence-bundle.v2":
         raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_SCHEMA_UNSUPPORTED")
     manifest_sha = raw.get("manifest_sha256")
     if not isinstance(manifest_sha, str) or len(manifest_sha) != 64:
@@ -191,6 +200,7 @@ def verify_professional_evidence_bundle(
     for required_true in (
         "runtime_qualified",
         "runtime_attested_immediately_before_solve",
+        "mesh_attested_immediately_before_solve",
         "fea_solve_executed",
         "numerical_verification",
         "results_verified",
@@ -211,10 +221,8 @@ def verify_professional_evidence_bundle(
         if not isinstance(item, dict):
             raise ProfessionalEvidenceBundleError("EVIDENCE_BUNDLE_ARTIFACT_ENTRY_INVALID")
         artifact = EvidenceArtifact(
-            role=str(item["role"]),
-            relative_path=str(item["relative_path"]),
-            sha256=str(item["sha256"]),
-            size_bytes=int(item["size_bytes"]),
+            role=str(item["role"]), relative_path=str(item["relative_path"]),
+            sha256=str(item["sha256"]), size_bytes=int(item["size_bytes"]),
         )
         if artifact.role in roles:
             raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_DUPLICATE_ROLE:{artifact.role}")
@@ -234,36 +242,38 @@ def verify_professional_evidence_bundle(
         unexpected = sorted(roles - required_roles - {"source_step"})
         raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_UNEXPECTED_ROLES:{','.join(unexpected)}")
 
+    by_role = {item.role: item for item in artifacts}
+    for role, hash_field in (
+        ("mesh_quality", "mesh_quality_artifact_sha256"),
+        ("reference_case_evidence", "reference_case_evidence_sha256"),
+    ):
+        if by_role[role].sha256 != raw.get(hash_field):
+            raise ProfessionalEvidenceBundleError(f"EVIDENCE_BUNDLE_PROVENANCE_HASH_MISMATCH:{role}")
+
     return ProfessionalEvidenceBundle(
-        schema_version=raw["schema_version"],
-        engine_kind=raw["engine_kind"],
-        distribution=raw["distribution"],
-        detected_version=raw.get("detected_version"),
-        cad_length_unit=raw["cad_length_unit"],
-        solver_unit_system=raw["solver_unit_system"],
-        runtime_qualified=raw["runtime_qualified"],
+        schema_version=raw["schema_version"], engine_kind=raw["engine_kind"], distribution=raw["distribution"],
+        detected_version=raw.get("detected_version"), cad_length_unit=raw["cad_length_unit"],
+        solver_unit_system=raw["solver_unit_system"], runtime_qualified=raw["runtime_qualified"],
         runtime_attested_immediately_before_solve=raw["runtime_attested_immediately_before_solve"],
-        fea_solve_executed=raw["fea_solve_executed"],
-        numerical_verification=raw["numerical_verification"],
-        results_verified=raw["results_verified"],
-        industrial_validation=raw["industrial_validation"],
-        ansys_equivalence=raw["ansys_equivalence"],
-        run_aster_sha256=raw["run_aster_sha256"],
-        config_sha256=raw["config_sha256"],
-        ux_relative_error=float(raw["ux_relative_error"]),
-        reaction_relative_error=float(raw["reaction_relative_error"]),
-        stress_relative_error=float(raw["stress_relative_error"]),
-        artifacts=tuple(artifacts),
-        manifest_sha256=manifest_sha,
+        mesh_attested_immediately_before_solve=raw["mesh_attested_immediately_before_solve"],
+        fea_solve_executed=raw["fea_solve_executed"], numerical_verification=raw["numerical_verification"],
+        results_verified=raw["results_verified"], industrial_validation=raw["industrial_validation"],
+        ansys_equivalence=raw["ansys_equivalence"], run_aster_sha256=raw["run_aster_sha256"],
+        config_sha256=raw["config_sha256"], mesh_quality_report_sha256=raw["mesh_quality_report_sha256"],
+        mesh_quality_artifact_sha256=raw["mesh_quality_artifact_sha256"],
+        reference_case_evidence_sha256=raw["reference_case_evidence_sha256"],
+        ux_relative_error=float(raw["ux_relative_error"]), reaction_relative_error=float(raw["reaction_relative_error"]),
+        stress_relative_error=float(raw["stress_relative_error"]), artifacts=tuple(artifacts), manifest_sha256=manifest_sha,
     )
 
 
 def _expected_artifacts_from_manifest_shape() -> tuple[tuple[str, str, str], ...]:
-    """Return required artifact roles without constructing synthetic solve evidence."""
     return (
         ("code_aster_export", "astermax.export", ""),
         ("code_aster_command", "astermax.comm", ""),
         ("input_med", "astermax.med", ""),
+        ("mesh_quality", "reference_mesh_quality.json", ""),
+        ("reference_case_evidence", "reference_case_evidence.json", ""),
         ("result_med", "astermax_result.med", ""),
         ("solver_message", "astermax.mess", ""),
         ("displacement_table", "reference_displacement.table", ""),
