@@ -9,6 +9,7 @@ on:
       - 'integrations/prepomax-codeaster/tools/**'
       - 'integrations/prepomax-codeaster/smoke/codeaster-generated-linear-tetra/**'
       - 'integrations/prepomax-codeaster/harness/astermax_harness.py'
+      - 'integrations/prepomax-codeaster/harness/validate_numeric_reference.py'
       - '.github/workflows/codeaster-generated-e2e.yml'
   workflow_dispatch:
 
@@ -104,7 +105,7 @@ jobs:
         run: |
           chmod -R a+rwX generated-study
           python - <<'PY'
-          import json, os
+          import json
           from pathlib import Path
           root = Path('generated-study').resolve()
           manifest = {
@@ -146,6 +147,13 @@ jobs:
           for item in report['checks']:
               print(item['passed'], item['name'], item['detail'])
           PY
+
+      - name: Validate analytical tetra reference
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/validate_numeric_reference.py \
+            --resu generated-study/smoke.resu \
+            --contract integrations/prepomax-codeaster/smoke/codeaster-generated-linear-tetra/reference-contract.json
 
       - name: Upload real results from generated study
         uses: actions/upload-artifact@v4
