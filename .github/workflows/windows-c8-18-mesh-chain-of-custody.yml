@@ -1,0 +1,82 @@
+name: Windows C8.18 Mesh Chain of Custody
+on:
+  push:
+    branches: [agent/c8-18-mesh-chain-of-custody]
+    paths:
+      - 'src/astermax/code_aster_mesh_attestation.py'
+      - 'src/astermax/code_aster_reference_run.py'
+      - 'src/astermax/code_aster_mesh_quality_gate.py'
+      - 'tests/test_c8_18_mesh_chain_of_custody.py'
+      - 'tests/test_code_aster_reference_run.py'
+      - 'tests/test_c8_16_professional_evidence_bundle.py'
+      - '.github/workflows/windows-c8-18-mesh-chain-of-custody.yml'
+  pull_request:
+    branches: [agent/c8-17-tet10-jacobian-presolve-gate]
+    paths:
+      - 'src/astermax/code_aster_mesh_attestation.py'
+      - 'src/astermax/code_aster_reference_run.py'
+      - 'src/astermax/code_aster_mesh_quality_gate.py'
+      - 'tests/test_c8_18_mesh_chain_of_custody.py'
+      - 'tests/test_code_aster_reference_run.py'
+      - 'tests/test_c8_16_professional_evidence_bundle.py'
+      - '.github/workflows/windows-c8-18-mesh-chain-of-custody.yml'
+  workflow_dispatch:
+concurrency:
+  group: c8-18-mesh-chain-of-custody-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mesh-chain-of-custody-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax harness dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify C8.17 quality regression
+        shell: pwsh
+        run: python -m pytest -q tests/test_c8_17_tet10_jacobian_presolve_gate.py
+      - name: Verify C8.18 MED chain of custody
+        shell: pwsh
+        run: python -m pytest -q tests/test_c8_18_mesh_chain_of_custody.py
+      - name: Verify genuine-run gate regression
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_run.py
+      - name: Verify evidence-bundle constructor regression
+        shell: pwsh
+        run: python -m pytest -q tests/test_c8_16_professional_evidence_bundle.py
+      - name: Emit non-solve chain-of-custody witness
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          witness = {
+              'increment': 'C8.18',
+              'quality_report_canonical_hash_revalidated': True,
+              'quality_artifact_hash_revalidated': True,
+              'input_med_hash_revalidated_immediately_before_solve': True,
+              'mesh_attestation_wired_before_runtime_attestation_and_launch': True,
+              'length_unit': 'mm',
+              'solver_unit_system': 'mm-N-MPa',
+              'real_runtime_attested': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+          }
+          Path('c8-18-witness.json').write_text(json.dumps(witness, indent=2, sort_keys=True), encoding='utf-8')
+          print(witness)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.18-mesh-chain-of-custody
+          path: c8-18-witness.json
+          if-no-files-found: error
