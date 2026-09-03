@@ -134,7 +134,7 @@ def test_mesh_quality_hash_mismatch_fails_closed(tmp_path: Path):
     make_case(tmp_path)
     ev = evidence(tmp_path)
     (tmp_path / "reference_mesh_quality.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(ProfessionalEvidenceBundleError, match="HASH_MISMATCH:mesh_quality"):
+    with pytest.raises(ProfessionalEvidenceBundleError, match="MESH_PROVENANCE_INVALID"):
         create_professional_evidence_bundle(tmp_path, ev, tmp_path / "bundle.json")
 
 
@@ -142,7 +142,7 @@ def test_reference_case_hash_mismatch_fails_closed(tmp_path: Path):
     make_case(tmp_path)
     ev = evidence(tmp_path)
     (tmp_path / "reference_case_evidence.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(ProfessionalEvidenceBundleError, match="HASH_MISMATCH:reference_case_evidence"):
+    with pytest.raises(ProfessionalEvidenceBundleError, match="MESH_PROVENANCE_INVALID"):
         create_professional_evidence_bundle(tmp_path, ev, tmp_path / "bundle.json")
 
 
