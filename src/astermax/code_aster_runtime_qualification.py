@@ -43,6 +43,25 @@ class QualifiedCodeAsterRuntime:
         return self.__dict__.copy()
 
 
+@dataclass(frozen=True)
+class RuntimeAttestationEvidence:
+    engine_kind: str
+    distribution: str
+    run_aster_linux: str
+    run_aster_sha256: str
+    config_linux: str
+    config_sha256: str
+    kernel_release: str
+    machine: str
+    identity_probe_sha256: str
+    attestation_valid: bool = True
+    fea_solve_executed: bool = False
+    results_verified: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return self.__dict__.copy()
+
+
 def _run(command: list[str], *, timeout_s: float = 30.0) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(command, capture_output=True, text=True, timeout=timeout_s, check=False)
@@ -75,6 +94,21 @@ def _require_regular_file(runtime: CodeAsterWslRuntime, path: str, *, label: str
     completed = _wsl(runtime, "test", "-f", path)
     if completed.returncode != 0:
         raise CodeAsterRuntimeQualificationError(f"CODE_ASTER_RUNTIME_{label}_NOT_FOUND")
+
+
+def _platform_identity(runtime: CodeAsterWslRuntime, *, timeout_s: float) -> tuple[str, str]:
+    uname = _wsl(runtime, "uname", "-srmo", timeout_s=timeout_s)
+    if uname.returncode != 0 or not (uname.stdout or "").strip():
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_UNAME_FAILED")
+    uname_text = (uname.stdout or "").strip()
+    parts = uname_text.split()
+    kernel_release = parts[1] if len(parts) >= 2 else uname_text
+
+    machine_call = _wsl(runtime, "uname", "-m", timeout_s=timeout_s)
+    if machine_call.returncode != 0 or not (machine_call.stdout or "").strip():
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_MACHINE_FAILED")
+    machine = (machine_call.stdout or "").strip()
+    return kernel_release, machine
 
 
 def _detect_version(text: str) -> str | None:
@@ -111,24 +145,11 @@ def qualify_wsl_code_aster_runtime(
     _require_regular_file(runtime, config, label="CONFIG")
     launcher_sha = _sha256_linux_file(runtime, launcher)
     config_sha = _sha256_linux_file(runtime, config)
-
-    uname = _wsl(runtime, "uname", "-srmo", timeout_s=timeout_s)
-    if uname.returncode != 0 or not (uname.stdout or "").strip():
-        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_UNAME_FAILED")
-    uname_text = (uname.stdout or "").strip()
-    parts = uname_text.split()
-    kernel_release = parts[1] if len(parts) >= 2 else uname_text
-
-    machine_call = _wsl(runtime, "uname", "-m", timeout_s=timeout_s)
-    if machine_call.returncode != 0 or not (machine_call.stdout or "").strip():
-        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_MACHINE_FAILED")
-    machine = (machine_call.stdout or "").strip()
+    kernel_release, machine = _platform_identity(runtime, timeout_s=timeout_s)
 
     version_call = _wsl(runtime, launcher, "--version", timeout_s=timeout_s)
     version_text = ((version_call.stdout or "") + "\n" + (version_call.stderr or "")).strip()
     if version_call.returncode != 0 or not version_text:
-        # Some run_aster releases do not expose --version. The already verified
-        # --help identity remains valid evidence; record that text instead.
         help_call = _wsl(runtime, launcher, "--help", timeout_s=timeout_s)
         version_text = ((help_call.stdout or "") + "\n" + (help_call.stderr or "")).strip()
         if help_call.returncode != 0 or not version_text:
@@ -152,6 +173,69 @@ def qualify_wsl_code_aster_runtime(
         version_text_sha256=version_hash,
         detected_version=detected_version,
         identity_probe_sha256=identity_hash,
+    )
+
+
+def attest_qualified_wsl_code_aster_runtime(
+    runtime: CodeAsterWslRuntime,
+    qualification: QualifiedCodeAsterRuntime,
+    *,
+    timeout_s: float = 30.0,
+) -> RuntimeAttestationEvidence:
+    """Re-attest immutable runtime evidence immediately before a genuine solve.
+
+    This closes the qualification-to-execution TOCTOU gap. The launcher, config,
+    Code_Aster identity, kernel and machine must still match the qualification.
+    A successful attestation still does not constitute an FEA solve.
+    """
+    runtime.validate()
+    if not qualification.runtime_qualified:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_NOT_QUALIFIED")
+    if qualification.engine_kind != runtime.engine_kind:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_ENGINE_MISMATCH")
+    if qualification.distribution != runtime.distribution:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_DISTRO_MISMATCH")
+    if qualification.run_aster_linux != runtime.run_aster_linux:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_LAUNCHER_MISMATCH")
+
+    launcher = _require_linux_path(qualification.run_aster_linux, label="LAUNCHER")
+    config = _require_linux_path(qualification.config_linux, label="CONFIG")
+    _require_regular_file(runtime, launcher, label="LAUNCHER")
+    _require_regular_file(runtime, config, label="CONFIG")
+
+    current_launcher_sha = _sha256_linux_file(runtime, launcher)
+    if current_launcher_sha != qualification.run_aster_sha256:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_LAUNCHER_HASH_MISMATCH")
+    current_config_sha = _sha256_linux_file(runtime, config)
+    if current_config_sha != qualification.config_sha256:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_CONFIG_HASH_MISMATCH")
+
+    try:
+        probe = probe_wsl_runtime(runtime, timeout_s=timeout_s)
+    except CodeAsterWslError as exc:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_IDENTITY_PROBE_FAILED") from exc
+    current_identity_sha = str(probe.get("probe_sha256", ""))
+    if not _SHA256_RE.fullmatch(current_identity_sha):
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_IDENTITY_HASH_INVALID")
+    if current_identity_sha != qualification.identity_probe_sha256:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_IDENTITY_MISMATCH")
+
+    current_kernel, current_machine = _platform_identity(runtime, timeout_s=timeout_s)
+    if current_kernel != qualification.kernel_release:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_KERNEL_MISMATCH")
+    if current_machine != qualification.machine:
+        raise CodeAsterRuntimeQualificationError("CODE_ASTER_RUNTIME_ATTESTATION_MACHINE_MISMATCH")
+
+    return RuntimeAttestationEvidence(
+        engine_kind=runtime.engine_kind,
+        distribution=runtime.distribution,
+        run_aster_linux=launcher,
+        run_aster_sha256=current_launcher_sha,
+        config_linux=config,
+        config_sha256=current_config_sha,
+        kernel_release=current_kernel,
+        machine=current_machine,
+        identity_probe_sha256=current_identity_sha,
     )
 
 

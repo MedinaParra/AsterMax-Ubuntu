@@ -1,0 +1,70 @@
+name: Windows C8.15 Runtime Attestation Before Genuine Solve
+on:
+  push:
+    branches: [agent/c8-15-runtime-attestation-before-genuine-solve]
+    paths:
+      - 'src/astermax/code_aster_runtime_qualification.py'
+      - 'src/astermax/code_aster_reference_run.py'
+      - 'tests/test_code_aster_runtime_qualification.py'
+      - 'tests/test_code_aster_reference_run.py'
+      - 'tests/test_c8_15_runtime_attestation.py'
+      - '.github/workflows/windows-c8-15-runtime-attestation.yml'
+  pull_request:
+    branches: [agent/c8-14-qualified-runner-boundary]
+    paths:
+      - 'src/astermax/code_aster_runtime_qualification.py'
+      - 'src/astermax/code_aster_reference_run.py'
+      - 'tests/test_code_aster_runtime_qualification.py'
+      - 'tests/test_code_aster_reference_run.py'
+      - 'tests/test_c8_15_runtime_attestation.py'
+      - '.github/workflows/windows-c8-15-runtime-attestation.yml'
+  workflow_dispatch:
+concurrency:
+  group: c8-15-runtime-attestation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  runtime-attestation-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax harness dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify qualification and attestation contracts
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_runtime_qualification.py tests/test_c8_15_runtime_attestation.py
+      - name: Verify genuine solve remains fail-closed
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_run.py
+      - name: Emit non-solve witness
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          witness = {
+              'increment': 'C8.15',
+              'runtime_attestation_contract_tested': True,
+              'toctou_gap_closed_by_contract': True,
+              'real_runtime_attested': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+          }
+          Path('c8-15-witness.json').write_text(json.dumps(witness, indent=2, sort_keys=True), encoding='utf-8')
+          print(witness)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.15-runtime-attestation-contract
+          path: c8-15-witness.json
+          if-no-files-found: error
