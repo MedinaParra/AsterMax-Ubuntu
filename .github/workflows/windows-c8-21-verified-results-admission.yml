@@ -1,0 +1,82 @@
+name: Windows C8.21 Verified Results Admission
+
+on:
+  push:
+    paths:
+      - "src/astermax/verified_results_admission.py"
+      - "src/astermax/code_aster_med_results.py"
+      - "src/astermax/code_aster_reference_run.py"
+      - "src/astermax/professional_evidence_bundle.py"
+      - "src/astermax/professional_postprocess.py"
+      - "tests/test_c8_21_verified_results_admission.py"
+      - "tests/test_c8_20_genuine_bundle_launch_gate.py"
+      - "tests/test_code_aster_med_results.py"
+      - "tests/test_professional_postprocess.py"
+      - ".github/workflows/windows-c8-21-verified-results-admission.yml"
+  pull_request:
+    paths:
+      - "src/astermax/verified_results_admission.py"
+      - "src/astermax/code_aster_med_results.py"
+      - "src/astermax/code_aster_reference_run.py"
+      - "src/astermax/professional_evidence_bundle.py"
+      - "src/astermax/professional_postprocess.py"
+      - "tests/test_c8_21_verified_results_admission.py"
+      - "tests/test_c8_20_genuine_bundle_launch_gate.py"
+      - "tests/test_code_aster_med_results.py"
+      - "tests/test_professional_postprocess.py"
+      - ".github/workflows/windows-c8-21-verified-results-admission.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: c8-21-verified-results-admission-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verified-results-admission-contract:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install harness dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+
+      - name: Run C8.21 admission and regression harnesses
+        shell: pwsh
+        run: |
+          python -m pytest -q `
+            tests/test_c8_21_verified_results_admission.py `
+            tests/test_c8_20_genuine_bundle_launch_gate.py `
+            tests/test_code_aster_med_results.py `
+            tests/test_professional_postprocess.py
+
+      - name: Write non-solver witness
+        shell: pwsh
+        run: |
+          @'
+          {
+            "schema": "astermax.c8-21.verified-results-admission-harness.v1",
+            "purpose": "software contract validation only",
+            "real_code_aster_runtime_used": false,
+            "fea_solve_executed": false,
+            "numerical_verification": false,
+            "results_verified": false,
+            "industrial_validation": false,
+            "ansys_equivalence": false
+          }
+          '@ | Set-Content -Path c8-21-witness.json -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: c8-21-verified-results-admission-witness
+          path: c8-21-witness.json
+          if-no-files-found: error
