@@ -63,11 +63,14 @@ def test_genuine_bundle_binds_every_artifact_required_by_reference_run(tmp_path:
     assert "IMPR_TABLE" in comm
     assert "SIEQ_NOEU" in comm
     assert "F rmed astermax_result.med R 80" in export
+    assert "F mess astermax.mess R 6" in export
     assert "F libr reference_displacement.table R 91" in export
     assert "F libr reference_reaction.table R 92" in export
     assert "F libr reference_stress.table R 93" in export
     assert evidence["verification_tables_bound"] is True
+    assert evidence["solver_message_bound"] is True
     assert readiness["pre_solve_bundle_valid"] is True
+    assert readiness["solver_message_bound"] is True
     assert readiness["fea_solve_executed"] is False
     assert readiness["numerical_verification"] is False
     assert readiness["results_verified"] is False
