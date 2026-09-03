@@ -1,0 +1,112 @@
+DEBUT()
+
+mesh = LIRE_MAILLAGE(FORMAT='ASTER', UNITE=20)
+
+model = AFFE_MODELE(
+    MAILLAGE=mesh,
+    AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'))
+
+material = DEFI_MATERIAU(
+    ELAS=_F(E=2.10E11, NU=0.30))
+
+material_field = AFFE_MATERIAU(
+    MAILLAGE=mesh,
+    AFFE=_F(GROUP_MA='VOLUME_ALL', MATER=material))
+
+load = AFFE_CHAR_MECA(
+    MODELE=model,
+    DDL_IMPO=_F(GROUP_NO='FIXED', DX=0.0, DY=0.0, DZ=0.0),
+    FORCE_NODALE=_F(GROUP_NO='LOADN', FX=1000.0))
+
+result = MECA_STATIQUE(
+    MODELE=model,
+    CHAM_MATER=material_field,
+    EXCIT=_F(CHARGE=load))
+
+result = CALC_CHAMP(
+    reuse=result,
+    RESULTAT=result,
+    CONTRAINTE=('SIGM_ELNO', 'SIGM_NOEU'),
+    DEFORMATION=('EPSI_ELNO', 'EPSI_NOEU'),
+    CRITERES=('SIEQ_ELNO', 'SIEQ_NOEU'))
+
+IMPR_RESU(
+    FORMAT='MED',
+    UNITE=80,
+    RESU=_F(
+        MAILLAGE=mesh,
+        RESULTAT=result,
+        NOM_CHAM=('DEPL', 'SIGM_NOEU', 'SIEQ_NOEU', 'EPSI_NOEU'),
+        TOUT_ORDRE='OUI'))
+
+tab_depl = CREA_TABLE(RESU=_F(
+    RESULTAT=result,
+    TOUT='OUI',
+    NOM_CHAM='DEPL',
+    NOM_CMP=('DX', 'DY', 'DZ')))
+IMPR_TABLE(
+    TABLE=tab_depl,
+    TITRE='PPM_DEPL',
+    UNITE=8,
+    FORMAT='TABLEAU',
+    SEPARATEUR=';',
+    FORMAT_R='1PE15.8',
+    NOM_PARA=('NOEUD', 'DX', 'DY', 'DZ'))
+
+tab_sig_n = CREA_TABLE(RESU=_F(
+    RESULTAT=result,
+    TOUT='OUI',
+    NOM_CHAM='SIGM_NOEU',
+    NOM_CMP=('SIXX', 'SIYY', 'SIZZ')))
+IMPR_TABLE(
+    TABLE=tab_sig_n,
+    TITRE='PPM_STRESS_N',
+    UNITE=8,
+    FORMAT='TABLEAU',
+    SEPARATEUR=';',
+    FORMAT_R='1PE15.8',
+    NOM_PARA=('NOEUD', 'SIXX', 'SIYY', 'SIZZ'))
+
+tab_sig_s = CREA_TABLE(RESU=_F(
+    RESULTAT=result,
+    TOUT='OUI',
+    NOM_CHAM='SIGM_NOEU',
+    NOM_CMP=('SIXY', 'SIYZ', 'SIXZ')))
+IMPR_TABLE(
+    TABLE=tab_sig_s,
+    TITRE='PPM_STRESS_S',
+    UNITE=8,
+    FORMAT='TABLEAU',
+    SEPARATEUR=';',
+    FORMAT_R='1PE15.8',
+    NOM_PARA=('NOEUD', 'SIXY', 'SIYZ', 'SIXZ'))
+
+tab_eps_n = CREA_TABLE(RESU=_F(
+    RESULTAT=result,
+    TOUT='OUI',
+    NOM_CHAM='EPSI_NOEU',
+    NOM_CMP=('EPXX', 'EPYY', 'EPZZ')))
+IMPR_TABLE(
+    TABLE=tab_eps_n,
+    TITRE='PPM_STRAIN_N',
+    UNITE=8,
+    FORMAT='TABLEAU',
+    SEPARATEUR=';',
+    FORMAT_R='1PE15.8',
+    NOM_PARA=('NOEUD', 'EPXX', 'EPYY', 'EPZZ'))
+
+tab_eps_s = CREA_TABLE(RESU=_F(
+    RESULTAT=result,
+    TOUT='OUI',
+    NOM_CHAM='EPSI_NOEU',
+    NOM_CMP=('EPXY', 'EPYZ', 'EPXZ')))
+IMPR_TABLE(
+    TABLE=tab_eps_s,
+    TITRE='PPM_STRAIN_S',
+    UNITE=8,
+    FORMAT='TABLEAU',
+    SEPARATEUR=';',
+    FORMAT_R='1PE15.8',
+    NOM_PARA=('NOEUD', 'EPXY', 'EPYZ', 'EPXZ'))
+
+FIN()
