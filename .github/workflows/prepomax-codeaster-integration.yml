@@ -35,6 +35,7 @@ jobs:
           python -m py_compile integrations/prepomax-codeaster/tools/apply_results_bridge.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_harness_runtime.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_harness_runtime_fixups.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_harness_ui.py
           python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
           python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
           python -m py_compile integrations/prepomax-codeaster/harness/test_harness_contract.py
@@ -61,6 +62,8 @@ jobs:
           if ($harnessPrepare.Count -lt 2) { throw 'Normal and wear solver runs must both cross the harness boundary.' }
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'TryValidatePassingReport'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'HarnessReport'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'HarnessExitCode'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/SettingsContainer.cs -Pattern 'CodeAsterSettings'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern 'MECA_STATIQUE'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs -Pattern "AFFE=_F\(TOUT='OUI'.*MODELISATION='3D'"
