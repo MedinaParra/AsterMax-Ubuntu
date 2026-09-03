@@ -40,10 +40,12 @@ def main():
     run([sys.executable, HERE / "apply_harness_ui.py", destination])
     run([sys.executable, HERE / "apply_solver_settings_ui.py", destination])
     run([sys.executable, HERE / "apply_import_probe.py", destination])
+    run([sys.executable, HERE / "apply_branding.py", destination])
 
     print()
     print("Prepared:", destination)
     print("Upstream revision:", UPSTREAM_SHA)
+    print("Product: AsterMax Mechanical")
     print("Next: open PrePoMax.sln and build the solution.")
     return 0
 
