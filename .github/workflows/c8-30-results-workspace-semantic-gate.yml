@@ -79,6 +79,8 @@ jobs:
           foreach($needle in @('100.0','UnitSystemType.MM_TON_S_C','GetAllVisibleFiledNameComponentNames','FOComponentNames.Mises','results.Preprocess()')) {
             if($s -notmatch [regex]::Escape($needle)){ throw "Missing production semantic gate: $needle" }
           }
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
       - name: Build Release x64
         shell: pwsh
         run: |
