@@ -1,0 +1,73 @@
+name: Real Code_Aster smoke
+
+on:
+  push:
+    branches:
+      - feature/prepomax-code-aster-harness-runtime
+    paths:
+      - 'integrations/prepomax-codeaster/smoke/**'
+      - 'integrations/prepomax-codeaster/harness/astermax_harness.py'
+      - '.github/workflows/codeaster-real-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: codeaster-real-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeaster-linear-tetra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Prepare writable smoke workspace
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/codeaster-linear-tetra
+          docker --version
+
+      - name: Pull pinned Code_Aster image
+        shell: bash
+        run: docker pull simvia/code_aster:17.4.0
+
+      - name: Run real solver through AsterMax harness
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json
+
+      - name: Show harness report summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json')
+          data = json.loads(p.read_text())
+          print('status:', data.get('status'))
+          for check in data.get('checks', []):
+              print(f"{check.get('passed')}: {check.get('name')} - {check.get('detail')}")
+          PY
+          fi
+
+      - name: Upload real solver diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeaster-real-smoke
+          path: |
+            integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.mess
+            integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.resu
+            integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.rmed
+            integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json
+            integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/.astermax-harness/
+          if-no-files-found: warn
