@@ -1,0 +1,73 @@
+name: Windows C8.14 Self-Hosted Code_Aster Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: WSL2 distribution name containing Code_Aster
+        required: true
+        default: Ubuntu-24.04
+      run_aster_linux:
+        description: Absolute Linux path to run_aster
+        required: true
+        default: /opt/aster/bin/run_aster
+      config_linux:
+        description: Absolute Linux path to Code_Aster config.yaml
+        required: true
+        default: /opt/aster/etc/codeaster/config.yaml
+
+concurrency:
+  group: c8-14-self-hosted-code-aster
+  cancel-in-progress: false
+
+jobs:
+  qualify-runtime:
+    runs-on: [self-hosted, Windows, X64, astermax-code-aster]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax harness
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Qualify exact WSL2 Code_Aster runtime
+        shell: pwsh
+        env:
+          ASTERMAX_DISTRO: ${{ inputs.distribution }}
+          ASTERMAX_RUN_ASTER: ${{ inputs.run_aster_linux }}
+          ASTERMAX_CONFIG: ${{ inputs.config_linux }}
+        run: |
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          @'
+          import json
+          import os
+          from pathlib import Path
+          from astermax.code_aster_wsl_runtime import CodeAsterWslRuntime
+          from astermax.code_aster_runtime_qualification import qualify_wsl_code_aster_runtime
+
+          runtime = CodeAsterWslRuntime(
+              distribution=os.environ['ASTERMAX_DISTRO'],
+              run_aster_linux=os.environ['ASTERMAX_RUN_ASTER'],
+          )
+          qualified = qualify_wsl_code_aster_runtime(
+              runtime,
+              config_linux=os.environ['ASTERMAX_CONFIG'],
+          )
+          evidence = qualified.as_dict()
+          assert evidence['runtime_qualified'] is True
+          assert evidence['fea_solve_executed'] is False
+          assert evidence['results_verified'] is False
+          Path('evidence/c8_14_runtime_qualification.json').write_text(
+              json.dumps(evidence, indent=2, sort_keys=True), encoding='utf-8'
+          )
+          print(json.dumps(evidence, indent=2, sort_keys=True))
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c8-14-runtime-qualification
+          path: evidence/c8_14_runtime_qualification.json
+          if-no-files-found: error
