@@ -1,0 +1,104 @@
+name: AsterMax Mechanical Windows Build
+
+on:
+  push:
+    branches:
+      - feature/prepomax-code-aster-harness-runtime
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/astermax-mechanical-windows-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-mechanical-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout AsterMax integration
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate branding helper
+        shell: pwsh
+        run: python -m py_compile integrations/prepomax-codeaster/tools/apply_branding.py
+
+      - name: Bootstrap patched and branded source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Verify AsterMax Mechanical branding
+        shell: pwsh
+        run: |
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Globals.cs -Pattern 'ProgramName = "AsterMax Mechanical"'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyTitle\("AsterMax Mechanical"\)'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyProduct\("AsterMax Mechanical"\)'
+
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Assemble AsterMax Mechanical test package
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build/PrePoMax-CodeAster/PrePoMax/bin -Recurse -Filter PrePoMax.exe |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Release/x64 PrePoMax.exe was not found.' }
+
+          $release = $exe.Directory.FullName
+          $package = Join-Path $PWD 'artifact/AsterMax Mechanical'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item -Path (Join-Path $release '*') -Destination $package -Recurse -Force
+
+          $sourceExe = Join-Path $package 'PrePoMax.exe'
+          $targetExe = Join-Path $package 'AsterMax Mechanical.exe'
+          if (-not (Test-Path $sourceExe)) { throw 'PrePoMax.exe is missing from staged package.' }
+          Move-Item -Path $sourceExe -Destination $targetExe -Force
+
+          $sourceConfig = Join-Path $package 'PrePoMax.exe.config'
+          if (Test-Path $sourceConfig) {
+            Move-Item -Path $sourceConfig -Destination (Join-Path $package 'AsterMax Mechanical.exe.config') -Force
+          }
+
+          @"
+          AsterMax Mechanical - experimental Windows test build
+
+          Code_Aster integration branch:
+          feature/prepomax-code-aster-harness-runtime
+
+          Upstream GUI foundation: PrePoMax, GPL-3.0.
+          This experimental derivative remains subject to GPL-3.0 obligations.
+          Source integration: https://github.com/MedinaParra/AsterMax-Ubuntu
+          Upstream: https://github.com/tsvilans/PrePoMax
+          "@ | Set-Content -Path (Join-Path $package 'SOURCE_AND_LICENSE.txt') -Encoding UTF8
+
+          $license = Join-Path $PWD 'build/PrePoMax-CodeAster/LICENSE'
+          if (Test-Path $license) { Copy-Item $license (Join-Path $package 'LICENSE') -Force }
+
+          Write-Host "Executable: $targetExe"
+          Get-Item $targetExe | Format-List Name,Length,LastWriteTime
+
+      - name: Upload AsterMax Mechanical Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-Windows-x64-test
+          path: artifact/AsterMax Mechanical/**
+          if-no-files-found: error
+          compression-level: 6
