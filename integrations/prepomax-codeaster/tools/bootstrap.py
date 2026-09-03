@@ -37,6 +37,7 @@ def main():
     run([sys.executable, HERE / "apply_results_bridge.py", destination])
     run([sys.executable, HERE / "apply_harness_runtime.py", destination])
     run([sys.executable, HERE / "apply_harness_runtime_fixups.py", destination])
+    run([sys.executable, HERE / "apply_harness_ui.py", destination])
 
     print()
     print("Prepared:", destination)
