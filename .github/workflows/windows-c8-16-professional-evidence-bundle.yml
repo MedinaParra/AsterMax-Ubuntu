@@ -1,0 +1,70 @@
+name: Windows C8.16 Professional Evidence Bundle
+on:
+  push:
+    branches: [agent/c8-16-professional-evidence-bundle]
+    paths:
+      - 'src/astermax/professional_evidence_bundle.py'
+      - 'src/astermax/code_aster_reference_run.py'
+      - 'tests/test_c8_16_professional_evidence_bundle.py'
+      - 'tests/test_code_aster_reference_run.py'
+      - '.github/workflows/windows-c8-16-professional-evidence-bundle.yml'
+  pull_request:
+    branches: [agent/c8-15-runtime-attestation-before-genuine-solve]
+    paths:
+      - 'src/astermax/professional_evidence_bundle.py'
+      - 'src/astermax/code_aster_reference_run.py'
+      - 'tests/test_c8_16_professional_evidence_bundle.py'
+      - 'tests/test_code_aster_reference_run.py'
+      - '.github/workflows/windows-c8-16-professional-evidence-bundle.yml'
+  workflow_dispatch:
+concurrency:
+  group: c8-16-professional-evidence-bundle-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  evidence-bundle-contract:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install AsterMax harness dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest
+      - name: Verify reference solve evidence regression
+        shell: pwsh
+        run: python -m pytest -q tests/test_code_aster_reference_run.py
+      - name: Verify professional evidence bundle
+        shell: pwsh
+        run: python -m pytest -q tests/test_c8_16_professional_evidence_bundle.py
+      - name: Emit non-solve witness
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          witness = {
+              'increment': 'C8.16',
+              'professional_evidence_bundle_contract_tested': True,
+              'replay_hash_verification_tested': True,
+              'cad_length_unit_contract': 'mm',
+              'solver_unit_system_contract': 'mm-N-MPa',
+              'real_runtime_attested': False,
+              'fea_solve_executed': False,
+              'numerical_verification': False,
+              'results_verified': False,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+          }
+          Path('c8-16-witness.json').write_text(json.dumps(witness, indent=2, sort_keys=True), encoding='utf-8')
+          print(witness)
+          '@ | python -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.16-professional-evidence-bundle-contract
+          path: c8-16-witness.json
+          if-no-files-found: error
