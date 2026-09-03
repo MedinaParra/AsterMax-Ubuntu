@@ -164,7 +164,7 @@ namespace PrePoMax
             button.Image = command.Image;
             button.Click += delegate { command.PerformClick(); };
             command.EnabledChanged += delegate { SyncRibbonButtonAppearance(button); };
-            command.VisibleChanged += delegate { SyncRibbonButtonAppearance(button); };
+            command.AvailableChanged += delegate { SyncRibbonButtonAppearance(button); };
             command.CheckedChanged += delegate { SyncRibbonButtonAppearance(button); };
             SyncRibbonButtonAppearance(button);
             _asterMaxRibbonToolTip.SetToolTip(button, GetRibbonToolTip(command));
@@ -181,7 +181,7 @@ namespace PrePoMax
                 ShowRibbonDropDown((Control)sender, command);
             };
             command.EnabledChanged += delegate { SyncRibbonButtonAppearance(button); };
-            command.VisibleChanged += delegate { SyncRibbonButtonAppearance(button); };
+            command.AvailableChanged += delegate { SyncRibbonButtonAppearance(button); };
             command.CheckedChanged += delegate { SyncRibbonButtonAppearance(button); };
             SyncRibbonButtonAppearance(button);
             _asterMaxRibbonToolTip.SetToolTip(button, GetRibbonToolTip(command));
@@ -384,17 +384,22 @@ namespace PrePoMax
             if (splitContainer1 == null) return;
             if (_asterMaxWorkspaceLayoutApplied && finalLayout) return;
 
-            splitContainer1.Panel1MinSize = 285;
-            splitContainer1.Panel2MinSize = 420;
-            splitContainer1.SplitterWidth = 6;
-            splitContainer1.FixedPanel = FixedPanel.Panel1;
-
+            int panel1Min = 285;
+            int panel2Min = 420;
+            int splitterWidth = 6;
             int available = splitContainer1.Width > 0 ? splitContainer1.Width : ClientSize.Width;
             int desired = (int)(available * 0.22);
             desired = Math.Max(330, Math.Min(380, desired));
-            int maximum = available - splitContainer1.Panel2MinSize - splitContainer1.SplitterWidth;
-            if (maximum >= splitContainer1.Panel1MinSize)
-                splitContainer1.SplitterDistance = Math.Max(splitContainer1.Panel1MinSize, Math.Min(desired, maximum));
+            int maximum = available - panel2Min - splitterWidth;
+
+            splitContainer1.Panel1MinSize = 0;
+            splitContainer1.Panel2MinSize = 0;
+            splitContainer1.SplitterWidth = splitterWidth;
+            splitContainer1.FixedPanel = FixedPanel.Panel1;
+            if (maximum >= panel1Min)
+                splitContainer1.SplitterDistance = Math.Max(panel1Min, Math.Min(desired, maximum));
+            splitContainer1.Panel1MinSize = panel1Min;
+            splitContainer1.Panel2MinSize = panel2Min;
 
             if (finalLayout) _asterMaxWorkspaceLayoutApplied = true;
         }
