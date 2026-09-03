@@ -1,0 +1,126 @@
+name: C8.30 Results Workspace semantic gate
+
+on:
+  push:
+    branches:
+      - agent/c8-30-results-workspace-semantic-gate
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/c8-30-results-workspace-semantic-gate.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-30-results-workspace-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  genuine-solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run genuine Code_Aster 17.4.0 solve
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/codeaster-linear-tetra
+          docker pull simvia/code_aster:17.4.0
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.manifest.json
+      - name: Verify pinned mm-N-MPa oracle
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/validate_numeric_reference.py \
+            --resu integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.resu \
+            --contract integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/c8-29-reference-contract.json
+      - name: Stage genuine result
+        shell: bash
+        run: |
+          mkdir -p artifact/genuine
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/{smoke.rmed,smoke.resu,smoke.mess,smoke.harness.json} artifact/genuine/
+          sha256sum artifact/genuine/* > artifact/genuine/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c8-30-genuine-${{ github.sha }}
+          path: artifact/genuine/**
+          if-no-files-found: error
+
+  windows-results-semantics:
+    needs: genuine-solve
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: c8-30-genuine-${{ github.sha }}
+          path: genuine
+      - name: Bootstrap production AsterMax
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Assert C8.30 unit and semantic fix reached production source
+        shell: pwsh
+        run: |
+          $p='build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterImportProbe.cs'
+          $s=Get-Content $p -Raw
+          foreach($needle in @('100.0','UnitSystemType.MM_TON_S_C','GetAllVisibleFiledNameComponentNames','FOComponentNames.Mises','results.Preprocess()')) {
+            if($s -notmatch [regex]::Escape($needle)){ throw "Missing production semantic gate: $needle" }
+          }
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+      - name: Exercise genuine FeResults semantic gate
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $rmed=(Resolve-Path 'genuine/smoke.rmed').Path
+          $resu=(Resolve-Path 'genuine/smoke.resu').Path
+          $out=Join-Path $PWD 'c8-30-results.stdout.log'
+          $err=Join-Path $PWD 'c8-30-results.stderr.log'
+          $p=Start-Process -FilePath $exe -ArgumentList @('--codeaster-import-probe',$rmed,$resu) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $out -RedirectStandardError $err -NoNewWindow -Wait -PassThru
+          Get-Content $out
+          if(Test-Path $err){ Get-Content $err }
+          if($p.ExitCode -ne 0){ throw "C8.30 semantic probe failed: $($p.ExitCode)" }
+          $log=Get-Content $out -Raw
+          foreach($needle in @('Code_Aster CaeResults import probe: PASS','Unit system: MM_TON_S_C','Deformation field:','Stress contour component: MISES')) {
+            if($log -notmatch [regex]::Escape($needle)){ throw "Missing runtime semantic evidence: $needle" }
+          }
+      - name: Emit evidence manifest
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/c8-30 | Out-Null
+          Copy-Item c8-30-results.*.log artifact/c8-30/ -ErrorAction SilentlyContinue
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          @{
+            schema='astermax.c8-30-results-workspace-semantic-gate.v1'
+            commit='${{ github.sha }}'
+            solver='Code_Aster 17.4.0'
+            unit_system='mm-N-MPa'
+            genuine_solve=$true
+            numerical_oracle=$true
+            production_bridge=$true
+            results_workspace_semantics=$true
+            displacement_deformation_available=$true
+            mises_contour_available=$true
+            executable_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            rmed_sha256=(Get-FileHash genuine/smoke.rmed -Algorithm SHA256).Hash.ToLowerInvariant()
+            resu_sha256=(Get-FileHash genuine/smoke.resu -Algorithm SHA256).Hash.ToLowerInvariant()
+            contour_rendered_from_verified_result=$false
+            rendering_semantics_verified=$false
+            industrial_validation=$false
+            ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content artifact/c8-30/C8_30_EVIDENCE.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.30-results-semantics-${{ github.sha }}
+          path: artifact/c8-30/**
+          if-no-files-found: error
+          retention-days: 14
