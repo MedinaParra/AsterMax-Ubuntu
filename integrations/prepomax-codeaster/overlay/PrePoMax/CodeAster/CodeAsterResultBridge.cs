@@ -66,6 +66,8 @@ namespace PrePoMax.CodeAster
         public static FeResults Read(string rmedFileName, string resuFileName, FeMesh mesh, UnitSystemType unitSystemType)
         {
             if (mesh == null) throw new ArgumentNullException("mesh");
+            if (mesh.Nodes == null || mesh.Nodes.Count == 0)
+                throw new InvalidDataException("Cannot admit Code_Aster results for an empty mesh.");
             if (String.IsNullOrWhiteSpace(resuFileName) || !File.Exists(resuFileName))
                 throw new FileNotFoundException("The Code_Aster interoperability .resu file was not found.", resuFileName);
 
@@ -163,6 +165,7 @@ namespace PrePoMax.CodeAster
                 values.Add(component, data);
             }
 
+            HashSet<int> seenNodes = new HashSet<int>();
             int rows = 0;
             for (int i = headerLine + 1; i < lines.Length; i++)
             {
@@ -182,25 +185,42 @@ namespace PrePoMax.CodeAster
                     if (rows > 0 && raw.StartsWith("#")) break;
                     continue;
                 }
-                int index;
-                if (!nodeLookup.TryGetValue(nodeId, out index)) continue;
 
-                bool rowValid = true;
+                int index;
+                if (!nodeLookup.TryGetValue(nodeId, out index))
+                    throw new InvalidDataException("Code_Aster result section " + title + " contains node " + nodeId + " which is not present in the admitted mesh.");
+                if (!seenNodes.Add(nodeId))
+                    throw new InvalidDataException("Code_Aster result section " + title + " contains duplicate node " + nodeId + ".");
+
+                Dictionary<string, float> rowValues = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
                 foreach (string component in components)
                 {
                     int column = componentColumns[component];
                     float value;
-                    if (column < 0 || column >= tokens.Length || !TryParseFloat(tokens[column], out value))
-                    {
-                        rowValid = false;
-                        break;
-                    }
-                    values[component][index] = value;
+                    if (column < 0 || column >= tokens.Length || !TryParseFloat(tokens[column], out value) ||
+                        Single.IsNaN(value) || Single.IsInfinity(value))
+                        throw new InvalidDataException("Code_Aster result section " + title + " contains a missing or non-finite " + component + " value for node " + nodeId + ".");
+                    rowValues.Add(component, value);
                 }
-                if (rowValid) rows++;
+
+                foreach (string component in components) values[component][index] = rowValues[component];
+                rows++;
             }
 
-            if (rows == 0) throw new InvalidDataException("No nodal values were read from Code_Aster result section: " + title + ".");
+            if (rows == 0)
+                throw new InvalidDataException("No nodal values were read from Code_Aster result section: " + title + ".");
+            if (seenNodes.Count != nodeLookup.Count)
+            {
+                int[] missing = nodeLookup.Keys.Where(id => !seenNodes.Contains(id)).OrderBy(id => id).Take(12).ToArray();
+                string suffix = nodeLookup.Count - seenNodes.Count > missing.Length ? ", ..." : String.Empty;
+                throw new InvalidDataException("Code_Aster result section " + title + " does not cover the admitted mesh. Missing node(s): " +
+                                               String.Join(", ", missing) + suffix + ".");
+            }
+
+            foreach (string component in components)
+                if (values[component].Any(value => Single.IsNaN(value) || Single.IsInfinity(value)))
+                    throw new InvalidDataException("Code_Aster result section " + title + " left non-finite values in component " + component + ".");
+
             return values;
         }
 
