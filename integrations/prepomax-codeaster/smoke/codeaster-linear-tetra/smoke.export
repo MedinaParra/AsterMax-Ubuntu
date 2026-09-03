@@ -1,0 +1,12 @@
+P actions make_etude
+P version stable
+P time_limit 300
+P memory_limit 2048
+P ncpus 1
+P mpi_nbcpu 1
+P mpi_nbnoeud 1
+F comm smoke.comm D 1
+F libr smoke.mail D 20
+F mess smoke.mess R 6
+F resu smoke.resu R 8
+F rmed smoke.rmed R 80
