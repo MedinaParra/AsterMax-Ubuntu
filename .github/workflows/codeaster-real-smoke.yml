@@ -7,6 +7,8 @@ on:
     paths:
       - 'integrations/prepomax-codeaster/smoke/**'
       - 'integrations/prepomax-codeaster/harness/astermax_harness.py'
+      - 'integrations/prepomax-codeaster/overlay/PrePoMax/CodeAster/**'
+      - 'integrations/prepomax-codeaster/tools/**'
       - '.github/workflows/codeaster-real-smoke.yml'
   workflow_dispatch:
 
@@ -70,4 +72,58 @@ jobs:
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.rmed
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/.astermax-harness/
-          if-no-files-found: warn
+          if-no-files-found: error
+
+  windows-cae-results-import:
+    needs: codeaster-linear-tetra
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download real Code_Aster results
+        uses: actions/download-artifact@v4
+        with:
+          name: codeaster-real-smoke
+          path: real-codeaster-output
+
+      - name: Bootstrap patched PrePoMax tree
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Restore PrePoMax NuGet dependencies
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build patched PrePoMax
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Import real solver results through CodeAsterResultBridge
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build/PrePoMax-CodeAster/PrePoMax/bin -Recurse -Filter PrePoMax.exe |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Release/x64 PrePoMax.exe was not found.' }
+          $rmed = (Resolve-Path real-codeaster-output/smoke.rmed).Path
+          $resu = (Resolve-Path real-codeaster-output/smoke.resu).Path
+          Write-Host "Importer executable: $($exe.FullName)"
+          Write-Host "RMED: $rmed"
+          Write-Host "RESU: $resu"
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList @('--codeaster-import-probe', $rmed, $resu) -Wait -PassThru
+          Write-Host "Code_Aster CaeResults import exit code: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) { throw "CodeAsterResultBridge import probe failed with exit code $($process.ExitCode)." }
