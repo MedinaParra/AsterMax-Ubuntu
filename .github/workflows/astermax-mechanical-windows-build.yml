@@ -26,9 +26,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Validate branding helper
+      - name: Validate build helpers
         shell: pwsh
-        run: python -m py_compile integrations/prepomax-codeaster/tools/apply_branding.py
+        run: |
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_branding.py
+          python -m py_compile integrations/prepomax-codeaster/tools/generate_materials_lib.py
 
       - name: Bootstrap patched and branded source
         shell: pwsh
@@ -91,6 +93,9 @@ jobs:
             }
           }
 
+          python integrations/prepomax-codeaster/tools/generate_materials_lib.py --output (Join-Path $package 'materials.lib')
+          Copy-Item integrations/prepomax-codeaster/assets/MATERIAL_LIBRARY_SOURCES.md (Join-Path $package 'MATERIAL_LIBRARY_SOURCES.md') -Force
+
           $sourceExe = Join-Path $package 'PrePoMax.exe'
           $targetExe = Join-Path $package 'AsterMax Mechanical.exe'
           if (-not (Test-Path $sourceExe)) { throw 'PrePoMax.exe is missing from staged package.' }
@@ -105,6 +110,16 @@ jobs:
           if (-not (Test-Path $netgen)) { throw 'Packaged NetGen\NetGenMesher.exe is missing.' }
           $mmgs = Join-Path $package 'NetGen\mmgs.exe'
           if (-not (Test-Path $mmgs)) { throw 'Packaged NetGen\mmgs.exe is missing.' }
+          $materialsFile = Join-Path $package 'materials.lib'
+          if (-not (Test-Path $materialsFile)) { throw 'Packaged materials.lib is missing.' }
+
+          $jsonObject = Get-Content $materialsFile -Raw | ConvertFrom-Json
+          $materialCount = 0
+          foreach ($category in $jsonObject.Items) { $materialCount += $category.Items.Count }
+          if ($materialCount -ne 11) { throw "Expected 11 seed materials, found $materialCount." }
+          if ((Get-Content $materialsFile -Raw) -notmatch 'CaeModel.ElasticWithDensity, CaeModel') {
+            throw 'materials.lib does not contain native ElasticWithDensity material properties.'
+          }
 
           @"
           AsterMax Mechanical - experimental Windows test build
@@ -114,6 +129,7 @@ jobs:
 
           Upstream GUI foundation: PrePoMax, GPL-3.0.
           Runtime CAD/mesher assets: official PrePoMax v1.4.0 portable package.
+          Starter material library: nominal linear-elastic engineering reference data.
           This experimental derivative remains subject to GPL-3.0 obligations.
           Source integration: https://github.com/MedinaParra/AsterMax-Ubuntu
           Upstream: https://github.com/tsvilans/PrePoMax
@@ -124,10 +140,48 @@ jobs:
 
           Write-Host "Executable: $targetExe"
           Get-Item $targetExe | Format-List Name,Length,LastWriteTime
+          Write-Host "Material library: $materialCount materials"
           Write-Host "NetGen runtime:"
           Get-ChildItem (Join-Path $package 'NetGen') | Select-Object Name,Length
           Write-Host "Solver runtime:"
           if (Test-Path (Join-Path $package 'Solver')) { Get-ChildItem (Join-Path $package 'Solver') | Select-Object Name,Length }
+
+      - name: Validate native material-library deserialization
+        shell: pwsh
+        run: |
+          $package = Join-Path $PWD 'artifact/AsterMax Mechanical'
+          $libDir = Join-Path $package 'lib'
+          $handler = [System.ResolveEventHandler] {
+            param($sender, $eventArgs)
+            try {
+              $simpleName = (New-Object System.Reflection.AssemblyName($eventArgs.Name)).Name + '.dll'
+              $candidate = Join-Path $libDir $simpleName
+              if (Test-Path $candidate) { return [System.Reflection.Assembly]::LoadFrom($candidate) }
+            } catch { }
+            return $null
+          }
+          [AppDomain]::CurrentDomain.add_AssemblyResolve($handler)
+
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'Newtonsoft.Json.dll'))
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'CaeGlobals.dll'))
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'CaeMesh.dll'))
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'CaeModel.dll'))
+          $astermaxAssembly = [System.Reflection.Assembly]::LoadFrom((Join-Path $package 'AsterMax Mechanical.exe'))
+          $libraryType = $astermaxAssembly.GetType('PrePoMax.Forms.MaterialLibraryItem', $true)
+          $settings = New-Object Newtonsoft.Json.JsonSerializerSettings
+          $settings.TypeNameHandling = [Newtonsoft.Json.TypeNameHandling]::Auto
+          $json = [IO.File]::ReadAllText((Join-Path $package 'materials.lib'))
+          $library = [Newtonsoft.Json.JsonConvert]::DeserializeObject($json, $libraryType, $settings)
+          if ($null -eq $library) { throw 'Native material library deserialization returned null.' }
+          if ($library.Items.Count -ne 4) { throw "Expected 4 material categories, found $($library.Items.Count)." }
+          $count = 0
+          foreach ($category in $library.Items) { $count += $category.Items.Count }
+          if ($count -ne 11) { throw "Native library expected 11 materials, found $count." }
+          $firstPropertyType = $library.Items[0].Items[0].Tag.Properties[0].GetType().FullName
+          if ($firstPropertyType -ne 'CaeModel.ElasticWithDensity') {
+            throw "Unexpected first material property type: $firstPropertyType"
+          }
+          Write-Host "Native materials.lib PASS: $count materials; property type $firstPropertyType"
 
       - name: Upload AsterMax Mechanical Windows package
         uses: actions/upload-artifact@v4
