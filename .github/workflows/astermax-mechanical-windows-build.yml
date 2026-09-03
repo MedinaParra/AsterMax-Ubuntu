@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout AsterMax integration
         uses: actions/checkout@v4
@@ -54,6 +54,23 @@ jobs:
           msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Fetch official PrePoMax 1.4.0 portable runtime
+        shell: pwsh
+        run: |
+          $url = 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $zip = Join-Path $PWD 'build/PrePoMax-v1.4.0-portable.zip'
+          $extract = Join-Path $PWD 'build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+
+          $netgenExe = Get-ChildItem -Path $extract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if (-not $netgenExe) { throw 'Official PrePoMax runtime does not contain NetGenMesher.exe.' }
+          $runtimeRoot = $netgenExe.Directory.Parent.FullName
+          "PREPOMAX_RUNTIME_ROOT=$runtimeRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Portable runtime root: $runtimeRoot"
+          Get-Item $netgenExe.FullName | Format-List Name,Length,LastWriteTime
+
       - name: Assemble AsterMax Mechanical test package
         shell: pwsh
         run: |
@@ -67,6 +84,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item -Path (Join-Path $release '*') -Destination $package -Recurse -Force
 
+          foreach ($folder in @('NetGen', 'Solver', 'Models', 'Temp')) {
+            $source = Join-Path $env:PREPOMAX_RUNTIME_ROOT $folder
+            if (Test-Path $source) {
+              Copy-Item -Path $source -Destination $package -Recurse -Force
+            }
+          }
+
           $sourceExe = Join-Path $package 'PrePoMax.exe'
           $targetExe = Join-Path $package 'AsterMax Mechanical.exe'
           if (-not (Test-Path $sourceExe)) { throw 'PrePoMax.exe is missing from staged package.' }
@@ -77,6 +101,11 @@ jobs:
             Move-Item -Path $sourceConfig -Destination (Join-Path $package 'AsterMax Mechanical.exe.config') -Force
           }
 
+          $netgen = Join-Path $package 'NetGen\NetGenMesher.exe'
+          if (-not (Test-Path $netgen)) { throw 'Packaged NetGen\NetGenMesher.exe is missing.' }
+          $mmgs = Join-Path $package 'NetGen\mmgs.exe'
+          if (-not (Test-Path $mmgs)) { throw 'Packaged NetGen\mmgs.exe is missing.' }
+
           @"
           AsterMax Mechanical - experimental Windows test build
 
@@ -84,6 +113,7 @@ jobs:
           feature/prepomax-code-aster-harness-runtime
 
           Upstream GUI foundation: PrePoMax, GPL-3.0.
+          Runtime CAD/mesher assets: official PrePoMax v1.4.0 portable package.
           This experimental derivative remains subject to GPL-3.0 obligations.
           Source integration: https://github.com/MedinaParra/AsterMax-Ubuntu
           Upstream: https://github.com/tsvilans/PrePoMax
@@ -94,6 +124,10 @@ jobs:
 
           Write-Host "Executable: $targetExe"
           Get-Item $targetExe | Format-List Name,Length,LastWriteTime
+          Write-Host "NetGen runtime:"
+          Get-ChildItem (Join-Path $package 'NetGen') | Select-Object Name,Length
+          Write-Host "Solver runtime:"
+          if (Test-Path (Join-Path $package 'Solver')) { Get-ChildItem (Join-Path $package 'Solver') | Select-Object Name,Length }
 
       - name: Upload AsterMax Mechanical Windows package
         uses: actions/upload-artifact@v4
