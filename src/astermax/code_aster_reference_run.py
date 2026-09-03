@@ -6,6 +6,10 @@ from pathlib import Path
 import json
 
 from .code_aster_diagnostic import verify_code_aster_message
+from .code_aster_mesh_attestation import (
+    CodeAsterMeshAttestationError,
+    attest_reference_mesh_before_solve,
+)
 from .code_aster_reference_harness import (
     ReferenceObservedMetrics,
     UniaxialPrismSpec,
@@ -46,6 +50,9 @@ class GenuineReferenceSolveEvidence:
     export_sha256: str
     command_sha256: str
     input_med_sha256: str
+    mesh_quality_report_sha256: str
+    mesh_quality_artifact_sha256: str
+    reference_case_evidence_sha256: str
     result_med_sha256: str
     message_sha256: str
     displacement_table_sha256: str
@@ -57,6 +64,7 @@ class GenuineReferenceSolveEvidence:
     message_execution_exit_code: int | None
     runtime_qualified: bool
     runtime_attested_immediately_before_solve: bool
+    mesh_attested_immediately_before_solve: bool
     run_aster_sha256: str
     config_sha256: str
     detected_version: str | None
@@ -99,7 +107,7 @@ def execute_and_verify_reference_wsl(
     message_filename: str = "astermax.mess",
     timeout_s: float = 300.0,
 ) -> GenuineReferenceSolveEvidence:
-    """Run a qualified and freshly attested WSL2 Code_Aster reference study."""
+    """Run a qualified, mesh-attested and runtime-attested WSL2 Code_Aster study."""
     spec.validate()
     _validate_qualification(runtime, qualification)
     root = Path(directory).expanduser().resolve()
@@ -126,6 +134,15 @@ def execute_and_verify_reference_wsl(
     expected_binding = f"F mess {message_filename} R 6"
     if expected_binding not in {line.strip() for line in export_text.splitlines()}:
         raise CodeAsterReferenceRunError("REFERENCE_RUN_MESSAGE_BINDING_MISSING")
+
+    # Close the mesh-validation -> solver-launch TOCTOU boundary. This recomputes
+    # the MED and quality-artifact hashes immediately before any runtime call.
+    try:
+        mesh_attestation = attest_reference_mesh_before_solve(root)
+    except CodeAsterMeshAttestationError as exc:
+        raise CodeAsterReferenceRunError(f"REFERENCE_RUN_MESH_ATTESTATION_FAILED:{exc}") from exc
+    if mesh_attestation.med_sha256 != _sha(input_med):
+        raise CodeAsterReferenceRunError("REFERENCE_RUN_MESH_ATTESTATION_MED_CHANGED")
 
     try:
         attestation = attest_qualified_wsl_code_aster_runtime(
@@ -166,7 +183,10 @@ def execute_and_verify_reference_wsl(
         distribution=runtime.distribution,
         export_sha256=_sha(export),
         command_sha256=_sha(command),
-        input_med_sha256=_sha(input_med),
+        input_med_sha256=mesh_attestation.med_sha256,
+        mesh_quality_report_sha256=mesh_attestation.quality_report_sha256,
+        mesh_quality_artifact_sha256=mesh_attestation.quality_artifact_sha256,
+        reference_case_evidence_sha256=mesh_attestation.reference_case_evidence_sha256,
         result_med_sha256=_sha(result_med),
         message_sha256=diagnostic.sha256,
         displacement_table_sha256=_sha(displacement),
@@ -178,6 +198,7 @@ def execute_and_verify_reference_wsl(
         message_execution_exit_code=diagnostic.execution_exit_code,
         runtime_qualified=True,
         runtime_attested_immediately_before_solve=attestation.attestation_valid,
+        mesh_attested_immediately_before_solve=mesh_attestation.mesh_attested_immediately_before_solve,
         run_aster_sha256=attestation.run_aster_sha256,
         config_sha256=attestation.config_sha256,
         detected_version=qualification.detected_version,
