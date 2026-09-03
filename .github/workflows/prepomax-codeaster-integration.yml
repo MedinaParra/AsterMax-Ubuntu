@@ -34,6 +34,7 @@ jobs:
           python -m py_compile integrations/prepomax-codeaster/tools/apply_model_translation.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_results_bridge.py
           python -m py_compile integrations/prepomax-codeaster/tools/apply_harness_runtime.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_harness_runtime_fixups.py
           python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
           python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
           python -m py_compile integrations/prepomax-codeaster/harness/test_harness_contract.py
@@ -52,10 +53,12 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'F libr.*\.mail D 20'
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'F resu.*\.resu R 8'
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern 'UseSolverHarness'
-          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern '_exe.ExitCode == 0'
+          $exitChecks = Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern '_exe.ExitCode == 0'
+          if ($exitChecks.Count -lt 2) { throw 'Both Windows execution paths must honor the harness exit code.' }
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'CodeAsterModelTranslator.WriteStudy'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'OpenCodeAsterResults'
-          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'SolverHarnessBridge.Prepare'
+          $harnessPrepare = Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'SolverHarnessBridge.Prepare'
+          if ($harnessPrepare.Count -lt 2) { throw 'Normal and wear solver runs must both cross the harness boundary.' }
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'TryValidatePassingReport'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/SettingsContainer.cs -Pattern 'CodeAsterSettings'
@@ -66,6 +69,7 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterResultBridge.cs -Pattern 'PPM_STRESS_N'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterCaseWriter.cs -Pattern 'F resu.*\.resu R 8'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Harness/SolverHarnessBridge.cs -Pattern 'Harness status is'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Harness/SolverHarnessBridge.cs -Pattern 'previous PASS report'
           if (-not (Test-Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/codeaster_catalog.py)) {
             throw 'Code_Aster catalog helper was not copied to the patched source tree.'
           }
@@ -90,10 +94,7 @@ jobs:
       - name: Verify bundled harness in build output
         shell: pwsh
         run: |
-          $matches = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter asternax_harness.py -ErrorAction SilentlyContinue
-          if (-not $matches) {
-            $matches = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter astermax_harness.py -ErrorAction SilentlyContinue
-          }
+          $matches = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter astermax_harness.py -ErrorAction SilentlyContinue
           if (-not $matches) { throw 'Bundled AsterMax harness was not copied to build output.' }
 
       - name: Upload MSBuild diagnostics
