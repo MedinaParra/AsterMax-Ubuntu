@@ -8,6 +8,10 @@ from pathlib import Path
 import numpy as np
 
 from .code_aster_med_writer import verify_code_aster_med_groups, write_code_aster_med
+from .code_aster_mesh_quality_gate import (
+    build_tet10_presolve_quality_report,
+    require_tet10_presolve_quality,
+)
 from .code_aster_study import LinearStaticStudy, render_linear_static_comm
 
 
@@ -230,11 +234,17 @@ def generate_uniaxial_prism_tet10(spec: UniaxialPrismSpec) -> ReferenceMesh:
 
 
 def prepare_reference_solver_bundle(spec: UniaxialPrismSpec, directory: str | Path) -> dict[str, object]:
-    """Build geometry/mesh/MED/.comm evidence without claiming solver execution."""
+    """Build quality-gated geometry/mesh/MED/.comm evidence without claiming a solve."""
     spec.validate()
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
     mesh = generate_uniaxial_prism_tet10(spec)
+
+    quality = build_tet10_presolve_quality_report(mesh.nodes_mm, mesh.tet10)
+    require_tet10_presolve_quality(quality)
+    quality_path = root / "reference_mesh_quality.json"
+    quality_path.write_text(json.dumps(quality.as_dict(), indent=2, sort_keys=True), encoding="utf-8")
+
     med = write_code_aster_med(
         root / "astermax.med",
         nodes_mm=mesh.nodes_mm,
@@ -276,6 +286,13 @@ def prepare_reference_solver_bundle(spec: UniaxialPrismSpec, directory: str | Pa
         "expected_epsilon_x": spec.expected_epsilon_x,
         "expected_ux_mm": spec.expected_ux_mm,
         "expected_support_reaction_x_n": spec.expected_support_reaction_x_n,
+        "mesh_quality_gate_passed": quality.solver_gate_passed,
+        "mesh_quality_report_sha256": quality.report_sha256,
+        "mesh_quality_artifact_sha256": sha256(quality_path.read_bytes()).hexdigest(),
+        "minimum_corner_mean_ratio": quality.minimum_corner_mean_ratio,
+        "minimum_sampled_jacobian_ratio": quality.minimum_sampled_jacobian_ratio,
+        "all_sampled_jacobians_positive": quality.all_sampled_jacobians_positive,
+        "ansys_metric_equivalence": False,
         "med_sha256": med_evidence.med_sha256,
         "comm_sha256": sha256(comm.read_bytes()).hexdigest(),
         "med_groups_verified": med_evidence.med_family_names_verified,
