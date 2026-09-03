@@ -41,6 +41,7 @@ jobs:
           python -m py_compile integrations/prepomax-codeaster/tools/bootstrap.py
           python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
           python -m py_compile integrations/prepomax-codeaster/harness/test_harness_contract.py
+          python -m py_compile integrations/prepomax-codeaster/harness/validate_numeric_reference.py
           python integrations/prepomax-codeaster/harness/astermax_harness.py --self-test
           python integrations/prepomax-codeaster/harness/test_harness_contract.py
 
@@ -65,7 +66,9 @@ jobs:
           $harnessRuntime = Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern '_settings.Harness.PythonExecutable'
           if ($harnessRuntime.Count -lt 2) { throw 'Harness runtime must be solver-neutral and separate from Code_Aster catalog Python.' }
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'TryValidatePassingReport'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Program.cs -Pattern 'codeaster-generate-probe'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Program.cs -Pattern 'codeaster-import-probe'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterStudyProbe.cs -Pattern 'CodeAsterModelTranslator.WriteStudy'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterImportProbe.cs -Pattern 'CodeAsterResultBridge.Read'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterImportProbe.cs -Pattern 'FOFieldNames.ToStrain'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/ViewJob.cs -Pattern 'Analysis solver'
