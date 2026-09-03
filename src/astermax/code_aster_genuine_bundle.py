@@ -36,9 +36,9 @@ def prepare_genuine_reference_bundle(
     The older reference preparer correctly creates the mm TET10/TRI6 MED and
     mesh-quality evidence, but its generic .comm does not emit the scalar tables
     required by ``execute_and_verify_reference_wsl`` and it does not create the
-    .export profile.  This function deliberately reuses that trusted geometry /
-    mesh path, then replaces only the solver command/profile layer with the
-    auditable reference-result contract.
+    .export profile. This function reuses that trusted geometry/mesh path, then
+    replaces only the solver command/profile layer with the auditable reference
+    result contract.
 
     This function never executes Code_Aster and cannot promote solver claims.
     """
@@ -65,15 +65,15 @@ def prepare_genuine_reference_bundle(
         newline="\n",
     )
     export = root / "astermax.export"
-    export.write_text(
-        render_reference_export(
-            tables=table_spec,
-            time_limit_s=time_limit_s,
-            memory_limit_mb=memory_limit_mb,
-        ),
-        encoding="utf-8",
-        newline="\n",
+    export_text = render_reference_export(
+        tables=table_spec,
+        time_limit_s=time_limit_s,
+        memory_limit_mb=memory_limit_mb,
     )
+    # The genuine-run gate requires the Code_Aster .mess file as explicit,
+    # replayable evidence. The generic C8.4 export renderer predates that gate.
+    export_text += "F mess astermax.mess R 6\n"
+    export.write_text(export_text, encoding="utf-8", newline="\n")
 
     evidence = dict(base)
     evidence.update(
@@ -82,6 +82,7 @@ def prepare_genuine_reference_bundle(
             "comm_sha256": _sha(comm),
             "export_sha256": _sha(export),
             "result_med_filename": "astermax_result.med",
+            "message_filename": "astermax.mess",
             "displacement_table_filename": table_spec.displacement_filename,
             "reaction_table_filename": table_spec.reaction_filename,
             "stress_table_filename": table_spec.stress_filename,
@@ -162,6 +163,7 @@ def validate_genuine_reference_bundle(
         "F comm astermax.comm D 1",
         "F libr astermax.med D 20",
         "F rmed astermax_result.med R 80",
+        "F mess astermax.mess R 6",
         f"F libr {table_spec.displacement_filename} R {table_spec.displacement_unit}",
         f"F libr {table_spec.reaction_filename} R {table_spec.reaction_unit}",
         f"F libr {table_spec.stress_filename} R {table_spec.stress_unit}",
@@ -177,6 +179,7 @@ def validate_genuine_reference_bundle(
         "mesh_quality_gate_passed": True,
         "verification_tables_bound": True,
         "result_med_bound": True,
+        "solver_message_bound": True,
         "pre_solve_bundle_valid": True,
         "med_sha256": _sha(med),
         "comm_sha256": _sha(comm),
