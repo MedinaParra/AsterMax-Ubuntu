@@ -39,6 +39,7 @@ def main():
     run([sys.executable, HERE / "apply_harness_runtime_fixups.py", destination])
     run([sys.executable, HERE / "apply_harness_ui.py", destination])
     run([sys.executable, HERE / "apply_solver_settings_ui.py", destination])
+    run([sys.executable, HERE / "apply_import_probe.py", destination])
 
     print()
     print("Prepared:", destination)
