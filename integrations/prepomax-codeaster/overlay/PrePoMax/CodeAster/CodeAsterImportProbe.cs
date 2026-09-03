@@ -31,7 +31,6 @@ namespace PrePoMax.CodeAster
                 if (!File.Exists(resuFile))
                     throw new FileNotFoundException("RESU interoperability result does not exist.", resuFile);
 
-                // C8.30: this mesh must match the verified mm-N-MPa smoke geometry.
                 Dictionary<int, FeNode> nodes = new Dictionary<int, FeNode>
                 {
                     { 1, new FeNode(1, 0.0, 0.0, 0.0) },
@@ -56,17 +55,11 @@ namespace PrePoMax.CodeAster
                     throw new InvalidDataException("Imported FeResults is not tagged with the required mm-ton-s unit system used for mm-N-MPa mechanics.");
 
                 HashSet<string> fields = new HashSet<string>(results.GetAllFieldNames(), StringComparer.OrdinalIgnoreCase);
-                string[] requiredFields = new string[]
-                {
-                    FOFieldNames.Disp,
-                    FOFieldNames.Stress,
-                    FOFieldNames.ToStrain
-                };
+                string[] requiredFields = new string[] { FOFieldNames.Disp, FOFieldNames.Stress, FOFieldNames.ToStrain };
                 string[] missing = requiredFields.Where(x => !fields.Contains(x)).ToArray();
                 if (missing.Length > 0)
                     throw new InvalidDataException("Imported FeResults is missing fields: " + String.Join(", ", missing));
 
-                // Verify exactly the semantic inventory the Results Workspace needs for a professional contour/deformation view.
                 Dictionary<string, string[]> visible = results.GetAllVisibleFiledNameComponentNames();
                 RequireComponents(visible, FOFieldNames.Disp,
                     new string[] { FOComponentNames.U1, FOComponentNames.U2, FOComponentNames.U3, FOComponentNames.All });
@@ -78,11 +71,44 @@ namespace PrePoMax.CodeAster
                     new string[] { FOComponentNames.E11, FOComponentNames.E22, FOComponentNames.E33,
                                    FOComponentNames.E12, FOComponentNames.E23, FOComponentNames.E13 });
 
-                // Force the same preprocessing path used before interactive result presentation.
                 results.Preprocess();
                 string deformationField = results.DeformationFieldOutputName;
                 if (String.IsNullOrWhiteSpace(deformationField))
                     throw new InvalidDataException("Results Workspace has no admissible deformation field after preprocessing.");
+
+                // C8.31: exercise the exact FieldData objects that the native Results Workspace consumes.
+                FieldData stressData = new FieldData(FOFieldNames.Stress, FOComponentNames.Mises, 1, 1);
+                Field stressField = results.GetField(stressData);
+                if (stressField == null) throw new InvalidDataException("Native Results Workspace could not resolve STRESS/MISES FieldData.");
+                float[] mises = stressField.GetComponentValues(FOComponentNames.Mises);
+                RequireFiniteValues("STRESS/MISES", mises, 4);
+                float misesMin = stressField.GetComponentMin(FOComponentNames.Mises);
+                float misesMax = stressField.GetComponentMax(FOComponentNames.Mises);
+                if (Single.IsNaN(misesMin) || Single.IsInfinity(misesMin) || Single.IsNaN(misesMax) || Single.IsInfinity(misesMax))
+                    throw new InvalidDataException("Native Results Workspace STRESS/MISES min/max is non-finite.");
+                if (misesMax < misesMin)
+                    throw new InvalidDataException("Native Results Workspace STRESS/MISES min/max ordering is invalid.");
+
+                FieldData dispData = new FieldData(FOFieldNames.Disp, FOComponentNames.All, 1, 1);
+                Field dispField = results.GetField(dispData);
+                if (dispField == null) throw new InvalidDataException("Native Results Workspace could not resolve DISP/ALL FieldData.");
+                float[] displacementMagnitude = dispField.GetComponentValues(FOComponentNames.All);
+                RequireFiniteValues("DISP/ALL", displacementMagnitude, 4);
+                float dispMin = dispField.GetComponentMin(FOComponentNames.All);
+                float dispMax = dispField.GetComponentMax(FOComponentNames.All);
+                if (Single.IsNaN(dispMin) || Single.IsInfinity(dispMin) || Single.IsNaN(dispMax) || Single.IsInfinity(dispMax))
+                    throw new InvalidDataException("Native Results Workspace DISP/ALL min/max is non-finite.");
+                if (dispMax < dispMin)
+                    throw new InvalidDataException("Native Results Workspace DISP/ALL min/max ordering is invalid.");
+
+                // The pinned benchmark oracle independently establishes SIXZ=0.6 MPa and DX(N4)=0.000742857... mm.
+                // Here we verify the native invariant pipeline produces the corresponding renderable scalar fields.
+                const double expectedMises = 1.0392304845413265; // sqrt(3) * 0.6 MPa pure shear
+                if (Math.Abs(misesMax - expectedMises) > 1e-5)
+                    throw new InvalidDataException("Native STRESS/MISES maximum does not match the pinned pure-shear invariant. Observed=" + misesMax);
+                const double expectedDisp = 0.0007428571428571429;
+                if (Math.Abs(dispMax - expectedDisp) > 1e-9)
+                    throw new InvalidDataException("Native DISP/ALL maximum does not match the pinned displacement oracle. Observed=" + dispMax);
 
                 Console.WriteLine("Code_Aster CaeResults import probe: PASS");
                 Console.WriteLine("Unit system: " + results.UnitSystem.UnitSystemType);
@@ -90,7 +116,10 @@ namespace PrePoMax.CodeAster
                 Console.WriteLine("Elements: " + results.Mesh.Elements.Count);
                 Console.WriteLine("Fields: " + String.Join(", ", fields.OrderBy(x => x)));
                 Console.WriteLine("Deformation field: " + deformationField);
-                Console.WriteLine("Stress contour component: " + FOComponentNames.Mises);
+                Console.WriteLine("Native contour field: " + stressData.Name + "/" + stressData.Component);
+                Console.WriteLine("Native contour min/max [MPa]: " + misesMin + " / " + misesMax);
+                Console.WriteLine("Native deformation field: " + dispData.Name + "/" + dispData.Component);
+                Console.WriteLine("Native deformation min/max [mm]: " + dispMin + " / " + dispMax);
                 Console.WriteLine("RMED bytes: " + new FileInfo(rmedFile).Length);
                 Console.WriteLine("RESU bytes: " + new FileInfo(resuFile).Length);
                 return 0;
@@ -112,6 +141,14 @@ namespace PrePoMax.CodeAster
             string[] missing = required.Where(x => !set.Contains(x)).ToArray();
             if (missing.Length > 0)
                 throw new InvalidDataException("Results Workspace field " + fieldName + " is missing component(s): " + String.Join(", ", missing));
+        }
+
+        private static void RequireFiniteValues(string label, float[] values, int expectedCount)
+        {
+            if (values == null || values.Length != expectedCount)
+                throw new InvalidDataException(label + " does not contain the expected " + expectedCount + " nodal values.");
+            if (values.Any(x => Single.IsNaN(x) || Single.IsInfinity(x)))
+                throw new InvalidDataException(label + " contains non-finite nodal values.");
         }
     }
 }
