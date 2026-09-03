@@ -42,11 +42,13 @@ def main():
     run([sys.executable, HERE / "apply_import_probe.py", destination])
     run([sys.executable, HERE / "apply_branding.py", destination])
     run([sys.executable, HERE / "apply_workdir_fix.py", destination])
+    run([sys.executable, HERE / "apply_ribbon_ui.py", destination])
 
     print()
     print("Prepared:", destination)
     print("Upstream revision:", UPSTREAM_SHA)
     print("Product: AsterMax Mechanical")
+    print("Interface: AsterMax Ribbon")
     print("Next: open PrePoMax.sln and build the solution.")
     return 0
 
