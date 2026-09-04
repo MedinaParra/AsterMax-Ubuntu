@@ -31,7 +31,7 @@ def main():
     csproj.write_text(text, encoding="utf-8")
     print("patched", csproj)
 
-    frm = repo / "PrePoMax" / "FrmMain.cs"
+    frm = repo / "PrePoMax" / "Forms" / "FrmMain.cs"
     text = frm.read_text(encoding="utf-8-sig")
     anchor = '                _controller = new Controller(this);'
     addition = anchor + '\n                InstallAsterMaxAiChat();'
