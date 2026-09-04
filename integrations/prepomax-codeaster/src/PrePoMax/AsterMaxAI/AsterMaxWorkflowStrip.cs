@@ -19,8 +19,9 @@ namespace PrePoMax.AsterMaxAI
             Name = "tsAsterMaxWorkflow";
             GripStyle = ToolStripGripStyle.Hidden;
             Dock = DockStyle.Top;
-            BackColor = Color.White;
-            Padding = new Padding(6, 3, 6, 3);
+            BackColor = AsterMaxUiTheme.Surface;
+            ForeColor = AsterMaxUiTheme.TextPrimary;
+            Padding = new Padding(8, 5, 8, 5);
             AutoSize = true;
             RenderMode = ToolStripRenderMode.System;
 
@@ -29,25 +30,34 @@ namespace PrePoMax.AsterMaxAI
             Items.Add(MakeStage("Material", StageIcon.Material));
             Items.Add(MakeStage("BC", StageIcon.Boundary));
             Items.Add(MakeStage("Load", StageIcon.Load));
+            Items.Add(MakeStage("Analysis", StageIcon.Analysis));
             Items.Add(MakeStage("Solve", StageIcon.Solve));
             Items.Add(MakeStage("Results", StageIcon.Results));
             Items.Add(new ToolStripSeparator());
 
             ToolStripLabel units = new ToolStripLabel("mm · N · MPa");
             units.Name = "tslAsterMaxUnits";
-            units.ForeColor = AsterMaxUiTheme.TextSecondary;
+            units.ForeColor = AsterMaxUiTheme.Accent;
+            units.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 8.5f, FontStyle.Bold);
             units.ToolTipText = "AsterMax engineering unit contract";
             Items.Add(units);
             Items.Add(new ToolStripSeparator());
 
             _statusButton = new ToolStripDropDownButton("Model status");
             _statusButton.Name = "tsddbAsterMaxModelStatus";
-            _statusButton.Image = CreateStatusIcon(Color.FromArgb(128, 138, 150), 18);
+            _statusButton.Image = CreateStatusIcon(AsterMaxUiTheme.TextSecondary, 18);
             _statusButton.ImageScaling = ToolStripItemImageScaling.None;
             _statusButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
+            _statusButton.ForeColor = AsterMaxUiTheme.TextPrimary;
             _statusButton.ToolTipText = "Observed engineering state. Presence is not solver verification.";
             _statusButton.DropDownOpening += (s, e) => RefreshEngineeringState();
             Items.Add(_statusButton);
+
+            ToolStripLabel ai = new ToolStripLabel("AI · evidence aware");
+            ai.ForeColor = AsterMaxUiTheme.AccentGlow;
+            ai.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 8.3f, FontStyle.Bold);
+            Items.Add(new ToolStripSeparator());
+            Items.Add(ai);
 
             _refreshTimer = new Timer();
             _refreshTimer.Interval = 1500;
@@ -63,11 +73,13 @@ namespace PrePoMax.AsterMaxAI
             ToolStripButton button = new ToolStripButton();
             button.Name = "tsbAsterMax" + text.Replace(" ", "").Replace("/", "");
             button.Text = text;
+            button.ForeColor = AsterMaxUiTheme.TextPrimary;
+            button.BackColor = AsterMaxUiTheme.Surface;
             button.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
             button.Image = CreateStageIcon(icon, 20);
             button.ImageScaling = ToolStripItemImageScaling.None;
             button.Margin = new Padding(2, 1, 2, 1);
-            button.Padding = new Padding(4, 2, 4, 2);
+            button.Padding = new Padding(5, 3, 5, 3);
             button.ToolTipText = "Engineering workflow: " + text;
             button.Tag = "astermax-workflow-stage";
             return button;
@@ -118,12 +130,13 @@ namespace PrePoMax.AsterMaxAI
             _statusButton.DropDownItems.Add(new ToolStripSeparator());
             ToolStripMenuItem truth = new ToolStripMenuItem("Evidence policy: observed ≠ solver verified");
             truth.Enabled = false;
+            truth.BackColor = AsterMaxUiTheme.SurfaceAlt;
             truth.ForeColor = AsterMaxUiTheme.TextSecondary;
             _statusButton.DropDownItems.Add(truth);
 
             bool hasModel = geometry == EngineeringState.Present;
             bool hasResults = results == EngineeringState.Present;
-            Color stateColor = hasResults ? Color.FromArgb(45, 145, 85) : hasModel ? Color.FromArgb(225, 156, 42) : Color.FromArgb(128, 138, 150);
+            Color stateColor = hasResults ? AsterMaxUiTheme.Success : hasModel ? AsterMaxUiTheme.Warning : AsterMaxUiTheme.TextSecondary;
             _statusButton.Image = CreateStatusIcon(stateColor, 18);
             _statusButton.Text = hasResults ? "Results loaded" : hasModel ? "Model loaded" : "No model";
         }
@@ -131,9 +144,11 @@ namespace PrePoMax.AsterMaxAI
         private void AddStateItem(string name, EngineeringState state, string tooltip)
         {
             string label = state == EngineeringState.Present ? "Present" : state == EngineeringState.Missing ? "Missing" : "Unknown";
-            Color color = state == EngineeringState.Present ? Color.FromArgb(45, 145, 85) : state == EngineeringState.Missing ? Color.FromArgb(190, 70, 70) : Color.FromArgb(128, 138, 150);
+            Color color = state == EngineeringState.Present ? AsterMaxUiTheme.Success : state == EngineeringState.Missing ? AsterMaxUiTheme.Danger : AsterMaxUiTheme.TextSecondary;
             ToolStripMenuItem item = new ToolStripMenuItem(name + "   ·   " + label);
             item.Enabled = false;
+            item.BackColor = AsterMaxUiTheme.SurfaceAlt;
+            item.ForeColor = AsterMaxUiTheme.TextPrimary;
             item.Image = CreateStatusIcon(color, 14);
             item.ImageScaling = ToolStripItemImageScaling.None;
             item.ToolTipText = tooltip;
@@ -170,7 +185,7 @@ namespace PrePoMax.AsterMaxAI
         }
 
         private enum EngineeringState { Unknown, Missing, Present }
-        private enum StageIcon { Geometry, Mesh, Material, Boundary, Load, Solve, Results }
+        private enum StageIcon { Geometry, Mesh, Material, Boundary, Load, Analysis, Solve, Results }
 
         private static Bitmap CreateStatusIcon(Color color, int size)
         {
@@ -180,11 +195,9 @@ namespace PrePoMax.AsterMaxAI
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.Clear(Color.Transparent);
                 using (Brush b = new SolidBrush(color))
-                using (Pen p = new Pen(Color.FromArgb(80, 0, 0, 0), 1f))
                 {
                     Rectangle r = new Rectangle(2, 2, size - 5, size - 5);
                     g.FillEllipse(b, r);
-                    g.DrawEllipse(p, r);
                 }
             }
             return bmp;
@@ -197,9 +210,9 @@ namespace PrePoMax.AsterMaxAI
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.Clear(Color.Transparent);
-                using (Pen p = new Pen(AsterMaxUiTheme.AccentDark, 1.7f))
-                using (Brush b = new SolidBrush(AsterMaxUiTheme.Accent))
-                using (Brush soft = new SolidBrush(Color.FromArgb(35, AsterMaxUiTheme.Accent)))
+                using (Pen p = new Pen(AsterMaxUiTheme.Accent, 1.7f))
+                using (Brush b = new SolidBrush(AsterMaxUiTheme.AccentGlow))
+                using (Brush soft = new SolidBrush(Color.FromArgb(38, AsterMaxUiTheme.Accent)))
                 {
                     switch (stage)
                     {
@@ -218,14 +231,12 @@ namespace PrePoMax.AsterMaxAI
                             for (int y = 6; y <= 14; y += 4) g.DrawLine(p, 2, y, 5, y - 2); break;
                         case StageIcon.Load:
                             g.DrawLine(p, 10, 2, 10, 15); g.DrawLine(p, 10, 15, 6, 11); g.DrawLine(p, 10, 15, 14, 11); g.FillEllipse(b, 8, 1, 4, 4); break;
+                        case StageIcon.Analysis:
+                            g.DrawRectangle(p, 3, 3, 14, 14); g.DrawLine(p, 5, 13, 9, 8); g.DrawLine(p, 9, 8, 12, 11); g.DrawLine(p, 12, 11, 16, 5); break;
                         case StageIcon.Solve:
                             PointF[] tri = { new PointF(6, 3), new PointF(16, 10), new PointF(6, 17) }; g.FillPolygon(b, tri); break;
                         case StageIcon.Results:
-                            g.DrawRectangle(p, 3, 3, 14, 14);
-                            using (Brush r1 = new SolidBrush(Color.FromArgb(80, 110, 190, 255))) g.FillRectangle(r1, 5, 11, 2, 4);
-                            using (Brush r2 = new SolidBrush(Color.FromArgb(100, 80, 160, 230))) g.FillRectangle(r2, 9, 8, 2, 7);
-                            using (Brush r3 = new SolidBrush(Color.FromArgb(120, 50, 130, 200))) g.FillRectangle(r3, 13, 5, 2, 10);
-                            break;
+                            g.DrawRectangle(p, 3, 3, 14, 14); g.FillRectangle(soft, 5, 11, 2, 4); g.FillRectangle(soft, 9, 8, 2, 7); g.FillRectangle(soft, 13, 5, 2, 10); break;
                     }
                 }
             }
