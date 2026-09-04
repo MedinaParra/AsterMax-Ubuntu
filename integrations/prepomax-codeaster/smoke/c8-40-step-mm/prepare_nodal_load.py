@@ -1,16 +1,36 @@
 #!/usr/bin/env python3
-import json, pathlib
+import hashlib, json, pathlib, re
 
 root = pathlib.Path(__file__).resolve().parent
 mail = root / 'step_mm.mail'
 comm = root / 'step_mm.comm'
 pre = root / 'C8_40_PRE_SOLVE.json'
+step = root / 'beam_100x20x10.step'
 
 e = json.loads(pre.read_text(encoding='utf-8'))
 count = int(e['load_nodes'])
 if count < 1:
     raise SystemExit('No load nodes available')
 force_per_node = float(e['nominal_resultant_N']) / count
+
+# Separate raw STEP bytes from a reproducible canonical provenance hash.
+# OpenCASCADE writes a run timestamp into FILE_NAME; canonicalization removes only
+# that volatile timestamp while keeping the rest of the STEP byte content intact.
+raw = step.read_bytes()
+raw_sha = hashlib.sha256(raw).hexdigest()
+text_step = raw.decode('utf-8', errors='strict')
+canonical = re.sub(
+    r"(FILE_NAME\('Open CASCADE Shape Model',)'[^']+'",
+    r"\1'<CANONICAL_TIMESTAMP>'",
+    text_step,
+    count=1,
+)
+if canonical == text_step:
+    raise SystemExit('STEP canonicalization anchor not found')
+canonical_sha = hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+e['step_raw_sha256'] = raw_sha
+e['step_sha256'] = canonical_sha
+e['step_sha256_semantics'] = 'canonical STEP bytes with FILE_NAME timestamp normalized only'
 
 # Keep only the volume mesh plus node groups in the Code_Aster MAIL file.
 # The imported STEP face triangulation remains measured/provenanced in PRE_SOLVE,
@@ -53,6 +73,8 @@ e['bc_semantics'] = (
 e['pressure_MPa'] = 5.0  # nominal axial stress oracle only; not the C8.40 solver load primitive
 pre.write_text(json.dumps(e, indent=2), encoding='utf-8')
 print(json.dumps({
+    'step_raw_sha256':raw_sha,
+    'step_canonical_sha256':canonical_sha,
     'load_nodes':count,
     'force_per_node_N':force_per_node,
     'sum_N':force_per_node*count,
