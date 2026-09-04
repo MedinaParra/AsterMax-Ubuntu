@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, pathlib, re
+import json, pathlib
 
 root = pathlib.Path(__file__).resolve().parent
 mail = root / 'step_mm.mail'
@@ -14,7 +14,7 @@ force_per_node = float(e['nominal_resultant_N']) / count
 
 # Keep only the volume mesh plus node groups in the Code_Aster MAIL file.
 # The imported STEP face triangulation remains measured/provenanced in PRE_SOLVE,
-# but nodal loading avoids coupling the first solver qualification to skin-element semantics.
+# while the first solver qualification uses an explicit, auditable nodal resultant.
 lines = mail.read_text(encoding='utf-8').splitlines()
 out=[]
 i=0
@@ -46,6 +46,15 @@ comm.write_text(text, encoding='utf-8')
 e['solver_load_application'] = 'equal nodal FX over geometric x=100 face node group'
 e['solver_force_per_load_node_N'] = force_per_node
 e['solver_force_sum_N'] = force_per_node * count
-e['pressure_MPa'] = 5.0  # nominal axial stress oracle, not the solver load primitive in C8.40.1
+e['bc_semantics'] = (
+    'x=0 geometric face fixed XYZ; x=100 geometric face nodes receive equal FX; '
+    f'{count} x {force_per_node:.12g} N = {force_per_node*count:.12g} N total'
+)
+e['pressure_MPa'] = 5.0  # nominal axial stress oracle only; not the C8.40 solver load primitive
 pre.write_text(json.dumps(e, indent=2), encoding='utf-8')
-print(json.dumps({'load_nodes':count,'force_per_node_N':force_per_node,'sum_N':force_per_node*count}, indent=2))
+print(json.dumps({
+    'load_nodes':count,
+    'force_per_node_N':force_per_node,
+    'sum_N':force_per_node*count,
+    'bc_semantics':e['bc_semantics']
+}, indent=2))
