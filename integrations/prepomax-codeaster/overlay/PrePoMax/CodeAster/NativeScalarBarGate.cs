@@ -71,6 +71,28 @@ namespace PrePoMax.CodeAster
             return null;
         }
 
+        private static MethodInfo FindSingleArgumentMethod(Type type, string name, Type argumentType)
+        {
+            foreach (MethodInfo method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
+            {
+                if (!String.Equals(method.Name, name, StringComparison.Ordinal)) continue;
+                ParameterInfo[] parameters = method.GetParameters();
+                if (parameters.Length != 1) continue;
+                if (parameters[0].ParameterType.IsAssignableFrom(argumentType)) return method;
+            }
+            return null;
+        }
+
+        private static MethodInfo FindZeroArgumentMethod(Type type, string name)
+        {
+            foreach (MethodInfo method in type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
+            {
+                if (!String.Equals(method.Name, name, StringComparison.Ordinal)) continue;
+                if (method.GetParameters().Length == 0) return method;
+            }
+            return null;
+        }
+
         private static bool NearlyEqual(double observed, double expected)
         {
             double scale = Math.Max(1.0, Math.Max(Math.Abs(observed), Math.Abs(expected)));
@@ -106,12 +128,13 @@ namespace PrePoMax.CodeAster
             if (vtk == null) return report;
 
             Type vtkType = vtk.GetType();
-            MethodInfo setSpectrum = vtkType.GetMethod("SetScalarBarColorSpectrum", BindingFlags.Instance | BindingFlags.Public);
+            object configuredSpectrum = controller.Settings.Legend.ColorSpectrum;
+            MethodInfo setSpectrum = FindSingleArgumentMethod(vtkType, "SetScalarBarColorSpectrum", configuredSpectrum.GetType());
             report.MethodFound = setSpectrum != null;
             if (setSpectrum == null) return report;
 
             controller.Settings.Legend.ColorSpectrum.MinMaxType = vtkControl.vtkColorSpectrumMinMaxType.Automatic;
-            setSpectrum.Invoke(vtk, new object[] { controller.Settings.Legend.ColorSpectrum });
+            setSpectrum.Invoke(vtk, new object[] { configuredSpectrum });
             report.MethodInvoked = true;
 
             FieldInfo internalSpectrumField = FindField(vtkType, "_colorSpectrum");
@@ -139,7 +162,7 @@ namespace PrePoMax.CodeAster
             report.LookupTableFound = lookupTable != null;
             if (lookupTable == null) return report;
 
-            MethodInfo getTableRange = lookupTable.GetType().GetMethod("GetTableRange", BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo getTableRange = FindZeroArgumentMethod(lookupTable.GetType(), "GetTableRange");
             if (getTableRange == null) return report;
             object rawRange = getTableRange.Invoke(lookupTable, null);
             double[] range = rawRange as double[];
