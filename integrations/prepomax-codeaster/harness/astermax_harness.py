@@ -156,7 +156,15 @@ def solver_defaults(solver: str, job_name: str) -> Tuple[List[str], List[str]]:
 
 def solver_command(solver: str, executable: str, job_name: str) -> List[str]:
     if solver == "code_aster":
-        return [executable, f"{job_name}.export"]
+        export_file = f"{job_name}.export"
+        # Native Windows Code_Aster MSI distributions expose run_aster.bat.
+        # subprocess(shell=False) cannot execute a batch file directly, so route
+        # it explicitly through COMSPEC while keeping the harness fail-closed.
+        if os.name == "nt" and Path(executable).suffix.lower() in (".bat", ".cmd"):
+            comspec = os.environ.get("COMSPEC") or "cmd.exe"
+            command_line = f'call "{executable}" "{export_file}"'
+            return [comspec, "/d", "/s", "/c", command_line]
+        return [executable, export_file]
     if solver == "calculix":
         return [executable, job_name]
     raise HarnessError(f"Unsupported solver profile: {solver}")
