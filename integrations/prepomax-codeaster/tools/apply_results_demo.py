@@ -66,13 +66,15 @@ def patch_demo(text):
     new_draw = '''                controller.DrawResults(false);
                 Application.DoEvents();
 
-                NativeScalarBarGate.Report scalarBarReport = NativeScalarBarGate.Verify(controller);
+                NativeScalarBarGate.Report scalarBarReport = NativeScalarBarGate.Verify(controller, min, max);
                 if (!scalarBarReport.ControlFound || !scalarBarReport.MethodFound ||
-                    !scalarBarReport.MethodInvoked || !scalarBarReport.InternalSpectrumAutomatic)
-                    throw new InvalidOperationException("Native scalar-bar contract gate failed: " + scalarBarReport.ToString());
+                    !scalarBarReport.MethodInvoked || !scalarBarReport.InternalSpectrumAutomatic ||
+                    !scalarBarReport.ScalarBarWidgetFound || !scalarBarReport.LookupTableFound ||
+                    !scalarBarReport.LookupTableRangeReadable || !scalarBarReport.RangeMatchesField)
+                    throw new InvalidOperationException("Native scalar-bar numerical semantics gate failed: " + scalarBarReport.ToString());
 
                 controller.Form.Refresh();'''
-    text = replace_once(text, old_draw, new_draw, "native scalar-bar runtime gate")
+    text = replace_once(text, old_draw, new_draw, "native scalar-bar numerical runtime gate")
 
     old_payload = '''                    "  \\\"verification_overlay_visible\\\": true,\\n" +
                     "  \\\"verification_overlay_bound_to_field\\\": true\\n" +'''
@@ -80,12 +82,18 @@ def patch_demo(text):
                     "  \\\"verification_overlay_bound_to_field\\\": true,\\n" +
                     "  \\\"native_scalar_bar_control_found\\\": true,\\n" +
                     "  \\\"native_scalar_bar_method_invoked\\\": true,\\n" +
-                    "  \\\"native_scalar_bar_automatic_range_contract\\\": true\\n" +'''
-    text = replace_once(text, old_payload, new_payload, "native scalar-bar READY evidence")
+                    "  \\\"native_scalar_bar_automatic_range_contract\\\": true,\\n" +
+                    "  \\\"native_scalar_bar_lut_found\\\": true,\\n" +
+                    "  \\\"native_scalar_bar_range_source\\\": \\\"vtkMaxScalarBarWidget._lookupTable.GetTableRange()\\\",\\n" +
+                    "  \\\"native_scalar_bar_min_mpa\\\": " + scalarBarReport.NativeRangeMin.ToString("R", CultureInfo.InvariantCulture) + ",\\n" +
+                    "  \\\"native_scalar_bar_max_mpa\\\": " + scalarBarReport.NativeRangeMax.ToString("R", CultureInfo.InvariantCulture) + ",\\n" +
+                    "  \\\"native_scalar_bar_range_matches_field\\\": true,\\n" +
+                    "  \\\"native_scalar_bar_semantically_verified\\\": true\\n" +'''
+    text = replace_once(text, old_payload, new_payload, "native scalar-bar numerical READY evidence")
 
     old_console = '                Console.WriteLine("Rendered semantics overlay: VERIFIED");'
-    new_console = old_console + '\n                Console.WriteLine("Native scalar-bar automatic-range contract: VERIFIED");'
-    return replace_once(text, old_console, new_console, "native scalar-bar console evidence")
+    new_console = old_console + '\n                Console.WriteLine("Native scalar-bar numerical semantics: VERIFIED " + scalarBarReport.ToString());'
+    return replace_once(text, old_console, new_console, "native scalar-bar numerical console evidence")
 
 
 def main():
