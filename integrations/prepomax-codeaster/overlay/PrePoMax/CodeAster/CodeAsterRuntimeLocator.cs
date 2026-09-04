@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Diagnostics;
 using Microsoft.Win32;
 
 namespace PrePoMax.CodeAster
@@ -77,6 +78,30 @@ namespace PrePoMax.CodeAster
         {
             string launcher = Resolve(configured);
             return !String.IsNullOrWhiteSpace(launcher) && File.Exists(launcher);
+        }
+
+        public static bool TryInstallInteractive()
+        {
+            string setup = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "INSTALL_CODE_ASTER.cmd");
+            if (!File.Exists(setup)) return false;
+
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = setup;
+                psi.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                psi.UseShellExecute = true;
+                using (Process process = Process.Start(psi))
+                {
+                    if (process == null) return false;
+                    process.WaitForExit();
+                }
+                return IsAvailable(null);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static string GetExpectedWindowsLauncher()
