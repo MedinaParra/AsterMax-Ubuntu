@@ -84,7 +84,7 @@ namespace PrePoMax.CodeAster
             Dictionary<string, string> materialVariables = WriteMaterials(sb, model, warnings);
             WriteMaterialAssignment(sb, model, map, materialVariables, warnings);
 
-            LoadBlocks loads = BuildLoads(step, map, warnings);
+            LoadBlocks loads = BuildLoads(model, step, map, warnings);
             WriteLoad(sb, loads);
 
             sb.AppendLine("result = MECA_STATIQUE(");
@@ -236,7 +236,7 @@ namespace PrePoMax.CodeAster
             public bool HasAny { get { return Ddl.Count + Nodal.Count + Pressure.Count + Gravity.Count > 0; } }
         }
 
-        private static LoadBlocks BuildLoads(StaticStep step, CodeAsterMeshMap map, List<string> warnings)
+        private static LoadBlocks BuildLoads(FeModel model, StaticStep step, CodeAsterMeshMap map, List<string> warnings)
         {
             LoadBlocks blocks = new LoadBlocks();
 
@@ -303,6 +303,31 @@ namespace PrePoMax.CodeAster
                         if (group != null)
                             blocks.Nodal.Add("_F(GROUP_NO='" + Aster(group) + "', " + String.Join(", ", components) + ")");
                         else warnings.Add("Concentrated load '" + load.Name + "' region could not be mapped to GROUP_NO.");
+                    }
+                    continue;
+                }
+
+                STLoad traction = load as STLoad;
+                if (traction != null)
+                {
+                    CLoad[] equivalentLoads = model.GetNodalLoadsFromSurfaceTraction(traction);
+                    if (equivalentLoads == null || equivalentLoads.Length == 0)
+                    {
+                        warnings.Add("Surface traction '" + load.Name + "' did not produce equivalent nodal forces. Check its surface definition.");
+                        continue;
+                    }
+
+                    foreach (CLoad equivalent in equivalentLoads)
+                    {
+                        List<string> components = new List<string>();
+                        if (equivalent.F1 != 0) components.Add("FX=" + F(equivalent.F1));
+                        if (equivalent.F2 != 0) components.Add("FY=" + F(equivalent.F2));
+                        if (equivalent.F3 != 0) components.Add("FZ=" + F(equivalent.F3));
+                        if (components.Count == 0) continue;
+
+                        blocks.Nodal.Add("_F(NOEUD='N" +
+                            equivalent.NodeId.ToString(CultureInfo.InvariantCulture) +
+                            "', " + String.Join(", ", components) + ")");
                     }
                     continue;
                 }
