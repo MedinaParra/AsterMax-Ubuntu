@@ -47,8 +47,45 @@ def patch_program(text):
 
 def patch_project(text):
     old = '    <Compile Include="CodeAster\\CodeAsterStudyProbe.cs" />'
-    new = old + '\n    <Compile Include="CodeAster\\CodeAsterResultsDemo.cs" />'
-    return replace_once(text, old, new, "CodeAsterResultsDemo compile item")
+    new = (old + '\n'
+           '    <Compile Include="CodeAster\\CodeAsterResultsDemo.cs" />\n'
+           '    <Compile Include="CodeAster\\NativeScalarBarGate.cs" />')
+    if 'CodeAster\\NativeScalarBarGate.cs' in text:
+        return text
+    if 'CodeAster\\CodeAsterResultsDemo.cs' in text:
+        return text.replace('    <Compile Include="CodeAster\\CodeAsterResultsDemo.cs" />',
+                            '    <Compile Include="CodeAster\\CodeAsterResultsDemo.cs" />\n'
+                            '    <Compile Include="CodeAster\\NativeScalarBarGate.cs" />', 1)
+    return replace_once(text, old, new, "CodeAster results demo compile items")
+
+
+def patch_demo(text):
+    old_draw = '''                controller.DrawResults(false);
+                Application.DoEvents();
+                controller.Form.Refresh();'''
+    new_draw = '''                controller.DrawResults(false);
+                Application.DoEvents();
+
+                NativeScalarBarGate.Report scalarBarReport = NativeScalarBarGate.Verify(controller);
+                if (!scalarBarReport.ControlFound || !scalarBarReport.MethodFound ||
+                    !scalarBarReport.MethodInvoked || !scalarBarReport.InternalSpectrumAutomatic)
+                    throw new InvalidOperationException("Native scalar-bar contract gate failed: " + scalarBarReport.ToString());
+
+                controller.Form.Refresh();'''
+    text = replace_once(text, old_draw, new_draw, "native scalar-bar runtime gate")
+
+    old_payload = '''                    "  \\\"verification_overlay_visible\\\": true,\\n" +
+                    "  \\\"verification_overlay_bound_to_field\\\": true\\n" +'''
+    new_payload = '''                    "  \\\"verification_overlay_visible\\\": true,\\n" +
+                    "  \\\"verification_overlay_bound_to_field\\\": true,\\n" +
+                    "  \\\"native_scalar_bar_control_found\\\": true,\\n" +
+                    "  \\\"native_scalar_bar_method_invoked\\\": true,\\n" +
+                    "  \\\"native_scalar_bar_automatic_range_contract\\\": true\\n" +'''
+    text = replace_once(text, old_payload, new_payload, "native scalar-bar READY evidence")
+
+    old_console = '                Console.WriteLine("Rendered semantics overlay: VERIFIED");'
+    new_console = old_console + '\n                Console.WriteLine("Native scalar-bar automatic-range contract: VERIFIED");'
+    return replace_once(text, old_console, new_console, "native scalar-bar console evidence")
 
 
 def main():
@@ -61,6 +98,7 @@ def main():
 
     patch_file(repo / "PrePoMax" / "Program.cs", patch_program)
     patch_file(repo / "PrePoMax" / "PrePoMax.csproj", patch_project)
+    patch_file(repo / "PrePoMax" / "CodeAster" / "CodeAsterResultsDemo.cs", patch_demo)
     print("Deterministic verified Results demo wiring applied successfully.")
     return 0
 
