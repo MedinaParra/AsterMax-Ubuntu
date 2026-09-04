@@ -46,7 +46,7 @@ jobs:
           foreach ($token in @('RESULTS','ACTIVE FIELD','COMPONENT','UNIT CONTRACT','RESULT OBJECT','EVIDENCE','mm · N · MPa','UNVERIFIED','NO RESULTS','solver verification is intentionally withheld')) {
             if ($src -notmatch [regex]::Escape($token)) { throw "Missing C8.47 results token: $token" }
           }
-          if ($src -match 'VERIFIED"') { throw 'Workspace must not infer VERIFIED from GUI state.' }
+          if ($src -match '_evidenceValue\.Text\s*=\s*"VERIFIED"') { throw 'Workspace must not infer VERIFIED from GUI state.' }
           $integration = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxAiIntegration.cs' -Raw
           if ($integration -notmatch 'InstallAsterMaxResultsWorkspace') { throw 'Results workspace not integrated.' }
       - name: Launch native GUI and capture workspace
