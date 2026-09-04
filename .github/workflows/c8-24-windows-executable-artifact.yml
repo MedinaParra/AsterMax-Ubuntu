@@ -1,0 +1,122 @@
+name: C8.24 Windows executable artifact
+
+on:
+  push:
+    branches:
+      - agent/c8-24-windows-executable-artifact
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/c8-24-windows-executable-artifact.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-24-windows-executable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-windows:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bootstrap patched PrePoMax tree
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 | Tee-Object -FilePath c8-24-msbuild.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Locate executable and create distributable bundle
+        shell: pwsh
+        run: |
+          $candidates = Get-ChildItem -Path build/PrePoMax-CodeAster -Recurse -Filter PrePoMax.exe -File -ErrorAction Stop |
+            Where-Object { $_.FullName -match '[\\/]bin[\\/].*[\\/]Release[\\/]' -or $_.FullName -match '[\\/]bin[\\/]Release[\\/]' }
+          if (-not $candidates) {
+            throw 'Release/x64 PrePoMax.exe was not found after successful MSBuild.'
+          }
+          $exe = $candidates | Sort-Object FullName | Select-Object -First 1
+          Write-Host "Executable: $($exe.FullName)"
+          $sourceDir = $exe.Directory.FullName
+          $bundleDir = Join-Path $PWD 'artifact/AsterMax-PMV-Windows-x64'
+          New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+          Copy-Item -Path (Join-Path $sourceDir '*') -Destination $bundleDir -Recurse -Force
+          $harness = Get-ChildItem -Path $bundleDir -Recurse -Filter astermax_harness.py -File -ErrorAction SilentlyContinue
+          if (-not $harness) { throw 'Bundled AsterMax solver harness is missing from executable output.' }
+          $packagedExe = Join-Path $bundleDir 'PrePoMax.exe'
+          if (-not (Test-Path $packagedExe)) { throw 'Packaged executable is missing.' }
+          $hash = (Get-FileHash $packagedExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = (Get-Item $packagedExe).Length
+          @{
+            schema = 'astermax.windows-executable-artifact.v1'
+            commit = '${{ github.sha }}'
+            executable = 'PrePoMax.exe'
+            product_status = 'AsterMax PMV integration build; upstream executable name retained for binary/config compatibility'
+            sha256 = $hash
+            size_bytes = $size
+            configuration = 'Release'
+            platform = 'x64'
+            solver_harness_bundled = $true
+            fea_solve_executed_by_this_job = $false
+            numerical_verification_by_this_job = $false
+            industrial_validation = $false
+            ansys_equivalence = $false
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $bundleDir 'ASTERMAX_BUILD_MANIFEST.json')
+          Get-FileHash $packagedExe -Algorithm SHA256 | Format-List | Out-File -Encoding utf8 (Join-Path $bundleDir 'SHA256.txt')
+          Compress-Archive -Path (Join-Path $bundleDir '*') -DestinationPath artifact/AsterMax-PMV-Windows-x64.zip -Force
+
+      - name: Startup smoke - no immediate crash
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path artifact/AsterMax-PMV-Windows-x64/PrePoMax.exe
+          $proc = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            throw "Windows GUI exited during startup smoke with code $($proc.ExitCode)."
+          }
+          @{
+            schema = 'astermax.windows-startup-smoke.v1'
+            commit = '${{ github.sha }}'
+            executable = $exe.Path
+            alive_after_seconds = 8
+            startup_smoke_pass = $true
+            note = 'Process-liveness smoke only; this does not prove rendering correctness or execute an FEA solve.'
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 artifact/AsterMax-PMV-Windows-x64/STARTUP_SMOKE.json
+          Stop-Process -Id $proc.Id -Force
+
+      - name: Upload executable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-PMV-Windows-x64-${{ github.sha }}
+          path: |
+            artifact/AsterMax-PMV-Windows-x64/**
+            artifact/AsterMax-PMV-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c8-24-build-diagnostics-${{ github.sha }}
+          path: c8-24-msbuild.log
+          if-no-files-found: ignore
+          retention-days: 14

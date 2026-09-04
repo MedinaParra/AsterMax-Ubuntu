@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/prepomax-code-aster-harness-runtime
+      - agent/c8-23-real-codeaster-mm-oracle
     paths:
       - 'integrations/prepomax-codeaster/smoke/**'
       - 'integrations/prepomax-codeaster/harness/astermax_harness.py'
@@ -45,6 +46,16 @@ jobs:
           python integrations/prepomax-codeaster/harness/astermax_harness.py \
             --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.manifest.json
 
+      - name: Verify real mechanics against independent mm-N-MPa oracle
+        shell: bash
+        working-directory: integrations/prepomax-codeaster/smoke/codeaster-linear-tetra
+        run: |
+          python verify_linear_tetra_oracle.py \
+            --resu smoke.resu \
+            --mail smoke.mail \
+            --comm smoke.comm \
+            --report smoke.oracle.json
+
       - name: Show harness report summary
         if: always()
         shell: bash
@@ -55,9 +66,24 @@ jobs:
           from pathlib import Path
           p = Path('integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json')
           data = json.loads(p.read_text())
-          print('status:', data.get('status'))
+          print('harness status:', data.get('status'))
           for check in data.get('checks', []):
               print(f"{check.get('passed')}: {check.get('name')} - {check.get('detail')}")
+          PY
+          fi
+          if [ -f integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.oracle.json ]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.oracle.json')
+          data = json.loads(p.read_text())
+          print('oracle status:', data.get('status'))
+          print('unit system:', data.get('unit_system'))
+          print('claims:', data.get('claims'))
+          print('expected DX [mm]:', data.get('oracle', {}).get('expected_loaded_dx_mm'))
+          print('expected SIXZ [MPa]:', data.get('oracle', {}).get('expected_sixz_mpa'))
+          failures = [c for c in data.get('checks', []) if not c.get('passed')]
+          print('oracle failures:', failures)
           PY
           fi
 
@@ -71,6 +97,7 @@ jobs:
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.resu
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.rmed
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json
+            integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.oracle.json
             integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/.astermax-harness/
           if-no-files-found: error
 
