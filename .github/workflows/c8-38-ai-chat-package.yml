@@ -69,34 +69,20 @@ jobs:
           $sourceConfig = Join-Path $package 'PrePoMax.exe.config'
           if (Test-Path $sourceConfig) { Move-Item $sourceConfig (Join-Path $package 'AsterMax Mechanical.exe.config') -Force }
           @{
-            schema='astermax.windows-ai-test-package.v1'
-            version='C8.38-AI'
-            commit='${{ github.sha }}'
-            executable='AsterMax Mechanical.exe'
-            executable_sha256=(Get-FileHash $targetExe -Algorithm SHA256).Hash.ToLowerInvariant()
-            build='Release/x64'
-            ai_chat_panel=$true
-            ai_provider='OpenAI-compatible configurable endpoint'
-            ai_env=@('ASTERMAX_AI_ENDPOINT','ASTERMAX_AI_MODEL','ASTERMAX_AI_API_KEY')
-            model_context_read=$true
-            solver_authority='Code_Aster'
-            unit_contract='mm-N-MPa'
-            industrial_validation=$false
-            ansys_equivalence=$false
-          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $package 'BUILD_EVIDENCE.json')
-          @'
-AsterMax AI setup
-=================
-The AI panel is built into AsterMax Mechanical. Click the "AsterMax AI" button in the top toolbar.
-
-Configure an OpenAI-compatible endpoint before launch:
-  ASTERMAX_AI_ENDPOINT   Base URL, e.g. a local or remote OpenAI-compatible server
-  ASTERMAX_AI_MODEL      Provider model identifier
-  ASTERMAX_AI_API_KEY    Optional bearer token
-
-The client calls: <ASTERMAX_AI_ENDPOINT>/v1/chat/completions
-AI suggestions are advisory. Code_Aster remains the solver authority and no AI-generated number is accepted as verified FEA evidence.
-'@ | Set-Content -Encoding UTF8 (Join-Path $package 'ASTERMAX_AI_README.txt')
+            schema='astermax.windows-ai-test-package.v1'; version='C8.38-AI'; commit='${{ github.sha }}';
+            executable='AsterMax Mechanical.exe'; executable_sha256=(Get-FileHash $targetExe -Algorithm SHA256).Hash.ToLowerInvariant();
+            build='Release/x64'; ai_chat_panel=$true; ai_provider='OpenAI-compatible configurable endpoint';
+            model_context_read=$true; solver_authority='Code_Aster'; unit_contract='mm-N-MPa';
+            industrial_validation=$false; ansys_equivalence=$false
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $package 'BUILD_EVIDENCE.json')
+          @(
+            'AsterMax AI setup',
+            '=================',
+            'Click the AsterMax AI button in the top toolbar.',
+            'Set ASTERMAX_AI_ENDPOINT, ASTERMAX_AI_MODEL and optionally ASTERMAX_AI_API_KEY before launch.',
+            'The client calls <ASTERMAX_AI_ENDPOINT>/v1/chat/completions.',
+            'AI output is advisory. Code_Aster remains the solver authority.'
+          ) | Set-Content -Encoding UTF8 (Join-Path $package 'ASTERMAX_AI_README.txt')
       - name: Smoke launch packaged executable
         shell: pwsh
         run: |
@@ -112,10 +98,9 @@ AI suggestions are advisory. Code_Aster remains the solver authority and no AI-g
           if ($proc.MainWindowHandle -eq 0) { throw 'Packaged GUI did not create a native main window.' }
           if ($proc.MainWindowTitle -notmatch '^AsterMax Mechanical') { throw "Unexpected window title: $($proc.MainWindowTitle)" }
           Stop-Process -Id $proc.Id -Force
-      - name: Verify AI integration binary strings
+      - name: Verify AI evidence
         shell: pwsh
         run: |
-          $dll = Get-ChildItem 'artifact/AsterMax Mechanical AI' -Filter 'PrePoMax.exe' -ErrorAction SilentlyContinue
           $evidence = Get-Content 'artifact/AsterMax Mechanical AI/BUILD_EVIDENCE.json' | ConvertFrom-Json
           if (-not $evidence.ai_chat_panel) { throw 'AI evidence flag missing.' }
           if (-not (Test-Path 'artifact/AsterMax Mechanical AI/ASTERMAX_AI_README.txt')) { throw 'AI README missing.' }
