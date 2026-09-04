@@ -19,14 +19,14 @@ def main():
     repo = Path(args.repo).resolve()
     target = repo / "PrePoMax" / "AsterMaxAI"
     target.mkdir(parents=True, exist_ok=True)
-    for name in ["AsterMaxAiChatForm.cs", "AsterMaxAiIntegration.cs", "AsterMaxUiTheme.cs", "AsterMaxWorkflowStrip.cs", "AsterMaxViewportHud.cs", "AsterMaxEngineeringTree.cs", "AsterMaxResultsWorkspace.cs"]:
+    for name in ["AsterMaxAiChatForm.cs", "AsterMaxAiIntegration.cs", "AsterMaxUiTheme.cs", "AsterMaxWorkflowStrip.cs", "AsterMaxViewportHud.cs", "AsterMaxGlyphLayer.cs", "AsterMaxGlyphIntegration.cs", "AsterMaxEngineeringTree.cs", "AsterMaxResultsWorkspace.cs"]:
         shutil.copy2(SRC / name, target / name)
         print("copied", target / name)
 
     csproj = repo / "PrePoMax" / "PrePoMax.csproj"
     text = csproj.read_text(encoding="utf-8-sig")
     anchor = '    <Compile Include="CodeAster\\NativeScalarBarGate.cs" />'
-    addition = anchor + '\n    <Compile Include="AsterMaxAI\\AsterMaxAiChatForm.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxAiIntegration.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxUiTheme.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxWorkflowStrip.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxViewportHud.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxEngineeringTree.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxResultsWorkspace.cs" />'
+    addition = anchor + '\n    <Compile Include="AsterMaxAI\\AsterMaxAiChatForm.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxAiIntegration.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxUiTheme.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxWorkflowStrip.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxViewportHud.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxGlyphLayer.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxGlyphIntegration.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxEngineeringTree.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxResultsWorkspace.cs" />'
     text = replace_once(text, anchor, addition, "AsterMax AI/UI compile items")
     csproj.write_text(text, encoding="utf-8")
     print("patched", csproj)
@@ -34,11 +34,11 @@ def main():
     frm = repo / "PrePoMax" / "Forms" / "FrmMain.cs"
     text = frm.read_text(encoding="utf-8-sig")
     anchor = '                _controller = new Controller(this);'
-    addition = anchor + '\n                InstallAsterMaxAiChat();'
-    text = replace_once(text, anchor, addition, "AsterMax AI launcher")
+    addition = anchor + '\n                InstallAsterMaxAiChat();\n                InstallAsterMaxGlyphLayer();'
+    text = replace_once(text, anchor, addition, "AsterMax AI + glyph launcher")
     frm.write_text(text, encoding="utf-8")
     print("patched", frm)
-    print("AsterMax AI + workflow + viewport HUD + engineering model tree + results workspace integration applied successfully.")
+    print("AsterMax AI + workflow + viewport HUD + CAE glyph layer + engineering model tree + results workspace integration applied successfully.")
     return 0
 
 if __name__ == "__main__":
