@@ -45,6 +45,7 @@ jobs:
           rows=[]
           started=False
           number_re = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$')
+          node_re = re.compile(r'^(?:N)?(\d+)$', re.IGNORECASE)
           for raw in block.splitlines()[1:]:
               line = raw.strip()
               if not line:
@@ -54,15 +55,16 @@ jobs:
               cols = [c.strip() for c in line.split(';')]
               if len(cols) < 2:
                   continue
-              node = cols[0]
-              if not re.fullmatch(r'N\d+', node, re.IGNORECASE):
+              node_match = node_re.fullmatch(cols[0])
+              if not node_match:
                   continue
+              node = f'N{int(node_match.group(1))}'
               numeric = [c for c in cols[1:] if number_re.fullmatch(c)]
               if not numeric:
                   raise SystemExit(f'VMIS row found without numeric value: {raw!r}')
               value = float(numeric[-1])
               vals.append(value)
-              rows.append({'node': node.upper(), 'vmis_mpa': value})
+              rows.append({'node': node, 'source_node_label': cols[0], 'vmis_mpa': value})
               started=True
           if len(vals) < 5:
               excerpt='\n'.join(block.splitlines()[:30])
@@ -76,7 +78,7 @@ jobs:
           if span <= 1e-6*scale:
               raise SystemExit(f'Degenerate VMIS field: min={lo} max={hi} span={span}; rows={rows}')
           evidence={
-              'schema':'astermax.c8-37-visual-benchmark.v1',
+              'schema':'astermax.c8-37-visual-benchmark.v2',
               'solver':'Code_Aster 17.4.0',
               'unit_system':'mm-N-MPa',
               'mesh_nodes':5,
@@ -87,6 +89,7 @@ jobs:
               'mises_max_mpa':hi,
               'mises_span_mpa':span,
               'nondegenerate_field':True,
+              'node_label_normalization':'Code_Aster numeric node labels normalized to N<id>',
               'result_source':'genuine Code_Aster RESU PPM_MISES table',
               'purpose':'native scalar-bar and contour semantics benchmark',
               'industrial_validation':False,
