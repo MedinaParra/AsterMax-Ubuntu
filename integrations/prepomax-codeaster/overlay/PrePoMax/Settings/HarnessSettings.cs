@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 namespace PrePoMax
 {
@@ -24,13 +25,21 @@ namespace PrePoMax
 
         public void CheckValues()
         {
-            if (String.IsNullOrWhiteSpace(_pythonExecutable)) _pythonExecutable = "python";
+            if (String.IsNullOrWhiteSpace(_pythonExecutable)) _pythonExecutable = GetDefaultPythonExecutable();
         }
 
         public void Reset()
         {
-            _pythonExecutable = "python";
+            _pythonExecutable = GetDefaultPythonExecutable();
             CheckValues();
+        }
+
+        private static string GetDefaultPythonExecutable()
+        {
+            string bundled = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                          "Runtime", "Python", "python.exe");
+            if (File.Exists(bundled)) return bundled;
+            return "python";
         }
     }
 }
