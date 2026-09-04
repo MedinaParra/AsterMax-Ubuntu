@@ -43,6 +43,7 @@ def main():
     run([sys.executable, HERE / "apply_branding.py", destination])
     run([sys.executable, HERE / "apply_workdir_fix.py", destination])
     run([sys.executable, HERE / "apply_ribbon_ui.py", destination])
+    run([sys.executable, HERE / "apply_outline_tree.py", destination])
 
     print()
     print("Prepared:", destination)
