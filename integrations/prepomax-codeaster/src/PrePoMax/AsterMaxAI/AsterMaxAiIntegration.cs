@@ -8,9 +8,12 @@ namespace PrePoMax
     public partial class FrmMain
     {
         private AsterMaxAiChatForm _asterMaxAiChat;
+        private AsterMaxWorkflowStrip _asterMaxWorkflowStrip;
 
         private void InstallAsterMaxAiChat()
         {
+            InstallAsterMaxWorkflowStrip();
+
             Bitmap icon16 = AsterMaxUiTheme.CreateAiIcon(16);
             Bitmap icon20 = AsterMaxUiTheme.CreateAiIcon(20);
 
@@ -35,6 +38,14 @@ namespace PrePoMax
             aiMenu.ToolTipText = "Asistente de ingeniería conectado al contexto actual del modelo.";
             aiMenu.Click += (s, e) => ShowAsterMaxAiChat();
             menuStripMain.Items.Add(aiMenu);
+        }
+
+        private void InstallAsterMaxWorkflowStrip()
+        {
+            if (_asterMaxWorkflowStrip != null) return;
+            _asterMaxWorkflowStrip = new AsterMaxWorkflowStrip();
+            Controls.Add(_asterMaxWorkflowStrip);
+            _asterMaxWorkflowStrip.BringToFront();
         }
 
         private void ShowAsterMaxAiChat()
