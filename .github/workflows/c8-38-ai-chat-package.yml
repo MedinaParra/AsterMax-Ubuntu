@@ -1,0 +1,137 @@
+name: C8.38 AI Chat Windows Package
+
+on:
+  push:
+    branches:
+      - agent/c8-38-ai-chat-windows
+    paths:
+      - '.github/workflows/c8-38-ai-chat-package.yml'
+      - 'integrations/prepomax-codeaster/**'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-38-ai-chat-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Fetch portable runtime assets
+        shell: pwsh
+        run: |
+          $url = 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $zip = Join-Path $PWD 'build/PrePoMax-v1.4.0-portable.zip'
+          $extract = Join-Path $PWD 'build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgenExe = Get-ChildItem -Path $extract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if (-not $netgenExe) { throw 'Official portable runtime does not contain NetGenMesher.exe.' }
+          "PREPOMAX_RUNTIME_ROOT=$($netgenExe.Directory.Parent.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Assemble portable AI build
+        shell: pwsh
+        run: |
+          $release = (Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $package = Join-Path $PWD 'artifact/AsterMax Mechanical AI'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item -Path (Join-Path $release '*') -Destination $package -Recurse -Force
+          foreach ($folder in @('NetGen','Solver','Models','Temp')) {
+            $source = Join-Path $env:PREPOMAX_RUNTIME_ROOT $folder
+            if (Test-Path $source) { Copy-Item -Path $source -Destination $package -Recurse -Force }
+          }
+          python integrations/prepomax-codeaster/tools/generate_materials_lib.py --output (Join-Path $package 'materials.lib')
+          Copy-Item integrations/prepomax-codeaster/assets/MATERIAL_LIBRARY_SOURCES.md (Join-Path $package 'MATERIAL_LIBRARY_SOURCES.md') -Force
+          $sourceExe = Join-Path $package 'PrePoMax.exe'
+          $targetExe = Join-Path $package 'AsterMax Mechanical.exe'
+          if (-not (Test-Path $sourceExe)) { throw 'Compiled PrePoMax.exe missing.' }
+          Move-Item $sourceExe $targetExe -Force
+          $sourceConfig = Join-Path $package 'PrePoMax.exe.config'
+          if (Test-Path $sourceConfig) { Move-Item $sourceConfig (Join-Path $package 'AsterMax Mechanical.exe.config') -Force }
+          @{
+            schema='astermax.windows-ai-test-package.v1'
+            version='C8.38-AI'
+            commit='${{ github.sha }}'
+            executable='AsterMax Mechanical.exe'
+            executable_sha256=(Get-FileHash $targetExe -Algorithm SHA256).Hash.ToLowerInvariant()
+            build='Release/x64'
+            ai_chat_panel=$true
+            ai_provider='OpenAI-compatible configurable endpoint'
+            ai_env=@('ASTERMAX_AI_ENDPOINT','ASTERMAX_AI_MODEL','ASTERMAX_AI_API_KEY')
+            model_context_read=$true
+            solver_authority='Code_Aster'
+            unit_contract='mm-N-MPa'
+            industrial_validation=$false
+            ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $package 'BUILD_EVIDENCE.json')
+          @'
+AsterMax AI setup
+=================
+The AI panel is built into AsterMax Mechanical. Click the "AsterMax AI" button in the top toolbar.
+
+Configure an OpenAI-compatible endpoint before launch:
+  ASTERMAX_AI_ENDPOINT   Base URL, e.g. a local or remote OpenAI-compatible server
+  ASTERMAX_AI_MODEL      Provider model identifier
+  ASTERMAX_AI_API_KEY    Optional bearer token
+
+The client calls: <ASTERMAX_AI_ENDPOINT>/v1/chat/completions
+AI suggestions are advisory. Code_Aster remains the solver authority and no AI-generated number is accepted as verified FEA evidence.
+'@ | Set-Content -Encoding UTF8 (Join-Path $package 'ASTERMAX_AI_README.txt')
+      - name: Smoke launch packaged executable
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'artifact/AsterMax Mechanical AI/AsterMax Mechanical.exe').Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "Packaged GUI exited early. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'Packaged GUI did not create a native main window.' }
+          if ($proc.MainWindowTitle -notmatch '^AsterMax Mechanical') { throw "Unexpected window title: $($proc.MainWindowTitle)" }
+          Stop-Process -Id $proc.Id -Force
+      - name: Verify AI integration binary strings
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem 'artifact/AsterMax Mechanical AI' -Filter 'PrePoMax.exe' -ErrorAction SilentlyContinue
+          $evidence = Get-Content 'artifact/AsterMax Mechanical AI/BUILD_EVIDENCE.json' | ConvertFrom-Json
+          if (-not $evidence.ai_chat_panel) { throw 'AI evidence flag missing.' }
+          if (-not (Test-Path 'artifact/AsterMax Mechanical AI/ASTERMAX_AI_README.txt')) { throw 'AI README missing.' }
+      - name: Create ZIP and SHA256
+        shell: pwsh
+        run: |
+          Compress-Archive -Path 'artifact/AsterMax Mechanical AI/*' -DestinationPath 'artifact/AsterMax-Mechanical-C8.38-AI-Windows-x64.zip' -CompressionLevel Optimal
+          $hash = (Get-FileHash 'artifact/AsterMax-Mechanical-C8.38-AI-Windows-x64.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash | Set-Content -Encoding ascii 'artifact/AsterMax-Mechanical-C8.38-AI-Windows-x64.zip.sha256'
+          Write-Host "ZIP SHA256: $hash"
+      - name: Upload portable Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-C8.38-AI-Windows-x64-${{ github.sha }}
+          path: |
+            artifact/AsterMax-Mechanical-C8.38-AI-Windows-x64.zip
+            artifact/AsterMax-Mechanical-C8.38-AI-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
