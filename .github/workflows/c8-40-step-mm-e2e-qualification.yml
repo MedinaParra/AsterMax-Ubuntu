@@ -1,0 +1,146 @@
+name: C8.40 STEP mm E2E Qualification
+
+on:
+  push:
+    branches:
+      - agent/c8-40-step-mm-e2e-qualification
+    paths:
+      - 'integrations/prepomax-codeaster/smoke/c8-40-step-mm/**'
+      - '.github/workflows/c8-40-step-mm-e2e-qualification.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-40-step-mm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  step-mm-genuine-solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Gmsh/OpenCASCADE runtime
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglu1-mesa
+          python -m pip install --disable-pip-version-check 'gmsh==4.13.1'
+
+      - name: STEP mm import, geometry gate, mesh and BC selection
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/smoke/c8-40-step-mm/generate_step_case.py
+          python - <<'PY'
+          import json, pathlib
+          p=pathlib.Path('integrations/prepomax-codeaster/smoke/c8-40-step-mm/C8_40_PRE_SOLVE.json')
+          e=json.loads(p.read_text())
+          dims=e['bbox_mm']
+          exp=e['expected_bbox_mm']
+          for k in ('x','y','z'):
+              if abs(float(dims[k])-float(exp[k])) > 1e-6:
+                  raise SystemExit(f'STEP mm bbox gate failed for {k}: {dims[k]} != {exp[k]}')
+          if e['tetra4_elements'] < 10 or e['load_face_tri3_elements'] < 2:
+              raise SystemExit('Mesh is too small to qualify STEP->mesh chain')
+          if e['min_tet_abs_volume_mm3'] <= 0:
+              raise SystemExit('Non-positive tetra volume gate')
+          print(json.dumps(e, indent=2))
+          PY
+
+      - name: Genuine Code_Aster 17.4.0 solve
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/c8-40-step-mm
+          docker pull simvia/code_aster:17.4.0
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/c8-40-step-mm/step_mm.harness.manifest.json
+
+      - name: Numerical admission against axial oracle
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, math, pathlib, re
+          root=pathlib.Path('integrations/prepomax-codeaster/smoke/c8-40-step-mm')
+          pre=json.loads((root/'C8_40_PRE_SOLVE.json').read_text())
+          text=(root/'step_mm.resu').read_text(encoding='utf-8',errors='replace')
+          def table(marker, nvals):
+              i=text.find(marker)
+              if i < 0: raise SystemExit(f'{marker} missing from genuine RESU')
+              block=text[i:]
+              rows=[]; started=False
+              num=re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$')
+              node=re.compile(r'^(?:N)?(\d+)$',re.I)
+              for raw in block.splitlines()[1:]:
+                  line=raw.strip()
+                  if not line:
+                      if started: break
+                      continue
+                  cols=[c.strip() for c in line.split(';')]
+                  if not cols or not node.fullmatch(cols[0]): continue
+                  vals=[float(c) for c in cols[1:] if num.fullmatch(c)]
+                  if len(vals) < nvals: continue
+                  rows.append((cols[0], vals[:nvals])); started=True
+              return rows
+          disp=table('PPM_DEPL',3)
+          mises=table('PPM_MISES',1)
+          if len(disp) < 4 or len(mises) < 4:
+              raise SystemExit(f'Insufficient result rows: disp={len(disp)} mises={len(mises)}')
+          dx=[abs(v[0]) for _,v in disp if math.isfinite(v[0])]
+          vm=[v[0] for _,v in mises if math.isfinite(v[0])]
+          if len(dx)!=len(disp) or len(vm)!=len(mises): raise SystemExit('Non-finite FEA results')
+          max_dx=max(dx)
+          expected=float(pre['analytic_axial_displacement_mm'])
+          rel=abs(max_dx-expected)/expected
+          if rel > 0.30:
+              raise SystemExit(f'Axial displacement oracle failed: observed max|DX|={max_dx} mm expected={expected} mm rel={rel}')
+          nominal=float(pre['pressure_MPa'])
+          vpos=sorted(v for v in vm if v>=0)
+          median=vpos[len(vpos)//2]
+          if not (0.25*nominal <= median <= 3.0*nominal):
+              raise SystemExit(f'VMIS scale gate failed: median={median} MPa nominal axial={nominal} MPa')
+          if max(vpos) > 20.0*nominal:
+              raise SystemExit(f'VMIS pathological concentration gate failed: max={max(vpos)} MPa')
+          out=pathlib.Path('artifact/c8-40'); out.mkdir(parents=True,exist_ok=True)
+          evidence={
+            'schema':'astermax.c8-40.step-mm-e2e.v1',
+            'solver':'Code_Aster 17.4.0',
+            'cad':'STEP imported in fresh Gmsh/OpenCASCADE session',
+            'unit_system':'mm-N-MPa',
+            'step_sha256':pre['step_sha256'],
+            'bbox_mm':pre['bbox_mm'],
+            'mesh_nodes':pre['mesh_nodes'],
+            'tetra4_elements':pre['tetra4_elements'],
+            'load_face_tri3_elements':pre['load_face_tri3_elements'],
+            'min_tet_abs_volume_mm3':pre['min_tet_abs_volume_mm3'],
+            'bc_semantics':pre['bc_semantics'],
+            'nominal_resultant_N':pre['nominal_resultant_N'],
+            'analytic_axial_displacement_mm':expected,
+            'observed_max_abs_dx_mm':max_dx,
+            'displacement_relative_error':rel,
+            'mises_median_mpa':median,
+            'mises_min_mpa':min(vpos),
+            'mises_max_mpa':max(vpos),
+            'genuine_solver_admitted':True,
+            'industrial_validation':False,
+            'ansys_equivalence':False
+          }
+          (out/'C8_40_STEP_MM_E2E.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+          print(json.dumps(evidence,indent=2))
+          PY
+
+      - name: Stage content-addressed evidence
+        shell: bash
+        run: |
+          mkdir -p artifact/c8-40
+          cp integrations/prepomax-codeaster/smoke/c8-40-step-mm/{beam_100x20x10.step,step_mm.mail,step_mm.comm,step_mm.mess,step_mm.rmed,step_mm.resu,C8_40_PRE_SOLVE.json} artifact/c8-40/
+          sha256sum artifact/c8-40/* > artifact/c8-40/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.40-STEP-mm-E2E-${{ github.sha }}
+          path: artifact/c8-40/**
+          if-no-files-found: error
+          retention-days: 14
