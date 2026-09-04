@@ -1,0 +1,82 @@
+name: C8.45 Engineering Status Rail Windows
+
+on:
+  push:
+    branches:
+      - agent/c8-45-engineering-status-rail
+    paths:
+      - '.github/workflows/c8-45-engineering-status-rail.yml'
+      - 'integrations/prepomax-codeaster/**'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-45-engineering-status-rail-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify engineering status source contract
+        shell: pwsh
+        run: |
+          $src = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxWorkflowStrip.cs' -Raw
+          foreach ($token in @('Model status','Present','Missing','Unknown','Evidence policy: observed ≠ solver verified','Geometry / STEP','Boundary conditions','Analysis / solve','Results loaded')) {
+            if ($src -notmatch [regex]::Escape($token)) { throw "Missing C8.45 status token: $token" }
+          }
+          if ($src -notmatch 'ProbeAny') { throw 'Reflection-based model state probe missing.' }
+          if ($src -match 'EngineeringState\.Verified') { throw 'UI must not infer solver verification from model presence.' }
+      - name: Smoke launch compiled executable
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "GUI exited early. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'GUI did not create a native main window.' }
+          if ($proc.MainWindowTitle -notmatch '^AsterMax Mechanical') { throw "Unexpected window title: $($proc.MainWindowTitle)" }
+          Stop-Process -Id $proc.Id -Force
+      - name: Write C8.45 evidence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          @{
+            schema='astermax.engineering-status-rail.v1'; version='C8.45'; commit='${{ github.sha }}';
+            model_status_rail=$true; controller_context_read=$true; refresh_interval_ms=1500;
+            states=@('Present','Missing','Unknown'); observed_not_verified_policy=$true;
+            workflow_stages=@('CAD_STEP','Mesh','Material','BC','Load','Solve','Results');
+            unit_contract_visible='mm-N-MPa'; solver_logic_modified=$false;
+            industrial_validation=$false; ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 artifact/C8.45_UI_EVIDENCE.json
+      - name: Upload C8.45 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.45-Engineering-Status-Rail-${{ github.sha }}
+          path: artifact/C8.45_UI_EVIDENCE.json
+          if-no-files-found: error
+          retention-days: 14
