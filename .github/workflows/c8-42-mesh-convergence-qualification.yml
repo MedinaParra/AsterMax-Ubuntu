@@ -28,89 +28,10 @@ jobs:
           sudo apt-get install -y libglu1-mesa
           python -m pip install --disable-pip-version-check 'gmsh==4.13.1'
           docker pull simvia/code_aster:17.4.0
-      - name: Run three genuine STEP/mm mesh levels
-        shell: bash
+      - name: Run genuine three-level STEP/mm convergence harness
         run: |
-          set -euo pipefail
-          root='integrations/prepomax-codeaster/smoke/c8-40-step-mm'
-          mkdir -p artifact/c8-42/cases
-          : > artifact/c8-42/cases.jsonl
-          for spec in 'coarse 10.0' 'medium 7.5' 'fine 5.0'; do
-            set -- $spec
-            label=$1; size=$2
-            git checkout -- "$root/generate_step_case.py"
-            python - "$root/generate_step_case.py" "$size" <<'PY'
-import pathlib,sys
-p=pathlib.Path(sys.argv[1]); size=sys.argv[2]
-s=p.read_text(encoding='utf-8')
-s=s.replace("Mesh.MeshSizeMin', 7.5", "Mesh.MeshSizeMin', "+size)
-s=s.replace("Mesh.MeshSizeMax', 7.5", "Mesh.MeshSizeMax', "+size)
-s=s.replace("'mesh_size_mm':7.5", "'mesh_size_mm':"+size)
-p.write_text(s,encoding='utf-8')
-PY
-            python "$root/generate_step_case.py"
-            python "$root/prepare_nodal_load.py"
-            python "$root/prepare_reaction_gate.py"
-            chmod -R a+rwX "$root"
-            python integrations/prepomax-codeaster/harness/astermax_harness.py --manifest "$root/step_mm.harness.manifest.json"
-            python - "$label" "$size" <<'PY'
-import json,math,pathlib,re,statistics,sys,shutil
-label=sys.argv[1]; size=float(sys.argv[2])
-root=pathlib.Path('integrations/prepomax-codeaster/smoke/c8-40-step-mm')
-pre=json.loads((root/'C8_40_PRE_SOLVE.json').read_text())
-text=(root/'step_mm.resu').read_text(encoding='utf-8',errors='replace')
-num=re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$'); node=re.compile(r'^(?:N)?(\d+)$',re.I)
-def rows(marker,nvals):
-    i=text.find(marker)
-    if i<0: raise SystemExit(marker+' missing')
-    out=[]; started=False
-    for raw in text[i:].splitlines()[1:]:
-        line=raw.strip()
-        if not line:
-            if started: break
-            continue
-        cols=[c.strip() for c in line.split(';')]
-        if not cols or not node.fullmatch(cols[0]): continue
-        vals=[float(c) for c in cols[1:] if num.fullmatch(c)]
-        if len(vals)>=nvals: out.append((cols[0],vals[:nvals])); started=True
-    return out
-disp=rows('PPM_DEPL',3); mises=rows('PPM_MISES',1); reac=rows('PPM_REAC',3)
-if len(disp)<4 or len(mises)<4 or len(reac)<3: raise SystemExit('Incomplete genuine result tables')
-rx=sum(v[0] for _,v in reac); ry=sum(v[1] for _,v in reac); rz=sum(v[2] for _,v in reac)
-applied=float(pre['solver_force_sum_N']); eq=abs(rx+applied)/max(abs(applied),1.0); transverse=math.hypot(ry,rz)/max(abs(applied),1.0)
-if eq>5e-3 or transverse>5e-3: raise SystemExit(f'Equilibrium failed for {label}: x={eq} transverse={transverse}')
-maxdx=max(abs(v[0]) for _,v in disp); expected=float(pre['analytic_axial_displacement_mm']); err=abs(maxdx-expected)/expected
-vm=[v[0] for _,v in mises]
-case={'level':label,'mesh_size_mm':size,'mesh_nodes':pre['mesh_nodes'],'tetra4_elements':pre['tetra4_elements'],'min_tet_abs_volume_mm3':pre['min_tet_abs_volume_mm3'],'max_abs_dx_mm':maxdx,'analytic_dx_mm':expected,'dx_relative_error':err,'reaction_sum_x_N':rx,'equilibrium_relative_error':eq,'transverse_reaction_relative_resultant':transverse,'vmis_median_mpa':statistics.median(vm),'vmis_min_mpa':min(vm),'vmis_max_mpa':max(vm)}
-out=pathlib.Path('artifact/c8-42/cases')/label; out.mkdir(parents=True,exist_ok=True)
-(out/'CASE.json').write_text(json.dumps(case,indent=2),encoding='utf-8')
-for name in ['C8_40_PRE_SOLVE.json','step_mm.mail','step_mm.comm','step_mm.mess','step_mm.resu','step_mm.rmed','beam_100x20x10.step']:
-    shutil.copy2(root/name,out/name)
-with open('artifact/c8-42/cases.jsonl','a',encoding='utf-8') as f: f.write(json.dumps(case)+'\n')
-print(json.dumps(case,indent=2))
-PY
-          done
-      - name: Fail-closed convergence admission
-        run: |
-          python - <<'PY'
-          import json,pathlib
-          p=pathlib.Path('artifact/c8-42')
-          cases=[json.loads(x) for x in (p/'cases.jsonl').read_text().splitlines() if x.strip()]
-          if [c['level'] for c in cases] != ['coarse','medium','fine']: raise SystemExit('Unexpected convergence levels')
-          nodes=[c['mesh_nodes'] for c in cases]; elems=[c['tetra4_elements'] for c in cases]
-          if not (nodes[0] < nodes[1] < nodes[2] and elems[0] < elems[1] < elems[2]):
-              raise SystemExit(f'Mesh refinement did not increase resolution: nodes={nodes} elems={elems}')
-          for c in cases:
-              if c['equilibrium_relative_error'] > 5e-3: raise SystemExit('Equilibrium gate failed: '+c['level'])
-          dx=[c['max_abs_dx_mm'] for c in cases]; err=[c['dx_relative_error'] for c in cases]
-          medium_fine_change=abs(dx[2]-dx[1])/max(abs(dx[2]),1e-15)
-          coarse_fine_change=abs(dx[2]-dx[0])/max(abs(dx[2]),1e-15)
-          if err[2] > err[0]: raise SystemExit(f'Fine displacement is not closer to analytic oracle: errors={err}')
-          if medium_fine_change > 0.08: raise SystemExit(f'Displacement not stabilized enough: medium-fine={medium_fine_change}')
-          evidence={'schema':'astermax.c8-42.mesh-convergence.v1','solver':'Code_Aster 17.4.0','cad':'same STEP re-imported for every level','unit_system':'mm-N-MPa','mesh_levels':cases,'nodes_strictly_increase':True,'elements_strictly_increase':True,'all_reaction_equilibrium_verified':True,'fine_error_not_worse_than_coarse':True,'medium_fine_dx_relative_change':medium_fine_change,'coarse_fine_dx_relative_change':coarse_fine_change,'mesh_convergence_qualified':True,'industrial_validation':False,'ansys_equivalence':False}
-          (p/'C8_42_MESH_CONVERGENCE.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
-          print(json.dumps(evidence,indent=2))
-          PY
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/c8-40-step-mm
+          python integrations/prepomax-codeaster/smoke/c8-40-step-mm/run_convergence.py
       - name: Content-address evidence
         run: |
           find artifact/c8-42 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > artifact/c8-42/SHA256SUMS.txt
