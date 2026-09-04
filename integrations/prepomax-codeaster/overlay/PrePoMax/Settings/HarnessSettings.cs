@@ -25,7 +25,14 @@ namespace PrePoMax
 
         public void CheckValues()
         {
-            if (String.IsNullOrWhiteSpace(_pythonExecutable)) _pythonExecutable = GetDefaultPythonExecutable();
+            string bundled = GetBundledPythonExecutable();
+            if (File.Exists(bundled) &&
+                (String.IsNullOrWhiteSpace(_pythonExecutable) ||
+                 String.Equals(_pythonExecutable, "python", StringComparison.OrdinalIgnoreCase) ||
+                 String.Equals(_pythonExecutable, "python.exe", StringComparison.OrdinalIgnoreCase)))
+                _pythonExecutable = bundled;
+            else if (String.IsNullOrWhiteSpace(_pythonExecutable))
+                _pythonExecutable = GetDefaultPythonExecutable();
         }
 
         public void Reset()
@@ -34,10 +41,15 @@ namespace PrePoMax
             CheckValues();
         }
 
+        private static string GetBundledPythonExecutable()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                                "Runtime", "Python", "python.exe");
+        }
+
         private static string GetDefaultPythonExecutable()
         {
-            string bundled = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
-                                          "Runtime", "Python", "python.exe");
+            string bundled = GetBundledPythonExecutable();
             if (File.Exists(bundled)) return bundled;
             return "python";
         }
