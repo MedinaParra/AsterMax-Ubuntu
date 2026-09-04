@@ -40,9 +40,6 @@ def clone_pinned_upstream(upstream, destination, attempts=3):
         remove_destination(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            # HTTP/1.1 avoids intermittent HTTP/2 stream resets seen on hosted
-            # Windows runners. Partial clone reduces transferred bytes without
-            # changing the pinned source identity.
             run([
                 "git", "-c", "http.version=HTTP/1.1", "clone",
                 "--filter=blob:none", "--no-checkout", upstream, destination,
@@ -95,6 +92,7 @@ def main():
     run([sys.executable, HERE / "apply_harness_ui.py", destination])
     run([sys.executable, HERE / "apply_solver_settings_ui.py", destination])
     run([sys.executable, HERE / "apply_import_probe.py", destination])
+    run([sys.executable, HERE / "apply_results_demo.py", destination])
     run([sys.executable, HERE / "apply_branding.py", destination])
     run([sys.executable, HERE / "apply_workdir_fix.py", destination])
 
