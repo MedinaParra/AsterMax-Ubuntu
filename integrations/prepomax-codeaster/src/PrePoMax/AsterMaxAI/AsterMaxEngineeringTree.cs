@@ -27,7 +27,7 @@ namespace PrePoMax.AsterMaxAI
             Panel header = new Panel();
             header.Dock = DockStyle.Top;
             header.Height = 54;
-            header.BackColor = AsterMaxUiTheme.Panel;
+            header.BackColor = AsterMaxUiTheme.SurfaceAlt;
             header.Padding = new Padding(12, 8, 8, 6);
 
             _caption = new Label();
@@ -62,7 +62,7 @@ namespace PrePoMax.AsterMaxAI
             Panel footer = new Panel();
             footer.Dock = DockStyle.Bottom;
             footer.Height = 42;
-            footer.BackColor = Color.FromArgb(248, 249, 251);
+            footer.BackColor = AsterMaxUiTheme.Surface;
             footer.Padding = new Padding(10, 5, 8, 5);
             _legend = new Label();
             _legend.Dock = DockStyle.Fill;
@@ -74,7 +74,7 @@ namespace PrePoMax.AsterMaxAI
             Panel divider = new Panel();
             divider.Dock = DockStyle.Left;
             divider.Width = 1;
-            divider.BackColor = Color.FromArgb(214, 219, 225);
+            divider.BackColor = AsterMaxUiTheme.Border;
 
             Controls.Add(_tree);
             Controls.Add(header);
@@ -120,25 +120,17 @@ namespace PrePoMax.AsterMaxAI
                 string resultInfo = result == null ? "No result object loaded" : "Result object loaded";
                 TreeNode resultsNode = AddStage("Results", resultState, resultInfo,
                     new[] { "Loaded ≠ solver verified" });
-                if (result != null)
-                {
-                    TryAddCurrentField(resultsNode);
-                }
+                if (result != null) TryAddCurrentField(resultsNode);
 
                 foreach (TreeNode node in _tree.Nodes) node.Expand();
             }
-            finally
-            {
-                _tree.EndUpdate();
-            }
+            finally { _tree.EndUpdate(); }
         }
 
         private void AddModelCollectionStage(object model, string label, string[] probes, string note)
         {
             ProbeResult probe = ProbeAny(model, probes);
-            State state = probe.State;
-            string detail = probe.Detail;
-            AddStage(label, state, detail, new[] { note });
+            AddStage(label, probe.State, probe.Detail, new[] { note });
         }
 
         private TreeNode AddStage(string label, State state, string detail, string[] notes)
@@ -146,21 +138,19 @@ namespace PrePoMax.AsterMaxAI
             string badge = state == State.Present ? "●" : state == State.Missing ? "○" : "?";
             TreeNode node = new TreeNode(badge + "  " + label);
             node.Name = "astermax:" + label;
-            node.ForeColor = state == State.Present ? Color.FromArgb(38, 122, 76) :
+            node.ForeColor = state == State.Present ? AsterMaxUiTheme.Success :
                              state == State.Missing ? Color.FromArgb(176, 70, 70) :
-                             Color.FromArgb(116, 126, 138);
+                             AsterMaxUiTheme.TextSecondary;
             TreeNode detailNode = new TreeNode(detail ?? "State unavailable");
             detailNode.ForeColor = AsterMaxUiTheme.TextSecondary;
             node.Nodes.Add(detailNode);
             if (notes != null)
-            {
                 foreach (string note in notes)
                 {
                     TreeNode n = new TreeNode(note);
-                    n.ForeColor = Color.FromArgb(122, 130, 140);
+                    n.ForeColor = AsterMaxUiTheme.TextSecondary;
                     node.Nodes.Add(n);
                 }
-            }
             _tree.Nodes.Add(node);
             return node;
         }

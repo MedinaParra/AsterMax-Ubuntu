@@ -10,11 +10,13 @@ namespace PrePoMax
         private AsterMaxAiChatForm _asterMaxAiChat;
         private AsterMaxWorkflowStrip _asterMaxWorkflowStrip;
         private AsterMaxEngineeringTree _asterMaxEngineeringTree;
+        private AsterMaxResultsWorkspace _asterMaxResultsWorkspace;
 
         private void InstallAsterMaxAiChat()
         {
             InstallAsterMaxWorkflowStrip();
             InstallAsterMaxEngineeringTree();
+            InstallAsterMaxResultsWorkspace();
 
             Bitmap icon16 = AsterMaxUiTheme.CreateAiIcon(16);
             Bitmap icon20 = AsterMaxUiTheme.CreateAiIcon(20);
@@ -56,6 +58,14 @@ namespace PrePoMax
             _asterMaxEngineeringTree = new AsterMaxEngineeringTree(_controller);
             Controls.Add(_asterMaxEngineeringTree);
             _asterMaxEngineeringTree.BringToFront();
+        }
+
+        private void InstallAsterMaxResultsWorkspace()
+        {
+            if (_asterMaxResultsWorkspace != null) return;
+            _asterMaxResultsWorkspace = new AsterMaxResultsWorkspace(_controller);
+            Controls.Add(_asterMaxResultsWorkspace);
+            _asterMaxResultsWorkspace.BringToFront();
         }
 
         private void ShowAsterMaxAiChat()
