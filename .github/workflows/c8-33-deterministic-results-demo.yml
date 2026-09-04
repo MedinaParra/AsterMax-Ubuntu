@@ -70,34 +70,7 @@ jobs:
           nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
           msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
           if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
-      - name: Launch deterministic verified Results scene
-        shell: pwsh
-        run: |
-          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
-          $rmed=(Resolve-Path 'genuine/smoke.rmed').Path
-          $resu=(Resolve-Path 'genuine/smoke.resu').Path
-          New-Item -ItemType Directory -Force 'artifact/c8-33' | Out-Null
-          $ready=(Join-Path $PWD 'artifact/c8-33/RESULTS_DEMO_READY.json')
-          $stdout=(Join-Path $PWD 'artifact/c8-33/results-demo.stdout.log')
-          $stderr=(Join-Path $PWD 'artifact/c8-33/results-demo.stderr.log')
-          $p=Start-Process -FilePath $exe -ArgumentList @('--astermax-results-demo',$rmed,$resu,$ready) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-          "ASTERMAX_DEMO_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "ASTERMAX_DEMO_READY=$ready" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $deadline=(Get-Date).AddSeconds(45)
-          do {
-            Start-Sleep -Milliseconds 500
-            $p.Refresh()
-            if($p.HasExited){
-              Write-Host (Get-Content $stdout -Raw -ErrorAction SilentlyContinue)
-              Write-Host (Get-Content $stderr -Raw -ErrorAction SilentlyContinue)
-              throw "Results demo exited before READY. ExitCode=$($p.ExitCode)"
-            }
-          } while(-not (Test-Path $ready) -and (Get-Date) -lt $deadline)
-          if(-not (Test-Path $ready)){ throw 'Timed out waiting for deterministic Results scene READY marker.' }
-          $state=Get-Content $ready -Raw | ConvertFrom-Json
-          if(-not $state.scene_ready -or -not $state.result_admitted -or -not $state.native_draw_invoked){ throw 'Results demo READY marker is incomplete.' }
-          if($state.field -ne 'STRESS' -or $state.component -ne 'MISES'){ throw 'Results demo did not select STRESS/MISES.' }
-      - name: Capture native Results window after READY
+      - name: Launch and capture deterministic verified Results scene
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
@@ -110,17 +83,47 @@ jobs:
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
           }
           '@
-          $p=Get-Process -Id ([int]$env:ASTERMAX_DEMO_PID)
-          $deadline=(Get-Date).AddSeconds(20)
-          do { Start-Sleep -Milliseconds 500; $p.Refresh() } while($p.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $rmed=(Resolve-Path 'genuine/smoke.rmed').Path
+          $resu=(Resolve-Path 'genuine/smoke.resu').Path
+          New-Item -ItemType Directory -Force 'artifact/c8-33' | Out-Null
+          $ready=(Join-Path $PWD 'artifact/c8-33/RESULTS_DEMO_READY.json')
+          $stdout=(Join-Path $PWD 'artifact/c8-33/results-demo.stdout.log')
+          $stderr=(Join-Path $PWD 'artifact/c8-33/results-demo.stderr.log')
+          $p=Start-Process -FilePath $exe -ArgumentList @('--astermax-results-demo',$rmed,$resu,$ready) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+
+          $deadline=(Get-Date).AddSeconds(45)
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if($p.HasExited){
+              Write-Host (Get-Content $stdout -Raw -ErrorAction SilentlyContinue)
+              Write-Host (Get-Content $stderr -Raw -ErrorAction SilentlyContinue)
+              throw "Results demo exited before READY. ExitCode=$($p.ExitCode)"
+            }
+          } while(-not (Test-Path $ready) -and (Get-Date) -lt $deadline)
+          if(-not (Test-Path $ready)){ throw 'Timed out waiting for deterministic Results scene READY marker.' }
+
+          $state=Get-Content $ready -Raw | ConvertFrom-Json
+          if(-not $state.scene_ready -or -not $state.result_admitted -or -not $state.native_draw_invoked){ throw 'Results demo READY marker is incomplete.' }
+          if($state.field -ne 'STRESS' -or $state.component -ne 'MISES'){ throw 'Results demo did not select STRESS/MISES.' }
+
+          $windowDeadline=(Get-Date).AddSeconds(20)
+          do { Start-Sleep -Milliseconds 250; $p.Refresh() } while($p.MainWindowHandle -eq 0 -and -not $p.HasExited -and (Get-Date) -lt $windowDeadline)
+          if($p.HasExited){ throw "Results demo exited after READY but before capture. ExitCode=$($p.ExitCode)" }
           if($p.MainWindowHandle -eq 0){ throw 'Verified Results demo has no native main window.' }
           if($p.MainWindowTitle -notlike 'AsterMax Mechanical*'){ throw "Unexpected window title: $($p.MainWindowTitle)" }
+
           [NativeWindowC833]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
           Start-Sleep -Seconds 2
+          $p.Refresh()
+          if($p.HasExited){ throw 'Results demo exited while preparing native capture.' }
           $r=New-Object NativeWindowC833+RECT
           if(-not [NativeWindowC833]::GetWindowRect($p.MainWindowHandle,[ref]$r)){ throw 'GetWindowRect failed.' }
           $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top
           if($w -lt 640 -or $h -lt 480){ throw "Native Results window too small: ${w}x${h}" }
+
           $bmp=New-Object System.Drawing.Bitmap($w,$h)
           $g=[System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)
@@ -128,7 +131,8 @@ jobs:
           $bmp.Save($png,[System.Drawing.Imaging.ImageFormat]::Png)
           $g.Dispose(); $bmp.Dispose()
           if((Get-Item $png).Length -lt 15000){ throw 'Verified Results screenshot is unexpectedly small.' }
-          Stop-Process -Id $p.Id -Force
+
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
       - name: Emit content-addressed C8.33 evidence
         shell: pwsh
         run: |
@@ -147,6 +151,7 @@ jobs:
             deformation_field='DISP/ALL'
             native_draw_invoked=$true
             screenshot_captured_after_scene_ready=$true
+            capture_same_runner_step_as_process=$true
             executable_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
             rmed_sha256=(Get-FileHash genuine/smoke.rmed -Algorithm SHA256).Hash.ToLowerInvariant()
             resu_sha256=(Get-FileHash genuine/smoke.resu -Algorithm SHA256).Hash.ToLowerInvariant()
