@@ -19,14 +19,14 @@ def main():
     repo = Path(args.repo).resolve()
     target = repo / "PrePoMax" / "AsterMaxAI"
     target.mkdir(parents=True, exist_ok=True)
-    for name in ["AsterMaxAiChatForm.cs", "AsterMaxAiIntegration.cs", "AsterMaxUiTheme.cs", "AsterMaxWorkflowStrip.cs", "AsterMaxEngineeringTree.cs", "AsterMaxResultsWorkspace.cs"]:
+    for name in ["AsterMaxAiChatForm.cs", "AsterMaxAiIntegration.cs", "AsterMaxUiTheme.cs", "AsterMaxWorkflowStrip.cs", "AsterMaxViewportHud.cs", "AsterMaxEngineeringTree.cs", "AsterMaxResultsWorkspace.cs"]:
         shutil.copy2(SRC / name, target / name)
         print("copied", target / name)
 
     csproj = repo / "PrePoMax" / "PrePoMax.csproj"
     text = csproj.read_text(encoding="utf-8-sig")
     anchor = '    <Compile Include="CodeAster\\NativeScalarBarGate.cs" />'
-    addition = anchor + '\n    <Compile Include="AsterMaxAI\\AsterMaxAiChatForm.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxAiIntegration.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxUiTheme.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxWorkflowStrip.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxEngineeringTree.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxResultsWorkspace.cs" />'
+    addition = anchor + '\n    <Compile Include="AsterMaxAI\\AsterMaxAiChatForm.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxAiIntegration.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxUiTheme.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxWorkflowStrip.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxViewportHud.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxEngineeringTree.cs" />\n    <Compile Include="AsterMaxAI\\AsterMaxResultsWorkspace.cs" />'
     text = replace_once(text, anchor, addition, "AsterMax AI/UI compile items")
     csproj.write_text(text, encoding="utf-8")
     print("patched", csproj)
@@ -38,7 +38,7 @@ def main():
     text = replace_once(text, anchor, addition, "AsterMax AI launcher")
     frm.write_text(text, encoding="utf-8")
     print("patched", frm)
-    print("AsterMax AI + workflow + engineering model tree + results workspace integration applied successfully.")
+    print("AsterMax AI + workflow + viewport HUD + engineering model tree + results workspace integration applied successfully.")
     return 0
 
 if __name__ == "__main__":

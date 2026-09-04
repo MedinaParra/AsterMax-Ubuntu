@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using PrePoMax.AsterMaxAI;
 
@@ -9,13 +11,19 @@ namespace PrePoMax
     {
         private AsterMaxAiChatForm _asterMaxAiChat;
         private AsterMaxWorkflowStrip _asterMaxWorkflowStrip;
+        private AsterMaxViewportHud _asterMaxViewportHud;
         private AsterMaxEngineeringTree _asterMaxEngineeringTree;
         private AsterMaxResultsWorkspace _asterMaxResultsWorkspace;
+        private static readonly HashSet<TabControl> _asterMaxStyledTabs = new HashSet<TabControl>();
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
         private void InstallAsterMaxAiChat()
         {
             ApplyAsterMaxDarkShell();
             InstallAsterMaxWorkflowStrip();
+            InstallAsterMaxViewportHud();
             InstallAsterMaxEngineeringTree();
             InstallAsterMaxResultsWorkspace();
             Shown += (s, e) => ApplyAsterMaxDarkShell();
@@ -55,9 +63,22 @@ namespace PrePoMax
         {
             BackColor = AsterMaxUiTheme.Background;
             ForeColor = AsterMaxUiTheme.TextPrimary;
+            TryEnableNativeDarkTitleBar();
             ThemeAsterMaxControlTree(this);
             AsterMaxUiTheme.StyleMenuStrip(menuStripMain);
             AsterMaxUiTheme.StyleToolStrip(tsFile);
+        }
+
+        private void TryEnableNativeDarkTitleBar()
+        {
+            try
+            {
+                if (!IsHandleCreated) return;
+                int enabled = 1;
+                int result = DwmSetWindowAttribute(Handle, 20, ref enabled, sizeof(int));
+                if (result != 0) DwmSetWindowAttribute(Handle, 19, ref enabled, sizeof(int));
+            }
+            catch { }
         }
 
         private static void ThemeAsterMaxControlTree(Control root)
@@ -67,6 +88,9 @@ namespace PrePoMax
             {
                 ToolStrip strip = control as ToolStrip;
                 if (strip != null) AsterMaxUiTheme.StyleToolStrip(strip);
+
+                TabControl tabs = control as TabControl;
+                if (tabs != null) StyleAsterMaxTabs(tabs);
 
                 TreeView tree = control as TreeView;
                 if (tree != null)
@@ -114,12 +138,51 @@ namespace PrePoMax
             }
         }
 
+        private static void StyleAsterMaxTabs(TabControl tabs)
+        {
+            tabs.BackColor = AsterMaxUiTheme.Background;
+            tabs.ForeColor = AsterMaxUiTheme.TextPrimary;
+            tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
+            tabs.SizeMode = TabSizeMode.Normal;
+            tabs.Padding = new Point(10, 4);
+            if (_asterMaxStyledTabs.Contains(tabs)) return;
+            _asterMaxStyledTabs.Add(tabs);
+            tabs.DrawItem += DrawAsterMaxTab;
+            tabs.Disposed += (s, e) => _asterMaxStyledTabs.Remove(tabs);
+        }
+
+        private static void DrawAsterMaxTab(object sender, DrawItemEventArgs e)
+        {
+            TabControl tabs = sender as TabControl;
+            if (tabs == null || e.Index < 0 || e.Index >= tabs.TabPages.Count) return;
+            bool selected = e.Index == tabs.SelectedIndex;
+            Rectangle r = e.Bounds;
+            Color back = selected ? AsterMaxUiTheme.SurfaceRaised : AsterMaxUiTheme.Surface;
+            Color fore = selected ? AsterMaxUiTheme.AccentGlow : AsterMaxUiTheme.TextSecondary;
+            using (Brush bg = new SolidBrush(back)) e.Graphics.FillRectangle(bg, r);
+            TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, tabs.Font, r, fore,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            if (selected)
+            {
+                using (Pen p = new Pen(AsterMaxUiTheme.Accent, 2f))
+                    e.Graphics.DrawLine(p, r.Left + 3, r.Bottom - 2, r.Right - 3, r.Bottom - 2);
+            }
+        }
+
         private void InstallAsterMaxWorkflowStrip()
         {
             if (_asterMaxWorkflowStrip != null) return;
             _asterMaxWorkflowStrip = new AsterMaxWorkflowStrip(_controller);
             Controls.Add(_asterMaxWorkflowStrip);
             _asterMaxWorkflowStrip.BringToFront();
+        }
+
+        private void InstallAsterMaxViewportHud()
+        {
+            if (_asterMaxViewportHud != null) return;
+            _asterMaxViewportHud = new AsterMaxViewportHud(_controller);
+            Controls.Add(_asterMaxViewportHud);
+            _asterMaxViewportHud.BringToFront();
         }
 
         private void InstallAsterMaxEngineeringTree()
