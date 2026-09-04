@@ -14,6 +14,7 @@ namespace PrePoMax
 
         private void InstallAsterMaxAiChat()
         {
+            ApplyAsterMaxDarkShell();
             InstallAsterMaxWorkflowStrip();
             InstallAsterMaxEngineeringTree();
             InstallAsterMaxResultsWorkspace();
@@ -28,6 +29,9 @@ namespace PrePoMax
             aiButton.ImageScaling = ToolStripItemImageScaling.None;
             aiButton.DisplayStyle = ToolStripItemDisplayStyle.ImageAndText;
             aiButton.AutoToolTip = false;
+            aiButton.ForeColor = AsterMaxUiTheme.AccentGlow;
+            aiButton.BackColor = AsterMaxUiTheme.Surface;
+            aiButton.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 8.5f, FontStyle.Bold);
             aiButton.ToolTipText = "AsterMax AI Engineering Copilot (Ctrl+Shift+A)";
             aiButton.Margin = new Padding(3, 1, 3, 2);
             aiButton.Click += (s, e) => ShowAsterMaxAiChat();
@@ -38,10 +42,20 @@ namespace PrePoMax
             ToolStripMenuItem aiMenu = new ToolStripMenuItem("AsterMax AI Engineering Copilot");
             aiMenu.Name = "tsmiAsterMaxAI";
             aiMenu.Image = icon16;
+            aiMenu.ForeColor = AsterMaxUiTheme.AccentGlow;
+            aiMenu.BackColor = AsterMaxUiTheme.Surface;
             aiMenu.ShortcutKeys = Keys.Control | Keys.Shift | Keys.A;
-            aiMenu.ToolTipText = "Asistente de ingeniería conectado al contexto actual del modelo.";
+            aiMenu.ToolTipText = "Evidence-aware engineering assistant connected to the current model context.";
             aiMenu.Click += (s, e) => ShowAsterMaxAiChat();
             menuStripMain.Items.Add(aiMenu);
+        }
+
+        private void ApplyAsterMaxDarkShell()
+        {
+            BackColor = AsterMaxUiTheme.Background;
+            ForeColor = AsterMaxUiTheme.TextPrimary;
+            AsterMaxUiTheme.StyleMenuStrip(menuStripMain);
+            AsterMaxUiTheme.StyleToolStrip(tsFile);
         }
 
         private void InstallAsterMaxWorkflowStrip()
