@@ -69,12 +69,15 @@ namespace PrePoMax.CodeAster
                 if (Math.Abs(dispMax - expectedDisp) > 1e-9)
                     throw new InvalidDataException("DISP/ALL maximum failed the pinned displacement oracle. Observed=" + dispMax);
 
+                // Admit the verified result first, then let the native UI resolve the exact FieldData.
+                // Set ColorContours last because RegenerateTree/SetFieldData may legitimately synchronize
+                // result-view state while rebuilding controls.
                 controller.AllResults.Add(results.FileName, results);
                 controller.CurrentFieldData = stressData;
                 controller.CurrentView = ViewGeometryModelResults.Results;
-                controller.ViewResultsType = ViewResultsTypeEnum.ColorContours;
                 controller.Form.RegenerateTree();
                 controller.Form.SetFieldData(FOFieldNames.Stress, FOComponentNames.Mises, 1, 1);
+                controller.ViewResultsType = ViewResultsTypeEnum.ColorContours;
                 controller.DrawResults(false);
                 Application.DoEvents();
                 controller.Form.Refresh();
@@ -84,10 +87,12 @@ namespace PrePoMax.CodeAster
                     throw new InvalidOperationException("Live Controller did not retain the admitted result/field state.");
                 if (!String.Equals(controller.CurrentFieldData.Name, FOFieldNames.Stress, StringComparison.OrdinalIgnoreCase) ||
                     !String.Equals(controller.CurrentFieldData.Component, FOComponentNames.Mises, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Live Controller is not displaying STRESS/MISES.");
+                    throw new InvalidOperationException("Live Controller is not displaying STRESS/MISES. CurrentField=" +
+                                                        controller.CurrentFieldData.Name + "/" + controller.CurrentFieldData.Component);
                 if (controller.CurrentView != ViewGeometryModelResults.Results ||
                     controller.ViewResultsType != ViewResultsTypeEnum.ColorContours)
-                    throw new InvalidOperationException("Live Controller is not in Results/ColorContours mode.");
+                    throw new InvalidOperationException("Live Controller is not in Results/ColorContours mode. CurrentView=" +
+                                                        controller.CurrentView + ", ViewResultsType=" + controller.ViewResultsType);
 
                 Directory.CreateDirectory(Path.GetDirectoryName(readyFile));
                 string payload = "{\n" +
