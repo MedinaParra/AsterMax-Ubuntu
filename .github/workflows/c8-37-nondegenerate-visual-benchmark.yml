@@ -1,0 +1,89 @@
+name: C8.37 Nondegenerate visual benchmark
+
+on:
+  push:
+    branches:
+      - agent/c8-37-nondegenerate-visual-benchmark
+    paths:
+      - 'integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/**'
+      - '.github/workflows/c8-37-nondegenerate-visual-benchmark.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-37-visual-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  genuine-visual-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Genuine Code_Aster 17.4.0 solve
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra
+          docker pull simvia/code_aster:17.4.0
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/visual.harness.manifest.json
+      - name: Prove nondegenerate native-result candidate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math, pathlib, re
+          p = pathlib.Path('integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/visual.resu')
+          text = p.read_text(encoding='utf-8', errors='replace')
+          marker = 'PPM_MISES'
+          i = text.find(marker)
+          if i < 0:
+              raise SystemExit('PPM_MISES table missing from genuine Code_Aster RESU')
+          block = text[i:]
+          vals=[]
+          for line in block.splitlines():
+              if vals and (not line.strip() or line.startswith('---')):
+                  break
+              m = re.search(r'\bN\d+\b.*?([+-]?\d+(?:\.\d*)?(?:[Ee][+-]?\d+)?)\s*$', line)
+              if m:
+                  vals.append(float(m.group(1)))
+          if len(vals) < 5:
+              raise SystemExit(f'Expected >=5 VMIS nodal values, observed {len(vals)}: {vals}')
+          if not all(math.isfinite(v) for v in vals):
+              raise SystemExit('Non-finite VMIS value detected')
+          lo=min(vals); hi=max(vals); span=hi-lo
+          scale=max(1.0, abs(lo), abs(hi))
+          if span <= 1e-6*scale:
+              raise SystemExit(f'Degenerate VMIS field: min={lo} max={hi} span={span}')
+          evidence={
+              'schema':'astermax.c8-37-visual-benchmark.v1',
+              'solver':'Code_Aster 17.4.0',
+              'unit_system':'mm-N-MPa',
+              'mesh_nodes':5,
+              'mesh_elements':2,
+              'mises_samples':vals,
+              'mises_min_mpa':lo,
+              'mises_max_mpa':hi,
+              'mises_span_mpa':span,
+              'nondegenerate_field':True,
+              'purpose':'native scalar-bar and contour semantics benchmark',
+              'industrial_validation':False,
+              'ansys_equivalence':False
+          }
+          out=pathlib.Path('artifact/c8-37')
+          out.mkdir(parents=True, exist_ok=True)
+          (out/'C8_37_VISUAL_BENCHMARK.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
+          print(json.dumps(evidence, indent=2))
+          PY
+      - name: Stage content-addressed evidence
+        shell: bash
+        run: |
+          cp integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/{visual.rmed,visual.resu,visual.mess,visual.harness.json} artifact/c8-37/
+          sha256sum artifact/c8-37/* > artifact/c8-37/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.37-nondegenerate-visual-benchmark-${{ github.sha }}
+          path: artifact/c8-37/**
+          if-no-files-found: error
+          retention-days: 14
