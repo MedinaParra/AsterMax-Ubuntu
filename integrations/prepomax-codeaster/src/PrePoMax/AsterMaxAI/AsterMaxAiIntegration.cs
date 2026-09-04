@@ -9,6 +9,7 @@ namespace PrePoMax
     {
         private AsterMaxAiChatForm _asterMaxAiChat;
         private AsterMaxWorkflowStrip _asterMaxWorkflowStrip;
+        private AsterMaxViewportHud _asterMaxViewportHud;
         private AsterMaxEngineeringTree _asterMaxEngineeringTree;
         private AsterMaxResultsWorkspace _asterMaxResultsWorkspace;
 
@@ -16,6 +17,7 @@ namespace PrePoMax
         {
             ApplyAsterMaxDarkShell();
             InstallAsterMaxWorkflowStrip();
+            InstallAsterMaxViewportHud();
             InstallAsterMaxEngineeringTree();
             InstallAsterMaxResultsWorkspace();
             Shown += (s, e) => ApplyAsterMaxDarkShell();
@@ -120,6 +122,14 @@ namespace PrePoMax
             _asterMaxWorkflowStrip = new AsterMaxWorkflowStrip(_controller);
             Controls.Add(_asterMaxWorkflowStrip);
             _asterMaxWorkflowStrip.BringToFront();
+        }
+
+        private void InstallAsterMaxViewportHud()
+        {
+            if (_asterMaxViewportHud != null) return;
+            _asterMaxViewportHud = new AsterMaxViewportHud(_controller);
+            Controls.Add(_asterMaxViewportHud);
+            _asterMaxViewportHud.BringToFront();
         }
 
         private void InstallAsterMaxEngineeringTree()
