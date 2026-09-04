@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows.Forms;
 using CaeGlobals;
 using CaeMesh;
@@ -69,15 +70,12 @@ namespace PrePoMax.CodeAster
                 if (Math.Abs(dispMax - expectedDisp) > 1e-9)
                     throw new InvalidDataException("DISP/ALL maximum failed the pinned displacement oracle. Observed=" + dispMax);
 
-                // Admit and synchronize the result while the UI is still in its current tab. RegenerateTree and
-                // SetFieldData may raise model-tree selection events, so Results is deliberately selected LAST.
                 controller.AllResults.Add(results.FileName, results);
                 controller.CurrentFieldData = stressData;
                 controller.Form.RegenerateTree();
                 controller.Form.SetFieldData(FOFieldNames.Stress, FOComponentNames.Mises, 1, 1);
                 Application.DoEvents();
 
-                // Enter the live Results workspace only after the tree/field synchronization is complete.
                 controller.CurrentView = ViewGeometryModelResults.Results;
                 Application.DoEvents();
                 controller.ViewResultsType = ViewResultsTypeEnum.ColorContours;
@@ -115,6 +113,18 @@ namespace PrePoMax.CodeAster
                 File.WriteAllText(readyFile, payload);
                 Console.WriteLine("AsterMax deterministic verified Results demo: READY");
                 Console.WriteLine("Native Results state: STRESS/MISES + DISP/ALL");
+
+                // Evidence harness lease: READY means the scene has been admitted and drawn, not that the
+                // application may exit. Keep the native window alive long enough for an external capture step.
+                // The workflow terminates the process immediately after the screenshot; this bounded lease is
+                // only a fail-safe so CI cannot hang forever if the capture step itself fails.
+                DateTime leaseDeadline = DateTime.UtcNow.AddSeconds(60);
+                while (DateTime.UtcNow < leaseDeadline)
+                {
+                    if (controller.Form == null || controller.Form.IsDisposed) break;
+                    Application.DoEvents();
+                    Thread.Sleep(100);
+                }
                 return 0;
             }
             catch (Exception ex)
