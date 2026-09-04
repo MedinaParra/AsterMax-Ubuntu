@@ -33,8 +33,10 @@ jobs:
           }
           if ($hud -match 'VERIFIED\s*=|solver_verified\s*=\s*true') { throw 'Viewport HUD must not synthesize verified solver state.' }
           $integration = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxAiIntegration.cs' -Raw
-          if ($integration -notmatch 'InstallAsterMaxViewportHud') { throw 'Viewport HUD not integrated into FrmMain.' }
-      - name: Launch and capture native GUI
+          foreach ($token in @('InstallAsterMaxViewportHud','DwmSetWindowAttribute','StyleAsterMaxTabs','OwnerDrawFixed','DrawAsterMaxTab')) {
+            if ($integration -notmatch [regex]::Escape($token)) { throw "Missing C8.50 chrome token: $token" }
+          }
+      - name: Launch and capture maximized native GUI
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
@@ -44,6 +46,7 @@ jobs:
             [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
             [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int nCmdShow);
           }
           "@
           New-Item -ItemType Directory -Force artifact | Out-Null
@@ -53,17 +56,21 @@ jobs:
           do { Start-Sleep -Milliseconds 500; $p.Refresh(); if($p.HasExited){throw 'GUI exited early'} } while($p.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
           if($p.MainWindowHandle -eq 0){throw 'No native window'}
           if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
-          [NativeWin50]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 2
+          [NativeWin50]::ShowWindow($p.MainWindowHandle,3)|Out-Null
+          [NativeWin50]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
+          Start-Sleep -Seconds 3
           $r=New-Object NativeWin50+RECT; [NativeWin50]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null
-          $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top; $bmp=New-Object Drawing.Bitmap $w,$h; $g=[Drawing.Graphics]::FromImage($bmp)
+          $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top
+          if($w -lt 1200 -or $h -lt 700){throw "Native demo window did not maximize enough: ${w}x${h}"}
+          $bmp=New-Object Drawing.Bitmap $w,$h; $g=[Drawing.Graphics]::FromImage($bmp)
           try{$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
           $png='artifact/C8.50_VIEWPORT_ENGINEERING_HUD.png'; $bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-          @{title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant()}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_WINDOW_EVIDENCE.json
+          @{title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();maximized_capture=$true}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_WINDOW_EVIDENCE.json
           Stop-Process -Id $p.Id -Force
       - name: Write evidence
         shell: pwsh
         run: |
-          @{schema='astermax.viewport-engineering-hud.v1';version='C8.50';commit='${{ github.sha }}';viewport_hud=$true;cad_state_observed=$true;mesh_state_observed=$true;bc_state_observed=$true;load_state_observed=$true;result_state_observed=$true;current_view_observed=$true;solver_verified_inferred=$false;solver_logic_modified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_UI_EVIDENCE.json
+          @{schema='astermax.viewport-engineering-hud.v1';version='C8.50';commit='${{ github.sha }}';viewport_hud=$true;cad_state_observed=$true;mesh_state_observed=$true;bc_state_observed=$true;load_state_observed=$true;result_state_observed=$true;current_view_observed=$true;native_dark_titlebar_attempted=$true;inherited_tabs_owner_drawn=$true;solver_verified_inferred=$false;solver_logic_modified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_UI_EVIDENCE.json
       - uses: actions/upload-artifact@v4
         with:
           name: AsterMax-C8.50-Viewport-Engineering-HUD-${{ github.sha }}
