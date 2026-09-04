@@ -112,13 +112,35 @@ def patch_controller(text):
                 job.Executable = launcher;
                 if (!File.Exists(launcher))
                 {
-                    throw new CaeException(
-                        "Code_Aster is the selected solver, but its Windows runtime was not found." +
+                    string expected = PrePoMax.CodeAster.CodeAsterRuntimeLocator.GetExpectedWindowsLauncher();
+                    string message =
+                        "Code_Aster is the default solver but its Windows runtime is not installed." +
                         Environment.NewLine + Environment.NewLine +
-                        "AsterMax searched the configured launcher, PATH, the Code_Aster registry keys and:" +
-                        Environment.NewLine + PrePoMax.CodeAster.CodeAsterRuntimeLocator.GetExpectedWindowsLauncher() +
+                        "AsterMax can download and launch the Code_Aster 2025 Windows installer now (~398 MB)." +
+                        Environment.NewLine + "The installer hash is verified before execution." +
                         Environment.NewLine + Environment.NewLine +
-                        "Run INSTALL_CODE_ASTER.cmd from the AsterMax Mechanical folder, then press Solve again.");
+                        "Install Code_Aster now?";
+
+                    DialogResult install = MessageBox.Show(message, "AsterMax Mechanical - Code_Aster",
+                                                           MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                    if (install == DialogResult.Yes)
+                    {
+                        if (PrePoMax.CodeAster.CodeAsterRuntimeLocator.TryInstallInteractive())
+                        {
+                            launcher = PrePoMax.CodeAster.CodeAsterRuntimeLocator.Resolve(null);
+                            job.Executable = launcher;
+                        }
+                    }
+
+                    if (!File.Exists(job.Executable))
+                    {
+                        throw new CaeException(
+                            "Code_Aster runtime is still unavailable." +
+                            Environment.NewLine + Environment.NewLine +
+                            "Expected Windows launcher:" + Environment.NewLine + expected +
+                            Environment.NewLine + Environment.NewLine +
+                            "You can also run INSTALL_CODE_ASTER.cmd from the AsterMax Mechanical folder.");
+                    }
                 }
             }
 
