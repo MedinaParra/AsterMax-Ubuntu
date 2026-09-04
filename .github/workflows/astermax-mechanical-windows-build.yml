@@ -31,6 +31,8 @@ jobs:
         run: |
           python -m py_compile integrations/prepomax-codeaster/tools/apply_branding.py
           python -m py_compile integrations/prepomax-codeaster/tools/generate_materials_lib.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_codeaster_windows_runtime.py
+          python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
 
       - name: Bootstrap patched and branded source
         shell: pwsh
@@ -44,6 +46,9 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyProduct\("AsterMax Mechanical"\)'
           Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern '_analysisSolver = AnalysisSolverTypeEnum.CodeAster'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/FrmAnalysis.cs -Pattern 'Settings.CodeAster.AsRunExecutable'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'CodeAsterRuntimeLocator.Resolve'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/CodeAsterSettings.cs -Pattern 'CodeAsterRuntimeLocator.Resolve'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterRuntimeLocator.cs -Pattern 'run_aster.bat'
 
       - name: Restore NuGet dependencies
         shell: pwsh
@@ -75,6 +80,20 @@ jobs:
           Write-Host "Portable runtime root: $runtimeRoot"
           Get-Item $netgenExe.FullName | Format-List Name,Length,LastWriteTime
 
+      - name: Fetch embedded Python harness runtime
+        shell: pwsh
+        run: |
+          $url = 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip'
+          $zip = Join-Path $PWD 'build/python-3.11.9-embed-amd64.zip'
+          $extract = Join-Path $PWD 'build/python-3.11.9-embed-amd64'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $python = Join-Path $extract 'python.exe'
+          if (-not (Test-Path $python)) { throw 'Embedded Python runtime does not contain python.exe.' }
+          "ASTERMAX_PYTHON_RUNTIME=$extract" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $python -c "import json, pathlib, subprocess, dataclasses; print('Embedded Python runtime OK')"
+
       - name: Assemble AsterMax Mechanical test package
         shell: pwsh
         run: |
@@ -87,6 +106,13 @@ jobs:
           $package = Join-Path $PWD 'artifact/AsterMax Mechanical'
           New-Item -ItemType Directory -Force -Path $package | Out-Null
           Copy-Item -Path (Join-Path $release '*') -Destination $package -Recurse -Force
+
+          $pythonTarget = Join-Path $package 'Runtime\Python'
+          New-Item -ItemType Directory -Force -Path $pythonTarget | Out-Null
+          Copy-Item -Path (Join-Path $env:ASTERMAX_PYTHON_RUNTIME '*') -Destination $pythonTarget -Recurse -Force
+
+          Copy-Item integrations/prepomax-codeaster/assets/INSTALL_CODE_ASTER.cmd (Join-Path $package 'INSTALL_CODE_ASTER.cmd') -Force
+          Copy-Item integrations/prepomax-codeaster/assets/Install-CodeAster-2025.ps1 (Join-Path $package 'Install-CodeAster-2025.ps1') -Force
 
           foreach ($folder in @('NetGen', 'Solver', 'Models', 'Temp')) {
             $source = Join-Path $env:PREPOMAX_RUNTIME_ROOT $folder
@@ -115,6 +141,14 @@ jobs:
           $materialsFile = Join-Path $package 'materials.lib'
           if (-not (Test-Path $materialsFile)) { throw 'Packaged materials.lib is missing.' }
 
+          $bundledPython = Join-Path $package 'Runtime\Python\python.exe'
+          if (-not (Test-Path $bundledPython)) { throw 'Bundled harness Python is missing.' }
+          $harnessScript = Join-Path $package 'Harness\astermax_harness.py'
+          if (-not (Test-Path $harnessScript)) { throw 'Bundled AsterMax harness script is missing.' }
+          & $bundledPython $harnessScript --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled AsterMax harness self-test failed.' }
+          Write-Host "Bundled harness Python: $bundledPython"
+
           $jsonObject = Get-Content $materialsFile -Raw | ConvertFrom-Json
           $materialCount = 0
           foreach ($category in $jsonObject.Items) { $materialCount += $category.Items.Count }
@@ -133,6 +167,8 @@ jobs:
           Runtime CAD/mesher assets: official PrePoMax v1.4.0 portable package.
           Engineering material library: 70+ nominal linear-elastic reference materials.
           Default FEA engine for new analyses: Code_Aster (no silent fallback to CalculiX).
+          AsterMax includes an embedded Python runtime for the solver harness.
+          Native Windows Code_Aster is auto-detected; INSTALL_CODE_ASTER.cmd can install the 2025 runtime when missing.
           This experimental derivative remains subject to GPL-3.0 obligations.
           Source integration: https://github.com/MedinaParra/AsterMax-Ubuntu
           Upstream: https://github.com/tsvilans/PrePoMax
