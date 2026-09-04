@@ -42,31 +42,52 @@ jobs:
               raise SystemExit('PPM_MISES table missing from genuine Code_Aster RESU')
           block = text[i:]
           vals=[]
-          for line in block.splitlines():
-              if vals and (not line.strip() or line.startswith('---')):
-                  break
-              m = re.search(r'\bN\d+\b.*?([+-]?\d+(?:\.\d*)?(?:[Ee][+-]?\d+)?)\s*$', line)
-              if m:
-                  vals.append(float(m.group(1)))
+          rows=[]
+          started=False
+          number_re = re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$')
+          for raw in block.splitlines()[1:]:
+              line = raw.strip()
+              if not line:
+                  if started:
+                      break
+                  continue
+              cols = [c.strip() for c in line.split(';')]
+              if len(cols) < 2:
+                  continue
+              node = cols[0]
+              if not re.fullmatch(r'N\d+', node, re.IGNORECASE):
+                  continue
+              numeric = [c for c in cols[1:] if number_re.fullmatch(c)]
+              if not numeric:
+                  raise SystemExit(f'VMIS row found without numeric value: {raw!r}')
+              value = float(numeric[-1])
+              vals.append(value)
+              rows.append({'node': node.upper(), 'vmis_mpa': value})
+              started=True
           if len(vals) < 5:
-              raise SystemExit(f'Expected >=5 VMIS nodal values, observed {len(vals)}: {vals}')
+              excerpt='\n'.join(block.splitlines()[:30])
+              raise SystemExit(f'Expected >=5 VMIS nodal values, observed {len(vals)}: {vals}\nPPM_MISES excerpt:\n{excerpt}')
+          if len({r['node'] for r in rows}) < 5:
+              raise SystemExit(f'Expected >=5 distinct VMIS nodes, observed rows: {rows}')
           if not all(math.isfinite(v) for v in vals):
               raise SystemExit('Non-finite VMIS value detected')
           lo=min(vals); hi=max(vals); span=hi-lo
           scale=max(1.0, abs(lo), abs(hi))
           if span <= 1e-6*scale:
-              raise SystemExit(f'Degenerate VMIS field: min={lo} max={hi} span={span}')
+              raise SystemExit(f'Degenerate VMIS field: min={lo} max={hi} span={span}; rows={rows}')
           evidence={
               'schema':'astermax.c8-37-visual-benchmark.v1',
               'solver':'Code_Aster 17.4.0',
               'unit_system':'mm-N-MPa',
               'mesh_nodes':5,
               'mesh_elements':2,
+              'mises_rows':rows,
               'mises_samples':vals,
               'mises_min_mpa':lo,
               'mises_max_mpa':hi,
               'mises_span_mpa':span,
               'nondegenerate_field':True,
+              'result_source':'genuine Code_Aster RESU PPM_MISES table',
               'purpose':'native scalar-bar and contour semantics benchmark',
               'industrial_validation':False,
               'ansys_equivalence':False
