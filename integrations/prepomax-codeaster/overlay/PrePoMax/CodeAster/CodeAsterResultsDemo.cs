@@ -69,14 +69,17 @@ namespace PrePoMax.CodeAster
                 if (Math.Abs(dispMax - expectedDisp) > 1e-9)
                     throw new InvalidDataException("DISP/ALL maximum failed the pinned displacement oracle. Observed=" + dispMax);
 
-                // Admit the verified result first, then let the native UI resolve the exact FieldData.
-                // Set ColorContours last because RegenerateTree/SetFieldData may legitimately synchronize
-                // result-view state while rebuilding controls.
+                // Admit and synchronize the result while the UI is still in its current tab. RegenerateTree and
+                // SetFieldData may raise model-tree selection events, so Results is deliberately selected LAST.
                 controller.AllResults.Add(results.FileName, results);
                 controller.CurrentFieldData = stressData;
-                controller.CurrentView = ViewGeometryModelResults.Results;
                 controller.Form.RegenerateTree();
                 controller.Form.SetFieldData(FOFieldNames.Stress, FOComponentNames.Mises, 1, 1);
+                Application.DoEvents();
+
+                // Enter the live Results workspace only after the tree/field synchronization is complete.
+                controller.CurrentView = ViewGeometryModelResults.Results;
+                Application.DoEvents();
                 controller.ViewResultsType = ViewResultsTypeEnum.ColorContours;
                 controller.DrawResults(false);
                 Application.DoEvents();
