@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "case_name": "c8-40-step-mm-e2e",
+  "solver": "code_aster",
+  "job_name": "step_mm",
+  "working_directory": ".",
+  "solver_executable": "docker",
+  "timeout_seconds": 600,
+  "required_inputs": [
+    "beam_100x20x10.step",
+    "step_mm.comm",
+    "step_mm.mail",
+    "step_mm.export",
+    "C8_40_PRE_SOLVE.json"
+  ],
+  "required_outputs": [
+    "step_mm.mess",
+    "step_mm.rmed",
+    "step_mm.resu"
+  ],
+  "solver_command": [
+    "docker",
+    "run",
+    "--rm",
+    "-v",
+    "${GITHUB_WORKSPACE}/integrations/prepomax-codeaster/smoke/c8-40-step-mm:/home/user/data",
+    "-w",
+    "/home/user/data",
+    "simvia/code_aster:17.4.0",
+    "bash",
+    "-i",
+    "-c",
+    "run_aster step_mm.export"
+  ],
+  "result_contract": {
+    "required_tables": ["PPM_DEPL", "PPM_MISES"],
+    "min_rows_per_table": 4
+  }
+}
