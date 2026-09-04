@@ -1,0 +1,231 @@
+name: AsterMax Mechanical Windows Build
+
+on:
+  push:
+    branches:
+      - feature/prepomax-code-aster-harness-runtime
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/astermax-mechanical-windows-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-mechanical-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout AsterMax integration
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate build helpers
+        shell: pwsh
+        run: |
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_branding.py
+          python -m py_compile integrations/prepomax-codeaster/tools/generate_materials_lib.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_codeaster_windows_runtime.py
+          python -m py_compile integrations/prepomax-codeaster/harness/astermax_harness.py
+
+      - name: Bootstrap patched and branded source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Verify AsterMax Mechanical branding
+        shell: pwsh
+        run: |
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Globals.cs -Pattern 'ProgramName = "AsterMax Mechanical"'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyTitle\("AsterMax Mechanical"\)'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyProduct\("AsterMax Mechanical"\)'
+          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern '_analysisSolver = AnalysisSolverTypeEnum.CodeAster'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/FrmAnalysis.cs -Pattern 'Settings.CodeAster.AsRunExecutable'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Controller.cs -Pattern 'CodeAsterRuntimeLocator.Resolve'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Settings/CodeAsterSettings.cs -Pattern 'CodeAsterRuntimeLocator.Resolve'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterRuntimeLocator.cs -Pattern 'run_aster.bat'
+
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Fetch official PrePoMax 1.4.0 portable runtime
+        shell: pwsh
+        run: |
+          $url = 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $zip = Join-Path $PWD 'build/PrePoMax-v1.4.0-portable.zip'
+          $extract = Join-Path $PWD 'build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+
+          $netgenExe = Get-ChildItem -Path $extract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if (-not $netgenExe) { throw 'Official PrePoMax runtime does not contain NetGenMesher.exe.' }
+          $runtimeRoot = $netgenExe.Directory.Parent.FullName
+          "PREPOMAX_RUNTIME_ROOT=$runtimeRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Portable runtime root: $runtimeRoot"
+          Get-Item $netgenExe.FullName | Format-List Name,Length,LastWriteTime
+
+      - name: Fetch embedded Python harness runtime
+        shell: pwsh
+        run: |
+          $url = 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip'
+          $zip = Join-Path $PWD 'build/python-3.11.9-embed-amd64.zip'
+          $extract = Join-Path $PWD 'build/python-3.11.9-embed-amd64'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $python = Join-Path $extract 'python.exe'
+          if (-not (Test-Path $python)) { throw 'Embedded Python runtime does not contain python.exe.' }
+          "ASTERMAX_PYTHON_RUNTIME=$extract" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          & $python -c "import json, pathlib, subprocess, dataclasses; print('Embedded Python runtime OK')"
+
+      - name: Assemble AsterMax Mechanical test package
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build/PrePoMax-CodeAster/PrePoMax/bin -Recurse -Filter PrePoMax.exe |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Release/x64 PrePoMax.exe was not found.' }
+
+          $release = $exe.Directory.FullName
+          $package = Join-Path $PWD 'artifact/AsterMax Mechanical'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item -Path (Join-Path $release '*') -Destination $package -Recurse -Force
+
+          $pythonTarget = Join-Path $package 'Runtime\Python'
+          New-Item -ItemType Directory -Force -Path $pythonTarget | Out-Null
+          Copy-Item -Path (Join-Path $env:ASTERMAX_PYTHON_RUNTIME '*') -Destination $pythonTarget -Recurse -Force
+
+          Copy-Item integrations/prepomax-codeaster/assets/INSTALL_CODE_ASTER.cmd (Join-Path $package 'INSTALL_CODE_ASTER.cmd') -Force
+          Copy-Item integrations/prepomax-codeaster/assets/Install-CodeAster-2025.ps1 (Join-Path $package 'Install-CodeAster-2025.ps1') -Force
+
+          foreach ($folder in @('NetGen', 'Solver', 'Models', 'Temp')) {
+            $source = Join-Path $env:PREPOMAX_RUNTIME_ROOT $folder
+            if (Test-Path $source) {
+              Copy-Item -Path $source -Destination $package -Recurse -Force
+            }
+          }
+
+          python integrations/prepomax-codeaster/tools/generate_materials_lib.py --output (Join-Path $package 'materials.lib')
+          Copy-Item integrations/prepomax-codeaster/assets/MATERIAL_LIBRARY_SOURCES.md (Join-Path $package 'MATERIAL_LIBRARY_SOURCES.md') -Force
+
+          $sourceExe = Join-Path $package 'PrePoMax.exe'
+          $targetExe = Join-Path $package 'AsterMax Mechanical.exe'
+          if (-not (Test-Path $sourceExe)) { throw 'PrePoMax.exe is missing from staged package.' }
+          Move-Item -Path $sourceExe -Destination $targetExe -Force
+
+          $sourceConfig = Join-Path $package 'PrePoMax.exe.config'
+          if (Test-Path $sourceConfig) {
+            Move-Item -Path $sourceConfig -Destination (Join-Path $package 'AsterMax Mechanical.exe.config') -Force
+          }
+
+          $netgen = Join-Path $package 'NetGen\NetGenMesher.exe'
+          if (-not (Test-Path $netgen)) { throw 'Packaged NetGen\NetGenMesher.exe is missing.' }
+          $mmgs = Join-Path $package 'NetGen\mmgs.exe'
+          if (-not (Test-Path $mmgs)) { throw 'Packaged NetGen\mmgs.exe is missing.' }
+          $materialsFile = Join-Path $package 'materials.lib'
+          if (-not (Test-Path $materialsFile)) { throw 'Packaged materials.lib is missing.' }
+
+          $bundledPython = Join-Path $package 'Runtime\Python\python.exe'
+          if (-not (Test-Path $bundledPython)) { throw 'Bundled harness Python is missing.' }
+          $harnessScript = Join-Path $package 'Harness\astermax_harness.py'
+          if (-not (Test-Path $harnessScript)) { throw 'Bundled AsterMax harness script is missing.' }
+          & $bundledPython $harnessScript --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled AsterMax harness self-test failed.' }
+          Write-Host "Bundled harness Python: $bundledPython"
+
+          $jsonObject = Get-Content $materialsFile -Raw | ConvertFrom-Json
+          $materialCount = 0
+          foreach ($category in $jsonObject.Items) { $materialCount += $category.Items.Count }
+          if ($materialCount -lt 70) { throw "Expected at least 70 engineering materials, found $materialCount." }
+          if ((Get-Content $materialsFile -Raw) -notmatch 'CaeModel.ElasticWithDensity, CaeModel') {
+            throw 'materials.lib does not contain native ElasticWithDensity material properties.'
+          }
+
+          @"
+          AsterMax Mechanical - experimental Windows test build
+
+          Code_Aster integration branch:
+          feature/prepomax-code-aster-harness-runtime
+
+          Upstream GUI foundation: PrePoMax, GPL-3.0.
+          Runtime CAD/mesher assets: official PrePoMax v1.4.0 portable package.
+          Engineering material library: 70+ nominal linear-elastic reference materials.
+          Default FEA engine for new analyses: Code_Aster (no silent fallback to CalculiX).
+          AsterMax includes an embedded Python runtime for the solver harness.
+          Native Windows Code_Aster is auto-detected; INSTALL_CODE_ASTER.cmd can install the 2025 runtime when missing.
+          This experimental derivative remains subject to GPL-3.0 obligations.
+          Source integration: https://github.com/MedinaParra/AsterMax-Ubuntu
+          Upstream: https://github.com/tsvilans/PrePoMax
+          "@ | Set-Content -Path (Join-Path $package 'SOURCE_AND_LICENSE.txt') -Encoding UTF8
+
+          $license = Join-Path $PWD 'build/PrePoMax-CodeAster/LICENSE'
+          if (Test-Path $license) { Copy-Item $license (Join-Path $package 'LICENSE') -Force }
+
+          Write-Host "Executable: $targetExe"
+          Get-Item $targetExe | Format-List Name,Length,LastWriteTime
+          Write-Host "Material library: $materialCount materials"
+          Write-Host "NetGen runtime:"
+          Get-ChildItem (Join-Path $package 'NetGen') | Select-Object Name,Length
+          Write-Host "Solver runtime:"
+          if (Test-Path (Join-Path $package 'Solver')) { Get-ChildItem (Join-Path $package 'Solver') | Select-Object Name,Length }
+
+      - name: Validate native material-library deserialization
+        shell: pwsh
+        run: |
+          $package = Join-Path $PWD 'artifact/AsterMax Mechanical'
+          $libDir = Join-Path $package 'lib'
+          $handler = [System.ResolveEventHandler] {
+            param($sender, $eventArgs)
+            try {
+              $simpleName = (New-Object System.Reflection.AssemblyName($eventArgs.Name)).Name + '.dll'
+              $candidate = Join-Path $libDir $simpleName
+              if (Test-Path $candidate) { return [System.Reflection.Assembly]::LoadFrom($candidate) }
+            } catch { }
+            return $null
+          }
+          [AppDomain]::CurrentDomain.add_AssemblyResolve($handler)
+
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'Newtonsoft.Json.dll'))
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'CaeGlobals.dll'))
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'CaeMesh.dll'))
+          [void][System.Reflection.Assembly]::LoadFrom((Join-Path $libDir 'CaeModel.dll'))
+          $astermaxAssembly = [System.Reflection.Assembly]::LoadFrom((Join-Path $package 'AsterMax Mechanical.exe'))
+          $libraryType = $astermaxAssembly.GetType('PrePoMax.Forms.MaterialLibraryItem', $true)
+          $settings = New-Object Newtonsoft.Json.JsonSerializerSettings
+          $settings.TypeNameHandling = [Newtonsoft.Json.TypeNameHandling]::Auto
+          $json = [IO.File]::ReadAllText((Join-Path $package 'materials.lib'))
+          $library = [Newtonsoft.Json.JsonConvert]::DeserializeObject($json, $libraryType, $settings)
+          if ($null -eq $library) { throw 'Native material library deserialization returned null.' }
+          if ($library.Items.Count -lt 8) { throw "Expected at least 8 material categories, found $($library.Items.Count)." }
+          $count = 0
+          foreach ($category in $library.Items) { $count += $category.Items.Count }
+          if ($count -lt 70) { throw "Native library expected at least 70 materials, found $count." }
+          $firstPropertyType = $library.Items[0].Items[0].Tag.Properties[0].GetType().FullName
+          if ($firstPropertyType -ne 'CaeModel.ElasticWithDensity') {
+            throw "Unexpected first material property type: $firstPropertyType"
+          }
+          Write-Host "Native materials.lib PASS: $count materials; property type $firstPropertyType"
+
+      - name: Upload AsterMax Mechanical Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-Windows-x64-test
+          path: artifact/AsterMax Mechanical/**
+          if-no-files-found: error
+          compression-level: 6

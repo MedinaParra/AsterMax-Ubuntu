@@ -35,10 +35,22 @@ def main():
     run([sys.executable, HERE / "apply_overlay.py", destination])
     run([sys.executable, HERE / "apply_model_translation.py", destination])
     run([sys.executable, HERE / "apply_results_bridge.py", destination])
+    run([sys.executable, HERE / "apply_harness_runtime.py", destination])
+    run([sys.executable, HERE / "apply_harness_runtime_fixups.py", destination])
+    run([sys.executable, HERE / "apply_harness_ui.py", destination])
+    run([sys.executable, HERE / "apply_solver_settings_ui.py", destination])
+    run([sys.executable, HERE / "apply_codeaster_windows_runtime.py", destination])
+    run([sys.executable, HERE / "apply_import_probe.py", destination])
+    run([sys.executable, HERE / "apply_branding.py", destination])
+    run([sys.executable, HERE / "apply_workdir_fix.py", destination])
+    run([sys.executable, HERE / "apply_ribbon_ui.py", destination])
+    run([sys.executable, HERE / "apply_outline_tree.py", destination])
 
     print()
     print("Prepared:", destination)
     print("Upstream revision:", UPSTREAM_SHA)
+    print("Product: AsterMax Mechanical")
+    print("Interface: AsterMax Ribbon")
     print("Next: open PrePoMax.sln and build the solution.")
     return 0
 

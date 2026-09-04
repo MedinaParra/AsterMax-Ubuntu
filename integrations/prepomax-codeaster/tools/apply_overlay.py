@@ -106,7 +106,7 @@ def patch_analysis_job(text):
         text,
         "            _compatibilityMode = false;\n            _numCPUs = 1;",
         "            _compatibilityMode = false;\n"
-        "            _analysisSolver = AnalysisSolverTypeEnum.Calculix;\n"
+        "            _analysisSolver = AnalysisSolverTypeEnum.CodeAster;\n"
         "            _codeAsterVersion = \"stable\";\n"
         "            _codeAsterMemoryMB = 4096;\n"
         "            _codeAsterTimeLimitSeconds = 3600;\n"
@@ -399,6 +399,15 @@ def patch_analysis_form(text):
         "        }\n"
         "        private string GetJobName()\n        {",
         "analysis form helper methods",
+    )
+    text = replace_once(
+        text,
+        "                Job = new AnalysisJob(GetJobName(), _controller.Settings.Calculix.CalculixExe, GetJobName(),\n"
+        "                                      _controller.Settings.GetWorkDirectory());",
+        "                Job = new AnalysisJob(GetJobName(), _controller.Settings.CodeAster.AsRunExecutable,\n"
+        "                                      GetJobName() + \".export\", _controller.Settings.CodeAster.WorkDirectory);\n"
+        "                ApplySolverDefaults();",
+        "analysis form Code_Aster default job",
     )
     return text
 

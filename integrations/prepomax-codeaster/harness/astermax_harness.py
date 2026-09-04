@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -26,7 +27,7 @@ import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 SCHEMA_VERSION = 1
 CODE_ASTER_TABLES = (
@@ -36,6 +37,13 @@ CODE_ASTER_TABLES = (
     "PPM_STRAIN_N",
     "PPM_STRAIN_S",
 )
+CODE_ASTER_TABLE_COMPONENTS: Dict[str, Tuple[str, ...]] = {
+    "PPM_DEPL": ("DX", "DY", "DZ"),
+    "PPM_STRESS_N": ("SIXX", "SIYY", "SIZZ"),
+    "PPM_STRESS_S": ("SIXY", "SIYZ", "SIXZ"),
+    "PPM_STRAIN_N": ("EPXX", "EPYY", "EPZZ"),
+    "PPM_STRAIN_S": ("EPXY", "EPYZ", "EPXZ"),
+}
 
 
 class HarnessError(RuntimeError):
@@ -148,7 +156,15 @@ def solver_defaults(solver: str, job_name: str) -> Tuple[List[str], List[str]]:
 
 def solver_command(solver: str, executable: str, job_name: str) -> List[str]:
     if solver == "code_aster":
-        return [executable, f"{job_name}.export"]
+        export_file = f"{job_name}.export"
+        # Native Windows Code_Aster MSI distributions expose run_aster.bat.
+        # subprocess(shell=False) cannot execute a batch file directly, so route
+        # it explicitly through COMSPEC while keeping the harness fail-closed.
+        if os.name == "nt" and Path(executable).suffix.lower() in (".bat", ".cmd"):
+            comspec = os.environ.get("COMSPEC") or "cmd.exe"
+            command_line = f'call "{executable}" "{export_file}"'
+            return [comspec, "/d", "/s", "/c", command_line]
+        return [executable, export_file]
     if solver == "calculix":
         return [executable, job_name]
     raise HarnessError(f"Unsupported solver profile: {solver}")
@@ -288,40 +304,130 @@ def scan_text(path: Path, patterns: Sequence[str]) -> List[str]:
     return hits
 
 
+def _normalize_table_line(value: str) -> str:
+    return (value or "").lstrip("# ").strip()
+
+
+def _split_table_line(value: str) -> List[str]:
+    return [token.strip() for token in value.split(";")]
+
+
+def _parse_node_id(token: str) -> Optional[int]:
+    value = (token or "").strip()
+    if value[:1].lower() == "n":
+        value = value[1:]
+    if not re.fullmatch(r"\d+", value):
+        return None
+    return int(value)
+
+
+def _parse_finite_float(token: str) -> Optional[float]:
+    value = (token or "").strip().replace("D", "E").replace("d", "e")
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
 def validate_code_aster_tables(path: Path, required_tables: Sequence[str], min_rows: int) -> List[Check]:
+    """Validate the actual Code_Aster interoperability tables without inventing values."""
     checks: List[Check] = []
     if not path.exists() or path.stat().st_size == 0:
         return [Check("code_aster_result_tables", False, f"Missing or empty: {path}")]
+    if min_rows < 1:
+        raise HarnessError("min_rows_per_table must be at least one.")
 
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    for title in required_tables:
+    node_sets: Dict[str, Set[int]] = {}
+
+    for raw_title in required_tables:
+        title = str(raw_title).strip()
         title_index = next((i for i, line in enumerate(lines) if title.lower() in line.lower()), -1)
         if title_index < 0:
             checks.append(Check(f"table:{title}", False, "section title not found"))
             continue
 
         header_index = -1
+        header: List[str] = []
         for i in range(title_index + 1, min(len(lines), title_index + 90)):
-            normalized = lines[i].lstrip("# ").strip()
-            if ";" in normalized and "NOEUD" in normalized.upper():
+            normalized = _normalize_table_line(lines[i])
+            if ";" not in normalized:
+                continue
+            tokens = _split_table_line(normalized)
+            if any(token.upper() == "NOEUD" for token in tokens):
                 header_index = i
+                header = tokens
                 break
         if header_index < 0:
             checks.append(Check(f"table:{title}", False, "semicolon NOEUD header not found"))
             continue
 
+        upper_header = [token.upper() for token in header]
+        node_column = upper_header.index("NOEUD")
+        expected_components = CODE_ASTER_TABLE_COMPONENTS.get(title.upper(), ())
+        missing_components = [component for component in expected_components if component not in upper_header]
+        if missing_components:
+            checks.append(Check(
+                f"table:{title}:components",
+                False,
+                "missing=" + ",".join(missing_components),
+            ))
+            continue
+
+        component_columns = [upper_header.index(component) for component in expected_components]
+        nodes: Set[int] = set()
+        duplicate_nodes: Set[int] = set()
+        invalid_numeric_rows = 0
         rows = 0
+
         for i in range(header_index + 1, len(lines)):
             raw = lines[i].strip()
             if rows > 0 and (not raw or "PPM_" in raw):
                 break
-            normalized = raw.lstrip("# ").strip()
+            normalized = _normalize_table_line(raw)
             if not normalized or ";" not in normalized:
                 continue
-            first = normalized.split(";", 1)[0].strip()
-            if re.fullmatch(r"[Nn]?\d+", first):
-                rows += 1
+            tokens = _split_table_line(normalized)
+            if node_column >= len(tokens):
+                continue
+            node_id = _parse_node_id(tokens[node_column])
+            if node_id is None:
+                continue
+
+            if node_id in nodes:
+                duplicate_nodes.add(node_id)
+            nodes.add(node_id)
+            rows += 1
+
+            for column in component_columns:
+                if column >= len(tokens) or _parse_finite_float(tokens[column]) is None:
+                    invalid_numeric_rows += 1
+                    break
+
+        node_sets[title] = nodes
         checks.append(Check(f"table:{title}", rows >= min_rows, f"rows={rows}, required>={min_rows}"))
+        checks.append(Check(
+            f"table:{title}:unique_nodes",
+            not duplicate_nodes,
+            "none" if not duplicate_nodes else "duplicates=" + ",".join(str(x) for x in sorted(duplicate_nodes)[:20]),
+        ))
+        if expected_components:
+            checks.append(Check(
+                f"table:{title}:finite_values",
+                invalid_numeric_rows == 0,
+                f"invalid_numeric_rows={invalid_numeric_rows}",
+            ))
+
+    complete_node_sets = [nodes for title, nodes in node_sets.items() if title in required_tables and nodes]
+    if len(complete_node_sets) >= 2:
+        reference = complete_node_sets[0]
+        consistent = all(nodes == reference for nodes in complete_node_sets[1:])
+        sizes = ", ".join(f"{title}={len(nodes)}" for title, nodes in node_sets.items())
+        checks.append(Check("code_aster_node_sets_consistent", consistent, sizes))
+    elif len(required_tables) > 1:
+        checks.append(Check("code_aster_node_sets_consistent", False, "insufficient valid tables for comparison"))
+
     return checks
 
 
@@ -352,6 +458,8 @@ def validate_outputs(manifest: Dict[str, Any]) -> Tuple[List[Check], List[Artifa
             if not isinstance(result_contract, dict):
                 raise HarnessError("result_contract must be an object or false.")
             required_tables = result_contract.get("required_tables", list(CODE_ASTER_TABLES))
+            if not isinstance(required_tables, list) or not all(isinstance(x, str) and x.strip() for x in required_tables):
+                raise HarnessError("result_contract.required_tables must contain non-empty strings.")
             min_rows = int(result_contract.get("min_rows_per_table", 1))
             checks.extend(validate_code_aster_tables(case_path(cwd, f"{manifest['job_name']}.resu"), required_tables, min_rows))
 
