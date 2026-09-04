@@ -60,6 +60,14 @@ def patch_project(text):
 
 
 def patch_demo(text):
+    # C8.38 overlay already carries the complete numerical scalar-bar gate.
+    # Treat that state as idempotently applied instead of trying to patch
+    # historical C8.34/C8.35 anchors that no longer exist.
+    if ('native_scalar_bar_semantically_verified' in text and
+            'Native scalar-bar numerical semantics: VERIFIED' in text and
+            'NativeScalarBarGate.Verify(controller, min, max)' in text):
+        return text
+
     old_draw = '''                controller.DrawResults(false);
                 Application.DoEvents();
                 controller.Form.Refresh();'''
