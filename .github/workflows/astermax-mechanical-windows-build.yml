@@ -42,6 +42,8 @@ jobs:
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Globals.cs -Pattern 'ProgramName = "AsterMax Mechanical"'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyTitle\("AsterMax Mechanical"\)'
           Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Properties/AssemblyInfo.cs -Pattern 'AssemblyProduct\("AsterMax Mechanical"\)'
+          Select-String -Path build/PrePoMax-CodeAster/CaeJob/AnalysisJob.cs -Pattern '_analysisSolver = AnalysisSolverTypeEnum.CodeAster'
+          Select-String -Path build/PrePoMax-CodeAster/PrePoMax/Forms/61_Analysis/FrmAnalysis.cs -Pattern 'Settings.CodeAster.AsRunExecutable'
 
       - name: Restore NuGet dependencies
         shell: pwsh
@@ -116,7 +118,7 @@ jobs:
           $jsonObject = Get-Content $materialsFile -Raw | ConvertFrom-Json
           $materialCount = 0
           foreach ($category in $jsonObject.Items) { $materialCount += $category.Items.Count }
-          if ($materialCount -ne 11) { throw "Expected 11 seed materials, found $materialCount." }
+          if ($materialCount -lt 70) { throw "Expected at least 70 engineering materials, found $materialCount." }
           if ((Get-Content $materialsFile -Raw) -notmatch 'CaeModel.ElasticWithDensity, CaeModel') {
             throw 'materials.lib does not contain native ElasticWithDensity material properties.'
           }
@@ -129,7 +131,8 @@ jobs:
 
           Upstream GUI foundation: PrePoMax, GPL-3.0.
           Runtime CAD/mesher assets: official PrePoMax v1.4.0 portable package.
-          Starter material library: nominal linear-elastic engineering reference data.
+          Engineering material library: 70+ nominal linear-elastic reference materials.
+          Default FEA engine for new analyses: Code_Aster (no silent fallback to CalculiX).
           This experimental derivative remains subject to GPL-3.0 obligations.
           Source integration: https://github.com/MedinaParra/AsterMax-Ubuntu
           Upstream: https://github.com/tsvilans/PrePoMax
@@ -173,10 +176,10 @@ jobs:
           $json = [IO.File]::ReadAllText((Join-Path $package 'materials.lib'))
           $library = [Newtonsoft.Json.JsonConvert]::DeserializeObject($json, $libraryType, $settings)
           if ($null -eq $library) { throw 'Native material library deserialization returned null.' }
-          if ($library.Items.Count -ne 4) { throw "Expected 4 material categories, found $($library.Items.Count)." }
+          if ($library.Items.Count -lt 8) { throw "Expected at least 8 material categories, found $($library.Items.Count)." }
           $count = 0
           foreach ($category in $library.Items) { $count += $category.Items.Count }
-          if ($count -ne 11) { throw "Native library expected 11 materials, found $count." }
+          if ($count -lt 70) { throw "Native library expected at least 70 materials, found $count." }
           $firstPropertyType = $library.Items[0].Items[0].Tag.Properties[0].GetType().FullName
           if ($firstPropertyType -ne 'CaeModel.ElasticWithDensity') {
             throw "Unexpected first material property type: $firstPropertyType"
