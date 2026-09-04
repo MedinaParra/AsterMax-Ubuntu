@@ -11,7 +11,8 @@
     "step_mm.comm",
     "step_mm.mail",
     "step_mm.export",
-    "C8_40_PRE_SOLVE.json"
+    "C8_40_PRE_SOLVE.json",
+    "prepare_nodal_load.py"
   ],
   "required_outputs": [
     "step_mm.mess",
@@ -30,7 +31,7 @@
     "bash",
     "-i",
     "-c",
-    "run_aster step_mm.export"
+    "python3 prepare_nodal_load.py && run_aster step_mm.export"
   ],
   "result_contract": {
     "required_tables": ["PPM_DEPL", "PPM_MISES"],
