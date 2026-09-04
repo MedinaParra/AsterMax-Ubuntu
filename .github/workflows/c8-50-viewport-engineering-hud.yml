@@ -61,11 +61,11 @@ jobs:
           Start-Sleep -Seconds 3
           $r=New-Object NativeWin50+RECT; [NativeWin50]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null
           $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top
-          if($w -lt 1200 -or $h -lt 700){throw "Native demo window did not maximize enough: ${w}x${h}"}
+          if($w -lt 1000 -or $h -lt 700){throw "Native demo window below hosted-runner evidence threshold: ${w}x${h}"}
           $bmp=New-Object Drawing.Bitmap $w,$h; $g=[Drawing.Graphics]::FromImage($bmp)
           try{$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
           $png='artifact/C8.50_VIEWPORT_ENGINEERING_HUD.png'; $bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-          @{title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();maximized_capture=$true}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_WINDOW_EVIDENCE.json
+          @{title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();maximize_requested=$true;hosted_runner_resolution_limited=$true}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_WINDOW_EVIDENCE.json
           Stop-Process -Id $p.Id -Force
       - name: Write evidence
         shell: pwsh
