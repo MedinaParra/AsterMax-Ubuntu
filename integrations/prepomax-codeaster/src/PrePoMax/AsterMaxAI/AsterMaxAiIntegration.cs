@@ -43,7 +43,7 @@ namespace PrePoMax
         private void InstallAsterMaxWorkflowStrip()
         {
             if (_asterMaxWorkflowStrip != null) return;
-            _asterMaxWorkflowStrip = new AsterMaxWorkflowStrip();
+            _asterMaxWorkflowStrip = new AsterMaxWorkflowStrip(_controller);
             Controls.Add(_asterMaxWorkflowStrip);
             _asterMaxWorkflowStrip.BringToFront();
         }
