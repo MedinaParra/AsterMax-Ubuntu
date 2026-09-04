@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "case_name": "real-codeaster-visual-two-tetra",
+  "solver": "code_aster",
+  "job_name": "visual",
+  "working_directory": ".",
+  "solver_executable": "docker",
+  "timeout_seconds": 600,
+  "required_inputs": [
+    "visual.comm",
+    "visual.mail",
+    "visual.export"
+  ],
+  "required_outputs": [
+    "visual.mess",
+    "visual.rmed",
+    "visual.resu"
+  ],
+  "solver_command": [
+    "docker",
+    "run",
+    "--rm",
+    "-v",
+    "${GITHUB_WORKSPACE}/integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra:/home/user/data",
+    "-w",
+    "/home/user/data",
+    "simvia/code_aster:17.4.0",
+    "bash",
+    "-i",
+    "-c",
+    "run_aster visual.export"
+  ],
+  "result_contract": {
+    "required_tables": [
+      "PPM_DEPL",
+      "PPM_STRESS_N",
+      "PPM_STRESS_S",
+      "PPM_MISES"
+    ],
+    "min_rows_per_table": 5
+  }
+}
