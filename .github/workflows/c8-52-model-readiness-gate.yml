@@ -1,0 +1,48 @@
+name: C8.52 Model Readiness Gate Windows
+on:
+  push:
+    branches: [agent/c8-52-model-readiness-gate]
+  workflow_dispatch:
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify fail-closed readiness contract
+        shell: pwsh
+        run: |
+          $r=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxModelReadiness.cs' -Raw
+          foreach($t in @('MODEL READINESS','READY TO ATTEMPT SOLVE','BLOCKED/UNKNOWN','NOT SOLVER VERIFIED','MATERIAL','ANALYSIS')){if($r -notmatch [regex]::Escape($t)){throw "Missing readiness token $t"}}
+          if($r -match 'SOLVER VERIFIED[^\r\n]*true|industrial_validation\s*=\s*true'){throw 'Readiness gate must fail closed.'}
+          $f=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/Forms/FrmMain.cs' -Raw
+          if($f -notmatch 'InstallAsterMaxModelReadiness'){throw 'Readiness integration missing'}
+      - name: Native GUI smoke
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(30); do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited early'}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title $($p.MainWindowTitle)"}
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          @{schema='astermax.model-readiness.v1';version='C8.52';commit='${{ github.sha }}';readiness_gate=$true;cad_required=$true;mesh_required=$true;material_required=$true;bc_required=$true;load_required=$true;analysis_required=$true;solver_verified_inferred=$false;solver_logic_modified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.52_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.52-Model-Readiness-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 14
