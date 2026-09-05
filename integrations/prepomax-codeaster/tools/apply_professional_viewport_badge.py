@@ -45,5 +45,45 @@ if old_pos not in text:
     raise SystemExit('C8.75 overlay position anchor not found; refusing partial patch.')
 text = text.replace(old_pos, new_pos, 1)
 
+# Presentation mode should not leave the large extrema arrow callout covering the model.
+# The values remain visible in the verified badge and in the READY evidence. This hides only the
+# annotation widgets after all extrema/probe/render gates have already admitted the result.
+show_anchor = '''            overlay.Show(controller.Form);\n            overlay.BringToFront();\n'''
+show_new = '''            controller.Form.AsterMaxHideVerifiedResultArrowWidgets();\n            overlay.Show(controller.Form);\n            overlay.BringToFront();\n'''
+if show_anchor not in text:
+    raise SystemExit('C8.75 overlay show anchor not found; refusing lifecycle patch.')
+text = text.replace(show_anchor, show_new, 1)
+
+# Qualify normal shutdown by explicitly detaching VTK arrow widgets from their interactor while
+# the WinForms/VTK stack is still alive. Upstream vtkControl.RemoveAllArrowWidgets() performs the
+# required RemoveInteractor() for each widget before clearing the collection.
+finally_anchor = '''            finally\n            {\n                if (verificationOverlay != null && !verificationOverlay.IsDisposed)\n                    verificationOverlay.Close();\n            }\n'''
+finally_new = '''            finally\n            {\n                if (verificationOverlay != null && !verificationOverlay.IsDisposed)\n                    verificationOverlay.Close();\n            }\n'''
+if finally_anchor not in text:
+    raise SystemExit('C8.75 finally anchor not found; refusing partial lifecycle patch.')
+# No semantic change in finally itself; shutdown hook is attached to the owner form below.
+
 path.write_text(text, encoding='utf-8')
-print(f'Patched {path} with C8.75 compact borderless verified-results badge')
+
+frm = root / 'PrePoMax' / 'Forms' / 'FrmMain.cs'
+ftext = frm.read_text(encoding='utf-8-sig')
+frm_anchor = '''        public string GetDeformationVariable()\n        {\n'''
+frm_helper = '''        // AsterMax C8.75: presentation/lifecycle seam for the verified Results demo.\n        // It only manages VTK annotation widgets; it cannot alter result values, scale, mesh or actors.\n        public void AsterMaxHideVerifiedResultArrowWidgets()\n        {\n            if (InvokeRequired)\n            {\n                Invoke(new Action(AsterMaxHideVerifiedResultArrowWidgets));\n                return;\n            }\n            if (_vtk != null) _vtk.HideAllArrowWidgets();\n        }\n\n        public void AsterMaxPrepareVerifiedResultsShutdown()\n        {\n            if (InvokeRequired)\n            {\n                Invoke(new Action(AsterMaxPrepareVerifiedResultsShutdown));\n                return;\n            }\n            if (_vtk != null)\n            {\n                _vtk.RenderingOn = false;\n                _vtk.HideAllArrowWidgets();\n                _vtk.RemoveAllArrowWidgets();\n            }\n        }\n\n'''
+if frm_helper not in ftext:
+    if frm_anchor not in ftext:
+        raise SystemExit('C8.75 FrmMain lifecycle seam anchor not found; refusing partial patch.')
+    ftext = ftext.replace(frm_anchor, frm_helper + frm_anchor, 1)
+frm.write_text(ftext, encoding='utf-8')
+
+# Register the lifecycle cleanup on the real owner form. This is intentionally a FormClosing hook,
+# so the interactor exists when RemoveInteractor() is invoked and the normal WinForms close path continues.
+text = path.read_text(encoding='utf-8')
+run_anchor = '''                verificationOverlay = CreateVerificationOverlay(controller, demoCase, min, max, dispMax);\n                if (verificationOverlay == null || verificationOverlay.IsDisposed || !verificationOverlay.Visible)\n'''
+run_new = '''                verificationOverlay = CreateVerificationOverlay(controller, demoCase, min, max, dispMax);\n                controller.Form.FormClosing += delegate(object sender, FormClosingEventArgs e)\n                {\n                    controller.Form.AsterMaxPrepareVerifiedResultsShutdown();\n                    if (verificationOverlay != null && !verificationOverlay.IsDisposed)\n                        verificationOverlay.Hide();\n                };\n                if (verificationOverlay == null || verificationOverlay.IsDisposed || !verificationOverlay.Visible)\n'''
+if run_anchor not in text:
+    raise SystemExit('C8.75 verification overlay assignment anchor not found; refusing lifecycle patch.')
+text = text.replace(run_anchor, run_new, 1)
+path.write_text(text, encoding='utf-8')
+
+print(f'Patched {path} with C8.75 compact borderless verified-results badge and normal-close lifecycle hook')
+print(f'Patched {frm} with C8.75 safe VTK annotation cleanup seams')
