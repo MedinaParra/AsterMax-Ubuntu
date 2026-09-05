@@ -20,14 +20,14 @@ namespace PrePoMax.AsterMaxAI
             _controller = controller;
             Name = "ucAsterMaxRegionBindingInspector";
             Dock = DockStyle.Bottom;
-            Height = 132;
+            Height = 142;
             BackColor = AsterMaxUiTheme.SurfaceRaised;
             Padding = new Padding(8, 5, 8, 5);
 
             Label title = new Label();
             title.Dock = DockStyle.Top;
             title.Height = 22;
-            title.Text = "ENTITY COORDINATE RESOLVER · STEP → BC/LOAD → REGION → FE CENTROID";
+            title.Text = "SURFACE / FACE RESOLVER · STEP → BC/LOAD → REGION → FE FACE-NODE ANCHOR";
             title.ForeColor = AsterMaxUiTheme.AccentGlow;
             title.Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 8.2f, FontStyle.Bold);
 
@@ -57,7 +57,7 @@ namespace PrePoMax.AsterMaxAI
             object model = null;
             try { if (_controller != null) model = _controller.Model; } catch { }
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("Observed FE coordinates only. Selection/surface geometry remains UNQUALIFIED; no viewport anchoring or solver verification inferred.");
+            sb.AppendLine("Observed FE topology only. Surface anchors are face-node means; normals follow element face ordering. No viewport projection or solver verification inferred.");
             if (model == null) { sb.Append("MODEL: MISSING"); _report.Text = sb.ToString(); return; }
 
             object stepCollection = ReadMember(model, "StepCollection");
@@ -153,12 +153,131 @@ namespace PrePoMax.AsterMaxAI
                 return xyz == null ? AnchorResolution.Unknown("REFERENCE_POINT_COORD_UNKNOWN") : AnchorResolution.Resolved(xyz, "REFERENCE_POINT");
             }
             if (regionType.Equals("SurfaceName", StringComparison.OrdinalIgnoreCase))
-                return AnchorResolution.Unknown("SURFACE_TO_FACE_CENTROID_NOT_QUALIFIED");
+                return ResolveSurface(mesh, regionName);
             if (regionType.Equals("Selection", StringComparison.OrdinalIgnoreCase))
-                return AnchorResolution.Unknown("SELECTION_IDS_ARE_GEOMETRY_ENCODED");
+                return AnchorResolution.Unknown("SELECTION_GEOMETRY_ENCODING_NOT_QUALIFIED");
             if (regionType.Equals("PartName", StringComparison.OrdinalIgnoreCase))
                 return AnchorResolution.Unknown("PART_CENTROID_NOT_QUALIFIED");
             return AnchorResolution.Unknown("REGION_TYPE_UNSUPPORTED");
+        }
+
+        private static AnchorResolution ResolveSurface(object mesh, string surfaceName)
+        {
+            object surface = FindNamedValue(ReadMember(mesh, "Surfaces"), surfaceName);
+            if (surface == null) return AnchorResolution.Unknown("SURFACE_NOT_FOUND");
+
+            object elementFaces = ReadMember(surface, "ElementFaces");
+            IEnumerable faceEntries = elementFaces as IEnumerable;
+            if (faceEntries == null) return AnchorResolution.Unknown("SURFACE_ELEMENT_FACES_UNKNOWN");
+
+            object elementSets = ReadMember(mesh, "ElementSets");
+            object elements = ReadMember(mesh, "Elements");
+            object nodes = ReadMember(mesh, "Nodes");
+            if (elementSets == null || elements == null || nodes == null)
+                return AnchorResolution.Unknown("SURFACE_MESH_TOPOLOGY_API_UNKNOWN");
+
+            List<double[]> faceCentroids = new List<double[]>();
+            List<double[]> faceNormals = new List<double[]>();
+            int resolvedFaces = 0;
+            int skippedFaces = 0;
+
+            foreach (object rawEntry in faceEntries)
+            {
+                object faceName = ReadMember(rawEntry, "Key");
+                object elementSetNameValue = ReadMember(rawEntry, "Value");
+                string elementSetName = Safe(elementSetNameValue);
+                if (faceName == null || elementSetName == "?") { skippedFaces++; continue; }
+
+                object elementSet = FindNamedValue(elementSets, elementSetName);
+                int[] elementIds = elementSet == null ? null : ReadIntArray(ReadMember(elementSet, "Labels"));
+                if (elementIds == null || elementIds.Length == 0) { skippedFaces++; continue; }
+
+                foreach (int elementId in elementIds)
+                {
+                    object element = FindNumericValue(elements, elementId);
+                    int[] faceNodeIds = InvokeFaceNodeIds(element, faceName);
+                    if (faceNodeIds == null || faceNodeIds.Length < 2) { skippedFaces++; continue; }
+                    List<double[]> xyz = ReadNodeCoordinates(nodes, faceNodeIds);
+                    if (xyz.Count < 2) { skippedFaces++; continue; }
+
+                    double[] centroid = Mean(xyz);
+                    if (centroid == null) { skippedFaces++; continue; }
+                    faceCentroids.Add(centroid);
+                    resolvedFaces++;
+
+                    double[] normal = OrderedFaceNormal(xyz);
+                    if (normal != null) faceNormals.Add(normal);
+                }
+            }
+
+            if (resolvedFaces == 0) return AnchorResolution.Unknown("SURFACE_FACE_NODES_NOT_RESOLVED");
+            double[] anchor = Mean(faceCentroids);
+            double[] normalMean = MeanUnitVectors(faceNormals);
+            string source = "SURFACE_FACE_NODE_MEAN faces=" + resolvedFaces + " skipped=" + skippedFaces;
+            if (normalMean == null)
+                return AnchorResolution.Resolved(anchor, source + " normal=UNQUALIFIED");
+            return AnchorResolution.ResolvedWithNormal(anchor, normalMean, source + " normal=ORDERED_FACE_MEAN");
+        }
+
+        private static int[] InvokeFaceNodeIds(object element, object faceName)
+        {
+            if (element == null || faceName == null) return null;
+            try
+            {
+                MethodInfo method = element.GetType().GetMethod("GetNodeIdsFromFaceName", BindingFlags.Public | BindingFlags.Instance);
+                if (method == null) return null;
+                object result = method.Invoke(element, new object[] { faceName });
+                return ReadIntArray(result);
+            }
+            catch { return null; }
+        }
+
+        private static List<double[]> ReadNodeCoordinates(object nodes, int[] nodeIds)
+        {
+            List<double[]> xyz = new List<double[]>();
+            HashSet<int> unique = new HashSet<int>();
+            foreach (int nodeId in nodeIds)
+            {
+                if (!unique.Add(nodeId)) continue;
+                double[] p = ReadXYZ(FindNumericValue(nodes, nodeId));
+                if (p != null) xyz.Add(p);
+            }
+            return xyz;
+        }
+
+        private static double[] OrderedFaceNormal(List<double[]> xyz)
+        {
+            if (xyz == null || xyz.Count < 3) return null;
+            double[] a = xyz[0];
+            for (int i = 1; i < xyz.Count - 1; i++)
+            {
+                double[] b = xyz[i];
+                double[] c = xyz[i + 1];
+                double ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+                double vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+                double[] n = new double[] { uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx };
+                double len = Math.Sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                if (len > 1e-12) return new double[] { n[0] / len, n[1] / len, n[2] / len };
+            }
+            return null;
+        }
+
+        private static double[] Mean(List<double[]> points)
+        {
+            if (points == null || points.Count == 0) return null;
+            double x = 0, y = 0, z = 0;
+            foreach (double[] p in points) { x += p[0]; y += p[1]; z += p[2]; }
+            return new double[] { x / points.Count, y / points.Count, z / points.Count };
+        }
+
+        private static double[] MeanUnitVectors(List<double[]> vectors)
+        {
+            if (vectors == null || vectors.Count == 0) return null;
+            double x = 0, y = 0, z = 0;
+            foreach (double[] v in vectors) { x += v[0]; y += v[1]; z += v[2]; }
+            double len = Math.Sqrt(x * x + y * y + z * z);
+            if (len < 1e-9) return null;
+            return new double[] { x / len, y / len, z / len };
         }
 
         private static AnchorResolution ResolveNodes(object mesh, int[] nodeIds, string source)
@@ -195,8 +314,7 @@ namespace PrePoMax.AsterMaxAI
                 nodeIds.AddRange(ids);
             }
             if (resolvedElements == 0) return AnchorResolution.Unknown(source + "_ELEMENTS_NOT_FOUND");
-            AnchorResolution result = ResolveNodes(mesh, nodeIds.ToArray(), source + " e=" + resolvedElements);
-            return result;
+            return ResolveNodes(mesh, nodeIds.ToArray(), source + " e=" + resolvedElements);
         }
 
         private static object ReadMember(object target, string name)
@@ -328,14 +446,19 @@ namespace PrePoMax.AsterMaxAI
         {
             private readonly bool _resolved;
             private readonly double[] _xyz;
+            private readonly double[] _normal;
             private readonly string _source;
-            private AnchorResolution(bool resolved, double[] xyz, string source) { _resolved = resolved; _xyz = xyz; _source = source; }
-            public static AnchorResolution Resolved(double[] xyz, string source) { return new AnchorResolution(true, xyz, source); }
-            public static AnchorResolution Unknown(string reason) { return new AnchorResolution(false, null, reason); }
+            private AnchorResolution(bool resolved, double[] xyz, double[] normal, string source) { _resolved = resolved; _xyz = xyz; _normal = normal; _source = source; }
+            public static AnchorResolution Resolved(double[] xyz, string source) { return new AnchorResolution(true, xyz, null, source); }
+            public static AnchorResolution ResolvedWithNormal(double[] xyz, double[] normal, string source) { return new AnchorResolution(true, xyz, normal, source); }
+            public static AnchorResolution Unknown(string reason) { return new AnchorResolution(false, null, null, reason); }
             public string ToText()
             {
                 if (!_resolved || _xyz == null) return "UNQUALIFIED[" + _source + "]";
-                return String.Format(CultureInfo.InvariantCulture, "FE_CENTROID({0:0.###},{1:0.###},{2:0.###})[{3}]", _xyz[0], _xyz[1], _xyz[2], _source);
+                string point = String.Format(CultureInfo.InvariantCulture, "FE_ANCHOR({0:0.###},{1:0.###},{2:0.###})", _xyz[0], _xyz[1], _xyz[2]);
+                if (_normal == null) return point + "[" + _source + "]";
+                string normal = String.Format(CultureInfo.InvariantCulture, " N({0:0.###},{1:0.###},{2:0.###})", _normal[0], _normal[1], _normal[2]);
+                return point + normal + "[" + _source + "]";
             }
         }
     }
