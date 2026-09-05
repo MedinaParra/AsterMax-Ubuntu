@@ -9,6 +9,7 @@ namespace PrePoMax
 {
     public partial class FrmMain
     {
+        private const string AsterMaxVisibleProductTitle = "AsterMax Mechanical";
         private AsterMaxAiChatForm _asterMaxAiChat;
         private AsterMaxWorkflowStrip _asterMaxWorkflowStrip;
         private AsterMaxViewportHud _asterMaxViewportHud;
@@ -21,12 +22,20 @@ namespace PrePoMax
 
         private void InstallAsterMaxAiChat()
         {
+            // C8.58: the visible product title must be independent from Globals.ProgramName.
+            // Globals.ProgramName is a persistence compatibility header and must retain the
+            // versioned `AsterMax v1.4.0` shape required by the pinned PMX reader.
+            Text = AsterMaxVisibleProductTitle;
             ApplyAsterMaxDarkShell();
             InstallAsterMaxWorkflowStrip();
             InstallAsterMaxViewportHud();
             InstallAsterMaxEngineeringTree();
             InstallAsterMaxResultsWorkspace();
-            Shown += (s, e) => ApplyAsterMaxDarkShell();
+            Shown += (s, e) =>
+            {
+                Text = AsterMaxVisibleProductTitle;
+                ApplyAsterMaxDarkShell();
+            };
 
             Bitmap icon16 = AsterMaxUiTheme.CreateAiIcon(16);
             Bitmap icon20 = AsterMaxUiTheme.CreateAiIcon(20);

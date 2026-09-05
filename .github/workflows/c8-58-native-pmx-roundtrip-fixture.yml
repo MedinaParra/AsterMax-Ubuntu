@@ -1,0 +1,78 @@
+name: C8.58 Native PMX Structural Roundtrip Windows
+
+on:
+  push:
+    branches: [agent/c8-58-native-pmx-roundtrip-fixture]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify C8.58 native PMX contract
+        shell: pwsh
+        run: |
+          $h=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxPmxRoundtripHarness.cs' -Raw
+          foreach($token in @('FeNode','FeNodeSet','StaticStep','FixedBC','CLoad','RegionTypeEnum.NodeSetName','SaveToPmx','Open(pmxPath)','FIXTURE_FIXED','FIXTURE_FORCE_1000N_X','loaded_pmx_fixture_proven','solver_executed')) {
+            if($h -notmatch [regex]::Escape($token)){throw "Missing C8.58 token: $token"}
+          }
+          if($h -match 'solver_verified\s*[=:]\s*true|industrial_validation\s*[=:]\s*true|ansys_equivalence\s*[=:]\s*true'){throw 'C8.58 must not synthesize validation claims.'}
+          $controller=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/Controller.cs' -Raw
+          foreach($token in @('public void SaveToPmx(string fileName)','public void Open(string fileName)','if (extension == ".pmx") OpenPmx(fileName)')) {
+            if($controller -notmatch [regex]::Escape($token)){throw "Pinned Controller PMX contract changed: $token"}
+          }
+      - name: Launch native PMX roundtrip proof
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $env:ASTERMAX_PMX_ROUNDTRIP_FIXTURE='1'
+          $env:ASTERMAX_PMX_ROUNDTRIP_PATH=(Join-Path $PWD 'artifact/AsterMax_C8.58_StructuralFixture.pmx')
+          $env:ASTERMAX_PMX_ROUNDTRIP_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.58_PMX_ROUNDTRIP_RUNTIME.json')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited early'}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $evidence=$env:ASTERMAX_PMX_ROUNDTRIP_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(20)
+          while(-not (Test-Path $evidence) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during PMX roundtrip'}}
+          if(-not (Test-Path $evidence)){throw 'C8.58 runtime evidence was not written.'}
+          $raw=Get-Content $evidence -Raw
+          Write-Host '--- C8.58 runtime evidence ---'
+          Write-Host $raw
+          Write-Host '--- end runtime evidence ---'
+          $r=$raw | ConvertFrom-Json
+          if(-not $r.fixture_uses_real_caemodel_types){throw 'Fixture did not use real CaeModel types.'}
+          if(-not $r.pmx_file_exists_nonzero){throw "Native PMX file was not persisted. Harness error: $($r.error)"}
+          if(-not $r.native_open_pmx_roundtrip){throw "Native PMX reopen failed. Harness error: $($r.error)"}
+          if(-not $r.fixed_roundtrip_xyz_verified){throw "Fixed support did not survive PMX roundtrip at expected XYZ. Harness error: $($r.error)"}
+          if(-not $r.force_roundtrip_xyz_verified){throw "Force did not survive PMX roundtrip at expected XYZ. Harness error: $($r.error)"}
+          if(-not $r.loaded_pmx_fixture_proven){throw "Loaded PMX fixture proof failed: $($r.error)"}
+          if([int]$r.native_arrow_widget_count -lt 2){throw "Expected at least two native VTK anchors after PMX reopen. count=$($r.native_arrow_widget_count)"}
+          if($r.solver_executed -or $r.solver_verified -or $r.industrial_validation -or $r.ansys_equivalence){throw 'C8.58 must remain persistence/anchor evidence only.'}
+          if([int64]$r.pmx_bytes -le 0 -or [string]::IsNullOrWhiteSpace([string]$r.pmx_sha256)){throw 'PMX byte/hash evidence missing.'}
+          @{schema='astermax.native-pmx-structural-roundtrip.v1';commit='${{ github.sha }}';fixture_units='mm';native_pmx_file=$true;pmx_bytes=[int64]$r.pmx_bytes;pmx_sha256=[string]$r.pmx_sha256;fixed_expected_xyz=@(0,0,0);force_expected_xyz=@(100,0,0);fixed_roundtrip_xyz_verified=$true;force_roundtrip_xyz_verified=$true;native_arrow_widget_count=[int]$r.native_arrow_widget_count;loaded_pmx_fixture_proven=$true;solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.58_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.58-Native-PMX-Structural-Roundtrip-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: warn
+          retention-days: 14
