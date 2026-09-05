@@ -47,6 +47,27 @@ def patch_case_writer(text):
     )
 
 
+def patch_result_bridge(text):
+    if 'public const string ReactionTitle = "PPM_REACTION";' not in text:
+        text = replace_once(
+            text,
+            '        public const string StrainShearTitle = "PPM_STRAIN_S";',
+            '        public const string StrainShearTitle = "PPM_STRAIN_S";\n'
+            '        public const string ReactionTitle = "PPM_REACTION";',
+            "reaction result title",
+        )
+
+    reaction_call = '''            AppendTable(sb, "tab_reac", ReactionTitle, "REAC_NODA",
+                        new string[] { "NOEUD", "DX", "DY", "DZ" },
+                        new string[] { "DX", "DY", "DZ" });'''
+    if reaction_call not in text:
+        old = '''            AppendTable(sb, "tab_eps_s", StrainShearTitle, "EPSI_NOEU",
+                        new string[] { "NOEUD", "EPXY", "EPYZ", "EPXZ" },
+                        new string[] { "EPXY", "EPYZ", "EPXZ" });'''
+        text = replace_once(text, old, old + "\n" + reaction_call, "native reaction result table")
+    return text
+
+
 def patch_translator(text):
     old = '''            sb.AppendLine("        TOUT_ORDRE='OUI'))");
             sb.AppendLine();
@@ -55,7 +76,17 @@ def patch_translator(text):
             sb.AppendLine();
             CodeAsterResultBridge.AppendResultTables(sb);
             sb.AppendLine("FIN()");'''
-    return replace_once(text, old, new, "Code_Aster table output before FIN")
+    text = replace_once(text, old, new, "Code_Aster table output before FIN")
+
+    if 'FORCE=(\'REAC_NODA\',)' not in text:
+        text = replace_once(
+            text,
+            '            sb.AppendLine("    CRITERES=(\'SIEQ_ELNO\', \'SIEQ_NOEU\'))");',
+            '            sb.AppendLine("    CRITERES=(\'SIEQ_ELNO\', \'SIEQ_NOEU\'),");\n'
+            '            sb.AppendLine("    FORCE=(\'REAC_NODA\',))");',
+            "native REAC_NODA CALC_CHAMP request",
+        )
+    return text
 
 
 def patch_controller(text):
@@ -118,6 +149,7 @@ def main():
 
     patch_file(repo / "PrePoMax" / "PrePoMax.csproj", patch_project)
     patch_file(repo / "PrePoMax" / "CodeAster" / "CodeAsterCaseWriter.cs", patch_case_writer)
+    patch_file(repo / "PrePoMax" / "CodeAster" / "CodeAsterResultBridge.cs", patch_result_bridge)
     patch_file(repo / "PrePoMax" / "CodeAster" / "CodeAsterModelTranslator.cs", patch_translator)
     patch_file(repo / "PrePoMax" / "Controller.cs", patch_controller)
     return 0
