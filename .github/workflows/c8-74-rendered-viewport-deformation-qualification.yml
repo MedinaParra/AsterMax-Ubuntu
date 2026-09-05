@@ -106,8 +106,9 @@ jobs:
           if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded){throw 'Full-model Results gate failed.'}
           if(-not [bool]$s.deformation_ui_scale_selector_verified -or [string]$s.deformation_state -ne 'user-defined-x10-contour'){throw 'C8.73 deformation UI prerequisite lost.'}
           if(-not [bool]$s.rendered_viewport_deformation_verified){throw 'C8.74 rendered viewport deformation gate failed.'}
-          if([int]$s.rendered_viewport_contour_actor_count -lt 1){throw 'No visible rendered contour actor admitted.'}
-          if([double]$s.rendered_viewport_bounds_max_error_mm -gt 1e-6){throw "Rendered VTK bounds mismatch: $($s.rendered_viewport_bounds_max_error_mm) mm"}
+          if([int]$s.rendered_viewport_contour_actor_count -lt 1 -or [long]$s.rendered_viewport_contour_point_count -lt 1){throw 'No visible rendered contour geometry admitted.'}
+          if([double]$s.rendered_viewport_point_mesh_max_error_mm -gt 1e-6){throw "Rendered VTK point/mesh mismatch: $($s.rendered_viewport_point_mesh_max_error_mm) mm"}
+          if([double]$s.rendered_viewport_required_extrema_max_error_mm -gt 1e-6){throw "Rendered extrema-node mismatch: $($s.rendered_viewport_required_extrema_max_error_mm) mm"}
           if(-not [bool]$s.native_scalar_bar_semantically_verified){throw 'Native scalar bar semantic gate lost.'}
 
           $windowDeadline=(Get-Date).AddSeconds(20)
@@ -134,13 +135,15 @@ jobs:
           $s=Get-Content artifact/c8-74/RESULTS_RENDERED_VIEWPORT_READY.json -Raw|ConvertFrom-Json
           $prior=Get-Content $env:C874_PRIOR -Raw|ConvertFrom-Json
           @{
-            schema='astermax.c8.74.rendered-viewport-deformation.v1';commit='${{ github.sha }}';source_solver_run=[long]$env:C865_RUN_ID;source_solver_commit=$env:C865_SHA
+            schema='astermax.c8.74.rendered-viewport-deformation.v2';commit='${{ github.sha }}';source_solver_run=[long]$env:C865_RUN_ID;source_solver_commit=$env:C865_SHA
             solver_verified=[bool]$prior.solver_verified;result_fields_verified=[bool]$prior.result_field_values_verified;reaction_equilibrium_verified=[bool]$prior.reaction_equilibrium_verified
             mesh_nodes=[int]$s.mesh_nodes;mesh_elements=2474;field='STRESS/MISES';unit='MPa'
             deformation_state=[string]$s.deformation_state;deformation_ui_scale_selector_verified=[bool]$s.deformation_ui_scale_selector_verified;deformation_ui_final_scale=[double]$s.deformation_ui_final_scale
             rendered_viewport_deformation_source=[string]$s.rendered_viewport_deformation_source
             rendered_viewport_contour_actor_count=[int]$s.rendered_viewport_contour_actor_count
-            rendered_viewport_bounds_max_error_mm=[double]$s.rendered_viewport_bounds_max_error_mm
+            rendered_viewport_contour_point_count=[long]$s.rendered_viewport_contour_point_count
+            rendered_viewport_point_mesh_max_error_mm=[double]$s.rendered_viewport_point_mesh_max_error_mm
+            rendered_viewport_required_extrema_max_error_mm=[double]$s.rendered_viewport_required_extrema_max_error_mm
             rendered_viewport_deformation_verified=[bool]$s.rendered_viewport_deformation_verified
             native_scalar_bar_verified=[bool]$s.native_scalar_bar_semantically_verified
             pmx_sha256=(Get-FileHash $env:C874_PMX -Algorithm SHA256).Hash.ToLowerInvariant();rmed_sha256=(Get-FileHash $env:C874_RMED -Algorithm SHA256).Hash.ToLowerInvariant();resu_sha256=(Get-FileHash $env:C874_RESU -Algorithm SHA256).Hash.ToLowerInvariant();screenshot_sha256=(Get-FileHash artifact/c8-74/AsterMax-C8.74-rendered-x10-verified.png -Algorithm SHA256).Hash.ToLowerInvariant()
