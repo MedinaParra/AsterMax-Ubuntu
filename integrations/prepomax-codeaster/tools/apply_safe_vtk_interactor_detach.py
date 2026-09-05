@@ -7,7 +7,7 @@ path = root / 'vtkControl' / 'vtkControl.Designer.cs'
 text = path.read_text(encoding='utf-8-sig')
 
 class_anchor = '''    partial class vtkControl\n    {\n'''
-trace_helper = '''    partial class vtkControl\n    {\n        private static void AsterMaxShutdownTrace(string message)\n        {\n            try\n            {\n                string trace = System.Environment.GetEnvironmentVariable("ASTERMAX_VTK_SHUTDOWN_TRACE");\n                if (!string.IsNullOrEmpty(trace))\n                    System.IO.File.AppendAllText(trace, System.DateTime.UtcNow.ToString("O") + " " + message + System.Environment.NewLine);\n            }\n            catch { }\n        }\n\n'''
+trace_helper = '''    partial class vtkControl\n    {\n        private static void AsterMaxShutdownTrace(string message)\n        {\n            try\n            {\n                System.Console.WriteLine("C8.75c VTK shutdown: " + message);\n                System.Console.Out.Flush();\n                string trace = System.Environment.GetEnvironmentVariable("ASTERMAX_VTK_SHUTDOWN_TRACE");\n                if (!string.IsNullOrEmpty(trace))\n                    System.IO.File.AppendAllText(trace, System.DateTime.UtcNow.ToString("O") + " " + message + System.Environment.NewLine);\n            }\n            catch { }\n        }\n\n'''
 if class_anchor not in text:
     raise SystemExit('C8.75c vtkControl class anchor not found.')
 text = text.replace(class_anchor, trace_helper, 1)
