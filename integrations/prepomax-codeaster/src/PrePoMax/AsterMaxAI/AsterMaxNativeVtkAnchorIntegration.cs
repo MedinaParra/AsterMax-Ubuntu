@@ -6,6 +6,21 @@ namespace PrePoMax
     {
         private AsterMaxNativeVtkAnchorLayer _asterMaxNativeVtkAnchorLayer;
 
+        public void AsterMaxPrepareNativeVtkAnchorShutdown()
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new System.Action(AsterMaxPrepareNativeVtkAnchorShutdown));
+                return;
+            }
+
+            if (_asterMaxNativeVtkAnchorLayer != null)
+            {
+                _asterMaxNativeVtkAnchorLayer.Dispose();
+                _asterMaxNativeVtkAnchorLayer = null;
+            }
+        }
+
         private void InstallAsterMaxNativeVtkAnchorLayer()
         {
             Shown += (s, e) =>
@@ -31,16 +46,9 @@ namespace PrePoMax
                 AsterMaxCodeAsterGenerationHarness generationHarness = new AsterMaxCodeAsterGenerationHarness(_controller);
                 BeginInvoke((System.Action)(() => generationHarness.RunIfRequested()));
 
-                // C8.75: dispose VTK-backed anchor widgets while FrmMain and vtkRenderer are still alive.
-                // FormClosed is too late: WinForms/VTK teardown may already have invalidated the native renderer.
-                FormClosing += (fs, fe) =>
-                {
-                    if (_asterMaxNativeVtkAnchorLayer != null)
-                    {
-                        _asterMaxNativeVtkAnchorLayer.Dispose();
-                        _asterMaxNativeVtkAnchorLayer = null;
-                    }
-                };
+                // Fallback only. C8.75 demo host calls AsterMaxPrepareNativeVtkAnchorShutdown()
+                // explicitly before queuing FrmMain.Close(), while the vtkRenderer is still valid.
+                FormClosing += (fs, fe) => AsterMaxPrepareNativeVtkAnchorShutdown();
             };
         }
     }
