@@ -60,6 +60,7 @@ jobs:
           python integrations/prepomax-codeaster/tools/apply_verified_deformation_geometry.py build/PrePoMax-CodeAster
           python integrations/prepomax-codeaster/tools/apply_render_mesh_deformation_qualification.py build/PrePoMax-CodeAster
           python integrations/prepomax-codeaster/tools/apply_native_deformation_ui_qualification.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_native_deformation_ui_evidence_fix.py build/PrePoMax-CodeAster
       - uses: microsoft/setup-msbuild@v2
       - name: Build Release x64
         shell: pwsh
@@ -92,6 +93,7 @@ jobs:
           if(($s.deformation_ui_states_verified|Measure-Object).Count -ne 3){throw 'Expected three qualified native UI states.'}
           if(($s.deformation_ui_effective_scales_verified|Measure-Object).Count -ne 3){throw 'Expected three qualified effective scales.'}
           if([Math]::Abs([double]$s.deformation_ui_final_scale-10.0) -gt 1e-6){throw 'Final presentation scale is not verified x10.'}
+          if([string]$s.deformation_state -ne 'user-defined-x10-contour'){throw 'READY deformation_state contradicts verified final UI state.'}
           if([double]$s.deformation_ui_render_max_coordinate_error_mm -gt 1e-7){throw 'Native UI -> render-mesh coordinate error exceeds tolerance.'}
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
       - name: Emit C8.73 evidence
@@ -103,6 +105,7 @@ jobs:
             schema='astermax.c8.73.native-deformation-ui.v1';commit='${{ github.sha }}';source_solver_run=[long]$env:C865_RUN_ID;source_solver_commit=$env:C865_SHA
             solver_verified=[bool]$prior.solver_verified;result_fields_verified=[bool]$prior.result_field_values_verified;reaction_equilibrium_verified=[bool]$prior.reaction_equilibrium_verified
             mesh_nodes=[int]$s.mesh_nodes;mesh_elements=2474
+            deformation_state=[string]$s.deformation_state
             deformation_ui_scale_selector_source=[string]$s.deformation_ui_scale_selector_source
             deformation_ui_states_verified=@($s.deformation_ui_states_verified);deformation_ui_effective_scales_verified=@($s.deformation_ui_effective_scales_verified)
             deformation_ui_final_scale=[double]$s.deformation_ui_final_scale
