@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using CaeGlobals;
 using CaeMesh;
 using CaeModel;
 
@@ -82,7 +83,7 @@ namespace PrePoMax.AsterMaxAI
                 bcCount=model.StepCollection.GetStep(stepName).BoundaryConditions.Count;
                 loadCount=model.StepCollection.GetStep(stepName).Loads.Count;
 
-                var invalid=model.CheckValidity(new System.Collections.Generic.List<Tuple<CaeGlobals.NamedClass,string>>());
+                var invalid=model.CheckValidity(new System.Collections.Generic.List<Tuple<NamedClass,string>>());
                 modelValidityPass=invalid!=null && invalid.Length==0;
                 setupQualified=meshPresent && materialAdded && sectionAdded && stepAdded && fixedAdded && loadAdded && fixedRegionNonEmpty && loadNodeExists && regionsDistinct && modelValidityPass;
                 if(!setupQualified) throw new InvalidOperationException("Structural setup qualification gate did not pass.");
@@ -96,7 +97,7 @@ namespace PrePoMax.AsterMaxAI
                           materialCount,sectionCount,stepCount,bcCount,loadCount,minX,maxX,loadX,loadY,loadZ,meshPartName,unitSystem,error);
         }
 
-        private static bool Finite(double v){return !Double.IsNaN(v)&&!Double.IsInfinity(v);}        
+        private static bool Finite(double v){return !Double.IsNaN(v)&&!Double.IsInfinity(v);}
         private static string Num(double v){return Finite(v)?v.ToString("R",CultureInfo.InvariantCulture):"null";}
         private static string Json(string s){return "\""+(s??"").Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r"," ").Replace("\n"," ")+"\"";}
         private static void WriteEvidence(string path,bool mesh,bool mat,bool sec,bool step,bool fixedBc,bool load,bool distinct,bool fixedNonEmpty,bool loadExists,bool valid,bool qualified,
