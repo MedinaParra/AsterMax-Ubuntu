@@ -74,12 +74,12 @@ text = text.replace(run_anchor, run_new, 1)
 path.write_text(text, encoding='utf-8')
 
 # Fix the demo host lifetime: never destroy FrmMain from outside while Run() is still nested inside
-# a BeginInvoke callback. After Run returns, queue Close() as a new UI message so all VTK cleanup
-# happens in normal WinForms order with no callback reentrancy.
+# a BeginInvoke callback. After Run returns, explicitly detach the AsterMax VTK anchor layer while
+# vtkRenderer is still alive, then queue Close() as a new UI message.
 program = root / 'PrePoMax' / 'Program.cs'
 ptext = program.read_text(encoding='utf-8-sig')
 program_anchor = '''                        int rc = PrePoMax.CodeAster.CodeAsterResultsDemo.Run(mainForm.Controller, demoArgs);\n                        Environment.ExitCode = rc;\n                        if (rc != 0) mainForm.Close();\n'''
-program_new = '''                        int rc = PrePoMax.CodeAster.CodeAsterResultsDemo.Run(mainForm.Controller, demoArgs);\n                        Environment.ExitCode = rc;\n                        if (!mainForm.IsDisposed)\n                            mainForm.BeginInvoke((Action)(() => mainForm.Close()));\n'''
+program_new = '''                        int rc = PrePoMax.CodeAster.CodeAsterResultsDemo.Run(mainForm.Controller, demoArgs);\n                        Environment.ExitCode = rc;\n                        if (!mainForm.IsDisposed)\n                        {\n                            mainForm.AsterMaxPrepareNativeVtkAnchorShutdown();\n                            mainForm.BeginInvoke((Action)(() => mainForm.Close()));\n                        }\n'''
 if program_anchor not in ptext:
     raise SystemExit('C8.75 Program results-demo lifetime anchor not found; refusing serialized teardown patch.')
 ptext = ptext.replace(program_anchor, program_new, 1)
@@ -87,4 +87,4 @@ program.write_text(ptext, encoding='utf-8')
 
 print(f'Patched {path} with C8.75 compact viewport presentation and finite evidence lease')
 print(f'Patched {frm} with safe VTK annotation cleanup seams')
-print(f'Patched {program} to serialize demo completion before normal FrmMain.Close')
+print(f'Patched {program} to detach AsterMax native VTK anchors before queued FrmMain.Close')
