@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
@@ -64,6 +65,45 @@ namespace PrePoMax.AsterMaxAI
                 {
                     // Fail closed: a widget that cannot be created is not counted or replaced by fake screen data.
                 }
+            }
+            WriteHarnessRuntimeEvidence();
+        }
+
+        private void WriteHarnessRuntimeEvidence()
+        {
+            string path = Environment.GetEnvironmentVariable("ASTERMAX_VTK_ANCHOR_EVIDENCE_PATH");
+            if (String.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                int nativeCount = -1;
+                FieldInfo f = _vtk.GetType().GetField("_arrowWidgets", BindingFlags.NonPublic | BindingFlags.Instance);
+                object nativeCollection = f == null ? null : f.GetValue(_vtk);
+                IDictionary dict = nativeCollection as IDictionary;
+                if (dict != null) nativeCount = dict.Count;
+                else if (nativeCollection != null)
+                {
+                    PropertyInfo count = nativeCollection.GetType().GetProperty("Count", BindingFlags.Public | BindingFlags.Instance);
+                    object raw = count == null ? null : count.GetValue(nativeCollection, null);
+                    int parsed;
+                    if (raw != null && Int32.TryParse(raw.ToString(), out parsed)) nativeCount = parsed;
+                }
+
+                string dir = Path.GetDirectoryName(path);
+                if (!String.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+                bool verified = nativeCount >= 1 && _widgetNames.Count >= 1;
+                string json = "{\n" +
+                    "  \"schema\": \"astermax.native-vtk-anchor-runtime.v1\",\n" +
+                    "  \"harness_only\": true,\n" +
+                    "  \"model_or_solver_evidence\": false,\n" +
+                    "  \"requested_widget_names\": " + _widgetNames.Count.ToString(CultureInfo.InvariantCulture) + ",\n" +
+                    "  \"native_arrow_widget_count\": " + nativeCount.ToString(CultureInfo.InvariantCulture) + ",\n" +
+                    "  \"native_widget_runtime_verified\": " + (verified ? "true" : "false") + "\n" +
+                    "}";
+                File.WriteAllText(path, json, Encoding.UTF8);
+            }
+            catch
+            {
+                // Evidence instrumentation must never turn into product/model evidence.
             }
         }
 
