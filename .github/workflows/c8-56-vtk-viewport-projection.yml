@@ -1,4 +1,4 @@
-name: C8.56 VTK Viewport Projection Windows
+name: C8.56 Native VTK Anchored Glyphs Windows
 
 on:
   push:
@@ -24,21 +24,21 @@ jobs:
       - name: Build Release x64
         shell: pwsh
         run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
-      - name: Verify C8.56 native VTK projection contract
+      - name: Verify C8.56 native VTK anchor contract
         shell: pwsh
         run: |
-          $overlay=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxViewportProjectionOverlay.cs' -Raw
-          foreach($token in @('ANCHORED GLYPHS · NATIVE VTK PROJECTION','FindVtkControl','_renderer','SetWorldPoint','WorldToDisplay','GetDisplayPoint','FE XYZ → VTK WorldToDisplay','POSITION ONLY · NOT SOLVER VERIFIED','TryResolveFeAnchor','AsterMaxRegionBindingInspector')) {
-            if($overlay -notmatch [regex]::Escape($token)){throw "Missing C8.56 overlay token: $token"}
+          $layer=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxNativeVtkAnchorLayer.cs' -Raw
+          foreach($token in @('AsterMaxNativeVtkAnchorLayer','AddArrowWidget','RemoveArrowWidgets','TryResolveFeAnchor','AsterMaxRegionBindingInspector','FE POSITION','HARNESS_ONLY','POC WORLD ORIGIN · NOT MODEL DATA')) {
+            if($layer -notmatch [regex]::Escape($token)){throw "Missing C8.56 native anchor token: $token"}
           }
-          if($overlay -match 'solver_verified\s*=\s*true|surface_geometric_centroid_exact\s*=\s*true|load_direction_projection_qualified\s*=\s*true'){throw 'C8.56 must not claim solver/exact-surface/direction verification.'}
-          $integration=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxViewportProjectionIntegration.cs' -Raw
-          if($integration -notmatch 'InstallAsterMaxViewportProjectionOverlay'){throw 'Projection overlay not integrated.'}
+          if($layer -match 'solver_verified\s*=\s*true|surface_geometric_centroid_exact\s*=\s*true|load_direction_projection_qualified\s*=\s*true'){throw 'C8.56 must not claim solver/exact-surface/direction verification.'}
+          $integration=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxNativeVtkAnchorIntegration.cs' -Raw
+          foreach($token in @('InstallAsterMaxNativeVtkAnchorLayer','_vtk','AsterMaxNativeVtkAnchorLayer')){if($integration -notmatch [regex]::Escape($token)){throw "Missing native integration token: $token"}}
           $vtk=Get-Content 'build/PrePoMax-CodeAster/vtkControl/vtkControl.cs' -Raw
-          foreach($token in @('private vtkRenderer _renderer','SetWorldPoint','WorldToDisplay','GetDisplayPoint')) {
+          foreach($token in @('private vtkRenderer _renderer','public void AddArrowWidget','public void RemoveArrowWidgets','SetWorldPoint','WorldToDisplay','GetDisplayPoint')) {
             if($vtk -notmatch [regex]::Escape($token)){throw "Pinned vtkControl contract moved: $token"}
           }
-      - name: Launch and capture native GUI
+      - name: Launch native VTK projection proof and capture GUI
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
@@ -52,6 +52,7 @@ jobs:
           }
           "@
           New-Item -ItemType Directory -Force artifact | Out-Null
+          $env:ASTERMAX_VTK_ANCHOR_POC='1'
           $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
           $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
           $deadline=(Get-Date).AddSeconds(30)
@@ -60,18 +61,19 @@ jobs:
           if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
           [NativeWin56]::ShowWindow($p.MainWindowHandle,3)|Out-Null
           [NativeWin56]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
-          Start-Sleep -Seconds 3
+          Start-Sleep -Seconds 4
+          if($p.HasExited){throw 'GUI exited during native VTK anchor proof'}
           $r=New-Object NativeWin56+RECT; [NativeWin56]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null
           $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top
           if($w -lt 900 -or $h -lt 650){throw "Native window below evidence threshold: ${w}x${h}"}
           $bmp=New-Object Drawing.Bitmap $w,$h; $g=[Drawing.Graphics]::FromImage($bmp)
           try{$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
-          $png='artifact/C8.56_VTK_VIEWPORT_PROJECTION.png'; $bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-          @{schema='astermax.vtk-viewport-projection.v1';title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();pinned_vtk_world_to_display_contract=$true;fe_anchor_projection_implemented=$true;camera_refresh_timer=$true;surface_geometric_centroid_exact=$false;selection_geometry_mapping_qualified=$false;load_direction_projection_qualified=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false;commit='${{ github.sha }}'}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.56_EVIDENCE.json
+          $png='artifact/C8.56_NATIVE_VTK_ANCHORED_GLYPHS.png'; $bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+          @{schema='astermax.native-vtk-anchors.v2';title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();pinned_vtk_world_to_display_contract=$true;native_arrow_widget_contract=$true;harness_world_origin_poc_requested=$true;fe_anchor_to_native_widget_path_implemented=$true;loaded_model_anchor_runtime_proven=$false;surface_geometric_centroid_exact=$false;selection_geometry_mapping_qualified=$false;load_direction_projection_qualified=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false;commit='${{ github.sha }}'}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.56_EVIDENCE.json
           Stop-Process -Id $p.Id -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C8.56-VTK-Viewport-Projection-${{ github.sha }}
+          name: AsterMax-C8.56-Native-VTK-Anchored-Glyphs-${{ github.sha }}
           path: artifact/*
           if-no-files-found: error
           retention-days: 14
