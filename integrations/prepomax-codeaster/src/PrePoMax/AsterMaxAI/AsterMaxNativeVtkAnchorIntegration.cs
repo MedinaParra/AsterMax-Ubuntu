@@ -31,7 +31,9 @@ namespace PrePoMax
                 AsterMaxCodeAsterGenerationHarness generationHarness = new AsterMaxCodeAsterGenerationHarness(_controller);
                 BeginInvoke((System.Action)(() => generationHarness.RunIfRequested()));
 
-                FormClosed += (fs, fe) =>
+                // C8.75: dispose VTK-backed anchor widgets while FrmMain and vtkRenderer are still alive.
+                // FormClosed is too late: WinForms/VTK teardown may already have invalidated the native renderer.
+                FormClosing += (fs, fe) =>
                 {
                     if (_asterMaxNativeVtkAnchorLayer != null)
                     {
