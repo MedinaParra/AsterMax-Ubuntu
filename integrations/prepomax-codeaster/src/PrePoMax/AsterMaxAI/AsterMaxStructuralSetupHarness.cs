@@ -9,8 +9,6 @@ using CaeModel;
 
 namespace PrePoMax.AsterMaxAI
 {
-    // CI-only structural setup qualification. It consumes the real STEP->NetGen mesh created by C8.60,
-    // then uses the native Controller model APIs to add material/section/step/BC/load. It does not run a solver.
     internal sealed class AsterMaxStructuralSetupHarness
     {
         private readonly Controller _controller;
@@ -25,12 +23,12 @@ namespace PrePoMax.AsterMaxAI
             int fixedNodeCount=0, loadNodeId=-1, materialCount=0, sectionCount=0, stepCount=0, bcCount=0, loadCount=0;
             double minX=Double.NaN, maxX=Double.NaN, loadX=Double.NaN, loadY=Double.NaN, loadZ=Double.NaN;
             string meshPartName="", unitSystem="", error="";
-            const string materialName="AsterMax Steel Demo";
-            const string sectionName="AsterMax Solid Section";
-            const string stepName="Static Structural";
+            const string materialName="AsterMax_Steel_Demo";
+            const string sectionName="AsterMax_Solid_Section";
+            const string stepName="Static_Structural";
             const string fixedSetName="FIXED_XMIN";
-            const string fixedName="Fixed Support";
-            const string loadName="Force XMAX";
+            const string fixedName="Fixed_Support";
+            const string loadName="Force_XMAX";
             try
             {
                 FeModel model=_controller.Model;
@@ -57,7 +55,6 @@ namespace PrePoMax.AsterMaxAI
                 _controller.AddNodeSet(new FeNodeSet(fixedSetName,fixedIds));
 
                 Material material=new Material(materialName);
-                // Values are intentionally recorded as model-system values; C8.61 does not claim a solver-unit interpretation.
                 material.AddProperty(new Elastic(new double[][] { new double[] { 210000.0, 0.30, 293.15 } }));
                 _controller.AddMaterial(material);
                 materialAdded=model.Materials.ContainsKey(materialName);
@@ -74,7 +71,6 @@ namespace PrePoMax.AsterMaxAI
                 _controller.AddBoundaryCondition(stepName,fixedBc);
                 fixedAdded=model.StepCollection.GetStep(stepName).BoundaryConditions.ContainsKey(fixedName);
 
-                // Point load on the deterministic maximum-X mesh node. Numeric component is setup evidence only; no solver claim.
                 CLoad force=new CLoad(loadName,loadNodeId,1000.0,0.0,0.0,false,false,0.0);
                 _controller.AddLoad(stepName,force);
                 loadAdded=model.StepCollection.GetStep(stepName).Loads.ContainsKey(loadName);
@@ -110,7 +106,7 @@ namespace PrePoMax.AsterMaxAI
                 "  \"mesh_part_name\": "+Json(part)+",\n"+
                 "  \"model_unit_system_observed\": "+Json(units)+",\n"+
                 "  \"material_added\": "+(mat?"true":"false")+",\n"+
-                "  \"material_name\": \"AsterMax Steel Demo\",\n  \"elastic_E_model_value\": 210000.0,\n  \"poisson_ratio\": 0.30,\n"+
+                "  \"material_name\": \"AsterMax_Steel_Demo\",\n  \"elastic_E_model_value\": 210000.0,\n  \"poisson_ratio\": 0.30,\n"+
                 "  \"material_solver_unit_interpretation_qualified\": false,\n"+
                 "  \"solid_section_added\": "+(sec?"true":"false")+",\n"+
                 "  \"static_step_added\": "+(step?"true":"false")+",\n"+
