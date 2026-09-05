@@ -110,36 +110,24 @@ jobs:
           grep -F 'E=210000' artifact/c8-64-solve/astermax_c862_static.comm
           grep -F 'FX=1000' artifact/c8-64-solve/astermax_c862_static.comm
           sha256sum artifact/c8-64-solve/astermax_c862_static.{comm,mail,export} | tee artifact/c8-64-solve/PRE_POSTPROCESS_SHA256SUMS.txt
-      - name: Add fail-closed result and reaction extraction only
+      - name: Add fail-closed reaction extraction only
         run: |
           python - <<'PY'
-          import hashlib,json,pathlib,re
+          import hashlib,json,pathlib
           root=pathlib.Path('artifact/c8-64-solve')
           p=root/'astermax_c862_static.comm'
           original=p.read_text(encoding='utf-8')
           physics_marker='result = CALC_CHAMP('
           if original.count(physics_marker)!=1: raise SystemExit('Expected exactly one CALC_CHAMP marker.')
           physics_prefix=original.split(physics_marker,1)[0]
+          for title in ('PPM_DEPL','PPM_STRESS_N','PPM_STRESS_S','PPM_STRAIN_N','PPM_STRAIN_S'):
+              if original.count("TITRE='"+title+"'") != 1:
+                  raise SystemExit('Expected exactly one native result table in Windows-generated study: '+title)
           calc_old="    CRITERES=('SIEQ_ELNO', 'SIEQ_NOEU'))"
           calc_new="    CRITERES=('SIEQ_ELNO', 'SIEQ_NOEU'),\n    FORCE=('REAC_NODA',))"
           if original.count(calc_old)!=1: raise SystemExit('Expected translator CALC_CHAMP tail not found exactly once.')
           if original.count('\nFIN()')!=1: raise SystemExit('Expected exactly one FIN() marker.')
           table_block=r'''
-          tab_depl = CREA_TABLE(RESU=_F(
-              RESULTAT=result, TOUT='OUI', NOM_CHAM='DEPL', NOM_CMP=('DX','DY','DZ')))
-          IMPR_TABLE(TABLE=tab_depl, TITRE='PPM_DEPL', UNITE=8, FORMAT='TABLEAU',
-                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','DX','DY','DZ'))
-
-          tab_sig_n = CREA_TABLE(RESU=_F(
-              RESULTAT=result, TOUT='OUI', NOM_CHAM='SIGM_NOEU', NOM_CMP=('SIXX','SIYY','SIZZ')))
-          IMPR_TABLE(TABLE=tab_sig_n, TITRE='PPM_STRESS_N', UNITE=8, FORMAT='TABLEAU',
-                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','SIXX','SIYY','SIZZ'))
-
-          tab_sig_s = CREA_TABLE(RESU=_F(
-              RESULTAT=result, TOUT='OUI', NOM_CHAM='SIGM_NOEU', NOM_CMP=('SIXY','SIYZ','SIXZ')))
-          IMPR_TABLE(TABLE=tab_sig_s, TITRE='PPM_STRESS_S', UNITE=8, FORMAT='TABLEAU',
-                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','SIXY','SIYZ','SIXZ'))
-
           tab_reac = CREA_TABLE(RESU=_F(
               RESULTAT=result, GROUP_NO='N_FIXED_XMIN', NOM_CHAM='REAC_NODA', NOM_CMP=('DX','DY','DZ')))
           IMPR_TABLE(TABLE=tab_reac, TITRE='PPM_REACTION', UNITE=8, FORMAT='TABLEAU',
@@ -147,17 +135,21 @@ jobs:
           '''
           patched=original.replace(calc_old,calc_new).replace('\nFIN()', '\n'+table_block+'\nFIN()')
           if patched.split(physics_marker,1)[0] != physics_prefix:
-              raise SystemExit('Physics prefix changed while adding postprocessing.')
+              raise SystemExit('Physics prefix changed while adding reaction postprocessing.')
+          for title in ('PPM_DEPL','PPM_STRESS_N','PPM_STRESS_S','PPM_STRAIN_N','PPM_STRAIN_S','PPM_REACTION'):
+              if patched.count("TITRE='"+title+"'") != 1:
+                  raise SystemExit('Postprocess table count is not exactly one: '+title)
           p.write_text(patched,encoding='utf-8')
           def sha_bytes(b): return hashlib.sha256(b).hexdigest()
           evidence={
-            'schema':'astermax.c8.64.postprocess-augmentation.v1',
-            'postprocess_only_augmented':True,
+            'schema':'astermax.c8.64.postprocess-augmentation.v2',
+            'reaction_postprocess_only_augmented':True,
+            'native_result_tables_preserved':True,
             'physics_prefix_unchanged':True,
             'physics_prefix_sha256':sha_bytes(physics_prefix.encode()),
             'windows_original_comm_sha256':sha_bytes(original.encode()),
             'augmented_comm_sha256':sha_bytes(patched.encode()),
-            'requested_fields':['DEPL','SIGM_NOEU','SIEQ_NOEU','EPSI_NOEU','REAC_NODA'],
+            'requested_additional_field':'REAC_NODA',
             'reaction_group':'N_FIXED_XMIN',
             'industrial_validation':False,
             'ansys_equivalence':False,
@@ -259,7 +251,7 @@ jobs:
           def sha(path):
               h=hashlib.sha256(); h.update(path.read_bytes()); return h.hexdigest()
           evidence={
-            'schema':'astermax.c8.64.numerical-reaction-admission.v1',
+            'schema':'astermax.c8.64.numerical-reaction-admission.v2',
             'solver':'Code_Aster 17.4.0',
             'unit_system':'mm-N-MPa',
             'solver_executed':True,
