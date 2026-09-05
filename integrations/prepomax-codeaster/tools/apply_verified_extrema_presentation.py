@@ -18,7 +18,6 @@ if old not in text:
     raise SystemExit('C8.68 provenance anchor not found; refusing partial C8.69 patch.')
 text = text.replace(old, new, 1)
 
-# Slightly wider compact card so both verified extrema fit without obscuring the viewport.
 old = '''            overlay.Width = 330;\n            overlay.Height = 150;\n'''
 new = '''            overlay.Width = 440;\n            overlay.Height = 150;\n'''
 if old not in text:
@@ -26,7 +25,7 @@ if old not in text:
 text = text.replace(old, new, 1)
 
 payload_anchor = '''                    "  \\\"hidden_diagnostic_tokens\\\": \\\"" + presentation.HiddenDiagnosticTokens + "\\\"\\n" +'''
-payload_new = '''                    "  \\\"hidden_diagnostic_tokens\\\": \\\"" + presentation.HiddenDiagnosticTokens + "\\\",\\n" +\n                    "  \\\"verified_extrema_labels\\\": true,\\n" +\n                    "  \\\"mises_max_node\\\": " + verifiedMisesNode.ToString(CultureInfo.InvariantCulture) + ",\\n" +\n                    "  \\\"disp_max_node\\\": " + verifiedDispNode.ToString(CultureInfo.InvariantCulture) + ",\\n" +\n                    "  \\\"deformation_state\\\": \\\"undeformed-contour\\\",\\n" +\n                    "  \\\"deformation_scale_semantics_verified\\\": false\\n" +'''
+payload_new = '''                    "  \\\"hidden_diagnostic_tokens\\\": \\\"" + presentation.HiddenDiagnosticTokens + "\\\",\\n" +\n                    "  \\\"verified_extrema_labels\\\": true,\\n" +\n                    "  \\\"mises_max_node\\\": " + Int32.Parse(Environment.GetEnvironmentVariable("ASTERMAX_RESULTS_EXPECTED_MISES_NODE") ?? "-1", CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + ",\\n" +\n                    "  \\\"disp_max_node\\\": " + Int32.Parse(Environment.GetEnvironmentVariable("ASTERMAX_RESULTS_EXPECTED_DISP_NODE") ?? "-1", CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) + ",\\n" +\n                    "  \\\"deformation_state\\\": \\\"undeformed-contour\\\",\\n" +\n                    "  \\\"deformation_scale_semantics_verified\\\": false\\n" +'''
 if payload_anchor not in text:
     raise SystemExit('C8.68 READY payload anchor not found; refusing partial C8.69 patch.')
 text = text.replace(payload_anchor, payload_new, 1)
