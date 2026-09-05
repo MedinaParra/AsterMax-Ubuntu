@@ -43,16 +43,16 @@ namespace PrePoMax.AsterMaxAI
             try { if (_controller != null) model = _controller.Model; } catch { }
 
             ObservedSummary next = new ObservedSummary();
-            next.Fixed = ProbeTypedCount(model,
-                new[] { "BoundaryConditions", "Constraints", "Bcs" },
+            // C8.59 correction: BC/load collections belong to Step objects, not directly to FeModel.
+            next.Fixed = ProbeStepTypedCount(model, "BoundaryConditions",
                 new[] { "fixed", "constraint", "displacement", "support" });
-            next.Forces = ProbeTypedCount(model,
-                new[] { "Loads", "Forces" },
-                new[] { "force", "concentrated" });
-            next.Pressures = ProbeTypedCount(model,
-                new[] { "Loads", "Pressures" },
+            next.Forces = ProbeStepTypedCount(model, "Loads",
+                new[] { "cload", "force", "concentrated" });
+            next.Pressures = ProbeStepTypedCount(model, "Loads",
                 new[] { "pressure" });
-            next.Mesh = ProbePresence(model, new[] { "Mesh", "Meshes", "FeMesh" });
+            // C8.59 correction: FeModel.Mesh always exists, even before FE meshing. Count actual
+            // elements instead of treating the mere mesh container as one mesh object.
+            next.Mesh = ProbeMeshElementCount(model);
             next.ModelPresent = model != null;
             _summary = next;
             Invalidate();
@@ -80,7 +80,7 @@ namespace PrePoMax.AsterMaxAI
                 DrawGlyphRow(g, 52, Glyph.Fixed, "FIXED SUPPORT", _summary.Fixed, rowFont);
                 DrawGlyphRow(g, 82, Glyph.Force, "FORCE", _summary.Forces, rowFont);
                 DrawGlyphRow(g, 112, Glyph.Pressure, "PRESSURE", _summary.Pressures, rowFont);
-                DrawGlyphRow(g, 142, Glyph.Mesh, "MESH EDGES", _summary.Mesh, rowFont);
+                DrawGlyphRow(g, 142, Glyph.Mesh, "MESH ELEMENTS", _summary.Mesh, rowFont);
 
                 TextRenderer.DrawText(g, "NOT ENTITY-ANCHORED · NOT SOLVER VERIFIED", small,
                     new Rectangle(12, 178, 190, 18), AsterMaxUiTheme.Warning,
@@ -146,55 +146,72 @@ namespace PrePoMax.AsterMaxAI
             }
         }
 
-        private static ProbeState ProbePresence(object root, string[] names)
+        private static ProbeState ProbeMeshElementCount(object model)
         {
-            if (root == null) return new ProbeState(true, 0);
-            object value;
-            if (!TryGetPropertyValue(root, names, out value)) return ProbeState.Unknown;
-            if (value == null) return new ProbeState(true, 0);
+            if (model == null) return new ProbeState(true, 0);
+            object mesh;
+            if (!TryGetPropertyValue(model, new[] { "Mesh" }, out mesh)) return ProbeState.Unknown;
+            if (mesh == null) return new ProbeState(true, 0);
+            object elements;
+            if (!TryGetPropertyValue(mesh, new[] { "Elements" }, out elements)) return ProbeState.Unknown;
+            if (elements == null) return new ProbeState(true, 0);
             int count;
-            if (TryGetCount(value, out count)) return new ProbeState(true, count);
-            return new ProbeState(true, 1);
+            return TryGetCount(elements, out count) ? new ProbeState(true, count) : ProbeState.Unknown;
         }
 
-        private static ProbeState ProbeTypedCount(object root, string[] collectionNames, string[] typeTokens)
+        private static ProbeState ProbeStepTypedCount(object model, string collectionName, string[] typeTokens)
         {
-            if (root == null) return new ProbeState(true, 0);
-            object value;
-            if (!TryGetPropertyValue(root, collectionNames, out value)) return ProbeState.Unknown;
-            if (value == null) return new ProbeState(true, 0);
-
-            IEnumerable enumerable = value as IEnumerable;
-            if (enumerable == null)
-            {
-                int count;
-                if (TryGetCount(value, out count)) return new ProbeState(true, count);
-                return new ProbeState(true, 1);
-            }
-
+            if (model == null) return new ProbeState(true, 0);
+            object stepCollection;
+            if (!TryGetPropertyValue(model, new[] { "StepCollection" }, out stepCollection) || stepCollection == null)
+                return ProbeState.Unknown;
+            object stepsRaw;
+            if (!TryGetPropertyValue(stepCollection, new[] { "StepsList" }, out stepsRaw) || stepsRaw == null)
+                return ProbeState.Unknown;
+            IEnumerable steps = stepsRaw as IEnumerable;
+            if (steps == null) return ProbeState.Unknown;
             int matched = 0;
-            int total = 0;
             try
             {
-                foreach (object item in enumerable)
+                foreach (object rawStep in steps)
                 {
-                    total++;
-                    if (item == null) continue;
-                    string haystack = (item.GetType().Name + " " + item.ToString()).ToLowerInvariant();
-                    foreach (string token in typeTokens)
+                    object step = UnwrapValue(rawStep);
+                    if (step == null) continue;
+                    object collection;
+                    if (!TryGetPropertyValue(step, new[] { collectionName }, out collection) || collection == null) continue;
+                    IEnumerable items = collection as IEnumerable;
+                    if (items == null) continue;
+                    foreach (object rawItem in items)
                     {
-                        if (haystack.Contains(token.ToLowerInvariant())) { matched++; break; }
+                        object item = UnwrapValue(rawItem);
+                        if (item == null) continue;
+                        string haystack = (item.GetType().Name + " " + item.ToString()).ToLowerInvariant();
+                        foreach (string token in typeTokens)
+                        {
+                            if (haystack.Contains(token.ToLowerInvariant())) { matched++; break; }
+                        }
                     }
                 }
-                if (matched > 0) return new ProbeState(true, matched);
-                return new ProbeState(true, total);
+                return new ProbeState(true, matched);
             }
             catch { return ProbeState.Unknown; }
+        }
+
+        private static object UnwrapValue(object item)
+        {
+            if (item == null) return null;
+            try
+            {
+                PropertyInfo p = item.GetType().GetProperty("Value", BindingFlags.Public | BindingFlags.Instance);
+                return p == null ? item : (p.GetValue(item, null) ?? item);
+            }
+            catch { return item; }
         }
 
         private static bool TryGetPropertyValue(object root, string[] names, out object value)
         {
             value = null;
+            if (root == null) return false;
             Type type = root.GetType();
             foreach (string name in names)
             {

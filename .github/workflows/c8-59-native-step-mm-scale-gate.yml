@@ -1,0 +1,112 @@
+name: C8.59 Native STEP mm Scale Gate Windows
+
+on:
+  push:
+    branches: [agent/c8-59-native-step-mm-scale-gate]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify pinned STEP import contract
+        shell: pwsh
+        run: |
+          $controller=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/Controller.cs' -Raw
+          foreach($token in @('public void ImportFile(string fileName, bool onlyMaterials)','extension == ".stp" || extension == ".step"','ImportCADAssemblyFile(fileName, "STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS")')) {
+            if($controller -notmatch [regex]::Escape($token)){throw "Pinned Controller STEP contract changed: $token"}
+          }
+          $h=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxStepMmHarness.cs' -Raw
+          foreach($token in @('ASTERMAX_STEP_MM_FIXTURE','Controller.ImportFile','_controller.ImportFile(stepPath,false)','BoundingBox','expected_extents_mm','step_mm_scale_qualified','meter_scale_signature_detected','x1000_scale_signature_detected')) {
+            if($h -notmatch [regex]::Escape($token)){throw "Missing C8.59 token: $token"}
+          }
+          if($h -match 'solver_verified\s*[=:]\s*true|industrial_validation\s*[=:]\s*true|ansys_equivalence\s*[=:]\s*true'){throw 'C8.59 must not synthesize validation claims.'}
+      - name: Fetch pinned CAD runtime and STEP fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){
+            $source=Join-Path $runtimeRoot $folder
+            if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force}
+          }
+          $fixture='build/AsterMax_C8.59_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'Pinned STEP fixture no longer declares SI millimetres.'}
+          if($raw -notmatch '537\.000000' -or $raw -notmatch '162\.000000' -or $raw -notmatch '\-254\.000000'){throw 'Pinned STEP fixture dimensional sentinels changed.'}
+          "ASTERMAX_STEP_FIXTURE=$((Resolve-Path $fixture).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Launch native STEP/mm qualification proof
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public static class NativeWin59 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $env:ASTERMAX_STEP_MM_FIXTURE='1'
+          $env:ASTERMAX_STEP_MM_PATH=$env:ASTERMAX_STEP_FIXTURE
+          $env:ASTERMAX_STEP_MM_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.59_STEP_MM_RUNTIME.json')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $evidence=$env:ASTERMAX_STEP_MM_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(30)
+          while(-not (Test-Path $evidence) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during STEP import'}}
+          if(-not (Test-Path $evidence)){throw 'C8.59 runtime evidence was not written.'}
+          $raw=Get-Content $evidence -Raw
+          Write-Host '--- C8.59 runtime evidence ---'; Write-Host $raw; Write-Host '--- end runtime evidence ---'
+          $r=$raw | ConvertFrom-Json
+          if(-not $r.step_source_declares_si_millimetres){throw "STEP unit declaration gate failed: $($r.error)"}
+          if(-not $r.native_step_imported){throw "Native STEP import failed: $($r.error)"}
+          if(-not $r.bounding_box_finite){throw "Imported geometry bounding box invalid: $($r.error)"}
+          if(-not $r.step_mm_scale_qualified){throw "STEP/mm scale qualification failed: $($r.error)"}
+          if($r.meter_scale_signature_detected -or $r.x1000_scale_signature_detected){throw 'Catastrophic CAD unit scale signature detected.'}
+          if([int]$r.geometry_part_count -lt 1){throw 'Native STEP import produced no parts.'}
+          if($r.mesh_generated -or $r.solver_executed -or $r.solver_verified -or $r.industrial_validation -or $r.ansys_equivalence){throw 'C8.59 must remain CAD scale evidence only.'}
+          [NativeWin59]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 2
+          $rect=New-Object NativeWin59+RECT; [NativeWin59]::GetWindowRect($p.MainWindowHandle,[ref]$rect)|Out-Null
+          $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
+          $bmp=New-Object Drawing.Bitmap $w,$h;$g=[Drawing.Graphics]::FromImage($bmp)
+          try{$g.CopyFromScreen($rect.Left,$rect.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
+          $png='artifact/C8.59_NATIVE_STEP_MM_IMPORT.png';$bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png);$bmp.Dispose()
+          @{schema='astermax.native-step-mm-scale-gate.v1';commit='${{ github.sha }}';source_step_sha256=[string]$r.step_sha256;source_declares_mm=$true;native_step_imported=$true;geometry_part_count=[int]$r.geometry_part_count;geometry_node_count=[int]$r.geometry_node_count;observed_extents_mm=@([double]$r.observed_extent_x_mm,[double]$r.observed_extent_y_mm,[double]$r.observed_extent_z_mm);expected_extents_mm=@(537.0,162.0,254.0);step_mm_scale_qualified=$true;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();mesh_generated=$false;solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.59_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.59-Native-STEP-mm-Scale-Gate-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: warn
+          retention-days: 14
