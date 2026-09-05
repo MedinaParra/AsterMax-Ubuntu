@@ -18,11 +18,11 @@ namespace PrePoMax.AsterMaxAI
         {
             if (!String.Equals(Environment.GetEnvironmentVariable("ASTERMAX_STRUCTURAL_SETUP_FIXTURE"), "1", StringComparison.Ordinal)) return;
             string evidencePath = Environment.GetEnvironmentVariable("ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH");
-            bool meshPresent=false, materialAdded=false, sectionAdded=false, stepAdded=false, fixedAdded=false, loadAdded=false;
+            bool meshPresent=false, unitLocked=false, materialAdded=false, sectionAdded=false, stepAdded=false, fixedAdded=false, loadAdded=false;
             bool regionsDistinct=false, fixedRegionNonEmpty=false, loadNodeExists=false, modelValidityPass=false, setupQualified=false;
             int fixedNodeCount=0, loadNodeId=-1, materialCount=0, sectionCount=0, stepCount=0, bcCount=0, loadCount=0;
             double minX=Double.NaN, maxX=Double.NaN, loadX=Double.NaN, loadY=Double.NaN, loadZ=Double.NaN;
-            string meshPartName="", unitSystem="", error="", invalidSummary="";
+            string meshPartName="", unitSystemType="", lengthUnit="", forceUnit="", pressureUnit="", error="", invalidSummary="";
             const string materialName="AsterMax_Steel_Demo";
             const string sectionName="AsterMax_Solid_Section";
             const string stepName="Static_Structural";
@@ -35,12 +35,24 @@ namespace PrePoMax.AsterMaxAI
                 FeModel model=_controller.Model;
                 FeMesh mesh=model==null?null:model.Mesh;
                 meshPresent=mesh!=null && mesh.Parts!=null && mesh.Parts.Count>0 && mesh.Nodes!=null && mesh.Nodes.Count>0 && mesh.Elements!=null && mesh.Elements.Count>0;
-                if(!meshPresent) throw new InvalidOperationException("C8.61 requires the qualified C8.60 FE mesh in the current model.");
+                if(!meshPresent) throw new InvalidOperationException("C8.61/C8.62 requires the qualified C8.60 FE mesh in the current model.");
                 if(model.Materials.Count!=0 || model.Sections.Count!=0 || model.StepCollection.StepsList.Count!=0)
-                    throw new InvalidOperationException("C8.61 requires an unconfigured FE model; refusing to mix qualification data with existing setup.");
+                    throw new InvalidOperationException("Structural qualification requires an unconfigured FE model; refusing to mix qualification data with existing setup.");
+
+                // C8.62 unit lock: this must happen before any dimensional material/load values are created.
+                // PrePoMax's pinned UnitSystem contract defines MM_TON_S_C as mm, N and MPa.
+                model.UnitSystem=new UnitSystem(UnitSystemType.MM_TON_S_C);
+                unitSystemType=model.UnitSystem.UnitSystemType.ToString();
+                lengthUnit=model.UnitSystem.LengthUnitAbbreviation;
+                forceUnit=model.UnitSystem.ForceUnitAbbreviation;
+                pressureUnit=model.UnitSystem.PressureUnitAbbreviation;
+                unitLocked=model.UnitSystem.UnitSystemType==UnitSystemType.MM_TON_S_C &&
+                           String.Equals(lengthUnit,"mm",StringComparison.OrdinalIgnoreCase) &&
+                           String.Equals(forceUnit,"N",StringComparison.OrdinalIgnoreCase) &&
+                           String.Equals(pressureUnit,"MPa",StringComparison.OrdinalIgnoreCase);
+                if(!unitLocked) throw new InvalidOperationException("Failed to lock model unit system to the qualified mm/N/MPa contract.");
 
                 meshPartName=mesh.Parts.First().Key;
-                unitSystem=model.UnitSystem==null?"null":model.UnitSystem.ToString();
                 minX=mesh.Nodes.Values.Min(n=>n.X); maxX=mesh.Nodes.Values.Max(n=>n.X);
                 double tol=Math.Max(1E-6,(maxX-minX)*1E-6);
                 int[] fixedIds=mesh.Nodes.Values.Where(n=>Math.Abs(n.X-minX)<=tol).Select(n=>n.Id).OrderBy(id=>id).ToArray();
@@ -84,33 +96,38 @@ namespace PrePoMax.AsterMaxAI
                 var invalid=model.CheckValidity(new System.Collections.Generic.List<Tuple<NamedClass,string>>());
                 invalidSummary=invalid==null?"NULL":String.Join(" | ",invalid);
                 modelValidityPass=invalid!=null && invalid.Length==0;
-                setupQualified=meshPresent && materialAdded && sectionAdded && stepAdded && fixedAdded && loadAdded && fixedRegionNonEmpty && loadNodeExists && regionsDistinct && modelValidityPass;
+                setupQualified=meshPresent && unitLocked && materialAdded && sectionAdded && stepAdded && fixedAdded && loadAdded && fixedRegionNonEmpty && loadNodeExists && regionsDistinct && modelValidityPass;
                 if(!setupQualified) throw new InvalidOperationException("Structural setup qualification gate did not pass. Invalid: "+invalidSummary);
 
                 _controller.CurrentView=ViewGeometryModelResults.Model;
                 _controller.DrawSymbolsForStep(stepName,true);
             }
             catch(Exception ex) { error=ex.GetType().Name+": "+ex.Message; }
-            WriteEvidence(evidencePath,meshPresent,materialAdded,sectionAdded,stepAdded,fixedAdded,loadAdded,regionsDistinct,
+            WriteEvidence(evidencePath,meshPresent,unitLocked,materialAdded,sectionAdded,stepAdded,fixedAdded,loadAdded,regionsDistinct,
                           fixedRegionNonEmpty,loadNodeExists,modelValidityPass,setupQualified,fixedNodeCount,loadNodeId,
-                          materialCount,sectionCount,stepCount,bcCount,loadCount,minX,maxX,loadX,loadY,loadZ,meshPartName,unitSystem,invalidSummary,error);
+                          materialCount,sectionCount,stepCount,bcCount,loadCount,minX,maxX,loadX,loadY,loadZ,meshPartName,
+                          unitSystemType,lengthUnit,forceUnit,pressureUnit,invalidSummary,error);
         }
 
         private static bool Finite(double v){return !Double.IsNaN(v)&&!Double.IsInfinity(v);}
         private static string Num(double v){return Finite(v)?v.ToString("R",CultureInfo.InvariantCulture):"null";}
         private static string Json(string s){return "\""+(s??"").Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r"," ").Replace("\n"," ")+"\"";}
-        private static void WriteEvidence(string path,bool mesh,bool mat,bool sec,bool step,bool fixedBc,bool load,bool distinct,bool fixedNonEmpty,bool loadExists,bool valid,bool qualified,
-            int fixedNodes,int loadNode,int mats,int secs,int steps,int bcs,int loads,double minX,double maxX,double lx,double ly,double lz,string part,string units,string invalid,string error)
+        private static void WriteEvidence(string path,bool mesh,bool unitLocked,bool mat,bool sec,bool step,bool fixedBc,bool load,bool distinct,bool fixedNonEmpty,bool loadExists,bool valid,bool qualified,
+            int fixedNodes,int loadNode,int mats,int secs,int steps,int bcs,int loads,double minX,double maxX,double lx,double ly,double lz,string part,
+            string unitType,string lengthUnit,string forceUnit,string pressureUnit,string invalid,string error)
         {
             if(String.IsNullOrWhiteSpace(path)) return; string dir=Path.GetDirectoryName(path); if(!String.IsNullOrWhiteSpace(dir))Directory.CreateDirectory(dir);
             string j="{\n"+
-                "  \"schema\": \"astermax.structural-model-setup-qualification.v1\",\n"+
+                "  \"schema\": \"astermax.structural-model-setup-qualification.v2\",\n"+
                 "  \"native_fe_mesh_present\": "+(mesh?"true":"false")+",\n"+
                 "  \"mesh_part_name\": "+Json(part)+",\n"+
-                "  \"model_unit_system_observed\": "+Json(units)+",\n"+
+                "  \"model_unit_system_type\": "+Json(unitType)+",\n"+
+                "  \"length_unit\": "+Json(lengthUnit)+",\n"+
+                "  \"force_unit\": "+Json(forceUnit)+",\n"+
+                "  \"pressure_unit\": "+Json(pressureUnit)+",\n"+
+                "  \"mm_n_mpa_unit_lock\": "+(unitLocked?"true":"false")+",\n"+
                 "  \"material_added\": "+(mat?"true":"false")+",\n"+
-                "  \"material_name\": \"AsterMax_Steel_Demo\",\n  \"elastic_E_model_value\": 210000.0,\n  \"poisson_ratio\": 0.30,\n"+
-                "  \"material_solver_unit_interpretation_qualified\": false,\n"+
+                "  \"material_name\": \"AsterMax_Steel_Demo\",\n  \"elastic_E_model_value\": 210000.0,\n  \"elastic_E_interpretation_mpa\": 210000.0,\n  \"poisson_ratio\": 0.30,\n"+
                 "  \"solid_section_added\": "+(sec?"true":"false")+",\n"+
                 "  \"static_step_added\": "+(step?"true":"false")+",\n"+
                 "  \"fixed_support_added\": "+(fixedBc?"true":"false")+",\n"+
@@ -120,7 +137,7 @@ namespace PrePoMax.AsterMaxAI
                 "  \"load_region_type\": \"NodeSetName\",\n  \"load_region_name\": \"LOAD_XMAX_NODE\",\n"+
                 "  \"load_node_id\": "+loadNode.ToString(CultureInfo.InvariantCulture)+",\n"+
                 "  \"load_node_exists\": "+(loadExists?"true":"false")+",\n"+
-                "  \"load_vector_model_values\": [1000.0,0.0,0.0],\n"+
+                "  \"load_vector_model_values\": [1000.0,0.0,0.0],\n  \"load_vector_interpretation_n\": [1000.0,0.0,0.0],\n"+
                 "  \"xmin_xmax_mm\": ["+Num(minX)+","+Num(maxX)+"],\n"+
                 "  \"load_node_xyz_mm\": ["+Num(lx)+","+Num(ly)+","+Num(lz)+"],\n"+
                 "  \"fixed_and_load_regions_distinct\": "+(distinct?"true":"false")+",\n"+
