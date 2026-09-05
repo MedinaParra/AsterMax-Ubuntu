@@ -1,0 +1,169 @@
+name: C8.63 Verified Static Solve
+
+on:
+  push:
+    branches: [agent/c8-63-verified-static-solve]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-63-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-windows-study:
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap pinned AsterMax tree
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Fetch pinned CAD runtime and STEP/mm fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $source=Join-Path $runtimeRoot $folder; if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.63_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres.'}
+          "ASTERMAX_STEP_FIXTURE=$((Resolve-Path $fixture).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate qualified Windows structural study
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/C8.63_study | Out-Null
+          $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+          $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_STEP_FIXTURE
+          $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.63_STEP_NETGEN_RUNTIME.json')
+          $env:ASTERMAX_STRUCTURAL_SETUP_FIXTURE='1'
+          $env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.63_STRUCTURAL_SETUP_RUNTIME.json')
+          $env:ASTERMAX_CODEASTER_GENERATION_FIXTURE='1'
+          $env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.63_CODEASTER_GENERATION_RUNTIME.json')
+          $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR=(Join-Path $PWD 'artifact/C8.63_study')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native AsterMax window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $meshEv=$env:ASTERMAX_STEP_MESH_EVIDENCE_PATH; $setupEv=$env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH; $genEv=$env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(240)
+          while(((-not(Test-Path $meshEv))-or(-not(Test-Path $setupEv))-or(-not(Test-Path $genEv))) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during study generation'}}
+          foreach($ev in @($meshEv,$setupEv,$genEv)){if(-not(Test-Path $ev)){throw "Missing runtime evidence: $ev"}}
+          $m=Get-Content $meshEv -Raw|ConvertFrom-Json; $s=Get-Content $setupEv -Raw|ConvertFrom-Json; $g=Get-Content $genEv -Raw|ConvertFrom-Json
+          if(-not $m.step_to_netgen_mesh_qualified){throw "STEP/mesh gate failed: $($m.error)"}
+          if(-not $s.structural_setup_qualified -or -not $s.mm_n_mpa_unit_lock){throw "Structural setup gate failed: $($s.error)"}
+          if(-not $g.unit_pmx_codeaster_generation_qualified){throw "Code_Aster generation gate failed: $($g.error)"}
+          if($g.solver_executed -or $g.solver_verified){throw 'Generation stage must not claim solver execution.'}
+          foreach($f in @('astermax_c862_static.comm','astermax_c862_static.mail','astermax_c862_static.export')){$fp=Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR $f;if(-not(Test-Path $fp)){throw "Missing generated study file: $f"}}
+          @{schema='astermax.c8.63.windows-generation.v1';commit='${{ github.sha }}';step_mesh_qualified=$true;structural_setup_qualified=$true;mm_n_mpa_unit_lock=$true;codeaster_generation_qualified=$true;source_comm_sha256=(Get-FileHash (Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR 'astermax_c862_static.comm') -Algorithm SHA256).Hash.ToLowerInvariant();source_mail_sha256=(Get-FileHash (Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR 'astermax_c862_static.mail') -Algorithm SHA256).Hash.ToLowerInvariant();source_export_sha256=(Get-FileHash (Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR 'astermax_c862_static.export') -Algorithm SHA256).Hash.ToLowerInvariant();solver_executed=$false;solver_verified=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.63_WINDOWS_GENERATION.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: C8.63-Windows-Generated-Study-${{ github.sha }}
+          path: |
+            artifact/C8.63_study/**
+            artifact/C8.63_*RUNTIME.json
+            artifact/C8.63_WINDOWS_GENERATION.json
+          if-no-files-found: error
+          retention-days: 14
+
+  solve-code-aster:
+    needs: generate-windows-study
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: C8.63-Windows-Generated-Study-${{ github.sha }}
+          path: artifact/input
+      - name: Stage Windows-generated case without rewriting physics
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/c8-63-solve
+          cp artifact/input/C8.63_study/astermax_c862_static.{comm,mail,export} artifact/c8-63-solve/
+          test -s artifact/c8-63-solve/astermax_c862_static.comm
+          test -s artifact/c8-63-solve/astermax_c862_static.mail
+          test -s artifact/c8-63-solve/astermax_c862_static.export
+          grep -F 'MECA_STATIQUE' artifact/c8-63-solve/astermax_c862_static.comm
+          grep -F 'E=210000' artifact/c8-63-solve/astermax_c862_static.comm
+          grep -F 'FX=1000' artifact/c8-63-solve/astermax_c862_static.comm
+          sha256sum artifact/c8-63-solve/astermax_c862_static.{comm,mail,export} | tee artifact/c8-63-solve/PRE_SOLVE_SHA256SUMS.txt
+      - name: Genuine Code_Aster 17.4.0 solve
+        run: |
+          set -euxo pipefail
+          docker pull simvia/code_aster:17.4.0
+          chmod -R a+rwX artifact/c8-63-solve
+          docker run --rm -v "$PWD/artifact/c8-63-solve:/home/user/data" -w /home/user/data simvia/code_aster:17.4.0 bash -i -c 'run_aster astermax_c862_static.export' | tee artifact/c8-63-solve/CODE_ASTER_STDOUT.log
+          test -s artifact/c8-63-solve/astermax_c862_static.mess
+          test -s artifact/c8-63-solve/astermax_c862_static.rmed
+      - name: Fail-closed solver admission
+        run: |
+          python - <<'PY'
+          import hashlib,json,math,pathlib,re
+          root=pathlib.Path('artifact/c8-63-solve')
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          mess=root/'astermax_c862_static.mess'; rmed=root/'astermax_c862_static.rmed'
+          if not mess.exists() or mess.stat().st_size==0: raise SystemExit('Missing non-empty .mess')
+          if not rmed.exists() or rmed.stat().st_size==0: raise SystemExit('Missing non-empty .rmed')
+          text=mess.read_text(encoding='utf-8',errors='replace')
+          fatal=[]
+          for pat in (r'<F>',r'ERREUR FATALE',r'FATAL_ERROR',r'EXECUTION_CODE_ASTER.*FAILED'):
+              if re.search(pat,text,re.I): fatal.append(pat)
+          if fatal: raise SystemExit('Fatal markers in .mess: '+','.join(fatal))
+          if not re.search(r'NORMAL|DIAGNOSTIC JOB.*OK|TOTAL_JOB',text,re.I):
+              raise SystemExit('No positive Code_Aster completion marker found in .mess')
+          evidence={
+            'schema':'astermax.c8.63.verified-static-solve.v1',
+            'solver':'Code_Aster 17.4.0',
+            'source':'Windows AsterMax C8.62 translator output',
+            'unit_system':'mm-N-MPa',
+            'source_model_E_mpa':210000.0,
+            'source_model_Fx_n':1000.0,
+            'solver_process_exit_zero':True,
+            'mess_nonempty':True,
+            'rmed_nonempty':True,
+            'fatal_markers':fatal,
+            'mess_sha256':sha(mess),
+            'rmed_sha256':sha(rmed),
+            'solver_executed':True,
+            'solver_verified':True,
+            'result_field_values_verified':False,
+            'reaction_equilibrium_verified':False,
+            'industrial_validation':False,
+            'ansys_equivalence':False,
+          }
+          (root/'C8.63_SOLVER_EVIDENCE.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Hash solver evidence
+        run: |
+          sha256sum artifact/c8-63-solve/* > artifact/c8-63-solve/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.63-Verified-Static-Solve-${{ github.sha }}
+          path: artifact/c8-63-solve/**
+          if-no-files-found: warn
+          retention-days: 14
