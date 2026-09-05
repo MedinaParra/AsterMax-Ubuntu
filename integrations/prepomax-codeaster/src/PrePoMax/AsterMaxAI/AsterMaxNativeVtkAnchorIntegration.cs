@@ -17,11 +17,14 @@ namespace PrePoMax
                 AsterMaxPmxRoundtripHarness pmxHarness = new AsterMaxPmxRoundtripHarness(_controller, _vtk, _asterMaxNativeVtkAnchorLayer);
                 BeginInvoke((System.Action)(() => pmxHarness.RunIfRequested()));
 
-                // C8.59 is a separate fail-closed CAD qualification path: a real STEP file is
-                // imported through Controller.ImportFile and its known millimetre extents are
-                // checked before any meshing or solver claim is allowed.
+                // C8.59 fail-closed CAD-only STEP/mm qualification path.
                 AsterMaxStepMmHarness stepHarness = new AsterMaxStepMmHarness(_controller);
                 BeginInvoke((System.Action)(() => stepHarness.RunIfRequested()));
+
+                // C8.60 independently starts from a clean model, imports the same real STEP/mm fixture,
+                // invokes Controller.CreateMesh (native NetGen BREP route), and qualifies the resulting FE mesh.
+                AsterMaxStepMeshHarness meshHarness = new AsterMaxStepMeshHarness(_controller);
+                BeginInvoke((System.Action)(() => meshHarness.RunIfRequested()));
 
                 FormClosed += (fs, fe) =>
                 {
