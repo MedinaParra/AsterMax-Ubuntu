@@ -22,11 +22,12 @@ namespace PrePoMax.AsterMaxAI
             bool regionsDistinct=false, fixedRegionNonEmpty=false, loadNodeExists=false, modelValidityPass=false, setupQualified=false;
             int fixedNodeCount=0, loadNodeId=-1, materialCount=0, sectionCount=0, stepCount=0, bcCount=0, loadCount=0;
             double minX=Double.NaN, maxX=Double.NaN, loadX=Double.NaN, loadY=Double.NaN, loadZ=Double.NaN;
-            string meshPartName="", unitSystem="", error="";
+            string meshPartName="", unitSystem="", error="", invalidSummary="";
             const string materialName="AsterMax_Steel_Demo";
             const string sectionName="AsterMax_Solid_Section";
             const string stepName="Static_Structural";
             const string fixedSetName="FIXED_XMIN";
+            const string loadSetName="LOAD_XMAX_NODE";
             const string fixedName="Fixed_Support";
             const string loadName="Force_XMAX";
             try
@@ -53,6 +54,7 @@ namespace PrePoMax.AsterMaxAI
                 if(!regionsDistinct) throw new InvalidOperationException("Fixed and load regions are not spatially distinct.");
 
                 _controller.AddNodeSet(new FeNodeSet(fixedSetName,fixedIds));
+                _controller.AddNodeSet(new FeNodeSet(loadSetName,new int[] { loadNodeId }));
 
                 Material material=new Material(materialName);
                 material.AddProperty(new Elastic(new double[][] { new double[] { 210000.0, 0.30, 293.15 } }));
@@ -71,7 +73,7 @@ namespace PrePoMax.AsterMaxAI
                 _controller.AddBoundaryCondition(stepName,fixedBc);
                 fixedAdded=model.StepCollection.GetStep(stepName).BoundaryConditions.ContainsKey(fixedName);
 
-                CLoad force=new CLoad(loadName,loadNodeId,1000.0,0.0,0.0,false,false,0.0);
+                CLoad force=new CLoad(loadName,loadSetName,RegionTypeEnum.NodeSetName,1000.0,0.0,0.0,false,false,0.0);
                 _controller.AddLoad(stepName,force);
                 loadAdded=model.StepCollection.GetStep(stepName).Loads.ContainsKey(loadName);
 
@@ -80,9 +82,10 @@ namespace PrePoMax.AsterMaxAI
                 loadCount=model.StepCollection.GetStep(stepName).Loads.Count;
 
                 var invalid=model.CheckValidity(new System.Collections.Generic.List<Tuple<NamedClass,string>>());
+                invalidSummary=invalid==null?"NULL":String.Join(" | ",invalid);
                 modelValidityPass=invalid!=null && invalid.Length==0;
                 setupQualified=meshPresent && materialAdded && sectionAdded && stepAdded && fixedAdded && loadAdded && fixedRegionNonEmpty && loadNodeExists && regionsDistinct && modelValidityPass;
-                if(!setupQualified) throw new InvalidOperationException("Structural setup qualification gate did not pass.");
+                if(!setupQualified) throw new InvalidOperationException("Structural setup qualification gate did not pass. Invalid: "+invalidSummary);
 
                 _controller.CurrentView=ViewGeometryModelResults.Model;
                 _controller.DrawSymbolsForStep(stepName,true);
@@ -90,14 +93,14 @@ namespace PrePoMax.AsterMaxAI
             catch(Exception ex) { error=ex.GetType().Name+": "+ex.Message; }
             WriteEvidence(evidencePath,meshPresent,materialAdded,sectionAdded,stepAdded,fixedAdded,loadAdded,regionsDistinct,
                           fixedRegionNonEmpty,loadNodeExists,modelValidityPass,setupQualified,fixedNodeCount,loadNodeId,
-                          materialCount,sectionCount,stepCount,bcCount,loadCount,minX,maxX,loadX,loadY,loadZ,meshPartName,unitSystem,error);
+                          materialCount,sectionCount,stepCount,bcCount,loadCount,minX,maxX,loadX,loadY,loadZ,meshPartName,unitSystem,invalidSummary,error);
         }
 
         private static bool Finite(double v){return !Double.IsNaN(v)&&!Double.IsInfinity(v);}
         private static string Num(double v){return Finite(v)?v.ToString("R",CultureInfo.InvariantCulture):"null";}
         private static string Json(string s){return "\""+(s??"").Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r"," ").Replace("\n"," ")+"\"";}
         private static void WriteEvidence(string path,bool mesh,bool mat,bool sec,bool step,bool fixedBc,bool load,bool distinct,bool fixedNonEmpty,bool loadExists,bool valid,bool qualified,
-            int fixedNodes,int loadNode,int mats,int secs,int steps,int bcs,int loads,double minX,double maxX,double lx,double ly,double lz,string part,string units,string error)
+            int fixedNodes,int loadNode,int mats,int secs,int steps,int bcs,int loads,double minX,double maxX,double lx,double ly,double lz,string part,string units,string invalid,string error)
         {
             if(String.IsNullOrWhiteSpace(path)) return; string dir=Path.GetDirectoryName(path); if(!String.IsNullOrWhiteSpace(dir))Directory.CreateDirectory(dir);
             string j="{\n"+
@@ -114,6 +117,7 @@ namespace PrePoMax.AsterMaxAI
                 "  \"fixed_node_count\": "+fixedNodes.ToString(CultureInfo.InvariantCulture)+",\n"+
                 "  \"fixed_region_nonempty\": "+(fixedNonEmpty?"true":"false")+",\n"+
                 "  \"load_added\": "+(load?"true":"false")+",\n"+
+                "  \"load_region_type\": \"NodeSetName\",\n  \"load_region_name\": \"LOAD_XMAX_NODE\",\n"+
                 "  \"load_node_id\": "+loadNode.ToString(CultureInfo.InvariantCulture)+",\n"+
                 "  \"load_node_exists\": "+(loadExists?"true":"false")+",\n"+
                 "  \"load_vector_model_values\": [1000.0,0.0,0.0],\n"+
@@ -121,6 +125,7 @@ namespace PrePoMax.AsterMaxAI
                 "  \"load_node_xyz_mm\": ["+Num(lx)+","+Num(ly)+","+Num(lz)+"],\n"+
                 "  \"fixed_and_load_regions_distinct\": "+(distinct?"true":"false")+",\n"+
                 "  \"material_count\": "+mats+",\n  \"section_count\": "+secs+",\n  \"step_count\": "+steps+",\n  \"bc_count\": "+bcs+",\n  \"load_count\": "+loads+",\n"+
+                "  \"invalid_items\": "+Json(invalid)+",\n"+
                 "  \"model_check_validity_pass\": "+(valid?"true":"false")+",\n"+
                 "  \"structural_setup_qualified\": "+(qualified?"true":"false")+",\n"+
                 "  \"solver_executed\": false,\n  \"solver_verified\": false,\n  \"industrial_validation\": false,\n  \"ansys_equivalence\": false,\n"+
