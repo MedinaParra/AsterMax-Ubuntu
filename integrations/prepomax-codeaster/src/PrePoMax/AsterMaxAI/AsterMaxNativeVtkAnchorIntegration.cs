@@ -6,10 +6,43 @@ namespace PrePoMax
     {
         private AsterMaxNativeVtkAnchorLayer _asterMaxNativeVtkAnchorLayer;
 
+        public void AsterMaxPrepareNativeVtkAnchorShutdown()
+        {
+            if (InvokeRequired)
+            {
+                Invoke(new System.Action(AsterMaxPrepareNativeVtkAnchorShutdown));
+                return;
+            }
+
+            if (_asterMaxNativeVtkAnchorLayer != null)
+            {
+                _asterMaxNativeVtkAnchorLayer.Dispose();
+                _asterMaxNativeVtkAnchorLayer = null;
+            }
+        }
+
+        private static bool IsAsterMaxResultsPresentationProcess()
+        {
+            string[] args = System.Environment.GetCommandLineArgs();
+            if (args == null) return false;
+            foreach (string arg in args)
+            {
+                if (string.Equals(arg, "--astermax-results-demo", System.StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
         private void InstallAsterMaxNativeVtkAnchorLayer()
         {
             Shown += (s, e) =>
             {
+                // C8.75: the verified Results presentation has its own result/extrema widgets and does not
+                // need the CAD/BC native-anchor harness layer. Keeping this unrelated layer alive during a
+                // result-only demo increased native VTK teardown surface and previously caused a stale
+                // vtkRenderer.RemoveActor call. Other harness modes retain the layer unchanged.
+                if (IsAsterMaxResultsPresentationProcess()) return;
+
                 if (_asterMaxNativeVtkAnchorLayer != null || _vtk == null) return;
                 _asterMaxNativeVtkAnchorLayer = new AsterMaxNativeVtkAnchorLayer(_controller, _vtk);
 
@@ -31,14 +64,7 @@ namespace PrePoMax
                 AsterMaxCodeAsterGenerationHarness generationHarness = new AsterMaxCodeAsterGenerationHarness(_controller);
                 BeginInvoke((System.Action)(() => generationHarness.RunIfRequested()));
 
-                FormClosed += (fs, fe) =>
-                {
-                    if (_asterMaxNativeVtkAnchorLayer != null)
-                    {
-                        _asterMaxNativeVtkAnchorLayer.Dispose();
-                        _asterMaxNativeVtkAnchorLayer = null;
-                    }
-                };
+                FormClosing += (fs, fe) => AsterMaxPrepareNativeVtkAnchorShutdown();
             };
         }
     }
