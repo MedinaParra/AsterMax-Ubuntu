@@ -53,21 +53,26 @@ jobs:
           $proofDeadline=(Get-Date).AddSeconds(20)
           while(-not (Test-Path $evidence) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during PMX roundtrip'}}
           if(-not (Test-Path $evidence)){throw 'C8.58 runtime evidence was not written.'}
-          $r=Get-Content $evidence -Raw | ConvertFrom-Json
+          $raw=Get-Content $evidence -Raw
+          Write-Host '--- C8.58 runtime evidence ---'
+          Write-Host $raw
+          Write-Host '--- end runtime evidence ---'
+          $r=$raw | ConvertFrom-Json
           if(-not $r.fixture_uses_real_caemodel_types){throw 'Fixture did not use real CaeModel types.'}
-          if(-not $r.pmx_file_exists_nonzero){throw 'Native PMX file was not persisted.'}
-          if(-not $r.native_open_pmx_roundtrip){throw 'Native PMX reopen failed.'}
-          if(-not $r.fixed_roundtrip_xyz_verified){throw 'Fixed support did not survive PMX roundtrip at expected XYZ.'}
-          if(-not $r.force_roundtrip_xyz_verified){throw 'Force did not survive PMX roundtrip at expected XYZ.'}
+          if(-not $r.pmx_file_exists_nonzero){throw "Native PMX file was not persisted. Harness error: $($r.error)"}
+          if(-not $r.native_open_pmx_roundtrip){throw "Native PMX reopen failed. Harness error: $($r.error)"}
+          if(-not $r.fixed_roundtrip_xyz_verified){throw "Fixed support did not survive PMX roundtrip at expected XYZ. Harness error: $($r.error)"}
+          if(-not $r.force_roundtrip_xyz_verified){throw "Force did not survive PMX roundtrip at expected XYZ. Harness error: $($r.error)"}
           if(-not $r.loaded_pmx_fixture_proven){throw "Loaded PMX fixture proof failed: $($r.error)"}
-          if([int]$r.native_arrow_widget_count -lt 2){throw 'Expected at least two native VTK anchors after PMX reopen.'}
+          if([int]$r.native_arrow_widget_count -lt 2){throw "Expected at least two native VTK anchors after PMX reopen. count=$($r.native_arrow_widget_count)"}
           if($r.solver_executed -or $r.solver_verified -or $r.industrial_validation -or $r.ansys_equivalence){throw 'C8.58 must remain persistence/anchor evidence only.'}
           if([int64]$r.pmx_bytes -le 0 -or [string]::IsNullOrWhiteSpace([string]$r.pmx_sha256)){throw 'PMX byte/hash evidence missing.'}
           @{schema='astermax.native-pmx-structural-roundtrip.v1';commit='${{ github.sha }}';fixture_units='mm';native_pmx_file=$true;pmx_bytes=[int64]$r.pmx_bytes;pmx_sha256=[string]$r.pmx_sha256;fixed_expected_xyz=@(0,0,0);force_expected_xyz=@(100,0,0);fixed_roundtrip_xyz_verified=$true;force_roundtrip_xyz_verified=$true;native_arrow_widget_count=[int]$r.native_arrow_widget_count;loaded_pmx_fixture_proven=$true;solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.58_EVIDENCE.json
           Stop-Process -Id $p.Id -Force
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: AsterMax-C8.58-Native-PMX-Structural-Roundtrip-${{ github.sha }}
           path: artifact/*
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
