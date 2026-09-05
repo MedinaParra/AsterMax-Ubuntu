@@ -122,8 +122,8 @@ jobs:
           # Inspect the actual secondary native window created by CreateVerificationOverlay.
           $windows=New-Object System.Collections.Generic.List[object]
           $cb=[NativeWindowC875+EnumWindowsProc]{ param($h,$l)
-            [uint32]$pid=0;[NativeWindowC875]::GetWindowThreadProcessId($h,[ref]$pid)|Out-Null
-            if($pid -eq [uint32]$p.Id -and [NativeWindowC875]::IsWindowVisible($h)){
+            [uint32]$windowProcessId=0;[NativeWindowC875]::GetWindowThreadProcessId($h,[ref]$windowProcessId)|Out-Null
+            if($windowProcessId -eq [uint32]$p.Id -and [NativeWindowC875]::IsWindowVisible($h)){
               $sb=New-Object Text.StringBuilder 512;[NativeWindowC875]::GetWindowText($h,$sb,$sb.Capacity)|Out-Null
               $r=New-Object NativeWindowC875+RECT;[NativeWindowC875]::GetWindowRect($h,[ref]$r)|Out-Null
               $style=[NativeWindowC875]::GetWindowLongPtr($h,-16).ToInt64()
