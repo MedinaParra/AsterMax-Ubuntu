@@ -28,14 +28,14 @@ jobs:
         shell: pwsh
         run: |
           $layer=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxNativeVtkAnchorLayer.cs' -Raw
-          foreach($token in @('AsterMaxNativeVtkAnchorLayer','AddArrowWidget','RemoveArrowWidgets','TryResolveFeAnchor','AsterMaxRegionBindingInspector','FE POSITION','HARNESS_ONLY','POC WORLD ORIGIN · NOT MODEL DATA')) {
+          foreach($token in @('AsterMaxNativeVtkAnchorLayer','AddArrowWidget','RemoveArrowWidgets','TryResolveFeAnchor','AsterMaxRegionBindingInspector','FE POSITION','HARNESS_ONLY','POC WORLD ORIGIN · NOT MODEL DATA','ASTERMAX_VTK_ANCHOR_EVIDENCE_PATH','native_widget_runtime_verified')) {
             if($layer -notmatch [regex]::Escape($token)){throw "Missing C8.56 native anchor token: $token"}
           }
           if($layer -match 'solver_verified\s*=\s*true|surface_geometric_centroid_exact\s*=\s*true|load_direction_projection_qualified\s*=\s*true'){throw 'C8.56 must not claim solver/exact-surface/direction verification.'}
           $integration=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxNativeVtkAnchorIntegration.cs' -Raw
           foreach($token in @('InstallAsterMaxNativeVtkAnchorLayer','_vtk','AsterMaxNativeVtkAnchorLayer')){if($integration -notmatch [regex]::Escape($token)){throw "Missing native integration token: $token"}}
           $vtk=Get-Content 'build/PrePoMax-CodeAster/vtkControl/vtkControl.cs' -Raw
-          foreach($token in @('private vtkRenderer _renderer','public void AddArrowWidget','public void RemoveArrowWidgets','SetWorldPoint','WorldToDisplay','GetDisplayPoint')) {
+          foreach($token in @('private vtkRenderer _renderer','private Dictionary<string, vtkMaxTextWithArrowWidget> _arrowWidgets','public void AddArrowWidget','public void RemoveArrowWidgets','SetWorldPoint','WorldToDisplay','GetDisplayPoint')) {
             if($vtk -notmatch [regex]::Escape($token)){throw "Pinned vtkControl contract moved: $token"}
           }
       - name: Launch native VTK projection proof and capture GUI
@@ -53,6 +53,7 @@ jobs:
           "@
           New-Item -ItemType Directory -Force artifact | Out-Null
           $env:ASTERMAX_VTK_ANCHOR_POC='1'
+          $env:ASTERMAX_VTK_ANCHOR_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.56_NATIVE_WIDGET_RUNTIME.json')
           $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
           $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
           $deadline=(Get-Date).AddSeconds(30)
@@ -63,13 +64,19 @@ jobs:
           [NativeWin56]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
           Start-Sleep -Seconds 4
           if($p.HasExited){throw 'GUI exited during native VTK anchor proof'}
+          $runtimePath=$env:ASTERMAX_VTK_ANCHOR_EVIDENCE_PATH
+          if(-not (Test-Path $runtimePath)){throw 'Native VTK runtime evidence file was not written.'}
+          $runtime=Get-Content $runtimePath -Raw | ConvertFrom-Json
+          if(-not $runtime.native_widget_runtime_verified){throw 'Native vtkControl arrow-widget insertion was not verified at runtime.'}
+          if([int]$runtime.native_arrow_widget_count -lt 1){throw 'Native vtkControl _arrowWidgets count is below 1.'}
+          if($runtime.model_or_solver_evidence){throw 'Harness proof must never be classified as model/solver evidence.'}
           $r=New-Object NativeWin56+RECT; [NativeWin56]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null
           $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top
           if($w -lt 900 -or $h -lt 650){throw "Native window below evidence threshold: ${w}x${h}"}
           $bmp=New-Object Drawing.Bitmap $w,$h; $g=[Drawing.Graphics]::FromImage($bmp)
           try{$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
           $png='artifact/C8.56_NATIVE_VTK_ANCHORED_GLYPHS.png'; $bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-          @{schema='astermax.native-vtk-anchors.v2';title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();pinned_vtk_world_to_display_contract=$true;native_arrow_widget_contract=$true;harness_world_origin_poc_requested=$true;fe_anchor_to_native_widget_path_implemented=$true;loaded_model_anchor_runtime_proven=$false;surface_geometric_centroid_exact=$false;selection_geometry_mapping_qualified=$false;load_direction_projection_qualified=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false;commit='${{ github.sha }}'}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.56_EVIDENCE.json
+          @{schema='astermax.native-vtk-anchors.v3';title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();pinned_vtk_world_to_display_contract=$true;native_arrow_widget_contract=$true;harness_world_origin_poc_requested=$true;native_widget_runtime_verified=$true;native_arrow_widget_count=[int]$runtime.native_arrow_widget_count;fe_anchor_to_native_widget_path_implemented=$true;loaded_model_anchor_runtime_proven=$false;visual_widget_presence_in_screenshot_proven=$false;surface_geometric_centroid_exact=$false;selection_geometry_mapping_qualified=$false;load_direction_projection_qualified=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false;commit='${{ github.sha }}'}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.56_EVIDENCE.json
           Stop-Process -Id $p.Id -Force
       - uses: actions/upload-artifact@v4
         with:
