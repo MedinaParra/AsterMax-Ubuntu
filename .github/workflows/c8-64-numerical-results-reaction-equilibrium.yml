@@ -1,0 +1,299 @@
+name: C8.64 Numerical Results + Reaction Equilibrium
+
+on:
+  push:
+    branches: [agent/c8-64-numerical-results-reaction-equilibrium]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-windows-study:
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap pinned AsterMax tree
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Fetch pinned CAD runtime and STEP/mm fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $source=Join-Path $runtimeRoot $folder; if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.64_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres.'}
+          "ASTERMAX_STEP_FIXTURE=$((Resolve-Path $fixture).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate qualified Windows structural study
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/C8.64_study | Out-Null
+          $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+          $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_STEP_FIXTURE
+          $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.64_STEP_NETGEN_RUNTIME.json')
+          $env:ASTERMAX_STRUCTURAL_SETUP_FIXTURE='1'
+          $env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.64_STRUCTURAL_SETUP_RUNTIME.json')
+          $env:ASTERMAX_CODEASTER_GENERATION_FIXTURE='1'
+          $env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.64_CODEASTER_GENERATION_RUNTIME.json')
+          $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR=(Join-Path $PWD 'artifact/C8.64_study')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native AsterMax window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $meshEv=$env:ASTERMAX_STEP_MESH_EVIDENCE_PATH; $setupEv=$env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH; $genEv=$env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(240)
+          while(((-not(Test-Path $meshEv))-or(-not(Test-Path $setupEv))-or(-not(Test-Path $genEv))) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during study generation'}}
+          foreach($ev in @($meshEv,$setupEv,$genEv)){if(-not(Test-Path $ev)){throw "Missing runtime evidence: $ev"}}
+          $m=Get-Content $meshEv -Raw|ConvertFrom-Json; $s=Get-Content $setupEv -Raw|ConvertFrom-Json; $g=Get-Content $genEv -Raw|ConvertFrom-Json
+          if(-not $m.step_to_netgen_mesh_qualified){throw "STEP/mesh gate failed: $($m.error)"}
+          if(-not $s.structural_setup_qualified -or -not $s.mm_n_mpa_unit_lock){throw "Structural setup gate failed: $($s.error)"}
+          if(-not $g.unit_pmx_codeaster_generation_qualified){throw "Code_Aster generation gate failed: $($g.error)"}
+          if($g.solver_executed -or $g.solver_verified){throw 'Generation stage must not claim solver execution.'}
+          foreach($f in @('astermax_c862_static.comm','astermax_c862_static.mail','astermax_c862_static.export')){$fp=Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR $f;if(-not(Test-Path $fp)){throw "Missing generated study file: $f"}}
+          @{schema='astermax.c8.64.windows-generation.v1';commit='${{ github.sha }}';step_mesh_qualified=$true;structural_setup_qualified=$true;mm_n_mpa_unit_lock=$true;codeaster_generation_qualified=$true;source_comm_sha256=(Get-FileHash (Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR 'astermax_c862_static.comm') -Algorithm SHA256).Hash.ToLowerInvariant();source_mail_sha256=(Get-FileHash (Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR 'astermax_c862_static.mail') -Algorithm SHA256).Hash.ToLowerInvariant();source_export_sha256=(Get-FileHash (Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR 'astermax_c862_static.export') -Algorithm SHA256).Hash.ToLowerInvariant();solver_executed=$false;solver_verified=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.64_WINDOWS_GENERATION.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: C8.64-Windows-Generated-Study-${{ github.sha }}
+          path: |
+            artifact/C8.64_study/**
+            artifact/C8.64_*RUNTIME.json
+            artifact/C8.64_WINDOWS_GENERATION.json
+          if-no-files-found: error
+          retention-days: 14
+
+  solve-and-admit-results:
+    needs: generate-windows-study
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: C8.64-Windows-Generated-Study-${{ github.sha }}
+          path: artifact/input
+      - name: Stage exact Windows-generated study
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact/c8-64-solve
+          cp artifact/input/C8.64_study/astermax_c862_static.{comm,mail,export} artifact/c8-64-solve/
+          cp artifact/c8-64-solve/astermax_c862_static.comm artifact/c8-64-solve/astermax_c862_static.windows-original.comm
+          test -s artifact/c8-64-solve/astermax_c862_static.comm
+          test -s artifact/c8-64-solve/astermax_c862_static.mail
+          test -s artifact/c8-64-solve/astermax_c862_static.export
+          grep -F 'MECA_STATIQUE' artifact/c8-64-solve/astermax_c862_static.comm
+          grep -F 'E=210000' artifact/c8-64-solve/astermax_c862_static.comm
+          grep -F 'FX=1000' artifact/c8-64-solve/astermax_c862_static.comm
+          sha256sum artifact/c8-64-solve/astermax_c862_static.{comm,mail,export} | tee artifact/c8-64-solve/PRE_POSTPROCESS_SHA256SUMS.txt
+      - name: Add fail-closed result and reaction extraction only
+        run: |
+          python - <<'PY'
+          import hashlib,json,pathlib,re
+          root=pathlib.Path('artifact/c8-64-solve')
+          p=root/'astermax_c862_static.comm'
+          original=p.read_text(encoding='utf-8')
+          physics_marker='result = CALC_CHAMP('
+          if original.count(physics_marker)!=1: raise SystemExit('Expected exactly one CALC_CHAMP marker.')
+          physics_prefix=original.split(physics_marker,1)[0]
+          calc_old="    CRITERES=('SIEQ_ELNO', 'SIEQ_NOEU'))"
+          calc_new="    CRITERES=('SIEQ_ELNO', 'SIEQ_NOEU'),\n    FORCE=('REAC_NODA',))"
+          if original.count(calc_old)!=1: raise SystemExit('Expected translator CALC_CHAMP tail not found exactly once.')
+          if original.count('\nFIN()')!=1: raise SystemExit('Expected exactly one FIN() marker.')
+          table_block=r'''
+          tab_depl = CREA_TABLE(RESU=_F(
+              RESULTAT=result, TOUT='OUI', NOM_CHAM='DEPL', NOM_CMP=('DX','DY','DZ')))
+          IMPR_TABLE(TABLE=tab_depl, TITRE='PPM_DEPL', UNITE=8, FORMAT='TABLEAU',
+                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','DX','DY','DZ'))
+
+          tab_sig_n = CREA_TABLE(RESU=_F(
+              RESULTAT=result, TOUT='OUI', NOM_CHAM='SIGM_NOEU', NOM_CMP=('SIXX','SIYY','SIZZ')))
+          IMPR_TABLE(TABLE=tab_sig_n, TITRE='PPM_STRESS_N', UNITE=8, FORMAT='TABLEAU',
+                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','SIXX','SIYY','SIZZ'))
+
+          tab_sig_s = CREA_TABLE(RESU=_F(
+              RESULTAT=result, TOUT='OUI', NOM_CHAM='SIGM_NOEU', NOM_CMP=('SIXY','SIYZ','SIXZ')))
+          IMPR_TABLE(TABLE=tab_sig_s, TITRE='PPM_STRESS_S', UNITE=8, FORMAT='TABLEAU',
+                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','SIXY','SIYZ','SIXZ'))
+
+          tab_reac = CREA_TABLE(RESU=_F(
+              RESULTAT=result, GROUP_NO='N_FIXED_XMIN', NOM_CHAM='REAC_NODA', NOM_CMP=('DX','DY','DZ')))
+          IMPR_TABLE(TABLE=tab_reac, TITRE='PPM_REACTION', UNITE=8, FORMAT='TABLEAU',
+                     SEPARATEUR=';', FORMAT_R='1PE15.8', NOM_PARA=('NOEUD','DX','DY','DZ'))
+          '''
+          patched=original.replace(calc_old,calc_new).replace('\nFIN()', '\n'+table_block+'\nFIN()')
+          if patched.split(physics_marker,1)[0] != physics_prefix:
+              raise SystemExit('Physics prefix changed while adding postprocessing.')
+          p.write_text(patched,encoding='utf-8')
+          def sha_bytes(b): return hashlib.sha256(b).hexdigest()
+          evidence={
+            'schema':'astermax.c8.64.postprocess-augmentation.v1',
+            'postprocess_only_augmented':True,
+            'physics_prefix_unchanged':True,
+            'physics_prefix_sha256':sha_bytes(physics_prefix.encode()),
+            'windows_original_comm_sha256':sha_bytes(original.encode()),
+            'augmented_comm_sha256':sha_bytes(patched.encode()),
+            'requested_fields':['DEPL','SIGM_NOEU','SIEQ_NOEU','EPSI_NOEU','REAC_NODA'],
+            'reaction_group':'N_FIXED_XMIN',
+            'industrial_validation':False,
+            'ansys_equivalence':False,
+          }
+          (root/'C8.64_POSTPROCESS_AUGMENTATION.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+          print(json.dumps(evidence,indent=2))
+          PY
+          grep -F "FORCE=('REAC_NODA',)" artifact/c8-64-solve/astermax_c862_static.comm
+          grep -F "TITRE='PPM_REACTION'" artifact/c8-64-solve/astermax_c862_static.comm
+      - name: Genuine Code_Aster 17.4.0 solve
+        run: |
+          set -euxo pipefail
+          docker pull simvia/code_aster:17.4.0
+          chmod -R a+rwX artifact/c8-64-solve
+          docker run --rm -v "$PWD/artifact/c8-64-solve:/home/user/data" -w /home/user/data simvia/code_aster:17.4.0 bash -i -c 'run_aster astermax_c862_static.export' | tee artifact/c8-64-solve/CODE_ASTER_STDOUT.log
+          test -s artifact/c8-64-solve/astermax_c862_static.mess
+          test -s artifact/c8-64-solve/astermax_c862_static.rmed
+          test -s artifact/c8-64-solve/astermax_c862_static.resu
+      - name: Admit numerical fields and reaction equilibrium
+        run: |
+          python - <<'PY'
+          import hashlib,json,math,pathlib,re
+          root=pathlib.Path('artifact/c8-64-solve')
+          comm=(root/'astermax_c862_static.comm').read_text(encoding='utf-8',errors='replace')
+          mess=(root/'astermax_c862_static.mess').read_text(encoding='utf-8',errors='replace')
+          resu=(root/'astermax_c862_static.resu').read_text(encoding='utf-8',errors='replace').splitlines()
+          fatal=[]
+          for pat in (r'<F>',r'ERREUR FATALE',r'FATAL_ERROR',r'EXECUTION_CODE_ASTER.*FAILED'):
+              if re.search(pat,mess,re.I): fatal.append(pat)
+          if fatal: raise SystemExit('Fatal solver markers: '+','.join(fatal))
+          if not re.search(r'DIAGNOSTIC JOB\s*:\s*OK|Code_Aster MPI exits normally|TOTAL_JOB',mess,re.I):
+              raise SystemExit('No positive Code_Aster completion marker.')
+
+          def split(line): return [x.strip().lstrip('#').strip() for x in line.split(';')]
+          def parse_table(title, cols):
+              hits=[i for i,l in enumerate(resu) if title in l]
+              if len(hits)!=1: raise SystemExit(f'{title}: expected one title, got {len(hits)}')
+              start=hits[0]; header_i=None; header=None
+              for i in range(start+1,min(len(resu),start+100)):
+                  toks=split(resu[i])
+                  if 'NOEUD' in toks and all(c in toks for c in cols): header_i=i; header=toks; break
+              if header_i is None: raise SystemExit(f'{title}: header not found')
+              idx={c:header.index(c) for c in ['NOEUD']+cols}; rows=[]
+              for line in resu[header_i+1:]:
+                  raw=line.strip()
+                  if not raw:
+                      if rows: break
+                      continue
+                  if 'PPM_' in raw and rows: break
+                  toks=split(line)
+                  if len(toks)<=max(idx.values()): continue
+                  node=toks[idx['NOEUD']]
+                  m=re.fullmatch(r'[Nn]?(\d+)',node)
+                  if not m:
+                      if rows and raw.startswith('#'): break
+                      continue
+                  vals=[]
+                  try: vals=[float(toks[idx[c]].replace('D','E')) for c in cols]
+                  except Exception: raise SystemExit(f'{title}: malformed numeric row for {node}')
+                  if not all(math.isfinite(v) for v in vals): raise SystemExit(f'{title}: non-finite row for {node}')
+                  rows.append((int(m.group(1)),vals))
+              if not rows: raise SystemExit(f'{title}: no rows')
+              ids=[r[0] for r in rows]
+              if len(ids)!=len(set(ids)): raise SystemExit(f'{title}: duplicate node ids')
+              return rows
+
+          depl=parse_table('PPM_DEPL',['DX','DY','DZ'])
+          sig_n=parse_table('PPM_STRESS_N',['SIXX','SIYY','SIZZ'])
+          sig_s=parse_table('PPM_STRESS_S',['SIXY','SIYZ','SIXZ'])
+          reac=parse_table('PPM_REACTION',['DX','DY','DZ'])
+          if len(depl)!=len(sig_n) or len(depl)!=len(sig_s): raise SystemExit('Result field node-count mismatch.')
+          if set(n for n,_ in depl)!=set(n for n,_ in sig_n) or set(n for n,_ in depl)!=set(n for n,_ in sig_s):
+              raise SystemExit('Result field node-set mismatch.')
+
+          max_u=(-1.0,None,None)
+          for node,v in depl:
+              mag=math.sqrt(sum(x*x for x in v))
+              if mag>max_u[0]: max_u=(mag,node,v)
+          smap={n:v for n,v in sig_s}
+          max_vm=(-1.0,None)
+          for node,nv in sig_n:
+              sxx,syy,szz=nv; sxy,syz,sxz=smap[node]
+              vm=math.sqrt(0.5*((sxx-syy)**2+(syy-szz)**2+(szz-sxx)**2)+3.0*(sxy*sxy+syz*syz+sxz*sxz))
+              if not math.isfinite(vm) or vm<0: raise SystemExit('Invalid reconstructed von Mises.')
+              if vm>max_vm[0]: max_vm=(vm,node)
+
+          load_match=re.search(r'FORCE_NODALE=.*?FX=([+-]?[0-9.eEdD+-]+)',comm,re.S)
+          if not load_match: raise SystemExit('Could not recover applied Fx from generated comm.')
+          applied_fx=float(load_match.group(1).replace('D','E'))
+          rx=sum(v[0] for _,v in reac); ry=sum(v[1] for _,v in reac); rz=sum(v[2] for _,v in reac)
+          if applied_fx==0 or not math.isfinite(applied_fx): raise SystemExit('Invalid applied Fx.')
+          rel=abs(rx+applied_fx)/abs(applied_fx)
+          transverse=max(abs(ry),abs(rz))/abs(applied_fx)
+          tol=0.005
+          eq=rel<=tol and transverse<=tol
+          if not eq:
+              raise SystemExit(f'Reaction equilibrium failed: Fx={applied_fx}, Rx={rx}, Ry={ry}, Rz={rz}, rel={rel}, transverse={transverse}')
+
+          def sha(path):
+              h=hashlib.sha256(); h.update(path.read_bytes()); return h.hexdigest()
+          evidence={
+            'schema':'astermax.c8.64.numerical-reaction-admission.v1',
+            'solver':'Code_Aster 17.4.0',
+            'unit_system':'mm-N-MPa',
+            'solver_executed':True,
+            'solver_verified':True,
+            'result_field_values_verified':True,
+            'depl_node_count':len(depl),
+            'stress_node_count':len(sig_n),
+            'reaction_node_count':len(reac),
+            'max_displacement_mm':max_u[0],
+            'max_displacement_node':max_u[1],
+            'max_displacement_components_mm':max_u[2],
+            'max_von_mises_mpa':max_vm[0],
+            'max_von_mises_node':max_vm[1],
+            'applied_fx_n':applied_fx,
+            'reaction_sum_n':[rx,ry,rz],
+            'reaction_equilibrium_relative_error_x':rel,
+            'reaction_transverse_relative':transverse,
+            'reaction_equilibrium_tolerance':tol,
+            'reaction_equilibrium_verified':True,
+            'mess_sha256':sha(root/'astermax_c862_static.mess'),
+            'resu_sha256':sha(root/'astermax_c862_static.resu'),
+            'rmed_sha256':sha(root/'astermax_c862_static.rmed'),
+            'industrial_validation':False,
+            'ansys_equivalence':False,
+          }
+          (root/'C8.64_NUMERICAL_REACTION_EVIDENCE.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Hash complete evidence
+        run: sha256sum artifact/c8-64-solve/* > artifact/c8-64-solve/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.64-Numerical-Reaction-Equilibrium-${{ github.sha }}
+          path: artifact/c8-64-solve/**
+          if-no-files-found: warn
+          retention-days: 14
