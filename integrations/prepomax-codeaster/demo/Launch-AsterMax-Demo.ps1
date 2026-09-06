@@ -8,6 +8,7 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $contractPath = Join-Path $root 'demo-contract.json'
 $logs = Join-Path $root 'Logs'
 New-Item -ItemType Directory -Force $logs | Out-Null
+$inv = [Globalization.CultureInfo]::InvariantCulture
 
 function Fail([string]$message) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -46,17 +47,26 @@ if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
 $stdout = Join-Path $logs 'AsterMax-demo.stdout.log'
 $stderr = Join-Path $logs 'AsterMax-demo.stderr.log'
 $env:ASTERMAX_RESULTS_FULL_MODEL_PMX = $pmx
-$env:ASTERMAX_RESULTS_EXPECTED_NODES = [string]$contract.expected.node_count
-$env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS = [string]$contract.expected.element_count
-$env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX = [string]$contract.expected.max_von_mises_mpa
-$env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = [string]$contract.expected.max_displacement_mm
-$env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = [string]$contract.expected.max_von_mises_node
-$env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = [string]$contract.expected.max_displacement_node
+$env:ASTERMAX_RESULTS_EXPECTED_NODES = ([int]$contract.expected.node_count).ToString($inv)
+$env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS = ([int]$contract.expected.element_count).ToString($inv)
+$env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX = ([double]$contract.expected.max_von_mises_mpa).ToString('R',$inv)
+$env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = ([double]$contract.expected.max_displacement_mm).ToString('R',$inv)
+$env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = ([int]$contract.expected.max_von_mises_node).ToString($inv)
+$env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = ([int]$contract.expected.max_displacement_node).ToString($inv)
 
-$p = Start-Process $exe -ArgumentList @('--astermax-results-demo',$rmed,$resu,$EvidencePath) -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+# Start-Process flattens ArgumentList to one command line. Quote every path argument explicitly so
+# the package remains valid when extracted under ordinary Windows paths containing spaces.
+$args = @(
+    '--astermax-results-demo',
+    ('"' + $rmed + '"'),
+    ('"' + $resu + '"'),
+    ('"' + $EvidencePath + '"')
+)
+$p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 $launch = @{
     schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
-    dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait)
+    dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait);
+    quoted_path_arguments=$true; invariant_numeric_contract=$true
 }
 $launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
 
