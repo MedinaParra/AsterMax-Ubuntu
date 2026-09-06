@@ -23,9 +23,12 @@ if (-not (Test-Path $contractPath)) { Fail 'demo-contract.json is missing.' }
 
 $contract = Get-Content $contractPath -Raw | ConvertFrom-Json
 $exe = Join-Path $root 'PrePoMax.exe'
-$pmx = Join-Path $root $contract.dataset.pmx.path
-$rmed = Join-Path $root $contract.dataset.rmed.path
-$resu = Join-Path $root $contract.dataset.resu.path
+$pmxRel = ([string]$contract.dataset.pmx.path).Replace('/','\')
+$rmedRel = ([string]$contract.dataset.rmed.path).Replace('/','\')
+$resuRel = ([string]$contract.dataset.resu.path).Replace('/','\')
+$pmx = Join-Path $root $pmxRel
+$rmed = Join-Path $root $rmedRel
+$resu = Join-Path $root $resuRel
 foreach ($p in @($exe,$pmx,$rmed,$resu)) { if (-not (Test-Path $p)) { Fail "Required demo file missing: $p" } }
 
 $checks = @(
@@ -38,10 +41,19 @@ foreach ($c in $checks) {
     if ($actual -ne $c.expected.ToLowerInvariant()) { Fail "Demo provenance hash mismatch: $($c.path)" }
 }
 
+$evidenceArg = $null
 if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
-    $EvidencePath = Join-Path $logs ("READY-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
+    $evidenceName = "READY-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json'
+    $evidenceArg = 'Logs\' + $evidenceName
+    $EvidencePath = Join-Path $logs $evidenceName
 } elseif (-not [IO.Path]::IsPathRooted($EvidencePath)) {
-    $EvidencePath = Join-Path $root $EvidencePath
+    $evidenceArg = $EvidencePath.Replace('/','\')
+    $EvidencePath = Join-Path $root $evidenceArg
+} else {
+    # Absolute custom evidence paths are supported only when they do not require shell quoting.
+    # The packaged one-click path always uses the relative Logs\... contract above.
+    if ($EvidencePath -match '\s') { Fail 'Custom absolute EvidencePath with spaces is unsupported; use a relative package path.' }
+    $evidenceArg = $EvidencePath
 }
 
 $stdout = Join-Path $logs 'AsterMax-demo.stdout.log'
@@ -54,15 +66,15 @@ $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = ([double]$contract.expected.max_displa
 $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = ([int]$contract.expected.max_von_mises_node).ToString($inv)
 $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = ([int]$contract.expected.max_displacement_node).ToString($inv)
 
-# Start-Process joins ArgumentList into a Win32 command line. Build one explicit argument line using
-# ASCII quote (34), avoiding locale- and escape-rule ambiguity for package paths containing spaces.
-$q = [char]34
-$argLine = '--astermax-results-demo ' + $q + $rmed + $q + ' ' + $q + $resu + $q + ' ' + $q + $EvidencePath + $q
-$p = Start-Process $exe -ArgumentList $argLine -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+# The package is relocatable by contract: validate absolute files, but pass only relative internal
+# RMED/RESU/READY paths to PrePoMax while setting WorkingDirectory to the package root. This avoids
+# Win32 command-line quoting ambiguity even when the installation path itself contains spaces.
+$args = @('--astermax-results-demo',$rmedRel,$resuRel,$evidenceArg)
+$p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 $launch = @{
     schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
     dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait);
-    quoted_path_arguments=$true; invariant_numeric_contract=$true; argument_line_model='explicit-win32-quoted'
+    relative_internal_arguments=$true; invariant_numeric_contract=$true; argument_line_model='relocatable-relative-package-paths'
 }
 $launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
 
