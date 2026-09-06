@@ -54,22 +54,15 @@ $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = ([double]$contract.expected.max_displa
 $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = ([int]$contract.expected.max_von_mises_node).ToString($inv)
 $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = ([int]$contract.expected.max_displacement_node).ToString($inv)
 
-# Start-Process flattens ArgumentList to one command line. Quote every path argument explicitly so
-# the package remains valid when extracted under ordinary Windows paths containing spaces.
-$args = @(
-    '--astermax-results-demo',
-    ('"' + $rmed + '"'),
-    ('"' + $resu + '"'),
-    ('"' + $EvidencePath + '"')
-)
-# PowerShell single-quoted strings do not use backslash escaping. Replace the literal backslash-quote
-# pair above with real quotes before passing arguments to Start-Process.
-$args = @($args | ForEach-Object { $_.Replace('\"','"') })
-$p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+# Start-Process joins ArgumentList into a Win32 command line. Build one explicit argument line using
+# ASCII quote (34), avoiding locale- and escape-rule ambiguity for package paths containing spaces.
+$q = [char]34
+$argLine = '--astermax-results-demo ' + $q + $rmed + $q + ' ' + $q + $resu + $q + ' ' + $q + $EvidencePath + $q
+$p = Start-Process $exe -ArgumentList $argLine -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 $launch = @{
     schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
     dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait);
-    quoted_path_arguments=$true; invariant_numeric_contract=$true
+    quoted_path_arguments=$true; invariant_numeric_contract=$true; argument_line_model='explicit-win32-quoted'
 }
 $launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
 
