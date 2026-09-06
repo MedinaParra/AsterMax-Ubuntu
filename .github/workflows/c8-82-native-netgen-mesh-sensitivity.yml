@@ -89,7 +89,7 @@ jobs:
               Start-Sleep -Milliseconds 500; $p.Refresh()
               if($p.HasExited){throw "$name GUI exited early: $($p.ExitCode)"}
             }while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
-            if($p.MainWindowHandle -eq 0){throw "$name: no native AsterMax window"}
+            if($p.MainWindowHandle -eq 0){throw "${name}: no native AsterMax window"}
             $proofDeadline=(Get-Date).AddSeconds(300)
             while(((-not(Test-Path $meshEv))-or(-not(Test-Path $cfgEv))-or(-not(Test-Path $setupEv))-or(-not(Test-Path $genEv))) -and (Get-Date)-lt $proofDeadline){
               Start-Sleep -Milliseconds 500; $p.Refresh()
