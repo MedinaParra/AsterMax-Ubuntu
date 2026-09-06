@@ -24,7 +24,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Pin exact admitted solver evidence
         shell: pwsh
         env:
@@ -49,7 +48,6 @@ jobs:
           "DISP=$($e.max_displacement_mm.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "MISES_NODE=$($e.max_von_mises_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
           "DISP_NODE=$($e.max_displacement_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
       - name: Bootstrap and apply admitted Results chain plus deterministic process shutdown
         shell: pwsh
         run: |
@@ -68,7 +66,6 @@ jobs:
           python integrations/prepomax-codeaster/tools/apply_professional_viewport_badge.py build/PrePoMax-CodeAster
           python integrations/prepomax-codeaster/tools/apply_safe_vtk_interactor_detach.py build/PrePoMax-CodeAster
           python integrations/prepomax-codeaster/tools/apply_deterministic_program_shutdown.py build/PrePoMax-CodeAster
-
       - uses: microsoft/setup-msbuild@v2
       - name: Build Release x64
         shell: pwsh
@@ -76,7 +73,6 @@ jobs:
           nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
           msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 | Tee-Object artifact-build.log
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
-
       - name: Run three fail-closed shutdown and finalizer cycles
         shell: pwsh
         run: |
@@ -104,13 +100,13 @@ jobs:
             $err=Get-Content $stderr -Raw -ErrorAction SilentlyContinue
             if($p.ExitCode -ne 0){throw "Cycle $i normal shutdown exit code $($p.ExitCode)"}
             if($err -match 'AccessViolationException|FatalExecutionEngineError|SEHException'){throw "Cycle $i unsafe native teardown signature"}
-            if($out -notmatch 'Application.Run returned; FrmMain disposed'){throw "Cycle $i never completed FrmMain disposal"}
-            if($out -notmatch 'MessageBoxManager unregistered'){throw "Cycle $i never unregistered native MessageBox hook"}
+            if($out -notmatch 'Application.Run returned'){throw "Cycle $i never returned from Application.Run"}
+            if($out -notmatch 'FrmMain disposed'){throw "Cycle $i never completed FrmMain disposal"}
+            if($out -notmatch 'MessageBoxManager unregister'){throw "Cycle $i never unregistered native MessageBox hook"}
             if($out -notmatch 'finalizer drain complete'){throw "Cycle $i never completed finalizer drain"}
             $cycles += [pscustomobject]@{cycle=$i;ready=$true;exit_code=$p.ExitCode;frm_disposed=$true;messagebox_hook_unregistered=$true;finalizer_drain=$true;unsafe_signature=$false}
           }
           $cycles|ConvertTo-Json|Set-Content artifact/c8-75d/C8_75D_CYCLES.json -Encoding UTF8
-
       - name: Emit C8.75d evidence
         shell: pwsh
         run: |
@@ -126,7 +122,6 @@ jobs:
             pmx_sha256=(Get-FileHash $env:PMX -Algorithm SHA256).Hash.ToLowerInvariant();rmed_sha256=(Get-FileHash $env:RMED -Algorithm SHA256).Hash.ToLowerInvariant();resu_sha256=(Get-FileHash $env:RESU -Algorithm SHA256).Hash.ToLowerInvariant()
             industrial_validation=$false;ansys_equivalence=$false
           }|ConvertTo-Json -Depth 6|Set-Content artifact/c8-75d/C8_75D_POST_HANDLE_FINALIZER_EVIDENCE.json -Encoding UTF8
-
       - uses: actions/upload-artifact@v4
         if: always()
         with:
