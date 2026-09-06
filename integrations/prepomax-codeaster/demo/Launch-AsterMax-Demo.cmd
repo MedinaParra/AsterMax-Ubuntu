@@ -6,6 +6,6 @@ set RC=%ERRORLEVEL%
 if not "%RC%"=="0" (
   echo.
   echo AsterMax demo failed. Review the Logs folder for evidence.
-  pause
+  if not defined CI pause
 )
 exit /b %RC%
