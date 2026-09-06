@@ -6,6 +6,15 @@ root = Path(sys.argv[1] if len(sys.argv) > 1 else 'build/PrePoMax-CodeAster')
 path = root / 'PrePoMax' / 'AsterMaxAI' / 'AsterMaxStepMeshHarness.cs'
 text = path.read_text(encoding='utf-8-sig')
 
+# FrmMeshingParameters relies on the CaeGlobals extension surface for Selection.DeepClone().
+# Keep the generated harness aligned with that compile-time contract instead of qualifying only
+# Selection/SelectionNodeIds while accidentally hiding the extension method namespace.
+using_anchor = 'using CaeMesh;\n'
+if 'using CaeGlobals;\n' not in text:
+    if using_anchor not in text:
+        raise SystemExit('C8.82e CaeGlobals using anchor not found; refusing non-deterministic patch')
+    text = text.replace(using_anchor, using_anchor + 'using CaeGlobals;\n', 1)
+
 # Exact GUI replay: FrmMeshingParameters does not synthesize CreationData. It puts the
 # controller in Part-selection mode, receives controller-generated IDs, and deep-clones
 # Controller.Selection. AddMeshingParameters then replays that same Selection internally.
