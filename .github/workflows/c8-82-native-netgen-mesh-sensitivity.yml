@@ -1,12 +1,12 @@
-name: C8.82 Native NetGen Mesh Sensitivity + Convergence Qualification
+name: C8.82c Effective NetGen Sizing + Convergence Qualification
 
 on:
   push:
-    branches: [agent/c8-82-native-netgen-mesh-sensitivity]
+    branches: [agent/c8-82c-effective-netgen-sizing]
   workflow_dispatch:
 
 concurrency:
-  group: c8-82-${{ github.ref }}
+  group: c8-82c-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -18,11 +18,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Bootstrap AsterMax and install native MaxH seam
+      - name: Bootstrap AsterMax and install effective native MaxH seam
         shell: pwsh
         run: |
           python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
           python integrations/prepomax-codeaster/tools/apply_c8_82_native_mesh_sensitivity.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_c8_82c_effective_netgen_sizing.py build/PrePoMax-CodeAster
       - uses: microsoft/setup-msbuild@v2
       - name: Restore and build Release x64
         shell: pwsh
@@ -102,13 +103,15 @@ jobs:
             $g=Get-Content $genEv -Raw|ConvertFrom-Json
             if(-not $m.step_to_netgen_mesh_qualified){throw "$name native STEP/NetGen failed: $($m.error)"}
             if([math]::Abs([double]$c.requested_maxh_mm-$maxh)-gt 1e-9){throw "$name native MaxH seam mismatch"}
+            if(-not $c.effective_get_part_maxh_match){throw "$name GetPartMeshingParameters did not admit requested MaxH"}
             if(-not $s.structural_setup_qualified -or -not $s.mm_n_mpa_unit_lock){throw "$name structural setup failed: $($s.error)"}
             if(-not $g.pmx_structural_roundtrip_qualified -or -not $g.unit_pmx_codeaster_generation_qualified){throw "$name PMX/Code_Aster generation failed: $($g.error)"}
             foreach($f in @('astermax_c862_static.comm','astermax_c862_static.mail','astermax_c862_static.export','AsterMax_C862_Structural.pmx')){
               if(-not(Test-Path (Join-Path $study $f))){throw "$name missing generated $f"}
             }
             $summary += [pscustomobject]@{
-              name=$name;requested_maxh_mm=$maxh;nodes=[int]$m.mesh_node_count;elements=[int]$m.mesh_element_count;element_types=$m.mesh_element_types
+              name=$name;requested_maxh_mm=$maxh;effective_maxh_mm=[double]$c.effective_get_part_maxh_mm;encoded_geometry_part_id=[int]$c.encoded_geometry_part_id
+              nodes=[int]$m.mesh_node_count;elements=[int]$m.mesh_element_count;element_types=$m.mesh_element_types
               step_sha256=$m.source_step_sha256
               pmx_sha256=(Get-FileHash (Join-Path $study 'AsterMax_C862_Structural.pmx') -Algorithm SHA256).Hash.ToLowerInvariant()
               mail_sha256=(Get-FileHash (Join-Path $study 'astermax_c862_static.mail') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -123,16 +126,17 @@ jobs:
             throw "Native refinement did not monotonically increase node count: $($summary.nodes -join ',')"
           }
           @{
-            schema='astermax.c8.82.native-mesh-family.v1'
+            schema='astermax.c8.82c.effective-native-mesh-family.v1'
             commit='${{ github.sha }}'
             levels=$summary
+            effective_get_part_meshing_parameters_verified=$true
             native_netgen_refinement_verified=$true
             industrial_validation=$false
             ansys_equivalence=$false
           }|ConvertTo-Json -Depth 8|Set-Content artifact/c8-82/C8.82_NATIVE_MESH_FAMILY.json -Encoding UTF8
       - uses: actions/upload-artifact@v4
         with:
-          name: C8.82-Native-NetGen-Studies-${{ github.sha }}
+          name: C8.82c-Native-NetGen-Studies-${{ github.sha }}
           path: artifact/c8-82/**
           if-no-files-found: error
           retention-days: 14
@@ -145,7 +149,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: C8.82-Native-NetGen-Studies-${{ github.sha }}
+          name: C8.82c-Native-NetGen-Studies-${{ github.sha }}
           path: artifact/c8-82
       - name: Solve all three fresh studies with Code_Aster 17.4.0
         shell: bash
@@ -170,7 +174,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C8.82-Native-NetGen-Convergence-${{ github.sha }}
+          name: AsterMax-C8.82c-Effective-NetGen-Convergence-${{ github.sha }}
           path: |
             artifact/c8-82/C8.82_NATIVE_MESH_FAMILY.json
             artifact/c8-82/C8.82_CONVERGENCE_QUALIFICATION.json
