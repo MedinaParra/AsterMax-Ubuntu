@@ -24,6 +24,18 @@ trap {
     exit 91
 }
 
+function Get-Sha256Hex([string]$Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $bytes = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes)).Replace('-','').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 function Fail([string]$message) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $failure = @{ ok=$false; timestamp=(Get-Date).ToUniversalTime().ToString('o'); error=$message }
@@ -51,7 +63,7 @@ $checks = @(
     @{ path=$resu; expected=[string]$contract.dataset.resu.sha256 }
 )
 foreach ($c in $checks) {
-    $actual = (Get-FileHash $c.path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-Sha256Hex $c.path
     if ($actual -ne $c.expected.ToLowerInvariant()) { Fail "Demo provenance hash mismatch: $($c.path)" }
 }
 
@@ -83,7 +95,8 @@ $p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectSta
 $launch = @{
     schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
     dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait);
-    relative_internal_arguments=$true; invariant_numeric_contract=$true; argument_line_model='relocatable-relative-package-paths'
+    relative_internal_arguments=$true; invariant_numeric_contract=$true; argument_line_model='relocatable-relative-package-paths';
+    sha256_implementation='System.Security.Cryptography.SHA256'
 }
 $launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
 
