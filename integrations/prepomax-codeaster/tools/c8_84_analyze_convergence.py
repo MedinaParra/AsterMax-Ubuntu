@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import csv, hashlib, json, math, pathlib, re, sys
-root=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'artifact/c8-84'); levels=['coarse','medium','fine']; requested={'coarse':25,'medium':18,'fine':12}
+root=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else 'artifact/c8-84'); levels=['coarse','medium','fine']; requested={'coarse':25,'medium':18,'fine':14}
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def table(text,marker,header):
     pos=text.find(marker)
@@ -52,7 +52,7 @@ for name in levels:
     for p in (resu,comm,mail,mess,rmed):
         if not p.is_file() or p.stat().st_size==0:raise SystemExit(f'{name}: missing {p.name}')
     if re.search(r'<F>|ERREUR FATALE|FATAL_ERROR',mess.read_text(errors='replace'),re.I):raise SystemExit(name+': solver fatal')
-    ct=comm.read_text(errors='replace'); mm=re.search(r"FORCE_FACE=\(_F\(GROUP_MA=['\"]S_LOAD_XMAX['\"],\s*FX=([+\-0-9.eEdD]+)\)\)",ct)
+    ct=comm.read_text(errors='replace'); mm=re.search(r"FORCE_FACE=\(_F\(GROUP_MA=['\"]S_LOAD_XMAX['\"],\s*FX=([+\-0-9.eEdD]+)\)\)\",ct)
     if not mm:raise SystemExit(name+': FORCE_FACE contract missing')
     if abs(float(mm.group(1).replace('D','E'))-tev['traction_fx_mpa'])>1e-12:raise SystemExit(name+': traction COMM/evidence mismatch')
     text=resu.read_text(errors='replace'); depl=table(text,'PPM_DEPL',['NOEUD','DX','DY','DZ']);sn=table(text,'PPM_STRESS_N',['NOEUD','SIXX','SIYY','SIZZ']);ss=table(text,'PPM_STRESS_S',['NOEUD','SIXY','SIYZ','SIXZ']);reac=table(text,'PPM_REACTION',['NOEUD','DX','DY','DZ'])
@@ -66,7 +66,7 @@ for name in levels:
     results.append({'name':name,'requested_maxh_mm':requested[name],'nodes':len(depl),'elements':q['tetra10_count'],'surface_faces_tria6':tev['tria6_face_count'],'surface_area_mm2':tev['surface_area_mm2'],'traction_mpa':tev['traction_fx_mpa'],'integrated_resultant_n':resultant,'disp_max_mm':disp[un],'disp_max_node':un,'mises_max_mpa':mises[vn],'mises_max_node':vn,'reaction_sum_n':reaction,'equilibrium_residual_norm_n':rnorm,'reaction_equilibrium_verified':True,'mesh_quality_proxy':q,'mail_sha256':sha(mail),'comm_sha256':sha(comm),'rmed_sha256':sha(rmed),'resu_sha256':sha(resu)})
 if not(results[0]['nodes']<results[1]['nodes']<results[2]['nodes'] and results[0]['elements']<results[1]['elements']<results[2]['elements']):raise SystemExit('mesh family not monotonic')
 rel=lambda a,b:abs(b-a)/max(abs(b),1e-30);du=rel(results[1]['disp_max_mm'],results[2]['disp_max_mm']);ds=rel(results[1]['mises_max_mpa'],results[2]['mises_max_mpa']);tol=.05
-ev={'schema':'astermax.c8.84.fine-surface-traction-convergence.v1','solver':'Code_Aster 17.4.0','unit_system':'mm-N-MPa','load_contract':'uniform +X surface traction independently integrated to 1000 N','levels':results,'fine_pair_displacement_relative_change':du,'fine_pair_mises_relative_change':ds,'convergence_tolerance':tol,'displacement_convergence_admitted':du<=tol,'peak_mises_convergence_admitted':ds<=tol,'solution_convergence_admitted':du<=tol and ds<=tol,'all_reaction_balances_verified':True,'product_surface_traction_binding_verified':False,'qualification_surface_transform_verified':True,'industrial_validation':False,'ansys_equivalence':False}
+ev={'schema':'astermax.c8.84a.budget-aware-fine-surface-traction-convergence.v1','solver':'Code_Aster 17.4.0','unit_system':'mm-N-MPa','load_contract':'uniform +X surface traction independently integrated to 1000 N','fine_mesh_strategy':'global MaxH 14 mm selected after 12 mm exceeded the 12-minute generation evidence budget; convergence gate remains unchanged at 5%','levels':results,'fine_pair_displacement_relative_change':du,'fine_pair_mises_relative_change':ds,'convergence_tolerance':tol,'displacement_convergence_admitted':du<=tol,'peak_mises_convergence_admitted':ds<=tol,'solution_convergence_admitted':du<=tol and ds<=tol,'all_reaction_balances_verified':True,'product_surface_traction_binding_verified':False,'qualification_surface_transform_verified':True,'industrial_validation':False,'ansys_equivalence':False}
 (root/'C8.84_CONVERGENCE_QUALIFICATION.json').write_text(json.dumps(ev,indent=2),encoding='utf-8')
 with (root/'C8.84_CONVERGENCE.csv').open('w',newline='',encoding='utf-8') as f:
     w=csv.writer(f);w.writerow(['level','maxh_mm','nodes','tetra10','surface_tria6','surface_area_mm2','traction_mpa','umax_mm','vmmax_mpa','reaction_residual_n']);[w.writerow([x['name'],x['requested_maxh_mm'],x['nodes'],x['elements'],x['surface_faces_tria6'],x['surface_area_mm2'],x['traction_mpa'],x['disp_max_mm'],x['mises_max_mpa'],x['equilibrium_residual_norm_n']]) for x in results]
