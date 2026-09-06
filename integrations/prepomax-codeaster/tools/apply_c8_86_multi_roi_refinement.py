@@ -37,14 +37,17 @@ replacement = '''            CreateMeshRefinementFile(part, meshRefinementFileNa
                     }
                     c886Writer.WriteLine("0"); // zero refined segments; point refinements only
                 }
-            }
 
-            string c886Copy = Environment.GetEnvironmentVariable("ASTERMAX_NETGEN_REFINEMENT_COPY_PATH");
-            if (!String.IsNullOrWhiteSpace(c886Copy))
-            {
-                string c886Dir = Path.GetDirectoryName(c886Copy);
-                if (!String.IsNullOrWhiteSpace(c886Dir)) Directory.CreateDirectory(c886Dir);
-                File.Copy(meshRefinementFileName, c886Copy, true);
+                // Only adaptive runs request/capture refinement evidence. A clean baseline must
+                // neither require nor synthesize meshRefinement evidence; this keeps absence of
+                // local refinement distinct from missing evidence.
+                string c886Copy = Environment.GetEnvironmentVariable("ASTERMAX_NETGEN_REFINEMENT_COPY_PATH");
+                if (!String.IsNullOrWhiteSpace(c886Copy))
+                {
+                    string c886Dir = Path.GetDirectoryName(c886Copy);
+                    if (!String.IsNullOrWhiteSpace(c886Dir)) Directory.CreateDirectory(c886Dir);
+                    File.Copy(meshRefinementFileName, c886Copy, true);
+                }
             }'''
 if anchor not in text:
     raise SystemExit('C8.86 CreateMeshRefinementFile anchor not found; refusing non-deterministic patch')
