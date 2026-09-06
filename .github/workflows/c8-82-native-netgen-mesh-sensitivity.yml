@@ -1,0 +1,229 @@
+name: C8.82 Native NetGen Mesh Sensitivity + Convergence Qualification
+
+on:
+  push:
+    branches: [agent/c8-82-native-netgen-mesh-sensitivity]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-82-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-three-native-netgen-studies:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap and install C8.82 native MaxH seam
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_c8_82_native_mesh_sensitivity.py build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore and build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Fetch pinned CAD runtime and SI-mm STEP fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $source=Join-Path $runtimeRoot $folder; if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.82_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres.'}
+          if($raw -notmatch '537\.000000' -or $raw -notmatch '162\.000000' -or $raw -notmatch '\-254\.000000'){throw 'STEP dimensional sentinels changed.'}
+          "ASTERMAX_C882_STEP=$((Resolve-Path $fixture).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate coarse medium fine native NetGen studies
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          New-Item -ItemType Directory -Force artifact/c8-82 | Out-Null
+          $levels=@(
+            @{name='coarse';maxh=60.0},
+            @{name='medium';maxh=40.0},
+            @{name='fine';maxh=25.0}
+          )
+          $summary=@()
+          foreach($level in $levels){
+            $name=$level.name; $maxh=[double]$level.maxh
+            $root=Join-Path $PWD "artifact/c8-82/$name"; New-Item -ItemType Directory -Force $root | Out-Null
+            $study=Join-Path $root 'study'; New-Item -ItemType Directory -Force $study | Out-Null
+            $meshEv=Join-Path $root 'STEP_NETGEN.json'; $cfgEv=Join-Path $root 'NETGEN_CONFIG.json'; $setupEv=Join-Path $root 'STRUCTURAL_SETUP.json'; $genEv=Join-Path $root 'CODEASTER_GENERATION.json'
+            $env:ASTERMAX_STEP_MESH_FIXTURE='1'; $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_C882_STEP
+            $env:ASTERMAX_STEP_MESH_MAXH_MM=$maxh.ToString([Globalization.CultureInfo]::InvariantCulture)
+            $env:ASTERMAX_STEP_MESH_CONFIG_EVIDENCE_PATH=$cfgEv; $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=$meshEv
+            $env:ASTERMAX_STRUCTURAL_SETUP_FIXTURE='1'; $env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH=$setupEv
+            $env:ASTERMAX_CODEASTER_GENERATION_FIXTURE='1'; $env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH=$genEv; $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR=$study
+            $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+            $deadline=(Get-Date).AddSeconds(35)
+            do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "$name GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+            if($p.MainWindowHandle -eq 0){throw "$name: no native AsterMax window"}
+            $proofDeadline=(Get-Date).AddSeconds(300)
+            while(((-not(Test-Path $meshEv))-or(-not(Test-Path $cfgEv))-or(-not(Test-Path $setupEv))-or(-not(Test-Path $genEv))) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "$name GUI exited during generation"}}
+            foreach($ev in @($meshEv,$cfgEv,$setupEv,$genEv)){if(-not(Test-Path $ev)){throw "$name missing runtime evidence $ev"}}
+            $m=Get-Content $meshEv -Raw|ConvertFrom-Json; $c=Get-Content $cfgEv -Raw|ConvertFrom-Json; $s=Get-Content $setupEv -Raw|ConvertFrom-Json; $g=Get-Content $genEv -Raw|ConvertFrom-Json
+            if(-not $m.step_to_netgen_mesh_qualified){throw "$name native STEP/NetGen failed: $($m.error)"}
+            if([math]::Abs([double]$c.requested_maxh_mm-$maxh)-gt 1e-9){throw "$name MaxH seam mismatch"}
+            if(-not $s.structural_setup_qualified -or -not $s.mm_n_mpa_unit_lock){throw "$name structural setup failed: $($s.error)"}
+            if(-not $g.pmx_structural_roundtrip_qualified -or -not $g.unit_pmx_codeaster_generation_qualified){throw "$name Code_Aster generation failed: $($g.error)"}
+            foreach($f in @('astermax_c862_static.comm','astermax_c862_static.mail','astermax_c862_static.export','AsterMax_C862_Structural.pmx')){if(-not(Test-Path (Join-Path $study $f))){throw "$name missing $f"}}
+            $summary += [pscustomobject]@{name=$name;requested_maxh_mm=$maxh;nodes=[int]$m.mesh_node_count;elements=[int]$m.mesh_element_count;element_types=$m.mesh_element_types;step_sha256=$m.source_step_sha256;pmx_sha256=(Get-FileHash (Join-Path $study 'AsterMax_C862_Structural.pmx') -Algorithm SHA256).Hash.ToLowerInvariant();mail_sha256=(Get-FileHash (Join-Path $study 'astermax_c862_static.mail') -Algorithm SHA256).Hash.ToLowerInvariant()}
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          }
+          if(-not($summary[0].elements -lt $summary[1].elements -and $summary[1].elements -lt $summary[2].elements)){throw "Native refinement did not monotonically increase element count: $($summary.elements -join ',')"}
+          if(-not($summary[0].nodes -lt $summary[1].nodes -and $summary[1].nodes -lt $summary[2].nodes)){throw "Native refinement did not monotonically increase node count: $($summary.nodes -join ',')"}
+          @{$schema='astermax.c8.82.native-mesh-family.v1';commit='${{ github.sha }}';levels=$summary;native_netgen_refinement_verified=$true;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 8|Set-Content artifact/c8-82/C8.82_NATIVE_MESH_FAMILY.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: C8.82-Native-NetGen-Studies-${{ github.sha }}
+          path: artifact/c8-82/**
+          if-no-files-found: error
+          retention-days: 14
+
+  solve-and-qualify-sensitivity:
+    needs: generate-three-native-netgen-studies
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: C8.82-Native-NetGen-Studies-${{ github.sha }}
+          path: artifact/c8-82
+      - name: Solve all three fresh studies with Code_Aster 17.4.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull simvia/code_aster:17.4.0
+          for level in coarse medium fine; do
+            d="artifact/c8-82/$level/study"
+            chmod -R a+rwX "$d"
+            docker run --rm -v "$PWD/$d:/home/user/data" -w /home/user/data simvia/code_aster:17.4.0 bash -i -c 'run_aster astermax_c862_static.export' | tee "artifact/c8-82/$level/CODE_ASTER_STDOUT.log"
+            test -s "$d/astermax_c862_static.mess"
+            test -s "$d/astermax_c862_static.resu"
+            test -s "$d/astermax_c862_static.rmed"
+          done
+      - name: Independently qualify mesh shape proxy, equilibrium and convergence
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib,json,math,pathlib,re,csv
+          root=pathlib.Path('artifact/c8-82')
+          family=json.loads((root/'C8.82_NATIVE_MESH_FAMILY.json').read_text(encoding='utf-8-sig'))
+          byname={x['name']:x for x in family['levels']}
+          levels=['coarse','medium','fine']
+          def sha(p):
+              h=hashlib.sha256();h.update(p.read_bytes());return h.hexdigest()
+          def table(text,marker,header):
+              pos=text.find(marker)
+              if pos<0: raise SystemExit('missing '+marker)
+              lines=text[pos:].splitlines(); key=';'.join(header)
+              hi=next((i for i,l in enumerate(lines) if l.strip()==key),None)
+              if hi is None: raise SystemExit('missing header '+marker)
+              rows={}
+              for line in lines[hi+1:]:
+                  if rows and (not line.strip() or line.startswith('PPM_') or 'ASTER 17.' in line): break
+                  p=[x.strip() for x in line.split(';')]
+                  if len(p)!=len(header):
+                      if rows: break
+                      continue
+                  try: n=int(p[0]); vals=[float(x.replace('D','E')) for x in p[1:]]
+                  except ValueError:
+                      if rows: break
+                      continue
+                  if not all(math.isfinite(x) for x in vals): raise SystemExit('nonfinite '+marker)
+                  rows[n]=vals
+              if not rows: raise SystemExit('empty '+marker)
+              return rows
+          def parse_mail(path):
+              lines=path.read_text(encoding='utf-8',errors='replace').splitlines(); nodes={}; tets=[]; mode=None
+              for raw in lines:
+                  s=raw.strip()
+                  if s=='COOR_3D': mode='nodes'; continue
+                  if s=='TETRA10': mode='tets'; continue
+                  if s in ('FINSF','FIN'): mode=None; continue
+                  if not s or s.startswith('%'): continue
+                  p=s.split()
+                  if mode=='nodes' and len(p)>=4:
+                      try:nodes[p[0]]=tuple(float(x.replace('D','E')) for x in p[1:4])
+                      except:pass
+                  elif mode=='tets' and len(p)>=11: tets.append(p[1:11])
+              if not nodes or not tets: raise SystemExit(f'could not parse COOR_3D/TETRA10 from {path}')
+              qs=[]; vols=[]
+              for ids in tets:
+                  a,b,c,d=(nodes[x] for x in ids[:4])
+                  def sub(x,y):return tuple(x[i]-y[i] for i in range(3))
+                  ab=sub(b,a);ac=sub(c,a);ad=sub(d,a)
+                  cross=(ac[1]*ad[2]-ac[2]*ad[1],ac[2]*ad[0]-ac[0]*ad[2],ac[0]*ad[1]-ac[1]*ad[0])
+                  V=abs(sum(ab[i]*cross[i] for i in range(3)))/6.0
+                  pts=(a,b,c,d); s2=0.0
+                  for i in range(4):
+                      for j in range(i+1,4): s2+=sum((pts[i][k]-pts[j][k])**2 for k in range(3))
+                  q=12.0*(3.0*V)**(2.0/3.0)/s2 if V>0 and s2>0 else 0.0
+                  if not math.isfinite(q): q=0.0
+                  qs.append(q);vols.append(V)
+              qs.sort()
+              def pct(p):return qs[min(len(qs)-1,max(0,int(round((len(qs)-1)*p))))]
+              return {'tetra10_count':len(tets),'corner_tet_volume_min_mm3':min(vols),'mean_ratio_proxy_min':qs[0],'mean_ratio_proxy_p05':pct(.05),'mean_ratio_proxy_median':pct(.5),'degenerate_corner_tets':sum(1 for v in vols if v<=1e-12)}
+          out=[]
+          for name in levels:
+              d=root/name/'study'; resu=d/'astermax_c862_static.resu'; comm=d/'astermax_c862_static.comm'; mail=d/'astermax_c862_static.mail'; mess=d/'astermax_c862_static.mess'
+              txt=resu.read_text(encoding='utf-8',errors='replace'); mt=mess.read_text(encoding='utf-8',errors='replace')
+              if re.search(r'<F>|ERREUR FATALE|FATAL_ERROR',mt,re.I): raise SystemExit(name+' solver fatal marker')
+              depl=table(txt,'PPM_DEPL',['NOEUD','DX','DY','DZ']);sn=table(txt,'PPM_STRESS_N',['NOEUD','SIXX','SIYY','SIZZ']);ss=table(txt,'PPM_STRESS_S',['NOEUD','SIXY','SIYZ','SIXZ']);reac=table(txt,'PPM_REACTION',['NOEUD','DX','DY','DZ'])
+              disp={n:math.sqrt(sum(v*v for v in xyz)) for n,xyz in depl.items()}; un=max(disp,key=disp.get); umax=disp[un]
+              def vm(n):
+                  sx,sy,sz=sn[n];xy,yz,xz=ss[n]
+                  return math.sqrt(.5*((sx-sy)**2+(sy-sz)**2+(sz-sx)**2)+3*(xy*xy+yz*yz+xz*xz))
+              vv={n:vm(n) for n in sn};vn=max(vv,key=vv.get);vmax=vv[vn]
+              r=[sum(v[i] for v in reac.values()) for i in range(3)]
+              cm=comm.read_text(encoding='utf-8',errors='replace'); m=re.search(r'GROUP_NO=[\'\"]N_LOAD_XMAX_NODE[\'\"],\s*FX=([+\-0-9.eEdD]+)',cm)
+              if not m: raise SystemExit(name+' load parse failed')
+              fx=float(m.group(1).replace('D','E')); residual=[r[0]+fx,r[1],r[2]]; rn=math.sqrt(sum(x*x for x in residual))
+              if rn>1e-3: raise SystemExit(f'{name} equilibrium residual {rn}')
+              q=parse_mail(mail)
+              if q['degenerate_corner_tets']!=0 or q['mean_ratio_proxy_min']<=0: raise SystemExit(name+' degenerate TETRA10 corner geometry')
+              f=byname[name]
+              if sha(mail)!=f['mail_sha256']: raise SystemExit(name+' MAIL provenance mismatch')
+              out.append({'name':name,'requested_maxh_mm':f['requested_maxh_mm'],'nodes':len(depl),'elements':q['tetra10_count'],'mises_max_mpa':vmax,'mises_max_node':vn,'disp_max_mm':umax,'disp_max_node':un,'reaction_equilibrium_verified':True,'equilibrium_residual_norm_n':rn,'mesh_quality_proxy':q,'pmx_sha256':sha(d/'AsterMax_C862_Structural.pmx'),'rmed_sha256':sha(d/'astermax_c862_static.rmed'),'resu_sha256':sha(resu)})
+          if not(out[0]['nodes']<out[1]['nodes']<out[2]['nodes'] and out[0]['elements']<out[1]['elements']<out[2]['elements']): raise SystemExit('solved mesh family is not monotonically refined')
+          def rel(a,b):return abs(b-a)/max(abs(b),1e-30)
+          du=rel(out[1]['disp_max_mm'],out[2]['disp_max_mm']); ds=rel(out[1]['mises_max_mpa'],out[2]['mises_max_mpa'])
+          u_tol=.05; stress_tol=.05
+          u_ok=du<=u_tol; s_ok=ds<=stress_tol
+          ev={'schema':'astermax.c8.82.native-netgen-convergence.v1','commit':'${{ github.sha }}','solver':'Code_Aster 17.4.0','unit_system':'mm-N-MPa','levels':out,'fine_pair_displacement_relative_change':du,'fine_pair_mises_relative_change':ds,'displacement_convergence_tolerance':u_tol,'mises_convergence_tolerance':stress_tol,'displacement_convergence_admitted':u_ok,'peak_mises_convergence_admitted':s_ok,'solution_convergence_admitted':u_ok and s_ok,'mesh_quality_metric':'corner-node tetrahedral mean-ratio proxy; not a NetGen Jacobian metric','all_reaction_balances_verified':True,'industrial_validation':False,'ansys_equivalence':False}
+          (root/'C8.82_CONVERGENCE_QUALIFICATION.json').write_text(json.dumps(ev,indent=2),encoding='utf-8')
+          with (root/'C8.82_CONVERGENCE.csv').open('w',newline='',encoding='utf-8') as f:
+              w=csv.writer(f);w.writerow(['level','maxh_mm','nodes','tetra10','umax_mm','vmmax_mpa','quality_min','quality_p05','quality_median','reaction_residual_n'])
+              for x in out:
+                  q=x['mesh_quality_proxy'];w.writerow([x['name'],x['requested_maxh_mm'],x['nodes'],x['elements'],x['disp_max_mm'],x['mises_max_mpa'],q['mean_ratio_proxy_min'],q['mean_ratio_proxy_p05'],q['mean_ratio_proxy_median'],x['equilibrium_residual_norm_n']])
+          print(json.dumps(ev,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.82-Native-NetGen-Convergence-${{ github.sha }}
+          path: |
+            artifact/c8-82/C8.82_CONVERGENCE_QUALIFICATION.json
+            artifact/c8-82/C8.82_CONVERGENCE.csv
+            artifact/c8-82/*/CODE_ASTER_STDOUT.log
+            artifact/c8-82/*/study/*.mess
+            artifact/c8-82/*/study/*.resu
+          if-no-files-found: error
+          retention-days: 14
