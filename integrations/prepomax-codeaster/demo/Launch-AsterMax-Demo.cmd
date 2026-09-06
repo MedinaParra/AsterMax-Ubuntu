@@ -6,6 +6,13 @@ set RC=%ERRORLEVEL%
 if not "%RC%"=="0" (
   echo.
   echo AsterMax demo failed. Review the Logs folder for evidence.
-  if not defined CI pause
+  if defined CI (
+    echo --- C8.78 launcher failure evidence ---
+    for %%F in ("%~dp0Logs\launch-failure-*.json") do if exist "%%~fF" type "%%~fF"
+    if exist "%~dp0Logs\AsterMax-demo.stderr.log" type "%~dp0Logs\AsterMax-demo.stderr.log"
+    if exist "%~dp0Logs\AsterMax-demo.stdout.log" type "%~dp0Logs\AsterMax-demo.stdout.log"
+  ) else (
+    pause
+  )
 )
 exit /b %RC%
