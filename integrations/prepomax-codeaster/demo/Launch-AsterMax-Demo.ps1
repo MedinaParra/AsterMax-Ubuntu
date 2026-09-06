@@ -102,13 +102,19 @@ $launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.js
 
 if ($NoWait) { return }
 if (-not $p.WaitForExit(120000)) { try { Stop-Process -Id $p.Id -Force } catch {}; Fail 'AsterMax demo did not exit within the deterministic qualification window.' }
-if ($p.ExitCode -ne 0) { Fail "AsterMax demo exited with code $($p.ExitCode). See Logs." }
+# Windows PowerShell can leave ExitCode unpopulated after the timeout overload. Complete a second
+# non-timeout wait and refresh the Process object before reading the native exit status.
+$p.WaitForExit()
+$p.Refresh()
+$exitCode = $p.ExitCode
+if ($null -eq $exitCode) { Fail 'AsterMax demo exited but Windows PowerShell did not expose a process exit code.' }
+if ([int]$exitCode -ne 0) { Fail "AsterMax demo exited with code $exitCode. See Logs." }
 if (-not (Test-Path $EvidencePath)) { Fail 'AsterMax demo exited without emitting READY evidence.' }
 $ready = Get-Content $EvidencePath -Raw | ConvertFrom-Json
 if (-not $ready.scene_ready -or -not $ready.result_admitted -or -not $ready.rendered_viewport_deformation_verified) { Fail 'AsterMax demo READY evidence did not satisfy the admitted Results contract.' }
 if ([string]$ready.deformation_state -ne 'user-defined-x10-contour') { Fail 'AsterMax demo did not preserve the qualified x10 deformation state.' }
 
-$launch.exit_code = $p.ExitCode
+$launch.exit_code = [int]$exitCode
 $launch.completed_utc = (Get-Date).ToUniversalTime().ToString('o')
 $launch.result_admitted = $true
 $launch.rendered_x10 = $true
