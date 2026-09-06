@@ -62,6 +62,9 @@ $args = @(
     ('"' + $resu + '"'),
     ('"' + $EvidencePath + '"')
 )
+# PowerShell single-quoted strings do not use backslash escaping. Replace the literal backslash-quote
+# pair above with real quotes before passing arguments to Start-Process.
+$args = @($args | ForEach-Object { $_.Replace('\"','"') })
 $p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 $launch = @{
     schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
