@@ -90,31 +90,51 @@ $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = ([double]$contract.expected.max_displa
 $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = ([int]$contract.expected.max_von_mises_node).ToString($inv)
 $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = ([int]$contract.expected.max_displacement_node).ToString($inv)
 
-$args = @('--astermax-results-demo',$rmedRel,$resuRel,$evidenceArg)
-$p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+# Use System.Diagnostics.Process directly instead of Start-Process. Windows PowerShell can leave
+# Start-Process.ExitCode empty after redirected output + timeout waits. Direct Process exposes the
+# native exit status deterministically while asynchronous reads prevent pipe-buffer deadlocks.
+$psi = New-Object Diagnostics.ProcessStartInfo
+$psi.FileName = $exe
+$psi.Arguments = '--astermax-results-demo ' + $rmedRel + ' ' + $resuRel + ' ' + $evidenceArg
+$psi.WorkingDirectory = $root
+$psi.UseShellExecute = $false
+$psi.CreateNoWindow = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$p = New-Object Diagnostics.Process
+$p.StartInfo = $psi
+if (-not $p.Start()) { Fail 'AsterMax demo process could not be started.' }
+$outTask = $p.StandardOutput.ReadToEndAsync()
+$errTask = $p.StandardError.ReadToEndAsync()
 $launch = @{
     schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
     dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait);
     relative_internal_arguments=$true; invariant_numeric_contract=$true; argument_line_model='relocatable-relative-package-paths';
-    sha256_implementation='System.Security.Cryptography.SHA256'
+    sha256_implementation='System.Security.Cryptography.SHA256'; process_api='System.Diagnostics.Process'
 }
 $launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
 
 if ($NoWait) { return }
-if (-not $p.WaitForExit(120000)) { try { Stop-Process -Id $p.Id -Force } catch {}; Fail 'AsterMax demo did not exit within the deterministic qualification window.' }
-# Windows PowerShell can leave ExitCode unpopulated after the timeout overload. Complete a second
-# non-timeout wait and refresh the Process object before reading the native exit status.
+if (-not $p.WaitForExit(120000)) {
+    try { $p.Kill() } catch {}
+    try { $p.WaitForExit() } catch {}
+    try { $outTask.Result | Set-Content $stdout -Encoding UTF8 } catch {}
+    try { $errTask.Result | Set-Content $stderr -Encoding UTF8 } catch {}
+    Fail 'AsterMax demo did not exit within the deterministic qualification window.'
+}
 $p.WaitForExit()
-$p.Refresh()
-$exitCode = $p.ExitCode
-if ($null -eq $exitCode) { Fail 'AsterMax demo exited but Windows PowerShell did not expose a process exit code.' }
-if ([int]$exitCode -ne 0) { Fail "AsterMax demo exited with code $exitCode. See Logs." }
+$outText = $outTask.Result
+$errText = $errTask.Result
+$outText | Set-Content $stdout -Encoding UTF8
+$errText | Set-Content $stderr -Encoding UTF8
+$exitCode = [int]$p.ExitCode
+if ($exitCode -ne 0) { Fail "AsterMax demo exited with code $exitCode. See Logs." }
 if (-not (Test-Path $EvidencePath)) { Fail 'AsterMax demo exited without emitting READY evidence.' }
 $ready = Get-Content $EvidencePath -Raw | ConvertFrom-Json
 if (-not $ready.scene_ready -or -not $ready.result_admitted -or -not $ready.rendered_viewport_deformation_verified) { Fail 'AsterMax demo READY evidence did not satisfy the admitted Results contract.' }
 if ([string]$ready.deformation_state -ne 'user-defined-x10-contour') { Fail 'AsterMax demo did not preserve the qualified x10 deformation state.' }
 
-$launch.exit_code = [int]$exitCode
+$launch.exit_code = $exitCode
 $launch.completed_utc = (Get-Date).ToUniversalTime().ToString('o')
 $launch.result_admitted = $true
 $launch.rendered_x10 = $true
