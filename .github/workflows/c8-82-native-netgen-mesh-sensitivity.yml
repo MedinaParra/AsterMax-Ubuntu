@@ -1,0 +1,185 @@
+name: C8.82 Native NetGen Mesh Sensitivity + Convergence Qualification
+
+on:
+  push:
+    branches: [agent/c8-82-native-netgen-mesh-sensitivity]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-82-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-native-mesh-family:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap AsterMax and install native MaxH seam
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_c8_82_native_mesh_sensitivity.py build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore and build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Fetch pinned NetGen runtime and SI-mm STEP fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){
+            $source=Join-Path $runtimeRoot $folder
+            if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force}
+          }
+          $fixture='build/AsterMax_C8.82_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres.'}
+          if($raw -notmatch '537\.000000' -or $raw -notmatch '162\.000000' -or $raw -notmatch '\-254\.000000'){throw 'STEP dimensional sentinels changed.'}
+          "ASTERMAX_C882_STEP=$((Resolve-Path $fixture).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Generate coarse medium fine fresh studies through native NetGen
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          New-Item -ItemType Directory -Force artifact/c8-82 | Out-Null
+          $levels=@(
+            [pscustomobject]@{name='coarse';maxh=60.0},
+            [pscustomobject]@{name='medium';maxh=40.0},
+            [pscustomobject]@{name='fine';maxh=25.0}
+          )
+          $summary=@()
+          foreach($level in $levels){
+            $name=$level.name; $maxh=[double]$level.maxh
+            $root=Join-Path $PWD "artifact/c8-82/$name"
+            $study=Join-Path $root 'study'
+            New-Item -ItemType Directory -Force $study | Out-Null
+            $meshEv=Join-Path $root 'STEP_NETGEN.json'
+            $cfgEv=Join-Path $root 'NETGEN_CONFIG.json'
+            $setupEv=Join-Path $root 'STRUCTURAL_SETUP.json'
+            $genEv=Join-Path $root 'CODEASTER_GENERATION.json'
+            $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+            $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_C882_STEP
+            $env:ASTERMAX_STEP_MESH_MAXH_MM=$maxh.ToString([Globalization.CultureInfo]::InvariantCulture)
+            $env:ASTERMAX_STEP_MESH_CONFIG_EVIDENCE_PATH=$cfgEv
+            $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=$meshEv
+            $env:ASTERMAX_STRUCTURAL_SETUP_FIXTURE='1'
+            $env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH=$setupEv
+            $env:ASTERMAX_CODEASTER_GENERATION_FIXTURE='1'
+            $env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH=$genEv
+            $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR=$study
+            $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+            $deadline=(Get-Date).AddSeconds(35)
+            do{
+              Start-Sleep -Milliseconds 500; $p.Refresh()
+              if($p.HasExited){throw "$name GUI exited early: $($p.ExitCode)"}
+            }while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+            if($p.MainWindowHandle -eq 0){throw "$name: no native AsterMax window"}
+            $proofDeadline=(Get-Date).AddSeconds(300)
+            while(((-not(Test-Path $meshEv))-or(-not(Test-Path $cfgEv))-or(-not(Test-Path $setupEv))-or(-not(Test-Path $genEv))) -and (Get-Date)-lt $proofDeadline){
+              Start-Sleep -Milliseconds 500; $p.Refresh()
+              if($p.HasExited){throw "$name GUI exited during study generation"}
+            }
+            foreach($ev in @($meshEv,$cfgEv,$setupEv,$genEv)){if(-not(Test-Path $ev)){throw "$name missing runtime evidence: $ev"}}
+            $m=Get-Content $meshEv -Raw|ConvertFrom-Json
+            $c=Get-Content $cfgEv -Raw|ConvertFrom-Json
+            $s=Get-Content $setupEv -Raw|ConvertFrom-Json
+            $g=Get-Content $genEv -Raw|ConvertFrom-Json
+            if(-not $m.step_to_netgen_mesh_qualified){throw "$name native STEP/NetGen failed: $($m.error)"}
+            if([math]::Abs([double]$c.requested_maxh_mm-$maxh)-gt 1e-9){throw "$name native MaxH seam mismatch"}
+            if(-not $s.structural_setup_qualified -or -not $s.mm_n_mpa_unit_lock){throw "$name structural setup failed: $($s.error)"}
+            if(-not $g.pmx_structural_roundtrip_qualified -or -not $g.unit_pmx_codeaster_generation_qualified){throw "$name PMX/Code_Aster generation failed: $($g.error)"}
+            foreach($f in @('astermax_c862_static.comm','astermax_c862_static.mail','astermax_c862_static.export','AsterMax_C862_Structural.pmx')){
+              if(-not(Test-Path (Join-Path $study $f))){throw "$name missing generated $f"}
+            }
+            $summary += [pscustomobject]@{
+              name=$name;requested_maxh_mm=$maxh;nodes=[int]$m.mesh_node_count;elements=[int]$m.mesh_element_count;element_types=$m.mesh_element_types
+              step_sha256=$m.source_step_sha256
+              pmx_sha256=(Get-FileHash (Join-Path $study 'AsterMax_C862_Structural.pmx') -Algorithm SHA256).Hash.ToLowerInvariant()
+              mail_sha256=(Get-FileHash (Join-Path $study 'astermax_c862_static.mail') -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+          }
+          if(-not($summary[0].elements -lt $summary[1].elements -and $summary[1].elements -lt $summary[2].elements)){
+            throw "Native refinement did not monotonically increase element count: $($summary.elements -join ',')"
+          }
+          if(-not($summary[0].nodes -lt $summary[1].nodes -and $summary[1].nodes -lt $summary[2].nodes)){
+            throw "Native refinement did not monotonically increase node count: $($summary.nodes -join ',')"
+          }
+          @{
+            schema='astermax.c8.82.native-mesh-family.v1'
+            commit='${{ github.sha }}'
+            levels=$summary
+            native_netgen_refinement_verified=$true
+            industrial_validation=$false
+            ansys_equivalence=$false
+          }|ConvertTo-Json -Depth 8|Set-Content artifact/c8-82/C8.82_NATIVE_MESH_FAMILY.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: C8.82-Native-NetGen-Studies-${{ github.sha }}
+          path: artifact/c8-82/**
+          if-no-files-found: error
+          retention-days: 14
+
+  solve-and-qualify:
+    needs: generate-native-mesh-family
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: C8.82-Native-NetGen-Studies-${{ github.sha }}
+          path: artifact/c8-82
+      - name: Solve all three fresh studies with Code_Aster 17.4.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull simvia/code_aster:17.4.0
+          for level in coarse medium fine; do
+            d="artifact/c8-82/$level/study"
+            chmod -R a+rwX "$d"
+            docker run --rm -v "$PWD/$d:/home/user/data" -w /home/user/data simvia/code_aster:17.4.0 bash -i -c 'run_aster astermax_c862_static.export' | tee "artifact/c8-82/$level/CODE_ASTER_STDOUT.log"
+            test -s "$d/astermax_c862_static.mess"
+            test -s "$d/astermax_c862_static.resu"
+            test -s "$d/astermax_c862_static.rmed"
+          done
+      - name: Independently qualify mesh quality proxy equilibrium and convergence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python integrations/prepomax-codeaster/tools/c8_82_analyze_convergence.py artifact/c8-82 | tee artifact/c8-82/C8.82_ANALYSIS_STDOUT.log
+          test -s artifact/c8-82/C8.82_CONVERGENCE_QUALIFICATION.json
+          test -s artifact/c8-82/C8.82_CONVERGENCE.csv
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.82-Native-NetGen-Convergence-${{ github.sha }}
+          path: |
+            artifact/c8-82/C8.82_NATIVE_MESH_FAMILY.json
+            artifact/c8-82/C8.82_CONVERGENCE_QUALIFICATION.json
+            artifact/c8-82/C8.82_CONVERGENCE.csv
+            artifact/c8-82/C8.82_ANALYSIS_STDOUT.log
+            artifact/c8-82/*/NETGEN_CONFIG.json
+            artifact/c8-82/*/STEP_NETGEN.json
+            artifact/c8-82/*/CODE_ASTER_STDOUT.log
+            artifact/c8-82/*/study/*.mess
+            artifact/c8-82/*/study/*.resu
+          if-no-files-found: warn
+          retention-days: 14
