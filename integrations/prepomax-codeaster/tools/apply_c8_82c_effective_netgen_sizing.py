@@ -62,10 +62,18 @@ text = text.replace(old_json, new_json, 1)
 old_gate = '''                    if (admittedIsNull || !maxHMatch || admittedRelativeSize)
                         throw new InvalidOperationException("C8.82 canonical MeshingParameters admission failed; see NETGEN_CONFIG.json.");'''
 new_gate = '''                    if (admittedIsNull || !maxHMatch || admittedRelativeSize || !admittedTargetsPart || !effectiveMaxHMatch)
-                        throw new InvalidOperationException("C8.82d authoritative CreationData/GetPartMeshingParameters admission failed; see NETGEN_CONFIG.json.");'''
+                    {
+                        string admittedMaxHText = Finite(admittedMaxH) ? admittedMaxH.ToString("R", CultureInfo.InvariantCulture) : "null";
+                        string effectiveMaxHText = Finite(effectiveMaxH) ? effectiveMaxH.ToString("R", CultureInfo.InvariantCulture) : "null";
+                        throw new InvalidOperationException("C8.82d meshing admission failed: admittedNull=" + admittedIsNull +
+                            ", maxHMatch=" + maxHMatch + ", relativeSize=" + admittedRelativeSize +
+                            ", decodedTargetPart=" + admittedTargetsPart + ", effectiveMaxHMatch=" + effectiveMaxHMatch +
+                            ", requestedMaxH=" + requestedMaxH.ToString("R", CultureInfo.InvariantCulture) +
+                            ", admittedMaxH=" + admittedMaxHText + ", effectiveMaxH=" + effectiveMaxHText + ".");
+                    }'''
 if old_gate not in text:
     raise SystemExit('C8.82d admission gate anchor not found; refusing non-deterministic patch')
 text = text.replace(old_gate, new_gate, 1)
 
 path.write_text(text, encoding='utf-8')
-print(f'C8.82d authoritative Selection replay + effective NetGen sizing seam applied: {path}')
+print(f'C8.82d authoritative Selection replay + diagnostic NetGen sizing seam applied: {path}')
