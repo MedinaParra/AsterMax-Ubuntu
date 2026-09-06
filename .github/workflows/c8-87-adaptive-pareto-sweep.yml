@@ -85,7 +85,7 @@ jobs:
             $required=@($meshEv,$paramCopy,$setupEv,$genEv); if($null -ne $h){$required += $refCopy}
             $sw=[Diagnostics.Stopwatch]::StartNew(); $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru; $deadline=(Get-Date).AddSeconds(35)
             do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "$name GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
-            if($p.MainWindowHandle -eq 0){throw "$name: no native AsterMax window"}
+            if($p.MainWindowHandle -eq 0){throw "${name}: no native AsterMax window"}
             $proofDeadline=(Get-Date).AddSeconds($budgetSeconds)
             while((@($required|Where-Object{-not(Test-Path $_)}).Count -gt 0) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 750;$p.Refresh();if($p.HasExited){throw "$name GUI exited during generation"}}
             $sw.Stop(); foreach($ev in $required){if(-not(Test-Path $ev)){throw "$name exceeded evidence budget; missing $ev"}}
