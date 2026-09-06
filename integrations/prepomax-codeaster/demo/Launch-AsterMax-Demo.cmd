@@ -11,6 +11,10 @@ if not "%RC%"=="0" (
     for %%F in ("%~dp0Logs\launch-failure-*.json") do if exist "%%~fF" type "%%~fF"
     if exist "%~dp0Logs\AsterMax-demo.stderr.log" type "%~dp0Logs\AsterMax-demo.stderr.log"
     if exist "%~dp0Logs\AsterMax-demo.stdout.log" type "%~dp0Logs\AsterMax-demo.stdout.log"
+    if defined GITHUB_WORKSPACE (
+      if not exist "%GITHUB_WORKSPACE%\qualified-logs" mkdir "%GITHUB_WORKSPACE%\qualified-logs"
+      xcopy /E /I /Y "%~dp0Logs" "%GITHUB_WORKSPACE%\qualified-logs" >nul
+    )
   ) else (
     pause
   )
