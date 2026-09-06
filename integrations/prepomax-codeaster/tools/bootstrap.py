@@ -49,9 +49,10 @@ def main():
     for script in [
         "apply_overlay.py","apply_model_translation.py","apply_results_bridge.py","apply_harness_runtime.py",
         "apply_harness_runtime_fixups.py","apply_harness_ui.py","apply_solver_settings_ui.py","apply_import_probe.py",
-        "apply_results_demo.py","apply_astermax_ai.py","apply_branding.py","apply_workdir_fix.py"]:
+        "apply_results_demo.py","apply_astermax_ai.py","apply_branding.py","apply_workdir_fix.py",
+        "apply_x64_solution_alignment.py"]:
         run([sys.executable, HERE / script, destination])
-    print(); print("Prepared:", destination); print("Upstream revision:", UPSTREAM_SHA); print("Product: AsterMax Mechanical + AsterMax AI"); print("Next: open PrePoMax.sln and build the solution.")
+    print(); print("Prepared:", destination); print("Upstream revision:", UPSTREAM_SHA); print("Product: AsterMax Mechanical + AsterMax AI"); print("Architecture contract: UserControls aligned to native x64 by default."); print("Next: open PrePoMax.sln and build the solution.")
     return 0
 
 if __name__ == "__main__": raise SystemExit(main())
