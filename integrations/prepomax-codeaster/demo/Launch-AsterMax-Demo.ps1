@@ -10,6 +10,20 @@ $logs = Join-Path $root 'Logs'
 New-Item -ItemType Directory -Force $logs | Out-Null
 $inv = [Globalization.CultureInfo]::InvariantCulture
 
+trap {
+    try {
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $detail = $_ | Out-String
+        $detail | Set-Content (Join-Path $logs "unexpected-launcher-error-$stamp.txt") -Encoding UTF8
+        if ($env:CI -and $env:GITHUB_WORKSPACE) {
+            $dest = Join-Path $env:GITHUB_WORKSPACE 'qualified-logs'
+            New-Item -ItemType Directory -Force $dest | Out-Null
+            Copy-Item (Join-Path $logs '*') $dest -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
+    exit 91
+}
+
 function Fail([string]$message) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $failure = @{ ok=$false; timestamp=(Get-Date).ToUniversalTime().ToString('o'); error=$message }
@@ -50,8 +64,6 @@ if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
     $evidenceArg = $EvidencePath.Replace('/','\')
     $EvidencePath = Join-Path $root $evidenceArg
 } else {
-    # Absolute custom evidence paths are supported only when they do not require shell quoting.
-    # The packaged one-click path always uses the relative Logs\... contract above.
     if ($EvidencePath -match '\s') { Fail 'Custom absolute EvidencePath with spaces is unsupported; use a relative package path.' }
     $evidenceArg = $EvidencePath
 }
@@ -66,9 +78,6 @@ $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = ([double]$contract.expected.max_displa
 $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = ([int]$contract.expected.max_von_mises_node).ToString($inv)
 $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = ([int]$contract.expected.max_displacement_node).ToString($inv)
 
-# The package is relocatable by contract: validate absolute files, but pass only relative internal
-# RMED/RESU/READY paths to PrePoMax while setting WorkingDirectory to the package root. This avoids
-# Win32 command-line quoting ambiguity even when the installation path itself contains spaces.
 $args = @('--astermax-results-demo',$rmedRel,$resuRel,$evidenceArg)
 $p = Start-Process $exe -ArgumentList $args -WorkingDirectory $root -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
 $launch = @{
