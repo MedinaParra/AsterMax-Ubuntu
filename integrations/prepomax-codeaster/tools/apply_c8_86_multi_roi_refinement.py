@@ -5,52 +5,19 @@ import sys
 root = Path(sys.argv[1] if len(sys.argv) > 1 else 'build/PrePoMax-CodeAster')
 path = root / 'PrePoMax' / 'Controller.cs'
 text = path.read_text(encoding='utf-8-sig')
-anchor = '''            CreateMeshRefinementFile(part, meshRefinementFileName, null);'''
-replacement = '''            CreateMeshRefinementFile(part, meshRefinementFileName, null);
 
-            // C8.86 harness-only multi-ROI qualification seam. This writes the exact NetGen
-            // mesh-size point contract at the consumer boundary. It does NOT claim that native
-            // FeMeshRefinement / GUI geometry binding is qualified yet.
-            string c886Points = Environment.GetEnvironmentVariable("ASTERMAX_NETGEN_REFINEMENT_POINTS");
-            if (!String.IsNullOrWhiteSpace(c886Points))
-            {
-                string[] c886Specs = c886Points.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                if (c886Specs.Length == 0) throw new InvalidOperationException("C8.86 refinement point contract is empty.");
-                using (System.IO.StreamWriter c886Writer = new System.IO.StreamWriter(meshRefinementFileName, false))
-                {
-                    c886Writer.WriteLine(c886Specs.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                    foreach (string c886Spec in c886Specs)
-                    {
-                        string[] c886Vals = c886Spec.Split(',');
-                        if (c886Vals.Length != 4) throw new InvalidOperationException("C8.86 point must be x,y,z,h.");
-                        double[] c886Num = new double[4];
-                        for (int c886I = 0; c886I < 4; c886I++)
-                        {
-                            if (!Double.TryParse(c886Vals[c886I], System.Globalization.NumberStyles.Float,
-                                                 System.Globalization.CultureInfo.InvariantCulture, out c886Num[c886I]) ||
-                                Double.IsNaN(c886Num[c886I]) || Double.IsInfinity(c886Num[c886I]))
-                                throw new InvalidOperationException("C8.86 point contains a non-finite value.");
-                        }
-                        if (c886Num[3] <= 0) throw new InvalidOperationException("C8.86 local h must be > 0 mm.");
-                        c886Writer.WriteLine(String.Format(System.Globalization.CultureInfo.InvariantCulture,
-                            "{0:R} {1:R} {2:R} {3:R}", c886Num[0], c886Num[1], c886Num[2], c886Num[3]));
-                    }
-                    c886Writer.WriteLine("0"); // zero refined segments; point refinements only
-                }
+# C8.86c: target the BREP_MESH path explicitly. The previous C8.86 seam replaced the
+# first generic CreateMeshRefinementFile(..., null) occurrence in Controller.cs, which
+# belongs to the STL path. Our qualified STEP fixture uses CreateMeshFromBrep, so the
+# adaptive contract never reached the NetGen consumer even though STEP/NetGen completed.
+anchor = '''            MeshingParameters meshingParameters = GetPartMeshingParameters(part.Name);\n            meshingParameters.WriteToFile(meshParametersFileName, part.BoundingBox.GetDiagonal());\n            CreateMeshRefinementFile(part, meshRefinementFileName, null);\n            ResumeExplodedViews(false);'''
 
-                // Only adaptive runs request/capture refinement evidence. A clean baseline must
-                // neither require nor synthesize meshRefinement evidence; this keeps absence of
-                // local refinement distinct from missing evidence.
-                string c886Copy = Environment.GetEnvironmentVariable("ASTERMAX_NETGEN_REFINEMENT_COPY_PATH");
-                if (!String.IsNullOrWhiteSpace(c886Copy))
-                {
-                    string c886Dir = Path.GetDirectoryName(c886Copy);
-                    if (!String.IsNullOrWhiteSpace(c886Dir)) Directory.CreateDirectory(c886Dir);
-                    File.Copy(meshRefinementFileName, c886Copy, true);
-                }
-            }'''
+seam = '''            MeshingParameters meshingParameters = GetPartMeshingParameters(part.Name);\n            meshingParameters.WriteToFile(meshParametersFileName, part.BoundingBox.GetDiagonal());\n            CreateMeshRefinementFile(part, meshRefinementFileName, null);\n\n            // C8.86c harness-only multi-ROI qualification seam at the effective BREP_MESH\n            // consumer boundary. This writes the exact NetGen point-refinement contract.\n            // It does NOT claim native FeMeshRefinement / GUI / PMX geometry binding.\n            string c886Points = Environment.GetEnvironmentVariable("ASTERMAX_NETGEN_REFINEMENT_POINTS");\n            if (!String.IsNullOrWhiteSpace(c886Points))\n            {\n                string[] c886Specs = c886Points.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);\n                if (c886Specs.Length == 0) throw new InvalidOperationException("C8.86 refinement point contract is empty.");\n                using (System.IO.StreamWriter c886Writer = new System.IO.StreamWriter(meshRefinementFileName, false))\n                {\n                    c886Writer.WriteLine(c886Specs.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));\n                    foreach (string c886Spec in c886Specs)\n                    {\n                        string[] c886Vals = c886Spec.Split(',');\n                        if (c886Vals.Length != 4) throw new InvalidOperationException("C8.86 point must be x,y,z,h.");\n                        double[] c886Num = new double[4];\n                        for (int c886I = 0; c886I < 4; c886I++)\n                        {\n                            if (!Double.TryParse(c886Vals[c886I], System.Globalization.NumberStyles.Float,\n                                                 System.Globalization.CultureInfo.InvariantCulture, out c886Num[c886I]) ||\n                                Double.IsNaN(c886Num[c886I]) || Double.IsInfinity(c886Num[c886I]))\n                                throw new InvalidOperationException("C8.86 point contains a non-finite value.");\n                        }\n                        if (c886Num[3] <= 0) throw new InvalidOperationException("C8.86 local h must be > 0 mm.");\n                        c886Writer.WriteLine(String.Format(System.Globalization.CultureInfo.InvariantCulture,\n                            "{0:R} {1:R} {2:R} {3:R}", c886Num[0], c886Num[1], c886Num[2], c886Num[3]));\n                    }\n                    c886Writer.WriteLine("0"); // zero refined segments; point refinements only\n                }\n\n                // Capture before launching NetGen. Thus a missing evidence file means the effective\n                // BREP consumer seam was not reached, rather than a later mesher/solver timeout.\n                string c886Copy = Environment.GetEnvironmentVariable("ASTERMAX_NETGEN_REFINEMENT_COPY_PATH");\n                if (!String.IsNullOrWhiteSpace(c886Copy))\n                {\n                    string c886Dir = Path.GetDirectoryName(c886Copy);\n                    if (!String.IsNullOrWhiteSpace(c886Dir)) Directory.CreateDirectory(c886Dir);\n                    File.Copy(meshRefinementFileName, c886Copy, true);\n                }\n            }\n            ResumeExplodedViews(false);'''
+
 if anchor not in text:
-    raise SystemExit('C8.86 CreateMeshRefinementFile anchor not found; refusing non-deterministic patch')
-text = text.replace(anchor, replacement, 1)
+    raise SystemExit('C8.86c BREP_MESH refinement anchor not found; refusing non-deterministic patch')
+if text.count(anchor) != 1:
+    raise SystemExit(f'C8.86c expected exactly one BREP_MESH anchor, found {text.count(anchor)}')
+text = text.replace(anchor, seam, 1)
 path.write_text(text, encoding='utf-8')
-print(f'C8.86 multi-ROI NetGen refinement seam applied: {path}')
+print(f'C8.86c effective BREP multi-ROI NetGen refinement seam applied: {path}')
