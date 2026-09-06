@@ -52,7 +52,7 @@ for name in levels:
     for p in (resu,comm,mail,mess,rmed):
         if not p.is_file() or p.stat().st_size==0:raise SystemExit(f'{name}: missing {p.name}')
     if re.search(r'<F>|ERREUR FATALE|FATAL_ERROR',mess.read_text(errors='replace'),re.I):raise SystemExit(name+': solver fatal')
-    ct=comm.read_text(errors='replace'); mm=re.search(r"FORCE_FACE=\(_F\(GROUP_MA=['\"]S_LOAD_XMAX['\"],\s*FX=([+\-0-9.eEdD]+)\)\)\",ct)
+    ct=comm.read_text(errors='replace'); mm=re.search(r"FORCE_FACE=\(_F\(GROUP_MA=['\"]S_LOAD_XMAX['\"],\s*FX=([+\-0-9.eEdD]+)\)\)",ct)
     if not mm:raise SystemExit(name+': FORCE_FACE contract missing')
     if abs(float(mm.group(1).replace('D','E'))-tev['traction_fx_mpa'])>1e-12:raise SystemExit(name+': traction COMM/evidence mismatch')
     text=resu.read_text(errors='replace'); depl=table(text,'PPM_DEPL',['NOEUD','DX','DY','DZ']);sn=table(text,'PPM_STRESS_N',['NOEUD','SIXX','SIYY','SIZZ']);ss=table(text,'PPM_STRESS_S',['NOEUD','SIXY','SIYZ','SIXZ']);reac=table(text,'PPM_REACTION',['NOEUD','DX','DY','DZ'])
