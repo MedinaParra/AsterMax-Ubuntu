@@ -50,10 +50,13 @@ namespace PrePoMax
                 AsterMaxStepMeshHarness meshHarness = new AsterMaxStepMeshHarness(_controller);
                 BeginInvoke((System.Action)(() => meshHarness.RunIfRequested()));
 
-                // C8.88 runs after STEP->NetGen and proves native FeMeshRefinement object persistence.
-                // It deliberately does not claim ROI->CAD selection binding or native refinement consumption yet.
                 AsterMaxNativeRefinementPersistenceHarness refinementHarness = new AsterMaxNativeRefinementPersistenceHarness(_controller);
                 BeginInvoke((System.Action)(() => refinementHarness.RunIfRequested()));
+
+                // C8.89 standalone fixture: bind admitted physical ROI centroids to native CAD surfaces,
+                // persist through PMX and prove the reloaded native NetGen path consumes the controls.
+                AsterMaxNativeRoiConsumerHarness roiConsumerHarness = new AsterMaxNativeRoiConsumerHarness(_controller);
+                BeginInvoke((System.Action)(() => roiConsumerHarness.RunIfRequested()));
 
                 AsterMaxStructuralSetupHarness setupHarness = new AsterMaxStructuralSetupHarness(_controller);
                 BeginInvoke((System.Action)(() => setupHarness.RunIfRequested()));
