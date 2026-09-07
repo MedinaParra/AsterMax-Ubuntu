@@ -18,11 +18,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Bootstrap pinned AsterMax
+      - name: Bootstrap pinned AsterMax and qualified BREP observer
         shell: pwsh
         run: |
           python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
-          python -m py_compile integrations/prepomax-codeaster/tools/apply_c8_89_native_refinement_observer.py
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_c8_82f_netgen_consumer_sizing.py integrations/prepomax-codeaster/tools/apply_c8_89_native_refinement_observer.py
+          python integrations/prepomax-codeaster/tools/apply_c8_82f_netgen_consumer_sizing.py build/PrePoMax-CodeAster
           python integrations/prepomax-codeaster/tools/apply_c8_89_native_refinement_observer.py build/PrePoMax-CodeAster
       - uses: microsoft/setup-msbuild@v2
       - name: Restore and build Release x64
