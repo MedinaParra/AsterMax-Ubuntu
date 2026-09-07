@@ -16,7 +16,34 @@ def main():
     if text.count(old_guard) == 1:
         text = text.replace(old_guard, new_guard, 1)
     elif new_guard not in text:
-        raise RuntimeError("C8.89c could not establish FeNode value-type guard")
+        raise RuntimeError("C8.89d could not establish FeNode value-type guard")
+
+    # C8.89d: AddMeshRefinementCommand is command-path semantics, not a raw object insert.
+    # The native GUI stores both GeometryIds and the Selection/CreationData that created them.
+    # Recreate the same geometry-based selection contract so the command can replay/validate it.
+    using_anchor = "using CaeMesh;\n"
+    if "using CaeGlobals;" not in text:
+        if text.count(using_anchor) != 1:
+            raise RuntimeError("C8.89d CaeMesh using anchor not unique")
+        text = text.replace(using_anchor, using_anchor + "using CaeGlobals;\n", 1)
+
+    old_refinement = '''                    FeMeshRefinement r=new FeMeshRefinement(b.Name);
+                    r.MeshSize=18.0;
+                    r.GeometryIds=new[]{b.GeometryId};
+                    _controller.AddMeshRefinementCommand(r);'''
+    new_refinement = '''                    FeMeshRefinement r=new FeMeshRefinement(b.Name);
+                    r.MeshSize=18.0;
+                    r.GeometryIds=new[]{b.GeometryId};
+                    Selection creation=new Selection();
+                    creation.SelectItem=vtkSelectItem.Surface;
+                    creation.Add(new SelectionNodeIds(vtkSelectOperation.Add,false,new[]{b.GeometryId},true));
+                    if(!creation.IsGeometryBased()) throw new InvalidOperationException("C8.89d failed to create geometry-based Selection/CreationData for "+b.Name);
+                    r.CreationData=creation;
+                    _controller.AddMeshRefinementCommand(r);'''
+    if text.count(old_refinement) == 1:
+        text = text.replace(old_refinement, new_refinement, 1)
+    elif "r.CreationData=creation;" not in text:
+        raise RuntimeError("C8.89d expected exactly one native refinement creation block, found %d" % text.count(old_refinement))
 
     # C8.89c: bind ROI to the actual tessellated surface, not merely its vertices.
     # Vertex-only distance falsely rejected ROI_03 on a large planar face even though
@@ -68,11 +95,10 @@ def main():
                     cx+=node.X; cy+=node.Y; cz+=node.Z; n++;
                 }
 '''
-    if text.count(old_block) != 1:
-        if "PointTriangleDistance(target.X,target.Y,target.Z,a,b,c)" in text:
-            raise RuntimeError("C8.89c surface-distance fix already present; refusing duplicate patch")
-        raise RuntimeError("C8.89c expected exactly one vertex-distance block, found %d" % text.count(old_block))
-    text = text.replace(old_block, new_block, 1)
+    if text.count(old_block) == 1:
+        text = text.replace(old_block, new_block, 1)
+    elif "PointTriangleDistance(target.X,target.Y,target.Z,a,b,c)" not in text:
+        raise RuntimeError("C8.89d expected exactly one vertex-distance block, found %d" % text.count(old_block))
 
     helper_anchor = "        private static bool Finite(double v) { return !Double.IsNaN(v)&&!Double.IsInfinity(v); }"
     helper = '''        private static double PointTriangleDistance(double px,double py,double pz,FeNode a,FeNode b,FeNode c)
@@ -124,12 +150,13 @@ def main():
         }
 
 '''
-    if text.count(helper_anchor) != 1:
-        raise RuntimeError("C8.89c Finite helper anchor not unique")
-    text = text.replace(helper_anchor, helper + helper_anchor, 1)
+    if "private static double PointTriangleDistance" not in text:
+        if text.count(helper_anchor) != 1:
+            raise RuntimeError("C8.89d Finite helper anchor not unique")
+        text = text.replace(helper_anchor, helper + helper_anchor, 1)
 
     path.write_text(text, encoding="utf-8")
-    print("C8.89c point-to-triangle native CAD surface distance + FeNode contract applied")
+    print("C8.89d native Selection/CreationData + point-to-triangle CAD surface contract applied")
     return 0
 
 
