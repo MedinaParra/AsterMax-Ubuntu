@@ -29,7 +29,8 @@ $method = @'
             steel.AddProperty(new ElasticWithDensity(210000.0, 0.30, 7.85E-9));
             model.Materials.Add(steel.Name, steel);
 
-            StaticStep step = new StaticStep("Static Structural");
+            // NamedClass identifiers reject spaces; UI may display a friendlier label separately.
+            StaticStep step = new StaticStep("StaticStructural");
             if(!step.AddBoundaryCondition(new FixedBC("FixedSupport", "FIXED", RegionTypeEnum.NodeSetName, false)))
                 throw new InvalidOperationException("StaticStep rejected FixedBC in C9.60 smoke model.");
             if(!step.AddLoad(new CLoad("AxialForce", "LOAD", RegionTypeEnum.NodeSetName, 2500.0, 0.0, 0.0, false, false, 0.0)))
