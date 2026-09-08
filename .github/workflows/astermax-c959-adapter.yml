@@ -1,0 +1,42 @@
+name: AsterMax C9.59 Code_Aster Adapter
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c959-adapter/**'
+      - 'native-windows/Export-AsterMaxCodeAster.ps1'
+      - 'native-windows/harness-c959-adapter.ps1'
+      - '.github/workflows/astermax-c959-adapter.yml'
+  workflow_dispatch:
+
+jobs:
+  adapter-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run C9.59 adapter harness
+        shell: pwsh
+        run: .\native-windows\harness-c959-adapter.ps1 -Root $PWD
+
+      - name: Show validation evidence
+        shell: pwsh
+        run: Get-Content .\c959-out\C9.59_VALIDATION.json -Raw
+
+      - name: Package generated Code_Aster deck
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\artifact | Out-Null
+          Copy-Item .\c959-out\* .\artifact -Force
+          Copy-Item .\native-windows\c959-adapter\axial-bar.model.json .\artifact\axial-bar.model.json
+          Copy-Item .\native-windows\Export-AsterMaxCodeAster.ps1 .\artifact\Export-AsterMaxCodeAster.ps1
+
+      - name: Upload C9.59 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.59-CodeAster-Adapter-v0
+          path: artifact
+          if-no-files-found: error
