@@ -1,0 +1,116 @@
+name: AsterMax C9.64 Real Results Bridge
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c958-benchmark/**'
+      - 'native-windows/c962-benchmark/**'
+      - 'native-windows/validate-c962-solver.py'
+      - 'native-windows/bridge-c964-med-results.py'
+      - '.github/workflows/astermax-c964-results-bridge.yml'
+  workflow_dispatch:
+
+jobs:
+  results-bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v4
+
+      - name: Prepare refined real-solver benchmark
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work artifact
+          chmod -R 0777 work
+          cp native-windows/c958-benchmark/axial-bar.comm work/axial-bar.comm
+          cp native-windows/c962-benchmark/axial-bar-refined.mail work/axial-bar.mail
+          cp native-windows/c958-benchmark/axial-bar.export work/axial-bar.export
+          cp native-windows/validate-c962-solver.py work/
+          cp native-windows/bridge-c964-med-results.py work/
+          sha256sum work/axial-bar.* | tee work/INPUT_SHA256.txt
+
+      - name: Execute real Code_Aster
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee work/CODE_ASTER_IMAGE_DIGEST.txt
+          docker run --rm --volume "$PWD/work:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/axial-bar.export | tee work/CODE_ASTER_STDOUT.log
+
+      - name: Revalidate real solver output
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 work/validate-c962-solver.py work
+
+      - name: Build AsterMax results bundle and VTU from real MED
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check h5py numpy
+          python3 work/bridge-c964-med-results.py work/axial-bar.rmed work/AsterMax.Results.C9.64.json work/AsterMax.Results.C9.64.vtu | tee work/C9.64_BRIDGE_STDOUT.log
+          sha256sum work/axial-bar.rmed work/AsterMax.Results.C9.64.json work/AsterMax.Results.C9.64.vtu | tee work/C9.64_OUTPUT_SHA256.txt
+
+      - name: Validate portable results contract
+        shell: python
+        run: |
+          import json, math, os, xml.etree.ElementTree as ET
+          b=json.load(open('work/AsterMax.Results.C9.64.json',encoding='utf-8'))
+          tree=ET.parse('work/AsterMax.Results.C9.64.vtu')
+          root=tree.getroot()
+          arrays={e.attrib.get('Name') for e in root.iter('DataArray')}
+          checks={
+            'schema':b['schema']=='astermax-results-bundle/v0',
+            'real_solver_source':b['source']['kind']=='REAL_CODE_ASTER_MED',
+            'mm_n_mpa':b['units']=={'length':'mm','force':'N','stress':'MPa'},
+            'mesh_44_nodes_10_hex':b['mesh']['node_count']==44 and b['mesh']['element_count']==10 and b['mesh']['element_type']=='HEXA8',
+            'dx_matches_real_c962':abs(b['fields']['displacement']['dx_max']-0.0471697826890255)<1e-12,
+            'displacement_array_44':len(b['arrays']['displacement'])==44,
+            'von_mises_array_44':len(b['arrays']['von_mises'])==44,
+            'stress_components_present':len(b['arrays']['stress'])==6,
+            'averaging_declared':b['integrity']['derived_nodal_stress_average_declared'] is True,
+            'no_invented_results':b['integrity']['fea_values_invented'] is False,
+            'vtu_core_fields':{'Displacement','Total Deformation','Equivalent Stress'}.issubset(arrays),
+            'vtu_nontrivial':os.path.getsize('work/AsterMax.Results.C9.64.vtu')>5000,
+          }
+          out={
+            'release':'C9.64',
+            'title':'Real MED -> AsterMax Results Bundle -> VTK Unstructured Grid',
+            'checks':checks,'passed':sum(checks.values()),'total':len(checks),'pass':all(checks.values()),
+            'real_dx_max_mm':b['fields']['displacement']['dx_max'],
+            'real_total_deformation_max_mm':b['fields']['displacement']['total_max'],
+            'derived_von_mises_nodal_max_mpa':b['fields']['von_mises']['nodal_max'],
+            'raw_code_aster_vmis_elno_max_mpa':b['fields']['von_mises']['raw_elno_max'],
+            'fea_values_invented':False,
+            'next_gate':'Native C# ResultsBundle reader -> existing AsterMax VTK actors, legend, extrema, probes'
+          }
+          json.dump(out,open('work/C9.64_VALIDATION.json','w',encoding='utf-8'),indent=2)
+          print(json.dumps(out,indent=2))
+          if not out['pass']: raise SystemExit(1)
+
+      - name: Package C9.64 evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp -a work/. artifact/
+          cat > artifact/C9.64_STATUS.md <<'EOF'
+          # AsterMax C9.64 — real results bridge
+
+          C9.64 solves the refined benchmark with real Code_Aster 15.2, reads the resulting MED/HDF5 fields, and produces an AsterMax results bundle plus a VTK UnstructuredGrid (.vtu).
+
+          Displacement values are copied from real Code_Aster DEPL output. SIGM_ELNO and SIEQ_ELNO are real element-node results; only the explicitly documented arithmetic averaging to globally nodal contour values is derived by AsterMax. No FEA value is synthesized.
+
+          The next product gate is native C# consumption of this bundle by the existing AsterMax/VTK viewport for contour selection, deformation scale, legend, min/max and node probes.
+          EOF
+
+      - name: Upload C9.64 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.64-Real-Results-Bridge
+          path: artifact
+          if-no-files-found: error
