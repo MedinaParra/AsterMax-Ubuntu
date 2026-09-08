@@ -1,0 +1,128 @@
+name: AsterMax C9.60 Native Solver Bridge v2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/astermax-c960-native-bridge-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  bridge-proof:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+
+      - name: Apply AsterMax native patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-lifecycle.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-solution-anchor.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-native-bridge.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-smoke-hook.ps1 -Root "$PWD\upstream"
+
+      - name: Restore and build x64
+        shell: pwsh
+        run: |
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vs=(Get-ChildItem 'C:\Program Files\Microsoft Visual Studio' -Recurse -Filter MSBuild.exe -ErrorAction SilentlyContinue | Where-Object FullName -match 'Current\\Bin\\MSBuild.exe' | Select-Object -First 1).FullName
+          if(-not $vs){ throw 'MSBuild.exe not found.' }
+          & $vs .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){ throw "MSBuild failed: $LASTEXITCODE" }
+
+      - name: Locate EXE and static gates
+        id: locate
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object FullName -match 'bin\\x64\\Release' | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
+          "exe=$($exe.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $bridge='.\upstream\PrePoMax\AsterMaxModelContractBridge.cs'
+          $ui='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          $must=@('live_astermax_femodel','model.Mesh.Nodes','model.Mesh.Elements','model.Materials','model.StepCollection.StepsList','bc is FixedBC','CLoad cload','no_fea_results_claimed','ExportDeterministicSmoke')
+          foreach($s in $must){ if(-not (Select-String $bridge -SimpleMatch $s -Quiet)){ throw "Bridge gate missing: $s" } }
+          if(-not (Select-String $ui -SimpleMatch 'Export Solver Contract' -Quiet)){ throw 'Solution UI export command missing.' }
+
+      - name: Execute compiled bridge on native FeModel smoke model
+        shell: pwsh
+        run: |
+          $exe='${{ steps.locate.outputs.exe }}'
+          $bin=Split-Path $exe -Parent
+          $out=(Join-Path $PWD 'C960_NATIVE_CONTRACT.json')
+          Push-Location $bin
+          try {
+            Get-ChildItem $bin -Filter '*.dll' | ForEach-Object { try { [Reflection.Assembly]::LoadFrom($_.FullName) | Out-Null } catch {} }
+            $asm=[Reflection.Assembly]::LoadFrom($exe)
+            $type=$asm.GetType('PrePoMax.AsterMaxModelContractBridge',$true)
+            $method=$type.GetMethod('ExportDeterministicSmoke',[Reflection.BindingFlags]'Public,Static')
+            if($null -eq $method){ throw 'Compiled bridge smoke method missing.' }
+            try { $null=$method.Invoke($null,@($out)) }
+            catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+          } finally { Pop-Location }
+          $m=Get-Content $out -Raw | ConvertFrom-Json
+          if($m.schema -ne 'astermax-model-contract/v0'){ throw 'Schema mismatch.' }
+          if($m.unit_system -ne 'MM_N_S_MPA'){ throw 'Unit mismatch.' }
+          if(@($m.mesh.nodes).Count -ne 8 -or @($m.mesh.elements).Count -ne 1){ throw 'Mesh extraction mismatch.' }
+          if($m.mesh.element_type -ne 'HEXA8'){ throw 'Element type mismatch.' }
+          if([double]$m.materials[0].young_modulus_mpa -ne 210000){ throw 'Material extraction mismatch.' }
+          if([double]$m.loads[0].fx_total_n -ne 10000){ throw 'CLoad total-force conservation mismatch.' }
+          if(-not $m.validation.no_fea_results_claimed){ throw 'No-fabrication gate failed.' }
+
+      - name: Round trip contract into Code_Aster input
+        shell: pwsh
+        run: |
+          .\native-windows\Export-AsterMaxCodeAster.ps1 -ModelPath .\C960_NATIVE_CONTRACT.json -OutDir .\c960-solver
+          $comm=Get-ChildItem .\c960-solver -Filter '*.comm' | Select-Object -First 1
+          $mail=Get-ChildItem .\c960-solver -Filter '*.mail' | Select-Object -First 1
+          if(-not $comm -or -not $mail){ throw 'Solver input generation failed.' }
+          $c=Get-Content $comm.FullName -Raw
+          foreach($s in @('MECA_STATIQUE',"GROUP_NO='FIXED'", "GROUP_NO='LOAD'",'FX=2500','SIEQ_ELNO',"FORMAT='MED'")){ if($c -notmatch [regex]::Escape($s)){ throw "Round-trip gate missing: $s" } }
+
+      - name: Evidence manifest
+        shell: pwsh
+        run: |
+          $exe='${{ steps.locate.outputs.exe }}'
+          $comm=Get-ChildItem .\c960-solver -Filter '*.comm' | Select-Object -First 1
+          $mail=Get-ChildItem .\c960-solver -Filter '*.mail' | Select-Object -First 1
+          $e=[ordered]@{
+            release='C9.60'
+            increment='compiled native FeModel -> contract -> Code_Aster input'
+            native_exe_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+            contract_sha256=(Get-FileHash .\C960_NATIVE_CONTRACT.json -Algorithm SHA256).Hash.ToLower()
+            comm_sha256=(Get-FileHash $comm.FullName -Algorithm SHA256).Hash.ToLower()
+            mail_sha256=(Get-FileHash $mail.FullName -Algorithm SHA256).Hash.ToLower()
+            compiled_native_bridge='PASS'
+            live_femodel_smoke='PASS'
+            load_conservation='PASS_10000N_TOTAL_2500N_PER_NODE'
+            code_aster_input_roundtrip='PASS'
+            solver_execution='NOT_RUN'
+            fea_results_claimed=$false
+            med_import='NOT_RUN'
+            priority_next='Code_Aster execution plus MED reimport into VTK'
+          }
+          $e | ConvertTo-Json -Depth 5 | Set-Content .\C9.60_EVIDENCE.json -Encoding UTF8
+          Get-Content .\C9.60_EVIDENCE.json
+
+      - name: Package evidence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item C960_NATIVE_CONTRACT.json artifact\
+          Copy-Item C9.60_EVIDENCE.json artifact\
+          Copy-Item c960-solver\* artifact\
+          Copy-Item native-windows\patch-c960-*.ps1 artifact\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.60-Native-CodeAster-Bridge
+          path: artifact
+          if-no-files-found: error
