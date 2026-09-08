@@ -169,9 +169,9 @@ if(-not $proj.Contains('AsterMaxCodeAsterNativeExporter.cs')){
 $nativeUi=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 $t=Get-Content $nativeUi -Raw
 if(-not $t.Contains('Export Code_Aster Deck')){
-  $anchor='CommandButton("Export Solver Contract", () => ExportAsterMaxModelContract()),'
+  $anchor='CommandTile("Export Solver Contract", "SOLVER", () => ExportAsterMaxModelContract(), true),'
   if(-not $t.Contains($anchor)){ throw 'C9.61 Solution ribbon command anchor missing.' }
-  $t=$t.Replace($anchor,$anchor+[Environment]::NewLine+'                CommandButton("Export Code_Aster Deck", () => ExportAsterMaxCodeAsterDeck()),')
+  $t=$t.Replace($anchor,$anchor+[Environment]::NewLine+'                CommandTile("Export Code_Aster Deck", "ASTER", () => ExportAsterMaxCodeAsterDeck(), true),')
   Set-Content $nativeUi $t -Encoding UTF8
 }
 Write-Host 'C9.61 native in-process Code_Aster exporter injected.' -ForegroundColor Green
