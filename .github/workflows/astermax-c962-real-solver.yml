@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'native-windows/c958-benchmark/**'
+      - 'native-windows/c962-benchmark/**'
       - 'native-windows/validate-c962-solver.py'
       - '.github/workflows/astermax-c962-real-solver.yml'
   workflow_dispatch:
@@ -17,15 +18,15 @@ jobs:
       - name: Checkout AsterMax
         uses: actions/checkout@v4
 
-      - name: Prepare deterministic benchmark
+      - name: Prepare refined deterministic benchmark
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p c962-work
           chmod -R 0777 c962-work
-          cp native-windows/c958-benchmark/axial-bar.comm c962-work/
-          cp native-windows/c958-benchmark/axial-bar.mail c962-work/
-          cp native-windows/c958-benchmark/axial-bar.export c962-work/
+          cp native-windows/c958-benchmark/axial-bar.comm c962-work/axial-bar.comm
+          cp native-windows/c962-benchmark/axial-bar-refined.mail c962-work/axial-bar.mail
+          cp native-windows/c958-benchmark/axial-bar.export c962-work/axial-bar.export
           cp native-windows/validate-c962-solver.py c962-work/
           sha256sum c962-work/axial-bar.* | tee c962-work/INPUT_SHA256.txt
 
@@ -63,9 +64,9 @@ jobs:
           cat > artifact/C9.62_STATUS.md <<'EOF'
           # AsterMax C9.62 — Real Code_Aster solver gate
 
-          This artifact is generated from an actual Code_Aster container execution attempt.
+          This artifact is generated from an actual Code_Aster 15.2 execution using the refined 10-HEXA8 axial benchmark.
           The analytical 1D axial-bar value is a reference only and is never presented as FEA output.
-          `C9.62_SOLVER_VALIDATION.json`, when present, is the authoritative numerical pass/fail manifest.
+          `C9.62_SOLVER_VALIDATION.json` is the authoritative numerical pass/fail manifest when present.
           EOF
 
       - name: Upload C9.62 solver evidence
