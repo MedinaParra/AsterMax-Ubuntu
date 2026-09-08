@@ -68,7 +68,10 @@ jobs:
           }
           $uc=Get-ChildItem .\upstream\UserControls\bin -Recurse -Filter 'UserControls.dll' | Where-Object FullName -match 'x64\\Release' | Select-Object -First 1
           if($uc){ Copy-Item $uc.FullName $bin -Force }
-          foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll')){ if(-not (Test-Path (Join-Path $bin $required))){ throw "Missing runtime dependency: $required" } }
+          $json=Get-ChildItem .\upstream\packages\Newtonsoft.Json.13.0.1 -Recurse -Filter 'Newtonsoft.Json.dll' | Where-Object FullName -match 'net45' | Select-Object -First 1
+          if(-not $json){ $json=Get-ChildItem .\upstream\packages\Newtonsoft.Json.13.0.1 -Recurse -Filter 'Newtonsoft.Json.dll' | Select-Object -First 1 }
+          if($json){ Copy-Item $json.FullName $bin -Force; Write-Host "runtime dependency: $($json.Name)" }
+          foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll')){ if(-not (Test-Path (Join-Path $bin $required))){ throw "Missing runtime dependency: $required" } }
 
       - name: Execute compiled bridge on native FeModel smoke model
         shell: pwsh
