@@ -10,12 +10,10 @@ if not os.path.isfile(path):
 
 records=[]
 field_tokens=set()
-finite_numeric_datasets=0
-numeric_values=0
+stats={'finite_numeric_datasets':0,'numeric_values':0}
 
 with h5py.File(path,'r') as h:
     def visit(name,obj):
-        nonlocal_dummy = None
         if isinstance(obj,h5py.Dataset):
             rec={'path':name,'shape':list(obj.shape),'dtype':str(obj.dtype)}
             up=name.upper()
@@ -30,8 +28,8 @@ with h5py.File(path,'r') as h:
                     if finite:
                         rec['min']=min(finite); rec['max']=max(finite)
                         rec['sample_count']=len(finite)
-                        finite_numeric_datasets += 1
-                        numeric_values += len(finite)
+                        stats['finite_numeric_datasets'] += 1
+                        stats['numeric_values'] += len(finite)
             except Exception as e:
                 rec['read_error']=type(e).__name__
             records.append(rec)
@@ -43,8 +41,8 @@ manifest={
   'file':os.path.basename(path),
   'size_bytes':os.path.getsize(path),
   'datasets_total':len(records),
-  'finite_numeric_datasets':finite_numeric_datasets,
-  'numeric_values_sampled':numeric_values,
+  'finite_numeric_datasets':stats['finite_numeric_datasets'],
+  'numeric_values_sampled':stats['numeric_values'],
   'field_tokens_detected':sorted(field_tokens),
   'has_displacement_evidence':('DEPL' in field_tokens or 'DX' in field_tokens),
   'has_stress_evidence':('SIGM' in field_tokens or 'SIEQ' in field_tokens),
