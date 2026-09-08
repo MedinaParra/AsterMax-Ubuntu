@@ -1,0 +1,95 @@
+name: AsterMax C9.63 Real MED Postprocess Gate
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c958-benchmark/**'
+      - 'native-windows/c962-benchmark/**'
+      - 'native-windows/validate-c962-solver.py'
+      - 'native-windows/inspect-c963-med.py'
+      - '.github/workflows/astermax-c963-med-postprocess.yml'
+  workflow_dispatch:
+
+jobs:
+  med-postprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v4
+
+      - name: Prepare deterministic refined benchmark
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work artifact
+          chmod -R 0777 work
+          cp native-windows/c958-benchmark/axial-bar.comm work/axial-bar.comm
+          cp native-windows/c962-benchmark/axial-bar-refined.mail work/axial-bar.mail
+          cp native-windows/c958-benchmark/axial-bar.export work/axial-bar.export
+          cp native-windows/validate-c962-solver.py work/
+          cp native-windows/inspect-c963-med.py work/
+          sha256sum work/axial-bar.* | tee work/INPUT_SHA256.txt
+
+      - name: Execute real Code_Aster
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee work/CODE_ASTER_IMAGE_DIGEST.txt
+          docker run --rm --volume "$PWD/work:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/axial-bar.export | tee work/CODE_ASTER_STDOUT.log
+
+      - name: Validate solver numerical evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 work/validate-c962-solver.py work
+
+      - name: Inspect real MED result container
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check h5py
+          python3 work/inspect-c963-med.py work/axial-bar.rmed work/C9.63_MED_POSTPROCESS.json
+          sha256sum work/axial-bar.rmed work/C9.63_MED_POSTPROCESS.json | tee work/C9.63_OUTPUT_SHA256.txt
+
+      - name: Professional postprocess contract gate
+        shell: python
+        run: |
+          import json
+          p='work/C9.63_MED_POSTPROCESS.json'
+          m=json.load(open(p,encoding='utf-8'))
+          checks={
+            'real_med_source':m['source']=='REAL_CODE_ASTER_RMED',
+            'med_nontrivial_size':m['size_bytes']>1000,
+            'hdf_datasets_present':m['datasets_total']>0,
+            'numeric_result_datasets_present':m['finite_numeric_datasets']>0,
+            'no_invented_fea_values':m['fea_values_invented'] is False,
+          }
+          out={'release':'C9.63','title':'Real Code_Aster MED postprocess readiness','checks':checks,'passed':sum(checks.values()),'total':len(checks),'pass':all(checks.values()),'med_manifest':'C9.63_MED_POSTPROCESS.json','next_gate':'Native AsterMax MED reader -> VTK contours/probes'}
+          json.dump(out,open('work/C9.63_VALIDATION.json','w',encoding='utf-8'),indent=2)
+          print(json.dumps(out,indent=2))
+          if not out['pass']: raise SystemExit(1)
+
+      - name: Package C9.63 evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp -a work/. artifact/
+          cat > artifact/C9.63_STATUS.md <<'EOF'
+          # AsterMax C9.63 — real MED postprocess readiness
+
+          This artifact comes from a real Code_Aster 15.2 solve of the refined 10-HEXA8 benchmark.
+          C9.63 inspects the resulting MED/HDF5 container and inventories numeric datasets without fabricating or substituting FEA values.
+          The next native product gate is loading the real result dataset into AsterMax/VTK for contours, deformation, legend, extrema and probes.
+          EOF
+
+      - name: Upload C9.63 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.63-Real-MED-Postprocess-Evidence
+          path: artifact
+          if-no-files-found: error
