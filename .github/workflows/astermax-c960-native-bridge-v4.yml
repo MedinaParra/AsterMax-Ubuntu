@@ -61,7 +61,7 @@ jobs:
         run: |
           $exe='${{ steps.locate.outputs.exe }}'
           $bin=Split-Path $exe -Parent
-          $out=(Join-Path $PWD 'C960_NATIVE_CONTRACT.json')
+          $out=[string](Join-Path $PWD 'C960_NATIVE_CONTRACT.json')
           Push-Location $bin
           try {
             Get-ChildItem $bin -Filter '*.dll' | ForEach-Object { try { [Reflection.Assembly]::LoadFrom($_.FullName) | Out-Null } catch {} }
@@ -69,7 +69,8 @@ jobs:
             $type=$asm.GetType('PrePoMax.AsterMaxModelContractBridge',$true)
             $method=$type.GetMethod('ExportDeterministicSmoke',[Reflection.BindingFlags]'Public,Static')
             if($null -eq $method){ throw 'Compiled bridge smoke method missing.' }
-            try { $null=$method.Invoke($null,@($out)) } catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+            $invokeArgs=[object[]]@([string]$out)
+            try { $null=$method.Invoke($null,$invokeArgs) } catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
           } finally { Pop-Location }
           if(-not (Test-Path $out)){ throw 'Native bridge produced no contract.' }
           $m=Get-Content $out -Raw | ConvertFrom-Json
