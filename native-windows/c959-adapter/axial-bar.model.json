@@ -1,0 +1,50 @@
+{
+  "schema": "astermax-model-contract/v0",
+  "name": "C9.59 Axial Bar",
+  "unit_system": "MM_N_S_MPA",
+  "geometry": {
+    "source": "deterministic_contract",
+    "dimensions_mm": [100.0, 10.0, 10.0]
+  },
+  "mesh": {
+    "element_type": "HEXA8",
+    "nodes": [
+      {"id":"N1","x":0.0,"y":0.0,"z":0.0},
+      {"id":"N2","x":100.0,"y":0.0,"z":0.0},
+      {"id":"N3","x":100.0,"y":10.0,"z":0.0},
+      {"id":"N4","x":0.0,"y":10.0,"z":0.0},
+      {"id":"N5","x":0.0,"y":0.0,"z":10.0},
+      {"id":"N6","x":100.0,"y":0.0,"z":10.0},
+      {"id":"N7","x":100.0,"y":10.0,"z":10.0},
+      {"id":"N8","x":0.0,"y":10.0,"z":10.0}
+    ],
+    "elements": [
+      {"id":"E1","nodes":["N1","N2","N3","N4","N5","N6","N7","N8"]}
+    ],
+    "node_groups": {
+      "FIXED": ["N1","N4","N5","N8"],
+      "LOAD": ["N2","N3","N6","N7"]
+    }
+  },
+  "materials": [
+    {"name":"StructuralSteel","young_modulus_mpa":210000.0,"poisson":0.30}
+  ],
+  "supports": [
+    {"name":"FixedSupport","group":"FIXED","dx":0.0,"dy":0.0,"dz":0.0}
+  ],
+  "loads": [
+    {"name":"AxialForce","group":"LOAD","type":"total_nodal_force","fx_total_n":10000.0,"fy_total_n":0.0,"fz_total_n":0.0}
+  ],
+  "analysis": {"type":"static_structural"},
+  "postprocess": {
+    "displacement_probe_group":"LOAD",
+    "stress_fields":["SIGM_ELNO","SIEQ_ELNO"],
+    "export_med":true
+  },
+  "reference": {
+    "kind":"analytical_1d_axial_bar_not_fea_output",
+    "area_mm2":100.0,
+    "axial_stress_mpa":100.0,
+    "axial_displacement_mm":0.047619047619047616
+  }
+}
