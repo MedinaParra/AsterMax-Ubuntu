@@ -116,13 +116,16 @@ jobs:
           $work = Split-Path $exe -Parent
           $step = (Resolve-Path .\runtime-fixture\cube-mm.stp).Path
           $report = Join-Path $PWD 'ASTERMAX_RUNTIME_STEP.json'
-          if(Test-Path $report){ Remove-Item $report -Force }
+          $stages = "$report.stages.log"
+          Remove-Item $report,$stages -Force -ErrorAction SilentlyContinue
           $args = @($step, '-US', 'MM_TON_S_C', "--ASTERMAX-SMOKE=$report")
           $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $work -PassThru
-          if(-not $p.WaitForExit(135000)){
+          if(-not $p.WaitForExit(90000)){
+            if(Test-Path $stages){ Write-Host '--- AsterMax runtime stages ---'; Get-Content $stages }
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             throw 'AsterMax runtime STEP gate timed out.'
           }
+          if(Test-Path $stages){ Write-Host '--- AsterMax runtime stages ---'; Get-Content $stages }
           if(-not (Test-Path $report)){ throw "AsterMax exited without runtime telemetry. ExitCode=$($p.ExitCode)" }
           $data = Get-Content $report -Raw | ConvertFrom-Json
           $data | ConvertTo-Json -Depth 5
@@ -130,6 +133,16 @@ jobs:
           if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
           if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
           if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
+
+      - name: Upload runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.55-Runtime-Diagnostics
+          path: |
+            ASTERMAX_RUNTIME_STEP.json
+            ASTERMAX_RUNTIME_STEP.json.stages.log
+          if-no-files-found: warn
 
       - name: Merge runtime evidence
         shell: pwsh
@@ -143,6 +156,7 @@ jobs:
           $m | Add-Member -NotePropertyName runtime_step_evidence -NotePropertyValue $r -Force
           $m | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json "$out\ASTERMAX_RUNTIME_STEP.json" -Force
+          if(Test-Path .\ASTERMAX_RUNTIME_STEP.json.stages.log){ Copy-Item .\ASTERMAX_RUNTIME_STEP.json.stages.log "$out\ASTERMAX_RUNTIME_STEP.json.stages.log" -Force }
 
       - name: Package rebuilt application binaries
         shell: pwsh
