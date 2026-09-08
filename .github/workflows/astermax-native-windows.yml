@@ -35,6 +35,7 @@ jobs:
         run: |
           .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-lifecycle.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
 
       - name: Restore NuGet packages
@@ -65,11 +66,13 @@ jobs:
           $ui = '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
           $splash = '.\upstream\PrePoMax\Forms\FrmSplash.Designer.cs'
           $advisor = '.\upstream\PrePoMax\Forms\00_Advisor\AdvisorCreator.cs'
+          $main = '.\upstream\PrePoMax\Forms\FrmMain.cs'
           $checks = @()
           $checks += [pscustomobject]@{ name='native_exe_exists'; pass=(Test-Path $exe); evidence=$exe }
           $checks += [pscustomobject]@{ name='native_exe_named_astermax'; pass=([IO.Path]::GetFileName($exe) -eq 'AsterMax Mechanical.exe'); evidence=[IO.Path]::GetFileName($exe) }
           $checks += [pscustomobject]@{ name='source_has_astermax_ui'; pass=(Test-Path $ui); evidence='AsterMaxNativeUi.cs' }
           $checks += [pscustomobject]@{ name='source_no_shell_embedding'; pass=(-not (Select-String -Path $ui -Pattern 'SetParent|PrePoMax.exe|Process.Start' -Quiet)); evidence='no SetParent / external PrePoMax launch' }
+          $checks += [pscustomobject]@{ name='ui_applied_after_native_shown'; pass=(Select-String -Path $main -Pattern 'this.Shown += \(asterSender, asterArgs\)' -Quiet); evidence='AsterMax UI delayed until native Shown completes' }
           $checks += [pscustomobject]@{ name='vtk_project_present'; pass=(Test-Path '.\upstream\vtkControl\vtkControl.csproj'); evidence='vtkControl project' }
           $checks += [pscustomobject]@{ name='modeltree_present'; pass=(Test-Path '.\upstream\UserControls\ModelTree.cs'); evidence='ModelTree source' }
           $checks += [pscustomobject]@{ name='step_import_command_preserved'; pass=(Select-String -Path '.\upstream\PrePoMax\PrePoMax.csproj' -Pattern 'CImportFile.cs' -Quiet); evidence='CImportFile.cs compiled' }
