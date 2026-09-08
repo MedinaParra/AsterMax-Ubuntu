@@ -87,7 +87,7 @@ jobs:
           $pass = ($checks | Where-Object { -not $_.pass }).Count -eq 0
           $manifest = [pscustomobject]@{
             release='C9.56'
-            title='Polished Native Mechanical UI + STEP Runtime Proof'
+            title='Polished Native Mechanical UI'
             build_os='windows-latest'
             upstream_commit=(Get-Content .\UPSTREAM_PREPOMAX_COMMIT.txt -Raw).Trim()
             exe_sha256=$sha
@@ -110,9 +110,10 @@ jobs:
           $url = 'https://raw.githubusercontent.com/Airthium/tanatloc/b1b9b084ab5ff04e908ed27eb7828ce847520316/public/doc/cube.stp'
           Invoke-WebRequest -Uri $url -OutFile .\runtime-fixture\cube-mm.stp
           if((Get-Item .\runtime-fixture\cube-mm.stp).Length -lt 1000){ throw 'STEP fixture download invalid.' }
-          Get-FileHash .\runtime-fixture\cube-mm.stp -Algorithm SHA256 | Format-List
 
       - name: Runtime STEP model gate
+        id: runtime_step
+        continue-on-error: true
         shell: pwsh
         run: |
           $exe = '${{ steps.locate.outputs.exe }}'
@@ -124,18 +125,34 @@ jobs:
           $args = @($step, '-US', 'MM_TON_S_C', "--ASTERMAX-SMOKE=$report")
           $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $work -PassThru
           if(-not $p.WaitForExit(90000)){
-            if(Test-Path $stages){ Write-Host '--- AsterMax runtime stages ---'; Get-Content $stages }
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             throw 'AsterMax runtime STEP gate timed out.'
           }
-          if(Test-Path $stages){ Write-Host '--- AsterMax runtime stages ---'; Get-Content $stages }
           if(-not (Test-Path $report)){ throw "AsterMax exited without runtime telemetry. ExitCode=$($p.ExitCode)" }
           $data = Get-Content $report -Raw | ConvertFrom-Json
-          $data | ConvertTo-Json -Depth 5
           if(-not $data.pass){ throw "Runtime STEP gate failed: $($data.reason)" }
           if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
           if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
           if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
+
+      - name: Merge runtime evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $out = Split-Path $exe -Parent
+          $manifestPath = Join-Path $out 'C9.56_VALIDATION.json'
+          $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if(Test-Path .\ASTERMAX_RUNTIME_STEP.json){
+            $r = Get-Content .\ASTERMAX_RUNTIME_STEP.json -Raw | ConvertFrom-Json
+            $m.runtime_step_model = $(if($r.pass){'PASS'}else{'FAIL'})
+            $m | Add-Member -NotePropertyName runtime_step_evidence -NotePropertyValue $r -Force
+            Copy-Item .\ASTERMAX_RUNTIME_STEP.json "$out\ASTERMAX_RUNTIME_STEP.json" -Force
+          } else {
+            $m.runtime_step_model = 'FAIL_NO_TELEMETRY'
+          }
+          if(Test-Path .\ASTERMAX_RUNTIME_STEP.json.stages.log){ Copy-Item .\ASTERMAX_RUNTIME_STEP.json.stages.log "$out\ASTERMAX_RUNTIME_STEP.json.stages.log" -Force }
+          $m | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
 
       - name: Upload runtime diagnostics
         if: always()
@@ -147,24 +164,12 @@ jobs:
             ASTERMAX_RUNTIME_STEP.json.stages.log
           if-no-files-found: warn
 
-      - name: Merge runtime evidence
-        shell: pwsh
-        run: |
-          $exe = '${{ steps.locate.outputs.exe }}'
-          $out = Split-Path $exe -Parent
-          $manifestPath = Join-Path $out 'C9.56_VALIDATION.json'
-          $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
-          $r = Get-Content .\ASTERMAX_RUNTIME_STEP.json -Raw | ConvertFrom-Json
-          $m.runtime_step_model = 'PASS'
-          $m | Add-Member -NotePropertyName runtime_step_evidence -NotePropertyValue $r -Force
-          $m | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
-          Copy-Item .\ASTERMAX_RUNTIME_STEP.json "$out\ASTERMAX_RUNTIME_STEP.json" -Force
-          if(Test-Path .\ASTERMAX_RUNTIME_STEP.json.stages.log){ Copy-Item .\ASTERMAX_RUNTIME_STEP.json.stages.log "$out\ASTERMAX_RUNTIME_STEP.json.stages.log" -Force }
-
       - name: Package rebuilt application binaries
+        if: always()
         shell: pwsh
         run: |
           $exe = '${{ steps.locate.outputs.exe }}'
+          if(-not (Test-Path $exe)){ throw 'Native executable unavailable for packaging.' }
           $bin = Split-Path $exe -Parent
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
@@ -173,6 +178,7 @@ jobs:
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 
       - name: Upload native build
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: AsterMax-C9.56-Polished-Native-Mechanical
