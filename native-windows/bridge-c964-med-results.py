@@ -50,11 +50,11 @@ def write_data_array(parent, name, values, ncomp=1, vtk_type="Float64"):
 with h5py.File(med_path, "r") as h:
     coords_raw=np.asarray(h[f"{MESH_ROOT}/NOE/COO"][()], dtype=float)
     n_nodes=int(h[f"{MESH_ROOT}/NOE/COO"].attrs["NBR"])
-    coords=coords_raw.reshape(3,n_nodes).T  # MED stores coordinate components in blocks.
+    coords=coords_raw.reshape(3,n_nodes).T
 
     conn_raw=np.asarray(h[f"{MESH_ROOT}/MAI/HE8/NOD"][()], dtype=int)
     n_elem=int(h[f"{MESH_ROOT}/MAI/HE8/NUM"].shape[0])
-    conn=conn_raw.reshape(8,n_elem).T  # MED stores the 8 connectivity positions in blocks.
+    conn=conn_raw.reshape(8,n_elem).T
 
     dcomp, displacement_blocks=field(h,"DEPL","NOE")
     if dcomp[:3] != ["DX","DY","DZ"]:
@@ -67,8 +67,6 @@ with h5py.File(med_path, "r") as h:
     if "VMIS" not in qcomp:
         raise RuntimeError("SIEQ_ELNO has no VMIS component")
 
-    # MED ELNO fields are ordered by element-local node. Convert to globally nodal contours by
-    # averaging coincident element-node values. Raw ELNO ranges are retained in the manifest.
     nodal_stress={}
     for i,name in enumerate(scomp):
         nodal_stress[name]=avg_element_node(stress_blocks[i],conn)
@@ -79,11 +77,7 @@ with h5py.File(med_path, "r") as h:
 bundle={
     "schema":"astermax-results-bundle/v0",
     "release":"C9.64",
-    "source":{
-        "kind":"REAL_CODE_ASTER_MED",
-        "file":os.path.basename(med_path),
-        "size_bytes":os.path.getsize(med_path)
-    },
+    "source":{"kind":"REAL_CODE_ASTER_MED","file":os.path.basename(med_path),"size_bytes":os.path.getsize(med_path)},
     "units":{"length":"mm","force":"N","stress":"MPa"},
     "mesh":{"node_count":int(n_nodes),"element_count":int(n_elem),"element_type":"HEXA8"},
     "fields":{
@@ -97,16 +91,10 @@ bundle={
             "raw_elno_min":float(vm_elno.min()),"raw_elno_max":float(vm_elno.max()),
             "nodal_min":float(von_mises.min()),"nodal_max":float(von_mises.max())}
     },
-    "arrays":{
-        "coordinates":coords.tolist(),"connectivity":conn.tolist(),
+    "arrays":{"coordinates":coords.tolist(),"connectivity":conn.tolist(),
         "displacement":displacement.tolist(),"total_deformation":total.tolist(),
-        "von_mises":von_mises.tolist(),"stress":{k:v.tolist() for k,v in nodal_stress.items()}
-    },
-    "integrity":{
-        "fea_values_invented":False,
-        "solver_output_modified":False,
-        "derived_nodal_stress_average_declared":True
-    }
+        "von_mises":von_mises.tolist(),"stress":{k:v.tolist() for k,v in nodal_stress.items()}},
+    "integrity":{"fea_values_invented":False,"solver_output_modified":False,"derived_nodal_stress_average_declared":True}
 }
 with open(bundle_path,"w",encoding="utf-8") as f: json.dump(bundle,f,indent=2)
 
@@ -118,7 +106,7 @@ write_data_array(points,"Points",coords,3)
 cells=ET.SubElement(piece,"Cells")
 write_data_array(cells,"connectivity",conn-1,1,"Int32")
 write_data_array(cells,"offsets",np.arange(1,n_elem+1)*8,1,"Int32")
-write_data_array(cells,"types",np.full(n_elem,12),1,"UInt8") # VTK_HEXAHEDRON
+write_data_array(cells,"types",np.full(n_elem,12),1,"UInt8")
 pd=ET.SubElement(piece,"PointData",{"Scalars":"Equivalent Stress","Vectors":"Displacement"})
 write_data_array(pd,"Displacement",displacement,3)
 write_data_array(pd,"Total Deformation",total)
@@ -127,16 +115,16 @@ for name,arr in nodal_stress.items(): write_data_array(pd,f"Stress {name}",arr)
 ET.ElementTree(vtk).write(vtu_path,encoding="utf-8",xml_declaration=True)
 
 checks={
-    "real_med_source":bundle["source"]["size_bytes"]>1000,
-    "mesh_44_nodes_10_hex":n_nodes==44 and n_elem==10 and conn.shape==(10,8),
-    "displacement_present":displacement.shape==(44,3),
-    "c962_dx_reproduced":abs(float(displacement[:,0].max())-0.0471697826890255)<1e-12,
-    "stress_present":len(scomp)==6 and all(len(v)==44 for v in nodal_stress.values()),
-    "von_mises_present":len(von_mises)==44 and np.isfinite(von_mises).all(),
-    "no_invented_results":bundle["integrity"]["fea_values_invented"] is False,
-    "vtu_written":os.path.isfile(vtu_path) and os.path.getsize(vtu_path)>1000
+    "real_med_source":bool(bundle["source"]["size_bytes"]>1000),
+    "mesh_44_nodes_10_hex":bool(n_nodes==44 and n_elem==10 and conn.shape==(10,8)),
+    "displacement_present":bool(displacement.shape==(44,3)),
+    "c962_dx_reproduced":bool(abs(float(displacement[:,0].max())-0.0471697826890255)<1e-12),
+    "stress_present":bool(len(scomp)==6 and all(len(v)==44 for v in nodal_stress.values())),
+    "von_mises_present":bool(len(von_mises)==44 and np.isfinite(von_mises).all()),
+    "no_invented_results":bool(bundle["integrity"]["fea_values_invented"] is False),
+    "vtu_written":bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path)>1000)
 }
-summary={"release":"C9.64","checks":checks,"checks_passed":sum(checks.values()),"checks_total":len(checks),"pass":all(checks.values()),
+summary={"release":"C9.64","checks":checks,"checks_passed":int(sum(checks.values())),"checks_total":len(checks),"pass":bool(all(checks.values())),
          "dx_max_mm":float(displacement[:,0].max()),"total_deformation_max_mm":float(total.max()),
          "von_mises_nodal_max_mpa":float(von_mises.max()),"von_mises_raw_elno_max_mpa":float(vm_elno.max()),
          "fea_values_invented":False}
