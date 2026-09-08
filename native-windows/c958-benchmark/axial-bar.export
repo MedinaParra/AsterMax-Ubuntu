@@ -1,0 +1,12 @@
+P actions make_etude
+P version unstable
+P time_limit 300
+P memory_limit 2048
+P ncpus 1
+P mpi_nbcpu 1
+
+F comm /aster/axial-bar.comm D 1
+F mail /aster/axial-bar.mail D 20
+F mess /aster/axial-bar.mess R 6
+F resu /aster/axial-bar.resu R 80
+F rmed /aster/axial-bar.rmed R 81
