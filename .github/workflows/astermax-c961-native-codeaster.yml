@@ -1,0 +1,162 @@
+name: AsterMax C9.61 Native Code_Aster Export
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/astermax-c961-native-codeaster.yml'
+      - 'native-windows/patch-c961-native-codeaster-export.ps1'
+      - 'native-windows/patch-c960-*.ps1'
+  workflow_dispatch:
+
+jobs:
+  native-codeaster-proof:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+
+      - name: Apply AsterMax native pipeline
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-lifecycle.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-solution-anchor.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-native-bridge.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-smoke-hook.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-compile-fixes.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c961-native-codeaster-export.ps1 -Root "$PWD\upstream"
+
+      - name: Restore and build x64
+        shell: pwsh
+        run: |
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Locate EXE and static gates
+        id: locate
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object FullName -match 'bin\\x64\\Release' | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
+          "exe=$($exe.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          $src='.\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs'
+          $ui='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          foreach($s in @('AsterMaxCodeAsterNativeExporter','ExportContract','MECA_STATIQUE','CALC_CHAMP','POST_RELEVE_T',"FORMAT='MED'",'solver_execution','fea_results_claimed')){
+            if(-not (Select-String -Path $src -Pattern $s -SimpleMatch -Quiet)){ throw "Native exporter gate missing: $s" }
+          }
+          if(-not (Select-String -Path $ui -Pattern 'Export Code_Aster Deck' -SimpleMatch -Quiet)){ throw 'Native Solution command missing.' }
+          Write-Host 'C9.61 static source gates PASS.'
+
+      - name: Assemble managed runtime dependencies
+        shell: pwsh
+        run: |
+          $exe='${{ steps.locate.outputs.exe }}'; $bin=Split-Path $exe -Parent
+          $projects=@('CaeGlobals','CaeJob','CaeMesh','CaeModel','CaeResults','vtkControl')
+          foreach($p in $projects){
+            $dll=Get-ChildItem ".\upstream\$p\bin" -Recurse -Filter "$p.dll" -ErrorAction SilentlyContinue | Where-Object FullName -match 'x64\\Release' | Select-Object -First 1
+            if($dll){ Copy-Item $dll.FullName $bin -Force }
+          }
+          $uc=Get-ChildItem .\upstream\UserControls\bin -Recurse -Filter 'UserControls.dll' | Where-Object FullName -match 'x64\\Release' | Select-Object -First 1
+          if($uc){ Copy-Item $uc.FullName $bin -Force }
+          foreach($name in @('Newtonsoft.Json.dll','UnitsNet.dll','NCalc.dll','System.Buffers.dll','System.Memory.dll','System.Numerics.Vectors.dll','System.Runtime.CompilerServices.Unsafe.dll')){
+            $candidate=Get-ChildItem .\upstream\packages -Recurse -Filter $name -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '\\lib\\' } | Sort-Object FullName | Select-Object -First 1
+            if($candidate){ Copy-Item $candidate.FullName $bin -Force }
+          }
+          foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll','UnitsNet.dll')){ if(-not (Test-Path (Join-Path $bin $required))){ throw "Missing runtime dependency: $required" } }
+
+      - name: Execute compiled native bridge and native Code_Aster exporter
+        shell: pwsh
+        run: |
+          $exe='${{ steps.locate.outputs.exe }}'; $bin=Split-Path $exe -Parent
+          $contract=[string](Join-Path $PWD 'C961_NATIVE_CONTRACT.json')
+          $solver=[string](Join-Path $PWD 'c961-native-solver')
+          New-Item -ItemType Directory -Force $solver | Out-Null
+          Push-Location $bin
+          try {
+            foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll','UnitsNet.dll')){ [Reflection.Assembly]::LoadFrom((Join-Path $bin $required)) | Out-Null }
+            $asm=[Reflection.Assembly]::LoadFrom($exe)
+            $bridge=$asm.GetType('PrePoMax.AsterMaxModelContractBridge',$true)
+            $bm=$bridge.GetMethod('ExportDeterministicSmoke',[Reflection.BindingFlags]'Public,Static')
+            try { $null=$bm.Invoke($null,[object[]]@([string]$contract)) } catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+            $jtype=[Type]::GetType('Newtonsoft.Json.Linq.JObject, Newtonsoft.Json',$true)
+            $parse=$jtype.GetMethod('Parse',[Type[]]@([string]))
+            $jobj=$parse.Invoke($null,[object[]]@([IO.File]::ReadAllText($contract)))
+            $exporter=$asm.GetType('PrePoMax.AsterMaxCodeAsterNativeExporter',$true)
+            $em=$exporter.GetMethod('ExportContract',[Reflection.BindingFlags]'Public,Static')
+            try { $null=$em.Invoke($null,[object[]]@($jobj,[string]$solver,[string]'c961-native')) } catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+          } finally { Pop-Location }
+          $mail=Join-Path $solver 'c961-native.mail'; $comm=Join-Path $solver 'c961-native.comm'; $manifest=Join-Path $solver 'c961-native.native-export.json'
+          foreach($f in @($contract,$mail,$comm,$manifest)){ if(-not (Test-Path $f)){ throw "Missing native output: $f" } }
+          $c=Get-Content $comm -Raw
+          foreach($s in @('MECA_STATIQUE',"GROUP_NO='FIXED'", "GROUP_NO='LOAD'",'FX=2500','SIGM_ELNO','SIEQ_ELNO','POST_RELEVE_T',"FORMAT='MED'")){ if(-not $c.Contains($s)){ throw "Native deck gate missing: $s" } }
+          $m=Get-Content $manifest -Raw | ConvertFrom-Json
+          if($m.exporter -ne 'C9.61-native-codeaster-v0'){ throw 'Native exporter version mismatch.' }
+          if($m.solver_execution -ne 'NOT_RUN' -or $m.fea_results_claimed){ throw 'No-fabrication gate failed.' }
+          if($m.nodes -ne 8 -or $m.elements -ne 1 -or $m.element_type -ne 'HEXA8'){ throw 'Mesh integrity gate failed.' }
+          if([double]$m.fx_per_node_n -ne 2500){ throw 'Load conservation gate failed.' }
+          Write-Host 'C9.61 COMPILED native FeModel -> native Code_Aster .mail/.comm PASS.'
+
+      - name: Semantic parity against C9.59 PowerShell adapter
+        shell: pwsh
+        run: |
+          .\native-windows\Export-AsterMaxCodeAster.ps1 -ModelPath .\C961_NATIVE_CONTRACT.json -OutDir .\c961-reference
+          $native=Get-Content .\c961-native-solver\c961-native.comm -Raw
+          $ref=Get-Content (Get-ChildItem .\c961-reference -Filter '*.comm' | Select-Object -First 1).FullName -Raw
+          foreach($s in @("E=210000","NU=0.3","GROUP_NO='FIXED'","GROUP_NO='LOAD'",'FX=2500','MECA_STATIQUE','SIEQ_ELNO',"FORMAT='MED'")){
+            if(-not $native.Contains($s) -or -not $ref.Contains($s)){ throw "Semantic parity failed: $s" }
+          }
+          Write-Host 'Native exporter semantic parity with validated C9.59 adapter PASS.'
+
+      - name: Write C9.61 evidence
+        shell: pwsh
+        run: |
+          $exe='${{ steps.locate.outputs.exe }}'
+          $e=[ordered]@{
+            release='C9.61'
+            increment='compiled in-process FeModel -> Code_Aster input exporter'
+            native_exe_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+            contract_sha256=(Get-FileHash .\C961_NATIVE_CONTRACT.json -Algorithm SHA256).Hash.ToLower()
+            mail_sha256=(Get-FileHash .\c961-native-solver\c961-native.mail -Algorithm SHA256).Hash.ToLower()
+            comm_sha256=(Get-FileHash .\c961-native-solver\c961-native.comm -Algorithm SHA256).Hash.ToLower()
+            native_bridge='PASS'
+            native_codeaster_export='PASS'
+            powershell_adapter_required_for_demo_path=$false
+            semantic_parity_c959='PASS'
+            units='PASS_MM_N_MPA'
+            mesh='PASS_HEXA8_8NODES_1ELEMENT'
+            material='PASS_E210000MPA_NU0.3'
+            bc='PASS_FIXED_NODESET'
+            load='PASS_10000N_TOTAL_2500N_PER_NODE'
+            postprocess_requested=@('DEPL','SIGM_ELNO','SIEQ_ELNO','MED')
+            solver_execution='NOT_RUN'
+            fea_results_claimed=$false
+            gaps=@('Code_Aster executable not executed','MED not reimported into VTK','exporter v0 limited to HEXA8/single material/fixed BC/CLoad','mesh quality and convergence gates pending','contacts/nonlinear/modal pending')
+            priority_next='C9.62 execute a real Code_Aster benchmark in a controlled runner and parse/reimport MED or solver tables without fabricating results'
+          }
+          $e | ConvertTo-Json -Depth 6 | Set-Content .\C9.61_EVIDENCE.json -Encoding UTF8
+          Get-Content .\C9.61_EVIDENCE.json
+
+      - name: Package evidence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item C961_NATIVE_CONTRACT.json artifact\
+          Copy-Item C9.61_EVIDENCE.json artifact\
+          Copy-Item c961-native-solver\* artifact\
+          Copy-Item native-windows\patch-c961-native-codeaster-export.ps1 artifact\
+          $exe='${{ steps.locate.outputs.exe }}'
+          Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File artifact\AsterMax-Mechanical.exe.sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.61-Native-CodeAster-Exporter
+          path: artifact
+          if-no-files-found: error
