@@ -75,9 +75,9 @@ namespace PrePoMax
 
         private static double[][] ReadJagged(JToken token, int width)
         {
-            return token.Select(row => row.Select(x => (double)x).ToArray())
-                        .Select(row => row.Length == width ? row : throw new InvalidDataException("Unexpected vector width."))
-                        .ToArray();
+            var rows = token.Select(row => row.Select(x => (double)x).ToArray()).ToArray();
+            if (rows.Any(row => row.Length != width)) throw new InvalidDataException("Unexpected vector width.");
+            return rows;
         }
 
         private void Validate()
@@ -171,7 +171,7 @@ namespace PrePoMax
             }
             catch (Exception ex)
             {
-                MessageBoxes.ShowError("AsterMax results bundle rejected: " + ex.Message);
+                CaeGlobals.MessageBoxes.ShowError("AsterMax results bundle rejected: " + ex.Message);
             }
         }
     }
