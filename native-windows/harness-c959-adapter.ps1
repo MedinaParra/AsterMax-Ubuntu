@@ -20,7 +20,7 @@ Gate 'contract_schema' ($m.schema -eq 'astermax-model-contract/v0') $m.schema
 Gate 'units_mm_n_mpa' ($m.unit_system -eq 'MM_N_S_MPA') $m.unit_system
 Gate 'mesh_hex8' (($m.mesh.element_type -eq 'HEXA8') -and ($m.mesh.nodes.Count -eq 8) -and ($m.mesh.elements.Count -eq 1)) 'HEXA8 / 8 nodes / 1 element'
 Gate 'mail_has_groups' (($mailText -match 'FIXED N1 N4 N5 N8') -and ($mailText -match 'LOAD N2 N3 N6 N7')) 'FIXED + LOAD node groups'
-Gate 'material_preserved' (($commText -match 'E=210000') -and ($commText -match 'NU=0.3')) 'E=210000 MPa; nu=0.30'
+Gate 'material_preserved' (($commText -match 'E=210000') -and ($commText -match 'NU=0\.3(?:0)?')) 'E=210000 MPa; nu=0.30 numeric semantics'
 Gate 'support_preserved' ($commText -match "GROUP_NO='FIXED'.*DX=0.*DY=0.*DZ=0") 'fixed XYZ'
 Gate 'total_force_distributed' (($commText -match "GROUP_NO='LOAD'.*FX=2500") -and ($ma.total_load_n -eq 10000) -and ($ma.load_nodes -eq 4)) '10000 N / 4 = 2500 N per node'
 Gate 'static_solver_deck' (($commText -match 'MECA_STATIQUE') -and ($commText -match 'CALC_CHAMP')) 'MECA_STATIQUE + CALC_CHAMP'
@@ -37,13 +37,16 @@ $stressErr=[math]::Abs($sigma-[double]$m.reference.axial_stress_mpa)
 $dispErr=[math]::Abs($disp-[double]$m.reference.axial_displacement_mm)
 Gate 'analytical_reference_recomputed' (($stressErr -lt 1e-10) -and ($dispErr -lt 1e-12)) ("sigma={0}; ux={1}" -f $sigma,$disp)
 
-# C9.58 parity gates: the generated adapter deck must preserve the validated benchmark semantics.
+# C9.58 parity gate intentionally compares solver semantics, not numeric string formatting.
 $c958Mail=Get-Content (Join-Path $repo 'native-windows/c958-benchmark/axial-bar.mail') -Raw
 $c958Comm=Get-Content (Join-Path $repo 'native-windows/c958-benchmark/axial-bar.comm') -Raw
-$semanticTokens=@('HEXA8','FIXED','LOAD','E=210000','NU=0.30','MECA_STATIQUE','SIGM_ELNO','SIEQ_ELNO','POST_RELEVE_T',"FORMAT='MED'")
+$semanticTokens=@('HEXA8','FIXED','LOAD','MECA_STATIQUE','SIGM_ELNO','SIEQ_ELNO','POST_RELEVE_T',"FORMAT='MED'")
 $parity=$true
 foreach($token in $semanticTokens){ if(($c958Mail+$c958Comm) -notmatch [regex]::Escape($token) -or ($mailText+$commText) -notmatch [regex]::Escape($token)){ $parity=$false } }
-Gate 'c958_semantic_parity' $parity ($semanticTokens -join ', ')
+$c958Material=(($c958Comm -match 'E=210000') -and ($c958Comm -match 'NU=0\.30'))
+$generatedMaterial=(($commText -match 'E=210000') -and ($commText -match 'NU=0\.3(?:0)?'))
+$parity=$parity -and $c958Material -and $generatedMaterial
+Gate 'c958_semantic_parity' $parity (($semanticTokens -join ', ') + '; E=210000; nu=0.30 numerically')
 
 $checks | Format-Table -AutoSize | Out-String | Write-Host
 $pass=($checks | Where-Object{-not $_.pass}).Count -eq 0
