@@ -56,6 +56,20 @@ jobs:
           if(-not (Select-String -Path $ui -Pattern 'Export Solver Contract' -SimpleMatch -Quiet)){ throw 'Solution UI export command missing.' }
           Write-Host 'C9.60 static gates PASS.'
 
+      - name: Assemble x64 runtime dependencies
+        shell: pwsh
+        run: |
+          $exe='${{ steps.locate.outputs.exe }}'
+          $bin=Split-Path $exe -Parent
+          $projects=@('CaeGlobals','CaeJob','CaeMesh','CaeModel','CaeResults','vtkControl')
+          foreach($p in $projects){
+            $dll=Get-ChildItem ".\upstream\$p\bin" -Recurse -Filter "$p.dll" -ErrorAction SilentlyContinue | Where-Object FullName -match 'x64\\Release' | Select-Object -First 1
+            if($dll){ Copy-Item $dll.FullName $bin -Force; Write-Host "runtime dependency: $($dll.Name)" }
+          }
+          $uc=Get-ChildItem .\upstream\UserControls\bin -Recurse -Filter 'UserControls.dll' | Where-Object FullName -match 'x64\\Release' | Select-Object -First 1
+          if($uc){ Copy-Item $uc.FullName $bin -Force }
+          foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll')){ if(-not (Test-Path (Join-Path $bin $required))){ throw "Missing runtime dependency: $required" } }
+
       - name: Execute compiled bridge on native FeModel smoke model
         shell: pwsh
         run: |
@@ -64,7 +78,7 @@ jobs:
           $out=[string](Join-Path $PWD 'C960_NATIVE_CONTRACT.json')
           Push-Location $bin
           try {
-            Get-ChildItem $bin -Filter '*.dll' | ForEach-Object { try { [Reflection.Assembly]::LoadFrom($_.FullName) | Out-Null } catch {} }
+            foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll')){ [Reflection.Assembly]::LoadFrom((Join-Path $bin $required)) | Out-Null }
             $asm=[Reflection.Assembly]::LoadFrom($exe)
             $type=$asm.GetType('PrePoMax.AsterMaxModelContractBridge',$true)
             $method=$type.GetMethod('ExportDeterministicSmoke',[Reflection.BindingFlags]'Public,Static')
@@ -117,6 +131,7 @@ jobs:
             compiled_native_bridge='PASS'
             live_femodel_smoke='PASS'
             gui_solution_export_command='PASS'
+            runtime_dependency_assembly='PASS'
             mesh='PASS_HEXA8_8NODES_1ELEMENT'
             material='PASS_E210000MPA_NU0.3'
             boundary_condition='PASS_FIXED_NODESET'
