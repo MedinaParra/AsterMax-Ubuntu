@@ -8,7 +8,7 @@ $ui = Get-Content $uiPath -Raw
 if(-not $ui.Contains('StartAsterMaxRuntimeSmoke();')){
   $anchor = '            ThemeRecursive(this);'
   if(-not $ui.Contains($anchor)){ throw 'AsterMax UI theme anchor not found.' }
-  $ui = $ui.Replace($anchor, "            StartAsterMaxRuntimeSmoke();`r`n" + $anchor)
+  $ui = $ui.Replace($anchor, '            StartAsterMaxRuntimeSmoke();' + [Environment]::NewLine + $anchor)
 }
 
 if(-not $ui.Contains('private void StartAsterMaxRuntimeSmoke()')){
@@ -119,31 +119,47 @@ if(-not $ui.Contains('internal static class AsterMaxSmokeTrace')){
 
 Set-Content $uiPath $ui -Encoding UTF8
 
-# Instrument startup stages before the WinForms message loop and through native initialization.
+# Instrument startup stages through native initialization using simple anchors.
 $programPath = Join-Path $Root 'PrePoMax/Program.cs'
 $program = Get-Content $programPath -Raw
-if(-not $program.Contains('AsterMaxSmokeTrace.Stage(args, "program_main");')){
-  $program = $program.Replace('        {`r`n            System.Globalization.CultureInfo ci =', '        {`r`n            AsterMaxSmokeTrace.Stage(args, "program_main");`r`n            System.Globalization.CultureInfo ci =')
-  if(-not $program.Contains('AsterMaxSmokeTrace.Stage(args, "program_main");')){
-    $program = $program.Replace("        {`n            System.Globalization.CultureInfo ci =", "        {`n            AsterMaxSmokeTrace.Stage(args, \"program_main\");`n            System.Globalization.CultureInfo ci =")
-  }
+$programStage = '            AsterMaxSmokeTrace.Stage(args, "program_main");'
+$programAnchor = '            System.Globalization.CultureInfo ci ='
+if(-not $program.Contains($programStage)){
+  if(-not $program.Contains($programAnchor)){ throw 'Program.cs culture anchor not found.' }
+  $program = $program.Replace($programAnchor, $programStage + [Environment]::NewLine + $programAnchor)
 }
 Set-Content $programPath $program -Encoding UTF8
 
 $mainPath = Join-Path $Root 'PrePoMax/Forms/FrmMain.cs'
 $main = Get-Content $mainPath -Raw
-if(-not $main.Contains('AsterMaxSmokeTrace.Stage(_args, "frm_constructor");')){
-  $main = $main.Replace('            _args = args;', '            _args = args;`r`n            AsterMaxSmokeTrace.Stage(_args, "frm_constructor");')
-}
-if(-not $main.Contains('AsterMaxSmokeTrace.Stage(_args, "frm_load_enter");')){
-  $main = $main.Replace('        private void FrmMain_Load(object sender, EventArgs e)`r`n        {', '        private void FrmMain_Load(object sender, EventArgs e)`r`n        {`r`n            AsterMaxSmokeTrace.Stage(_args, "frm_load_enter");')
-}
-if(-not $main.Contains('AsterMaxSmokeTrace.Stage(_args, "controller_created");')){
-  $main = $main.Replace('                _controller = new Controller(this);', '                _controller = new Controller(this);`r`n                AsterMaxSmokeTrace.Stage(_args, "controller_created");')
-}
-if(-not $main.Contains('AsterMaxSmokeTrace.Stage(_args, "import_file_async_returned");')){
-  $main = $main.Replace('                                await _controller.ImportFileAsync(fileName, false);', '                                await _controller.ImportFileAsync(fileName, false);`r`n                                AsterMaxSmokeTrace.Stage(_args, "import_file_async_returned");')
-}
-Set-Content $mainPath $main -Encoding UTF8
 
+$constructorStage = '            AsterMaxSmokeTrace.Stage(_args, "frm_constructor");'
+$constructorAnchor = '            _args = args;'
+if(-not $main.Contains($constructorStage)){
+  if(-not $main.Contains($constructorAnchor)){ throw 'FrmMain constructor args anchor not found.' }
+  $main = $main.Replace($constructorAnchor, $constructorAnchor + [Environment]::NewLine + $constructorStage)
+}
+
+$loadStage = '            AsterMaxSmokeTrace.Stage(_args, "frm_load_enter");'
+$loadAnchor = '            if (TestWriteAccess() == false)'
+if(-not $main.Contains($loadStage)){
+  if(-not $main.Contains($loadAnchor)){ throw 'FrmMain load write-access anchor not found.' }
+  $main = $main.Replace($loadAnchor, $loadStage + [Environment]::NewLine + $loadAnchor)
+}
+
+$controllerStage = '                AsterMaxSmokeTrace.Stage(_args, "controller_created");'
+$controllerAnchor = '                _controller = new Controller(this);'
+if(-not $main.Contains($controllerStage)){
+  if(-not $main.Contains($controllerAnchor)){ throw 'FrmMain controller anchor not found.' }
+  $main = $main.Replace($controllerAnchor, $controllerAnchor + [Environment]::NewLine + $controllerStage)
+}
+
+$importStage = '                                AsterMaxSmokeTrace.Stage(_args, "import_file_async_returned");'
+$importAnchor = '                                await _controller.ImportFileAsync(fileName, false);'
+if(-not $main.Contains($importStage)){
+  if(-not $main.Contains($importAnchor)){ throw 'FrmMain import anchor not found.' }
+  $main = $main.Replace($importAnchor, $importAnchor + [Environment]::NewLine + $importStage)
+}
+
+Set-Content $mainPath $main -Encoding UTF8
 Write-Host 'AsterMax native runtime smoke harness and stage trace injected.' -ForegroundColor Green
