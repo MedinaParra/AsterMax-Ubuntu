@@ -1,0 +1,39 @@
+name: AsterMax C9.58 Deterministic Benchmark
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c958-benchmark/**'
+      - 'native-windows/harness-c958-benchmark.ps1'
+      - '.github/workflows/astermax-c958-benchmark.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout AsterMax harness
+        uses: actions/checkout@v4
+
+      - name: Validate deterministic Code_Aster benchmark contract
+        shell: pwsh
+        run: |
+          .\native-windows\harness-c958-benchmark.ps1 -Root "$PWD" -OutDir "$PWD\c958-evidence"
+
+      - name: Show benchmark evidence
+        shell: pwsh
+        run: |
+          $r = Get-Content .\c958-evidence\C9.58_BENCHMARK_CONTRACT.json -Raw | ConvertFrom-Json
+          $r | Select-Object release,title,checks_total,checks_passed,benchmark_contract_pass,solver_execution,simulation_results | Format-List
+          $r.analytical_reference | Format-List
+          if(-not $r.benchmark_contract_pass){ throw 'C9.58 benchmark contract is not green.' }
+          if($r.simulation_results -ne 'NONE_CLAIMED'){ throw 'Integrity gate: harness must not claim solver output.' }
+
+      - name: Upload C9.58 benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.58-Deterministic-FEA-Benchmark
+          path: c958-evidence
+          if-no-files-found: error
