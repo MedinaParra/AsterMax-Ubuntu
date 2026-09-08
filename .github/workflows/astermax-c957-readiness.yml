@@ -1,0 +1,62 @@
+name: AsterMax C9.57 FEA Readiness
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/**'
+      - '.github/workflows/astermax-c957-readiness.yml'
+  workflow_dispatch:
+
+jobs:
+  readiness:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax harness
+        uses: actions/checkout@v4
+
+      - name: Checkout native upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+
+      - name: Apply AsterMax native patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-lifecycle.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+
+      - name: FEA readiness contract
+        shell: pwsh
+        run: .\native-windows\harness-c957-fea-readiness.ps1 -Root "$PWD\upstream" -OutDir "$PWD\evidence"
+
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Verify AsterMax executable
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match 'bin\\x64\\Release' } | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe not produced' }
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          [pscustomobject]@{ release='C9.57'; exe=$exe.FullName; sha256=$sha; simulation_results='NONE' } | ConvertTo-Json | Set-Content .\evidence\C9.57_BUILD.json -Encoding UTF8
+
+      - name: Upload verified readiness evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.57-FEA-Readiness-Evidence
+          path: evidence
+          if-no-files-found: error
