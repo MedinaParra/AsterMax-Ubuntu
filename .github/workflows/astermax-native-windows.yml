@@ -28,12 +28,13 @@ jobs:
         run: |
           Set-Location upstream
           git rev-parse HEAD | Set-Content ..\UPSTREAM_PREPOMAX_COMMIT.txt
-          git status --short
           Set-Location ..
 
       - name: Apply AsterMax native fork
         shell: pwsh
-        run: .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -53,29 +54,32 @@ jobs:
           $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match 'bin\\x64\\Release' } | Select-Object -First 1
           if(-not $exe){ throw 'AsterMax Mechanical.exe was not produced.' }
           "exe=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Native EXE: $($exe.FullName)"
 
       - name: Static native gates
         shell: pwsh
         run: |
           $exe = '${{ steps.locate.outputs.exe }}'
-          $bytes = [System.IO.File]::ReadAllBytes($exe)
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           $out = Split-Path $exe -Parent
+          $ui = '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          $splash = '.\upstream\PrePoMax\Forms\FrmSplash.Designer.cs'
+          $advisor = '.\upstream\PrePoMax\Forms\00_Advisor\AdvisorCreator.cs'
           $checks = @()
           $checks += [pscustomobject]@{ name='native_exe_exists'; pass=(Test-Path $exe); evidence=$exe }
           $checks += [pscustomobject]@{ name='native_exe_named_astermax'; pass=([IO.Path]::GetFileName($exe) -eq 'AsterMax Mechanical.exe'); evidence=[IO.Path]::GetFileName($exe) }
-          $checks += [pscustomobject]@{ name='source_has_astermax_ui'; pass=(Test-Path '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'); evidence='AsterMaxNativeUi.cs' }
-          $checks += [pscustomobject]@{ name='source_no_shell_embedding'; pass=(-not (Select-String -Path '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs' -Pattern 'SetParent|PrePoMax.exe|Process.Start' -Quiet)); evidence='no SetParent / external PrePoMax launch' }
+          $checks += [pscustomobject]@{ name='source_has_astermax_ui'; pass=(Test-Path $ui); evidence='AsterMaxNativeUi.cs' }
+          $checks += [pscustomobject]@{ name='source_no_shell_embedding'; pass=(-not (Select-String -Path $ui -Pattern 'SetParent|PrePoMax.exe|Process.Start' -Quiet)); evidence='no SetParent / external PrePoMax launch' }
           $checks += [pscustomobject]@{ name='vtk_project_present'; pass=(Test-Path '.\upstream\vtkControl\vtkControl.csproj'); evidence='vtkControl project' }
           $checks += [pscustomobject]@{ name='modeltree_present'; pass=(Test-Path '.\upstream\UserControls\ModelTree.cs'); evidence='ModelTree source' }
           $checks += [pscustomobject]@{ name='step_import_command_preserved'; pass=(Select-String -Path '.\upstream\PrePoMax\PrePoMax.csproj' -Pattern 'CImportFile.cs' -Quiet); evidence='CImportFile.cs compiled' }
-          $checks += [pscustomobject]@{ name='mm_unit_contract_visible'; pass=(Select-String -Path '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs' -Pattern 'mm · N · MPa' -Quiet); evidence='ribbon unit indicator' }
+          $checks += [pscustomobject]@{ name='mm_unit_contract_visible'; pass=(Select-String -Path $ui -Pattern 'mm · N · MPa' -Quiet); evidence='ribbon unit indicator' }
+          $checks += [pscustomobject]@{ name='splash_rebranded'; pass=((Select-String -Path $splash -Pattern 'AsterMax Mechanical' -Quiet) -and -not (Select-String -Path $splash -Pattern 'PrePoMax is a graphical' -Quiet)); evidence='native splash source' }
+          $checks += [pscustomobject]@{ name='advisor_rebranded'; pass=(-not (Select-String -Path $advisor -Pattern 'imported into PrePoMax' -Quiet)); evidence='geometry advisor source' }
           $checks += [pscustomobject]@{ name='no_powershell_gui'; pass=$true; evidence='PowerShell is build-time patcher only, not runtime GUI' }
           $pass = ($checks | Where-Object { -not $_.pass }).Count -eq 0
           $manifest = [pscustomobject]@{
-            release='C9.53'
-            title='Native Fork Baseline'
+            release='C9.54'
+            title='Native Mechanical Workflow UI'
             build_os='windows-latest'
             upstream_commit=(Get-Content .\UPSTREAM_PREPOMAX_COMMIT.txt -Raw).Trim()
             exe_sha256=$sha
@@ -84,11 +88,11 @@ jobs:
             all_static_checks_pass=$pass
             runtime_step_viewport='NOT_RUN_HEADLESS_CI'
             fea_solve='NOT_RUN'
-            code_aster='NEXT_GATE'
+            code_aster='NEXT_GATE_AFTER_RUNTIME_STEP'
             pmv_complete=$false
             checks=$checks
           }
-          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.53_VALIDATION.json" -Encoding UTF8
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.54_VALIDATION.json" -Encoding UTF8
           if(-not $pass){ throw 'Static gate failed.' }
 
       - name: Package rebuilt application binaries
@@ -99,12 +103,12 @@ jobs:
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
-          Copy-Item .\native-windows\README-C9.53.md .\artifact\README-C9.53.md
+          Copy-Item .\native-windows\README-C9.53.md .\artifact\README-C9.54.md
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 
       - name: Upload native build
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.53-Native-Windows-Build
+          name: AsterMax-C9.54-Native-Windows-Build
           path: artifact
           if-no-files-found: error
