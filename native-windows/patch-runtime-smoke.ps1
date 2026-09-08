@@ -22,7 +22,6 @@ if(-not $ui.Contains('private void StartAsterMaxRuntimeSmoke()')){
             string reportPath = AsterMaxSmokeTrace.GetReportPath(_args);
             if (String.IsNullOrWhiteSpace(reportPath)) return;
             AsterMaxSmokeTrace.Stage(_args, "astermax_ui_applied");
-
             int ticks = 0;
             var smokeTimer = new System.Windows.Forms.Timer { Interval = 250 };
             smokeTimer.Tick += (sender, eventArgs) =>
@@ -142,8 +141,6 @@ function Add-StageBefore([string]$anchor,[string]$stage,[string]$indent){
 
 Add-StageAfter '            _args = args;' 'AsterMaxSmokeTrace.Stage(_args, "frm_constructor");' '            '
 Add-StageBefore '            if (TestWriteAccess() == false)' 'AsterMaxSmokeTrace.Stage(_args, "frm_load_enter");' '            '
-Add-StageAfter '            }' 'AsterMaxSmokeTrace.Stage(_args, "write_access_ok");' '            '
-# The generic closing-brace anchor above can match too broadly; ensure meaningful probes around unique initialization statements too.
 Add-StageAfter '            var task = Task.Run(() => splash.ShowDialog());' 'AsterMaxSmokeTrace.Stage(_args, "splash_started");' '            '
 Add-StageBefore '                _vtk = new vtkControl.vtkControl();' 'AsterMaxSmokeTrace.Stage(_args, "vtk_create_enter");' '                '
 Add-StageAfter '                _vtk = new vtkControl.vtkControl();' 'AsterMaxSmokeTrace.Stage(_args, "vtk_create_returned");' '                '
