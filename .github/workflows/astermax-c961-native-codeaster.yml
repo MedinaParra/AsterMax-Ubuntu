@@ -34,11 +34,16 @@ jobs:
           .\native-windows\patch-c960-compile-fixes.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c961-native-codeaster-export.ps1 -Root "$PWD\upstream"
 
-      - name: Restore and build x64
+      - name: Restore packages
         shell: pwsh
-        run: |
-          nuget restore .\upstream\PrePoMax.sln -NonInteractive
-          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
       - name: Locate EXE and static gates
         id: locate
