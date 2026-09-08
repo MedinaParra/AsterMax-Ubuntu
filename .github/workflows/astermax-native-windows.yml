@@ -11,7 +11,7 @@ on:
 jobs:
   build-native:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout AsterMax build harness
         uses: actions/checkout@v4
@@ -35,6 +35,7 @@ jobs:
         run: |
           .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -75,25 +76,70 @@ jobs:
           $checks += [pscustomobject]@{ name='mm_unit_contract_visible'; pass=(Select-String -Path $ui -Pattern 'mm · N · MPa' -Quiet); evidence='ribbon unit indicator' }
           $checks += [pscustomobject]@{ name='splash_rebranded'; pass=((Select-String -Path $splash -Pattern 'AsterMax Mechanical' -Quiet) -and -not (Select-String -Path $splash -Pattern 'PrePoMax is a graphical' -Quiet)); evidence='native splash source' }
           $checks += [pscustomobject]@{ name='advisor_rebranded'; pass=(-not (Select-String -Path $advisor -Pattern 'imported into PrePoMax' -Quiet)); evidence='geometry advisor source' }
-          $checks += [pscustomobject]@{ name='no_powershell_gui'; pass=$true; evidence='PowerShell is build-time patcher only, not runtime GUI' }
+          $checks += [pscustomobject]@{ name='runtime_smoke_instrumented'; pass=(Select-String -Path $ui -Pattern 'StartAsterMaxRuntimeSmoke' -Quiet); evidence='native in-process telemetry gate' }
+          $checks += [pscustomobject]@{ name='no_powershell_gui'; pass=$true; evidence='PowerShell is build-time/CI harness only, not runtime GUI' }
           $pass = ($checks | Where-Object { -not $_.pass }).Count -eq 0
           $manifest = [pscustomobject]@{
-            release='C9.54'
-            title='Native Mechanical Workflow UI'
+            release='C9.55'
+            title='Native STEP Runtime Proof'
             build_os='windows-latest'
             upstream_commit=(Get-Content .\UPSTREAM_PREPOMAX_COMMIT.txt -Raw).Trim()
             exe_sha256=$sha
             checks_total=$checks.Count
             checks_passed=($checks | Where-Object pass).Count
             all_static_checks_pass=$pass
-            runtime_step_viewport='NOT_RUN_HEADLESS_CI'
+            runtime_step_model='PENDING_RUNTIME_GATE'
             fea_solve='NOT_RUN'
-            code_aster='NEXT_GATE_AFTER_RUNTIME_STEP'
+            code_aster='NEXT_AFTER_CAD_MESH_GATES'
             pmv_complete=$false
             checks=$checks
           }
-          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.54_VALIDATION.json" -Encoding UTF8
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.55_VALIDATION.json" -Encoding UTF8
           if(-not $pass){ throw 'Static gate failed.' }
+
+      - name: Download deterministic STEP fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\runtime-fixture | Out-Null
+          $url = 'https://raw.githubusercontent.com/Airthium/tanatloc/b1b9b084ab5ff04e908ed27eb7828ce847520316/public/doc/cube.stp'
+          Invoke-WebRequest -Uri $url -OutFile .\runtime-fixture\cube-mm.stp
+          if((Get-Item .\runtime-fixture\cube-mm.stp).Length -lt 1000){ throw 'STEP fixture download invalid.' }
+          Get-FileHash .\runtime-fixture\cube-mm.stp -Algorithm SHA256 | Format-List
+
+      - name: Runtime STEP model gate
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $work = Split-Path $exe -Parent
+          $step = (Resolve-Path .\runtime-fixture\cube-mm.stp).Path
+          $report = Join-Path $PWD 'ASTERMAX_RUNTIME_STEP.json'
+          if(Test-Path $report){ Remove-Item $report -Force }
+          $args = @($step, '-US', 'MM_TON_S_C', "--ASTERMAX-SMOKE=$report")
+          $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $work -PassThru
+          if(-not $p.WaitForExit(135000)){
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'AsterMax runtime STEP gate timed out.'
+          }
+          if(-not (Test-Path $report)){ throw "AsterMax exited without runtime telemetry. ExitCode=$($p.ExitCode)" }
+          $data = Get-Content $report -Raw | ConvertFrom-Json
+          $data | ConvertTo-Json -Depth 5
+          if(-not $data.pass){ throw "Runtime STEP gate failed: $($data.reason)" }
+          if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
+          if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
+          if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
+
+      - name: Merge runtime evidence
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $out = Split-Path $exe -Parent
+          $manifestPath = Join-Path $out 'C9.55_VALIDATION.json'
+          $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $r = Get-Content .\ASTERMAX_RUNTIME_STEP.json -Raw | ConvertFrom-Json
+          $m.runtime_step_model = 'PASS'
+          $m | Add-Member -NotePropertyName runtime_step_evidence -NotePropertyValue $r -Force
+          $m | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json "$out\ASTERMAX_RUNTIME_STEP.json" -Force
 
       - name: Package rebuilt application binaries
         shell: pwsh
@@ -103,12 +149,12 @@ jobs:
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
-          Copy-Item .\native-windows\README-C9.53.md .\artifact\README-C9.54.md
+          Copy-Item .\native-windows\README-C9.53.md .\artifact\README-C9.55.md
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 
       - name: Upload native build
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.54-Native-Windows-Build
+          name: AsterMax-C9.55-Native-STEP-Runtime-Proof
           path: artifact
           if-no-files-found: error
