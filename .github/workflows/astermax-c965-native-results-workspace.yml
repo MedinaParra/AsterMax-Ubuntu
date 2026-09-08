@@ -130,10 +130,10 @@ jobs:
         run: |
           $ui='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
           $rw='.\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs'
-          if(-not (Select-String $ui -SimpleMatch 'Load Results' -Quiet)){ throw 'Results ribbon command missing' }
-          if(-not (Select-String $rw -SimpleMatch 'ProbeNode' -Quiet)){ throw 'Probe contract missing' }
-          if(-not (Select-String $rw -SimpleMatch 'GetDeformedCoordinates' -Quiet)){ throw 'Deformed coordinates contract missing' }
-          if(-not (Select-String $rw -SimpleMatch 'fea_values_invented' -Quiet)){ throw 'Integrity gate missing' }
+          if(-not (Select-String -Path $ui -Pattern 'Load Results' -SimpleMatch -Quiet)){ throw 'Results ribbon command missing' }
+          if(-not (Select-String -Path $rw -Pattern 'ProbeNode' -SimpleMatch -Quiet)){ throw 'Probe contract missing' }
+          if(-not (Select-String -Path $rw -Pattern 'GetDeformedCoordinates' -SimpleMatch -Quiet)){ throw 'Deformed coordinates contract missing' }
+          if(-not (Select-String -Path $rw -Pattern 'fea_values_invented' -SimpleMatch -Quiet)){ throw 'Integrity gate missing' }
       - name: Package C9.65 evidence and Windows binary
         shell: pwsh
         run: |
