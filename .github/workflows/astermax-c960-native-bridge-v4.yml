@@ -68,10 +68,12 @@ jobs:
           }
           $uc=Get-ChildItem .\upstream\UserControls\bin -Recurse -Filter 'UserControls.dll' | Where-Object FullName -match 'x64\\Release' | Select-Object -First 1
           if($uc){ Copy-Item $uc.FullName $bin -Force }
-          $json=Get-ChildItem .\upstream\packages\Newtonsoft.Json.13.0.1 -Recurse -Filter 'Newtonsoft.Json.dll' | Where-Object FullName -match 'net45' | Select-Object -First 1
-          if(-not $json){ $json=Get-ChildItem .\upstream\packages\Newtonsoft.Json.13.0.1 -Recurse -Filter 'Newtonsoft.Json.dll' | Select-Object -First 1 }
-          if($json){ Copy-Item $json.FullName $bin -Force; Write-Host "runtime dependency: $($json.Name)" }
-          foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll')){ if(-not (Test-Path (Join-Path $bin $required))){ throw "Missing runtime dependency: $required" } }
+          $managed=@('Newtonsoft.Json.dll','UnitsNet.dll','NCalc.dll','System.Buffers.dll','System.Memory.dll','System.Numerics.Vectors.dll','System.Runtime.CompilerServices.Unsafe.dll')
+          foreach($name in $managed){
+            $candidate=Get-ChildItem .\upstream\packages -Recurse -Filter $name -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '\\lib\\' } | Sort-Object @{Expression={ if($_.FullName -match 'net4[5-9]'){0}elseif($_.FullName -match 'netstandard2.0'){1}else{2} }}, FullName | Select-Object -First 1
+            if($candidate){ Copy-Item $candidate.FullName $bin -Force; Write-Host "runtime dependency: $($candidate.Name)" }
+          }
+          foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll','UnitsNet.dll')){ if(-not (Test-Path (Join-Path $bin $required))){ throw "Missing runtime dependency: $required" } }
 
       - name: Execute compiled bridge on native FeModel smoke model
         shell: pwsh
@@ -81,7 +83,7 @@ jobs:
           $out=[string](Join-Path $PWD 'C960_NATIVE_CONTRACT.json')
           Push-Location $bin
           try {
-            foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll')){ [Reflection.Assembly]::LoadFrom((Join-Path $bin $required)) | Out-Null }
+            foreach($required in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll','UnitsNet.dll')){ [Reflection.Assembly]::LoadFrom((Join-Path $bin $required)) | Out-Null }
             $asm=[Reflection.Assembly]::LoadFrom($exe)
             $type=$asm.GetType('PrePoMax.AsterMaxModelContractBridge',$true)
             $method=$type.GetMethod('ExportDeterministicSmoke',[Reflection.BindingFlags]'Public,Static')
