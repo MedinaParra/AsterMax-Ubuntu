@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/astermax-c960-native-bridge-v4.yml'
+      - 'native-windows/patch-c960-*.ps1'
   workflow_dispatch:
 
 jobs:
