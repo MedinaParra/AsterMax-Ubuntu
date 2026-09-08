@@ -1,0 +1,155 @@
+name: AsterMax C9.65 Native Results Workspace
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c965-results-workspace.ps1'
+      - 'native-windows/bridge-c964-med-results.py'
+      - 'native-windows/c958-benchmark/**'
+      - 'native-windows/c962-benchmark/**'
+      - '.github/workflows/astermax-c965-native-results-workspace.yml'
+  workflow_dispatch:
+
+jobs:
+  real-results-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v4
+      - name: Prepare verified refined benchmark
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work fixture
+          chmod -R 0777 work
+          cp native-windows/c958-benchmark/axial-bar.comm work/axial-bar.comm
+          cp native-windows/c962-benchmark/axial-bar-refined.mail work/axial-bar.mail
+          cp native-windows/c958-benchmark/axial-bar.export work/axial-bar.export
+          cp native-windows/validate-c962-solver.py work/
+          cp native-windows/bridge-c964-med-results.py work/
+      - name: Execute real Code_Aster and validate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker run --rm --volume "$PWD/work:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/axial-bar.export | tee work/CODE_ASTER_STDOUT.log
+          python3 work/validate-c962-solver.py work
+      - name: Build real AsterMax results bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check h5py numpy
+          python3 work/bridge-c964-med-results.py work/axial-bar.rmed fixture/AsterMax.Results.C9.65.json fixture/AsterMax.Results.C9.65.vtu | tee fixture/BRIDGE_STDOUT.log
+          cp work/axial-bar.rmed fixture/
+          sha256sum fixture/* | tee fixture/SHA256.txt
+      - name: Upload verified real-results fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: c965-real-results-fixture
+          path: fixture
+          if-no-files-found: error
+
+  windows-native-workspace:
+    needs: real-results-fixture
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax harness
+        uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax native UI and C9.65 Results Workspace
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Download freshly solved results fixture
+        uses: actions/download-artifact@v4
+        with:
+          name: c965-real-results-fixture
+          path: fixture
+      - name: Native C# ResultsBundle reflection gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match 'bin\\x64\\Release' } | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          $bin=$exe.Directory.FullName
+          [Environment]::CurrentDirectory=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({ param($sender,$args)
+            $name=([Reflection.AssemblyName]$args.Name).Name + '.dll'
+            $p=Join-Path $bin $name
+            if(Test-Path $p){ return [Reflection.Assembly]::LoadFrom($p) }
+            return $null
+          })
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $t=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true)
+          $load=$t.GetMethod('Load',[Reflection.BindingFlags]'Public,Static')
+          $bundle=(Resolve-Path .\fixture\AsterMax.Results.C9.65.json).Path
+          $obj=$load.Invoke($null,@($bundle))
+          $fields=$t.GetMethod('AvailableFields').Invoke($obj,@())
+          $rangeTotal=$t.GetMethod('GetRange').Invoke($obj,@('Total Deformation'))
+          $rangeStress=$t.GetMethod('GetRange').Invoke($obj,@('Equivalent Stress'))
+          $probe=$t.GetMethod('ProbeNode').Invoke($obj,@(43,'Displacement X'))
+          $deformed=$t.GetMethod('GetDeformedCoordinates').Invoke($obj,@([double]1.0))
+          $nodeCount=$t.GetProperty('NodeCount').GetValue($obj)
+          $checks=[ordered]@{
+            compiled_native_exe=(Test-Path $exe.FullName)
+            native_results_type=($null -ne $t)
+            real_bundle_loaded=($nodeCount -eq 44)
+            professional_fields=(($fields -contains 'Total Deformation') -and ($fields -contains 'Equivalent Stress'))
+            total_range_real=([math]::Abs([double]$rangeTotal.Item2 - 0.047180597782) -lt 1e-9)
+            stress_range_real=([double]$rangeStress.Item2 -gt 99.0 -and [double]$rangeStress.Item2 -lt 102.0)
+            node_probe_real=([math]::Abs([double]$probe - 0.0471697826890255) -lt 1e-12)
+            deformed_coordinates_44=($deformed.Length -eq 44)
+            no_synthetic_results=((Get-Content $bundle -Raw | ConvertFrom-Json).integrity.fea_values_invented -eq $false)
+          }
+          $out=[ordered]@{release='C9.65';title='Native Results Workspace contract against freshly solved Code_Aster MED';checks=$checks;passed=($checks.Values|Where-Object {$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));probe_node_44_dx_mm=[double]$probe;total_deformation_max_mm=[double]$rangeTotal.Item2;equivalent_stress_max_mpa=[double]$rangeStress.Item2;fea_values_invented=$false;vtk_actor_binding='NEXT_GATE'}
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $out | ConvertTo-Json -Depth 6 | Set-Content artifact\C9.65_VALIDATION.json -Encoding UTF8
+          $out | ConvertTo-Json -Depth 6 | Write-Host
+          if(-not $out.pass){ throw 'C9.65 native results workspace gate failed' }
+      - name: Static UI integration gates
+        shell: pwsh
+        run: |
+          $ui='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          $rw='.\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs'
+          if(-not (Select-String $ui -SimpleMatch 'Load Results' -Quiet)){ throw 'Results ribbon command missing' }
+          if(-not (Select-String $rw -SimpleMatch 'ProbeNode' -Quiet)){ throw 'Probe contract missing' }
+          if(-not (Select-String $rw -SimpleMatch 'GetDeformedCoordinates' -Quiet)){ throw 'Deformed coordinates contract missing' }
+          if(-not (Select-String $rw -SimpleMatch 'fea_values_invented' -Quiet)){ throw 'Integrity gate missing' }
+      - name: Package C9.65 evidence and Windows binary
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match 'bin\\x64\\Release' } | Select-Object -First 1
+          Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe'
+          Copy-Item .\fixture\AsterMax.Results.C9.65.json artifact\
+          Copy-Item .\fixture\AsterMax.Results.C9.65.vtu artifact\
+          Copy-Item .\fixture\axial-bar.rmed artifact\
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs artifact\
+          Get-FileHash artifact\* -Algorithm SHA256 | Format-Table -AutoSize | Out-String | Set-Content artifact\SHA256.txt
+          @'
+          # AsterMax C9.65 — Native Results Workspace
+          The Windows executable compiles a native C# reader for the real AsterMax/Code_Aster results bundle. CI regenerates the benchmark with Code_Aster, then proves field enumeration, exact min/max access, node probing and deformed-coordinate generation against that fresh solver output. No FEA value is synthesized. Direct binding of these arrays to the existing VTK actors remains the next gate.
+          '@ | Set-Content artifact\C9.65_STATUS.md
+      - name: Upload C9.65 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.65-Native-Results-Workspace
+          path: artifact
+          if-no-files-found: error
