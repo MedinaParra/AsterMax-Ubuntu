@@ -1,0 +1,119 @@
+name: AsterMax C9.67 Native VTK Results Binding
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c967-vtk-results-binding.ps1'
+      - '.github/workflows/astermax-c967-vtk-results-binding.yml'
+  workflow_dispatch:
+
+jobs:
+  vtk-results-binding:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax result pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Build connectivity fixture from verified C9.64 values
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fixture | Out-Null
+          $json=@{
+            schema='astermax-results-bundle/v0'; release='C9.67-reflection-fixture';
+            units=@{length='mm';force='N';stress='MPa'};
+            mesh=@{node_count=8;element_count=1;element_type='HEXA8'};
+            arrays=@{
+              coordinates=@(@(0,0,0),@(100,0,0),@(100,10,0),@(0,10,0),@(0,0,10),@(100,0,10),@(100,10,10),@(0,10,10));
+              connectivity=@(@(1,2,3,4,5,6,7,8));
+              displacement=@(@(0,0,0),@(0.0471697826890255,0,0),@(0.0471697826890255,0,0),@(0,0,0),@(0,0,0),@(0.0471697826890255,0,0),@(0.0471697826890255,0,0),@(0,0,0));
+              total_deformation=@(0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0);
+              von_mises=@(98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98)
+            };
+            integrity=@{fea_values_invented=$false;fixture_role='VTK binding structural fixture; numerical extrema copied from prior real Code_Aster evidence, no fresh solve claimed'}
+          }
+          $json|ConvertTo-Json -Depth 8|Set-Content fixture\results.json -Encoding UTF8
+      - name: Native binding reflection gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName
+          [Environment]::CurrentDirectory=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a) $p=Join-Path $bin (([Reflection.AssemblyName]$a.Name).Name+'.dll'); if(Test-Path $p){[Reflection.Assembly]::LoadFrom($p)}})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $bt=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true)
+          $st=$asm.GetType('PrePoMax.AsterMaxResultsScene',$true)
+          $vt=$asm.GetType('PrePoMax.AsterMaxVtkResultsBinding',$true)
+          $bundle=$bt.GetMethod('Load',[Reflection.BindingFlags]'Public,Static').Invoke($null,@((Resolve-Path fixture\results.json).Path))
+          $scene=$st.GetMethod('Build').Invoke($null,@($bundle,'Equivalent Stress',[double]10.0))
+          $data=$vt.GetMethod('BuildActorData').Invoke($null,@($bundle,$scene))
+          $geom=$data.GetType().GetField('Geometry').GetValue($data)
+          $nodes=$geom.GetType().GetField('Nodes').GetValue($geom)
+          $cells=$geom.GetType().GetField('Cells').GetValue($geom)
+          $vals=$nodes.GetType().GetField('Values').GetValue($nodes)
+          $coor=$nodes.GetType().GetField('Coor').GetValue($nodes)
+          $conn=$cells.GetType().GetField('CellNodeIds').GetValue($cells)
+          $types=$cells.GetType().GetField('Types').GetValue($cells)
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            bundle_connectivity=([int]$bt.GetProperty('ElementCount').GetValue($bundle) -eq 1)
+            vtk_binding_type=($null -ne $vt)
+            nodal_scalars_bound=($vals.Length -eq 8 -and [math]::Abs([double]$vals[1]-100.70793442833039) -lt 1e-4)
+            deformed_coordinates_bound=($coor.Length -eq 8 -and [double]$coor[1][0] -gt 100.4)
+            hexa_connectivity_bound=($conn.Length -eq 1 -and $conn[0].Length -eq 8 -and $conn[0][0] -eq 0 -and $conn[0][7] -eq 7)
+            vtk_cell_type_hexa=($types.Length -eq 1 -and $types[0] -eq 12)
+            real_contour_flag=([bool]$data.GetType().GetField('ColorContours').GetValue($data))
+          }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $out=[ordered]@{release='C9.67';title='Native VTK Results Binding';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));fresh_solver_run='NOT_RUN_IN_C9.67_WINDOWS_JOB';vtk_actor_binding='SOURCE_DATA_BOUND_TO_VTKMAXACTORDATA';truth_boundary='Real-results arrays and HEXA8 connectivity are bound to PrePoMax vtkMaxActorData. Interactive render-window execution is compiled but not claimed as automated GUI proof.';fea_values_invented=$false}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.67_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.67 reflection gate failed'}
+      - name: Static renderer integration gates
+        shell: pwsh
+        run: |
+          $p='.\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs'
+          foreach($term in @('vtkMaxActorData','Geometry.Nodes.Values','Geometry.Cells.CellNodeIds','vtkControl.vtkControl','ClearAllActors','AddCells','FEA Results Viewport')){if(-not(Select-String -Path $p -Pattern $term -SimpleMatch -Quiet)){throw "Missing renderer integration term: $term"}}
+          if(-not(Select-String -Path '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs' -Pattern 'FEA Viewport' -SimpleMatch -Quiet)){throw 'FEA Viewport command missing'}
+      - name: Package evidence
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe'
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs artifact\
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs artifact\
+          Copy-Item fixture\results.json artifact\C9.67_BINDING_FIXTURE.json
+          @'
+          # AsterMax C9.67 — Native VTK Results Binding
+          C9.67 closes the connectivity loss in the C# results reader and binds verified result arrays to PrePoMax's native vtkMaxActorData/vtkControl path. The Windows job does not execute a fresh Code_Aster solve and does not claim an automated screenshot. Numerical fixture extrema are copied from prior verified real-solver evidence solely to test the native binding contract.
+          '@ | Set-Content artifact\C9.67_STATUS.md
+          Get-FileHash artifact\* -Algorithm SHA256 | Format-Table -AutoSize | Out-String | Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.67-Native-VTK-Results-Binding
+          path: artifact
+          if-no-files-found: error
