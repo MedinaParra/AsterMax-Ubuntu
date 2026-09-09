@@ -89,7 +89,7 @@ jobs:
             real_contour_flag=([bool]$data.GetType().GetField('ColorContours').GetValue($data))
           }
           New-Item -ItemType Directory -Force artifact | Out-Null
-          $out=[ordered]@{release='C9.67';title='Native VTK Results Binding';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));fresh_solver_run='NOT_RUN_IN_C9.67_WINDOWS_JOB';vtk_actor_binding='SOURCE_DATA_BOUND_TO_VTKMAXACTORDATA';truth_boundary='Real-results arrays and HEXA8 connectivity are bound to PrePoMax vtkMaxActorData. Interactive render-window execution is compiled but not claimed as automated GUI proof.';fea_values_invented=$false}
+          $out=[ordered]@{release='C9.67';title='Native VTK Results Binding';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));fresh_solver_run='NOT_RUN_IN_C9.67_WINDOWS_JOB';vtk_actor_binding='SOURCE_DATA_BOUND_TO_VTKMAXACTORDATA';truth_boundary='Real-results arrays and HEXA8 connectivity are bound to PrePoMax vtkMaxActorData; compiled viewport hands that data to vtkControl.AddCells. Automated GUI screenshot is not claimed.';fea_values_invented=$false}
           $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.67_VALIDATION.json -Encoding UTF8
           $out|ConvertTo-Json -Depth 6|Write-Host
           if(-not $out.pass){throw 'C9.67 reflection gate failed'}
@@ -97,7 +97,7 @@ jobs:
         shell: pwsh
         run: |
           $p='.\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs'
-          foreach($term in @('vtkMaxActorData','Geometry.Nodes.Values','Geometry.Cells.CellNodeIds','vtkControl.vtkControl','ClearAllActors','AddCells','FEA Results Viewport')){if(-not(Select-String -Path $p -Pattern $term -SimpleMatch -Quiet)){throw "Missing renderer integration term: $term"}}
+          foreach($term in @('vtkMaxActorData','Geometry.Nodes.Values','Geometry.Cells.CellNodeIds','vtkControl.vtkControl','AddCells','AdjustCameraDistanceAndClipping','FEA Results Viewport')){if(-not(Select-String -Path $p -Pattern $term -SimpleMatch -Quiet)){throw "Missing renderer integration term: $term"}}
           if(-not(Select-String -Path '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs' -Pattern 'FEA Viewport' -SimpleMatch -Quiet)){throw 'FEA Viewport command missing'}
       - name: Package evidence
         shell: pwsh
@@ -109,7 +109,7 @@ jobs:
           Copy-Item fixture\results.json artifact\C9.67_BINDING_FIXTURE.json
           @'
           # AsterMax C9.67 — Native VTK Results Binding
-          C9.67 closes the connectivity loss in the C# results reader and binds verified result arrays to PrePoMax's native vtkMaxActorData/vtkControl path. The Windows job does not execute a fresh Code_Aster solve and does not claim an automated screenshot. Numerical fixture extrema are copied from prior verified real-solver evidence solely to test the native binding contract.
+          C9.67 closes the connectivity loss in the C# results reader and binds verified result arrays to PrePoMax's native vtkMaxActorData/vtkControl.AddCells path. The Windows job does not execute a fresh Code_Aster solve and does not claim an automated screenshot. Numerical fixture extrema are copied from prior verified real-solver evidence solely to test the native binding contract.
           '@ | Set-Content artifact\C9.67_STATUS.md
           Get-FileHash artifact\* -Algorithm SHA256 | Format-Table -AutoSize | Out-String | Set-Content artifact\SHA256.txt
       - uses: actions/upload-artifact@v4
