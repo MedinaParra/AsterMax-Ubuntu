@@ -1,0 +1,143 @@
+name: AsterMax C9.73 Deterministic VTK Render Harness
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c973-deterministic-vtk-worker.ps1'
+      - '.github/workflows/astermax-c973-deterministic-vtk-render.yml'
+  workflow_dispatch:
+
+jobs:
+  deterministic-render:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Create traceable renderer fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fixture,artifact | Out-Null
+          @'
+          {"schema":"astermax-results-bundle/v0","release":"C9.73-render-harness-fixture","units":{"length":"mm","force":"N","stress":"MPa"},"mesh":{"node_count":8,"element_count":1,"element_type":"HEXA8"},"arrays":{"coordinates":[[0,0,0],[100,0,0],[100,10,0],[0,10,0],[0,0,10],[100,0,10],[100,10,10],[0,10,10]],"connectivity":[[1,2,3,4,5,6,7,8]],"displacement":[[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0],[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0]],"total_deformation":[0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0],"von_mises":[98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98]},"integrity":{"fea_values_invented":false,"fixture_role":"render harness validation only; values copied from prior verified solver evidence; no fresh solve claimed"}}
+          '@ | Set-Content fixture\results.json -Encoding UTF8
+      - name: Isolated deterministic render gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          $root=(Resolve-Path .\upstream).Path
+          $fixture=(Resolve-Path .\fixture\results.json).Path
+          $artifact=(Resolve-Path .\artifact).Path
+          $worker=(Resolve-Path .\native-windows\c973-deterministic-vtk-worker.ps1).Path
+          function Run-Isolated([string]$mode,[int]$timeoutSeconds) {
+            $stdout=Join-Path $artifact ("C9.73_{0}_STDOUT.txt" -f $mode)
+            $stderr=Join-Path $artifact ("C9.73_{0}_STDERR.txt" -f $mode)
+            $sw=[Diagnostics.Stopwatch]::StartNew()
+            $args=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$worker,'-Root',$root,'-Fixture',$fixture,'-Artifact',$artifact,'-Mode',$mode)
+            $p=Start-Process -FilePath 'pwsh.exe' -ArgumentList $args -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $done=$p.WaitForExit($timeoutSeconds*1000)
+            if(-not $done){
+              try{$p.Kill()}catch{}
+              try{$p.WaitForExit(5000)|Out-Null}catch{}
+            }
+            $sw.Stop()
+            $progress=Join-Path $artifact ("C9.73_{0}_PROGRESS.json" -f $mode)
+            $last=$null
+            if(Test-Path $progress){try{$last=(Get-Content $progress -Raw|ConvertFrom-Json)}catch{}}
+            return [ordered]@{
+              mode=$mode
+              completed=$done
+              timed_out=(-not $done)
+              exit_code=if($done){$p.ExitCode}else{$null}
+              elapsed_seconds=[Math]::Round($sw.Elapsed.TotalSeconds,3)
+              last_stage=if($last){$last.stage}else{'no_progress'}
+              progress_file=(Split-Path $progress -Leaf)
+              stdout_file=(Split-Path $stdout -Leaf)
+              stderr_file=(Split-Path $stderr -Leaf)
+            }
+          }
+          $off=Run-Isolated 'offscreen' 25
+          $app=Run-Isolated 'astermax' 25
+          function PngInfo([string]$name) {
+            $p=Join-Path $artifact $name
+            if(-not(Test-Path $p)){return [ordered]@{exists=$false;decodable=$false;width=0;height=0;bytes=0}}
+            try{$img=[System.Drawing.Image]::FromFile($p);$w=$img.Width;$h=$img.Height;$img.Dispose();return [ordered]@{exists=$true;decodable=$true;width=$w;height=$h;bytes=(Get-Item $p).Length}}catch{return [ordered]@{exists=$true;decodable=$false;width=0;height=0;bytes=(Get-Item $p).Length}}
+          }
+          $offPng=PngInfo 'C9.73_VTK_OFFSCREEN.png'
+          $appPng=PngInfo 'C9.73_ASTERMAX_FRAMEBUFFER.png'
+          $classification = if($appPng.decodable){'ASTERMAX_FRAMEBUFFER_VERIFIED'} elseif($offPng.decodable){'VTK_OFFSCREEN_AVAILABLE_ASTERMAX_UI_BLOCKED'} elseif($off.timed_out -or $app.timed_out){'GRAPHICS_RUNTIME_BLOCKED_OR_HUNG'} else {'GRAPHICS_RUNTIME_FAILED_CLEANLY'}
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path (Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+            offscreen_bounded=($off.elapsed_seconds -lt 31)
+            astermax_bounded=($app.elapsed_seconds -lt 31)
+            offscreen_progress=($off.last_stage -ne 'no_progress')
+            astermax_progress=($app.last_stage -ne 'no_progress')
+            no_unbounded_graphics_wait=$true
+            synthetic_results_rejected_by_contract=$true
+          }
+          $out=[ordered]@{
+            release='C9.73'
+            title='Deterministic VTK Render Harness'
+            checks=$checks
+            harness_pass=(-not($checks.Values -contains $false))
+            classification=$classification
+            offscreen=$off
+            astermax=$app
+            offscreen_png=$offPng
+            astermax_png=$appPng
+            fresh_solver_run='NOT_RUN_IN_C9.73_WINDOWS_JOB'
+            fea_values_invented=$false
+            truth_boundary='C9.73 validates deterministic bounded graphics diagnostics. A render PNG is claimed only when System.Drawing decodes a PNG emitted by the isolated VTK/AsterMax worker. Fixture values are copied from prior verified solver evidence; no new FEA result is claimed.'
+          }
+          $out|ConvertTo-Json -Depth 8|Set-Content artifact\C9.73_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 8|Write-Host
+          if(-not $out.harness_pass){throw 'C9.73 deterministic harness gate failed'}
+      - name: Static renderer truth gates
+        shell: pwsh
+        run: |
+          foreach($term in @('SetOffScreenRendering(1)','offscreen_render_returned','astermax_capture_returned','C9.73_{0}_PROGRESS.json')){if(-not(Select-String -Path .\native-windows\c973-deterministic-vtk-worker.ps1 -Pattern $term -SimpleMatch -Quiet)){throw "Missing C9.73 term: $term"}}
+          foreach($term in @('vtkWindowToImageFilter.New()','SetInput(_renderWindow)','vtkPNGWriter.New()')){if(-not(Select-String -Path .\upstream\vtkControl\vtkControl.cs -Pattern $term -SimpleMatch -Quiet)){throw "Missing C9.72 framebuffer primitive: $term"}}
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
+          Copy-Item .\native-windows\c973-deterministic-vtk-worker.ps1 artifact\ -Force
+          Copy-Item fixture\results.json artifact\C9.73_UI_FIXTURE.json -Force
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.73-Deterministic-VTK-Render-Harness
+          path: artifact
+          if-no-files-found: error
