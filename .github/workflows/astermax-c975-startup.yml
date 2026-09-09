@@ -134,7 +134,6 @@ jobs:
 
       - name: Runtime STEP model gate
         id: runtime_step
-        continue-on-error: true
         shell: pwsh
         run: |
           $exe = '${{ steps.locate.outputs.exe }}'
@@ -183,6 +182,7 @@ jobs:
           path: |
             ASTERMAX_RUNTIME_STEP.json
             ASTERMAX_RUNTIME_STEP.json.stages.log
+            ASTERMAX_RUNTIME_STEP.json.png
           if-no-files-found: warn
 
       - name: Package rebuilt application binaries
