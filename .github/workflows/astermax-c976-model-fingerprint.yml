@@ -1,0 +1,111 @@
+name: AsterMax C9.76 Automatic Model Fingerprint
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c976-automatic-model-fingerprint.ps1'
+      - '.github/workflows/astermax-c976-model-fingerprint.yml'
+  workflow_dispatch:
+
+jobs:
+  model-fingerprint:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-analysis-provenance-manifest.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Compiled FeModel fingerprint gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName;$root=(Resolve-Path .\upstream).Path;[Environment]::CurrentDirectory=$bin
+          $global:r=$root;$global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $fpType=$asm.GetType('PrePoMax.AsterMaxModelFingerprint',$true)
+          $extract=$fpType.GetMethod('Extract',[Reflection.BindingFlags]'Public,Static')
+          $caeModelDll=Get-ChildItem $root -Recurse -Filter 'CaeModel.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          $caeMeshDll=Get-ChildItem $root -Recurse -Filter 'CaeMesh.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          $caeGlobalsDll=Get-ChildItem $root -Recurse -Filter 'CaeGlobals.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          $cm=[Reflection.Assembly]::LoadFrom($caeModelDll.FullName);$meshAsm=[Reflection.Assembly]::LoadFrom($caeMeshDll.FullName);$cg=[Reflection.Assembly]::LoadFrom($caeGlobalsDll.FullName)
+          $feType=$cm.GetType('CaeModel.FeModel',$true);$model=[Activator]::CreateInstance($feType,@('C976-POC'))
+          $usType=$cg.GetType('CaeGlobals.UnitSystem',$true);$ust=$cg.GetType('CaeGlobals.UnitSystemType',$true);$mmEnum=[Enum]::Parse($ust,'MM_TON_S_C');$us=[Activator]::CreateInstance($usType,@($mmEnum));$feType.GetProperty('UnitSystem').SetValue($model,$us)
+          $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-PoC'));$model.Materials.Add('Steel-PoC',$mat)
+          $nodeType=$meshAsm.GetType('CaeMesh.FeNode',$true);$node=[Activator]::CreateInstance($nodeType,@(1,0.0,0.0,0.0));$model.Mesh.Nodes.Add(1,$node)
+          $stepType=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($stepType,@('Step-1'))
+          $regionType=$cm.GetType('CaeModel.RegionTypeEnum',$true);$nodeSet=[Enum]::Parse($regionType,'NodeSetName')
+          $bcType=$cm.GetType('CaeModel.FixedBC',$true);$bc=[Activator]::CreateInstance($bcType,@('Fixed-1','FIXED',$nodeSet,$false));$step.AddBoundaryCondition($bc)
+          $loadType=$cm.GetType('CaeModel.CLoad',$true);$load=[Activator]::CreateInstance($loadType,@('Force-1',1,1000.0,0.0,0.0,$false,$false,0.0));$step.AddLoad($load)
+          $model.StepCollection.AddStep($step,$false)
+          $fp1=$extract.Invoke($null,@($model));$fp2=$extract.Invoke($null,@($model))
+          $sha1=[string]$fpType.GetProperty('Sha256').GetValue($fp1);$sha2=[string]$fpType.GetProperty('Sha256').GetValue($fp2)
+          $summary=[string]$fpType.GetMethod('AuditSummary').Invoke($fp1,@())
+          $load.F1=1001.0;$fpLoad=$extract.Invoke($null,@($model));$shaLoad=[string]$fpType.GetProperty('Sha256').GetValue($fpLoad);$load.F1=1000.0
+          $mat.Description='changed';$fpMat=$extract.Invoke($null,@($model));$shaMat=[string]$fpType.GetProperty('Sha256').GetValue($fpMat);$mat.Description=$null
+          $node.X=1.0;$fpMesh=$extract.Invoke($null,@($model));$shaMesh=[string]$fpType.GetProperty('Sha256').GetValue($fpMesh);$node.X=0.0
+          $mEnum=[Enum]::Parse($ust,'M_KG_S_C');$badUs=[Activator]::CreateInstance($usType,@($mEnum));$feType.GetProperty('UnitSystem').SetValue($model,$badUs);$wrongUnitsRejected=$false;try{$null=$extract.Invoke($null,@($model))}catch{$wrongUnitsRejected=$true}
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            compiled_fingerprint_type=($null -ne $fpType)
+            deterministic_same_model=($sha1 -eq $sha2)
+            sha256_shape=($sha1 -match '^[0-9a-f]{64}$')
+            mm_n_mpa_contract=($summary -match 'MM_TON_S_C')
+            real_material_extracted=([int]$fpType.GetProperty('MaterialCount').GetValue($fp1) -eq 1)
+            real_bc_load_extracted=(([int]$fpType.GetProperty('BoundaryConditionCount').GetValue($fp1) -eq 1) -and ([int]$fpType.GetProperty('LoadCount').GetValue($fp1) -eq 1))
+            load_change_changes_hash=($shaLoad -ne $sha1)
+            material_change_changes_hash=($shaMat -ne $sha1)
+            mesh_change_changes_hash=($shaMesh -ne $sha1)
+            wrong_units_rejected=$wrongUnitsRejected
+          }
+          $out=[ordered]@{release='C9.76';title='Automatic Model Fingerprint';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));audit_summary=$summary;model_fingerprint_sha256=$sha1;fresh_solver_run='NOT_RUN_IN_C9.76_WINDOWS_JOB';fea_values_invented=$false;truth_boundary='C9.76 validates automatic extraction from an in-memory real PrePoMax FeModel object. It exercises units, mesh nodes, material, StaticStep, FixedBC and CLoad. No Code_Aster solve is executed and no physical FEA result is claimed.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.76_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.76 automatic model fingerprint gate failed'}
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
+          Copy-Item .\native-windows\patch-c976-automatic-model-fingerprint.ps1 artifact\ -Force
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.76-Automatic-Model-Fingerprint
+          path: artifact
+          if-no-files-found: error
