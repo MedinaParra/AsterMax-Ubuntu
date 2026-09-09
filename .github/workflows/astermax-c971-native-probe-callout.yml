@@ -1,0 +1,104 @@
+name: AsterMax C9.71 Native Probe Callout
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c971-native-probe-callout.ps1'
+      - '.github/workflows/astermax-c971-native-probe-callout.yml'
+  workflow_dispatch:
+
+jobs:
+  native-callout:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax result pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Create traceable renderer fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fixture | Out-Null
+          @'
+          {"schema":"astermax-results-bundle/v0","release":"C9.71-native-callout-fixture","units":{"length":"mm","force":"N","stress":"MPa"},"mesh":{"node_count":8,"element_count":1,"element_type":"HEXA8"},"arrays":{"coordinates":[[0,0,0],[100,0,0],[100,10,0],[0,10,0],[0,0,10],[100,0,10],[100,10,10],[0,10,10]],"connectivity":[[1,2,3,4,5,6,7,8]],"displacement":[[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0],[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0]],"total_deformation":[0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0],"von_mises":[98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98]},"integrity":{"fea_values_invented":false,"fixture_role":"native VTK callout contract validation only; values copied from prior verified solver evidence; no fresh solve claimed"}}
+          '@ | Set-Content fixture\results.json -Encoding UTF8
+      - name: Reflection callout gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName; $root=(Resolve-Path .\upstream).Path
+          [Environment]::CurrentDirectory=$bin
+          $global:r=$root; $global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $bt=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true); $ft=$asm.GetType('PrePoMax.AsterMaxResultsViewportForm',$true)
+          $bundle=$bt.GetMethod('Load',[Reflection.BindingFlags]'Public,Static').Invoke($null,@((Resolve-Path fixture\results.json).Path))
+          $form=[Activator]::CreateInstance($ft,[Reflection.BindingFlags]'Instance,NonPublic,Public',$null,@($bundle),$null)
+          $summary=$ft.GetMethod('NativeProbeAnnotationSummary',[Reflection.BindingFlags]'Instance,Public').Invoke($form,@(2))
+          $reject=$ft.GetMethod('NativeProbeAnnotationRejectsInvalidNode',[Reflection.BindingFlags]'Instance,Public').Invoke($form,@())
+          $form.Dispose()
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            native_callout_surface=($null -ne $ft.GetMethod('NativeProbeAnnotationSummary',[Reflection.BindingFlags]'Instance,Public'))
+            node_identity=($summary -match '^N2 ')
+            field_identity=($summary -match 'Equivalent Stress')
+            exact_bundle_value=($summary -match '100\.707934')
+            unit_mpa=($summary -match 'MPa')
+            model_coordinates=($summary -match 'X 100' -and $summary -match 'Y 0' -and $summary -match 'Z 0')
+            invalid_node_rejected=([bool]$reject)
+          }
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $out=[ordered]@{release='C9.71';title='Native VTK Probe Callout';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));callout=$summary;fresh_solver_run='NOT_RUN_IN_C9.71_WINDOWS_JOB';fea_values_invented=$false;truth_boundary='Validates Windows x64 compilation and that vtkControl native probe-widget annotation text is derived from the active Results Bundle/scene. Physical mouse injection and OpenGL framebuffer capture are not claimed.'}
+          $out|ConvertTo-Json -Depth 5|Set-Content artifact\C9.71_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 5|Write-Host
+          if(-not $out.pass){throw 'C9.71 gate failed'}
+      - name: Static vtkControl callout integration gates
+        shell: pwsh
+        run: |
+          $p='.\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs'
+          foreach($term in @('Controller_GetAnnotationText=NativeProbeAnnotation','_bundle.ProbeNode(i,_scene.Field)','Synthetic FEA scene rejected by native callout','VTK probe node id is outside the results bundle')){if(-not(Select-String -Path $p -Pattern $term -SimpleMatch -Quiet)){throw "Missing C9.71 integration term: $term"}}
+      - name: Verify upstream native probe widget path
+        shell: pwsh
+        run: |
+          $p='.\upstream\vtkControl\vtkControl.cs'
+          foreach($term in @('_probeWidget.SetText(Controller_GetAnnotationText(globalPointId.ToString()))','_probeWidget.SetPosition(w, h)','_probeWidget.VisibilityOn()')){if(-not(Select-String -Path $p -Pattern $term -SimpleMatch -Quiet)){throw "Missing upstream native probe-widget path: $term"}}
+      - name: Package evidence
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe'
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs artifact\
+          Copy-Item fixture\results.json artifact\C9.71_UI_FIXTURE.json
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.71-Native-Probe-Callout
+          path: artifact
+          if-no-files-found: error
