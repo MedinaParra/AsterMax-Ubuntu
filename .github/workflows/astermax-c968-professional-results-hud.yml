@@ -87,6 +87,14 @@ jobs:
           $png=(Resolve-Path artifact).Path+'\C9.68_RESULTS_HUD.png'
           $ft.GetMethod('CaptureEvidencePng',[Reflection.BindingFlags]'Instance,Public').Invoke($form,@($png))
           $form.Dispose()
+          $pngReadable=$false; $pngWidth=0; $pngHeight=0
+          try {
+            Add-Type -AssemblyName System.Drawing
+            $img=[System.Drawing.Image]::FromFile($png)
+            $pngWidth=$img.Width; $pngHeight=$img.Height
+            $pngReadable=($pngWidth -ge 1000 -and $pngHeight -ge 700)
+            $img.Dispose()
+          } catch { $pngReadable=$false }
           $checks=[ordered]@{
             windows_x64_build=(Test-Path $exe.FullName)
             professional_results_form=($null -ne $ft)
@@ -95,9 +103,9 @@ jobs:
             probe_traceable=($summary -match 'probeNode=8\|probe=98')
             synthetic_values_rejected=($summary -match 'invented=false')
             evidence_png_created=(Test-Path $png)
-            evidence_png_nontrivial=((Get-Item $png).Length -gt 10000)
+            evidence_png_decodes_at_window_size=$pngReadable
           }
-          $out=[ordered]@{release='C9.68';title='Professional Results HUD';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));summary=$summary;fresh_solver_run='NOT_RUN_IN_C9.68_WINDOWS_JOB';visual_evidence='WINFORMS_RESULTS_HUD_CAPTURE';vtk_binding='PRESERVED_FROM_C9.67';truth_boundary='The screenshot validates the professional HUD, legend/extrema/probe presentation and traceable values. It does not independently prove OpenGL/VTK framebuffer pixels because DrawToBitmap support for native VTK child rendering is not asserted.';fea_values_invented=$false}
+          $out=[ordered]@{release='C9.68';title='Professional Results HUD';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));summary=$summary;evidence_png=[ordered]@{width=$pngWidth;height=$pngHeight;bytes=(Get-Item $png).Length};fresh_solver_run='NOT_RUN_IN_C9.68_WINDOWS_JOB';visual_evidence='WINFORMS_RESULTS_HUD_CAPTURE';vtk_binding='PRESERVED_FROM_C9.67';truth_boundary='The screenshot validates the professional HUD, legend/extrema/probe presentation and traceable values. It does not independently prove OpenGL/VTK framebuffer pixels because DrawToBitmap support for native VTK child rendering is not asserted.';fea_values_invented=$false}
           $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.68_VALIDATION.json -Encoding UTF8
           $out|ConvertTo-Json -Depth 6|Write-Host
           if(-not $out.pass){throw 'C9.68 gate failed'}
