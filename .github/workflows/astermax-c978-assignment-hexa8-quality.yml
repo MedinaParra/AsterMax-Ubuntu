@@ -1,0 +1,114 @@
+name: AsterMax C9.78 Assignment + HEXA8 Quality
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c978-assignment-hexa8-quality.ps1'
+      - '.github/workflows/astermax-c978-assignment-hexa8-quality.yml'
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-analysis-provenance-manifest.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c977-pre-solve-readiness.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c978-assignment-hexa8-quality.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Compiled assignment and HEXA8 quality gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName;$root=(Resolve-Path .\upstream).Path;[Environment]::CurrentDirectory=$bin
+          $global:r=$root;$global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $qt=$asm.GetType('PrePoMax.AsterMaxAssignmentQualityGate',$true)
+          $eval=$qt.GetMethod('Evaluate',[Reflection.BindingFlags]'Public,Static')
+          $cm=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeModel.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $meshAsm=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeMesh.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $cg=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeGlobals.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $feType=$cm.GetType('CaeModel.FeModel',$true);$model=[Activator]::CreateInstance($feType,@('C978-POC'))
+          $usType=$cg.GetType('CaeGlobals.UnitSystem',$true);$ust=$cg.GetType('CaeGlobals.UnitSystemType',$true);$mmEnum=[Enum]::Parse($ust,'MM_TON_S_C');$us=[Activator]::CreateInstance($usType,@($mmEnum));$feType.GetProperty('UnitSystem').SetValue($model,$us)
+          $nodeType=$meshAsm.GetType('CaeMesh.FeNode',$true)
+          $xyz=@(@(0,0,0),@(1,0,0),@(1,1,0),@(0,1,0),@(0,0,1),@(1,0,1),@(1,1,1),@(0,1,1))
+          for($i=0;$i -lt 8;$i++){ $p=$xyz[$i];$nodeId=[int]($i+1);$n=[Activator]::CreateInstance($nodeType,@($nodeId,[double]$p[0],[double]$p[1],[double]$p[2]));$model.Mesh.Nodes.Add($nodeId,$n) }
+          $hexType=$meshAsm.GetType('CaeMesh.LinearHexaElement',$true);$normal=[int[]](1,2,3,4,5,6,7,8);$hex=[Activator]::CreateInstance($hexType,@(1,$normal));$model.Mesh.Elements.Add(1,$hex)
+          $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-PoC'));$model.Materials.Add('Steel-PoC',$mat)
+          $esType=$meshAsm.GetType('CaeMesh.FeElementSet',$true);$es=[Activator]::CreateInstance($esType,@('SOLID',[int[]](1),$false));$model.Mesh.ElementSets.Add('SOLID',$es)
+          $regionType=$cg.GetType('CaeGlobals.RegionTypeEnum',$true);$esRegion=[Enum]::Parse($regionType,'ElementSetName')
+          $ssType=$cm.GetType('CaeModel.SolidSection',$true);$sec=[Activator]::CreateInstance($ssType,@('Solid-1','Steel-PoC','SOLID',$esRegion,1.0,$false));$model.Sections.Add('Solid-1',$sec)
+          function Status($x){[string]$qt.GetProperty('Status').GetValue($x)}
+          $healthy=$eval.Invoke($null,@($model));$healthyStatus=Status $healthy
+          $minJ=[double]$qt.GetProperty('MinimumCenterJacobian').GetValue($healthy)
+          $model.Sections.Remove('Solid-1');$noSection=$eval.Invoke($null,@($model));$model.Sections.Add('Solid-1',$sec)
+          $sec.MaterialName='Missing-Material';$badMaterial=$eval.Invoke($null,@($model));$sec.MaterialName='Steel-PoC'
+          $model.Mesh.ElementSets.Remove('SOLID');$badRegion=$eval.Invoke($null,@($model));$model.Mesh.ElementSets.Add('SOLID',$es)
+          $inverted=[int[]](1,4,3,2,5,8,7,6);for($i=0;$i -lt 8;$i++){$hex.NodeIds[$i]=$inverted[$i]};$inv=$eval.Invoke($null,@($model))
+          $zero=[int[]](2,1,3,4,6,5,7,8);for($i=0;$i -lt 8;$i++){$hex.NodeIds[$i]=$zero[$i]};$collapsed=$eval.Invoke($null,@($model))
+          for($i=0;$i -lt 8;$i++){$hex.NodeIds[$i]=$normal[$i]}
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            compiled_assignment_quality_type=($null -ne $qt)
+            assigned_unit_cube_ready=($healthyStatus -eq 'READY')
+            unit_cube_center_jacobian_exact=([Math]::Abs($minJ-0.125) -lt 1e-12)
+            missing_section_blocked=((Status $noSection) -eq 'BLOCKED')
+            missing_material_reference_blocked=((Status $badMaterial) -eq 'BLOCKED')
+            missing_elementset_region_blocked=((Status $badRegion) -eq 'BLOCKED')
+            inverted_hexa8_blocked=((Status $inv) -eq 'BLOCKED')
+            zero_center_jacobian_blocked=((Status $collapsed) -eq 'BLOCKED')
+          }
+          $summary=[string]$qt.GetMethod('AuditSummary').Invoke($healthy,@())
+          $out=[ordered]@{release='C9.78';title='Material Assignment + HEXA8 Center-Jacobian Quality';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));audit_summary=$summary;minimum_center_jacobian=$minJ;fresh_solver_run='NOT_RUN_IN_C9.78_WINDOWS_JOB';fea_values_invented=$false;truth_boundary='C9.78 validates section-to-material-to-element-set assignment and the signed determinant of the isoparametric HEXA8 Jacobian at the element center. It blocks exactly non-positive center detJ, but does not yet claim full 2x2x2 Gauss-point Jacobian coverage, aspect ratio, skewness, warpage, rigid-body-mode sufficiency, or a new Code_Aster result.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.78_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.78 assignment/quality gate failed'}
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
+          Copy-Item .\native-windows\patch-c978-assignment-hexa8-quality.ps1 artifact\ -Force
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.78-Assignment-HEXA8-Quality
+          path: artifact
+          if-no-files-found: error
