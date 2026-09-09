@@ -1,0 +1,64 @@
+name: AsterMax C9.83 Four-Level Convergence Certification
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native-windows/c983-convergence-certification/**'
+      - '.github/workflows/astermax-c983-convergence-certification.yml'
+
+jobs:
+  convergence-certification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v5
+
+      - name: Generate deterministic four-level refinement ladder
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c983-work/coarse c983-work/medium c983-work/fine c983-work/ultrafine
+          python3 native-windows/c982-convergence/generate_case.py --nx 10 --ny 2 --nz 2 --name coarse --out c983-work/coarse
+          python3 native-windows/c982-convergence/generate_case.py --nx 20 --ny 4 --nz 4 --name medium --out c983-work/medium
+          python3 native-windows/c982-convergence/generate_case.py --nx 40 --ny 8 --nz 8 --name fine --out c983-work/fine
+          python3 native-windows/c982-convergence/generate_case.py --nx 80 --ny 16 --nz 16 --name ultrafine --out c983-work/ultrafine
+          cp native-windows/c983-convergence-certification/validate_c983.py c983-work/
+          chmod -R 0777 c983-work
+          find c983-work -type f -print0 | sort -z | xargs -0 sha256sum > c983-work/INPUT_SHA256.txt
+
+      - name: Pull pinned real Code_Aster solver
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee c983-work/CODE_ASTER_IMAGE_DIGEST.txt
+
+      - name: Execute four real Code_Aster solves
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for CASE in coarse medium fine ultrafine; do
+            docker run --rm --volume "$PWD/c983-work/$CASE:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run "/analysis/$CASE.export" | tee "c983-work/$CASE/CODE_ASTER_STDOUT.log"
+          done
+
+      - name: Certify convergence without moving goalposts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 c983-work/validate_c983.py --root c983-work --cases coarse medium fine ultrafine
+
+      - name: Hash all evidence
+        if: always()
+        shell: bash
+        run: |
+          find c983-work -type f ! -name OUTPUT_SHA256.txt -print0 | sort -z | xargs -0 sha256sum > c983-work/OUTPUT_SHA256.txt
+
+      - name: Upload C9.83 convergence evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.83-Four-Level-Convergence-Evidence
+          path: c983-work
+          if-no-files-found: error
