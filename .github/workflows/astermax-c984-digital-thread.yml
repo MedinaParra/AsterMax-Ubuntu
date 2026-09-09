@@ -1,0 +1,73 @@
+name: AsterMax C9.84 Solver Evidence Digital Thread
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native-windows/c984-digital-thread/**'
+      - '.github/workflows/astermax-c984-digital-thread.yml'
+
+jobs:
+  solve-and-seal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v5
+      - name: Generate deterministic B02 medium model
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c984-evidence/case
+          python3 native-windows/c982-convergence/generate_case.py --nx 20 --ny 4 --nz 4 --name c984 --out c984-evidence/case
+          chmod -R 0777 c984-evidence
+      - name: Pull pinned Code_Aster
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee c984-evidence/CODE_ASTER_IMAGE_DIGEST.txt
+      - name: Execute real Code_Aster solve
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker run --rm --volume "$PWD/c984-evidence/case:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/c984.export | tee c984-evidence/CODE_ASTER_STDOUT.log
+      - name: Create and self-verify evidence manifest
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 native-windows/c984-digital-thread/audit_c984.py create --case-dir c984-evidence/case --name c984 --out c984-evidence/ASTERMAX_SOLVER_EVIDENCE.json
+          python3 native-windows/c984-digital-thread/audit_c984.py verify --case-dir c984-evidence/case --manifest c984-evidence/ASTERMAX_SOLVER_EVIDENCE.json
+          sha256sum c984-evidence/ASTERMAX_SOLVER_EVIDENCE.json > c984-evidence/MANIFEST_SHA256.txt
+          cp native-windows/c984-digital-thread/audit_c984.py c984-evidence/
+      - name: Upload sealed solver evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.84-Solver-Evidence
+          path: c984-evidence
+          if-no-files-found: error
+
+  windows-independent-verification:
+    needs: solve-and-seal
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Download sealed evidence only
+        uses: actions/download-artifact@v4
+        with:
+          name: AsterMax-C9.84-Solver-Evidence
+          path: evidence
+      - name: Verify sealed evidence on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python evidence/audit_c984.py verify --case-dir evidence/case --manifest evidence/ASTERMAX_SOLVER_EVIDENCE.json
+      - name: Prove tamper rejection on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Copy-Item evidence -Destination tampered -Recurse
+          Add-Content -Path tampered/case/c984.comm -Value "# intentional C9.84 tamper"
+          python tampered/audit_c984.py verify --case-dir tampered/case --manifest tampered/ASTERMAX_SOLVER_EVIDENCE.json
+          if ($LASTEXITCODE -eq 0) { throw 'Tampered solver deck was incorrectly accepted.' }
+          Write-Host 'PASS: modified solver deck rejected by SHA-256 verification.'
