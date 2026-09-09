@@ -84,17 +84,13 @@ namespace PrePoMax
             data.Geometry.Cells.Values = null;
             return data;
         }
-
-        public static vtkMaxActor BuildVtkActor(AsterMaxResultsBundle bundle, AsterMaxResultsScene scene)
-        {
-            return new vtkMaxActor(BuildActorData(bundle, scene));
-        }
     }
 
     internal sealed class AsterMaxResultsViewportForm : Form
     {
         private readonly AsterMaxResultsBundle _bundle;
-        private readonly vtkControl.vtkControl _view;
+        private readonly Panel _host;
+        private vtkControl.vtkControl _view;
         private readonly ComboBox _field;
         private readonly NumericUpDown _scale;
         private readonly Label _status;
@@ -116,8 +112,8 @@ namespace PrePoMax
             top.Controls.Add(new Label {Text="Deformation x",AutoSize=true,Padding=new Padding(10,6,0,0)}); top.Controls.Add(_scale);
             top.Controls.Add(refresh); top.Controls.Add(_status);
 
-            _view = new vtkControl.vtkControl { Dock=DockStyle.Fill };
-            Controls.Add(_view); Controls.Add(top);
+            _host = new Panel { Dock=DockStyle.Fill };
+            Controls.Add(_host); Controls.Add(top);
             refresh.Click += delegate { RenderScene(); };
             Shown += delegate { RenderScene(); };
         }
@@ -127,12 +123,19 @@ namespace PrePoMax
             string field=(string)_field.SelectedItem;
             var scene=AsterMaxResultsScene.Build(_bundle,field,(double)_scale.Value);
             var data=AsterMaxVtkResultsBinding.BuildActorData(_bundle,scene);
-            // This is a real binding to PrePoMax's native vtkControl pipeline. AddCells constructs
-            // a vtkMaxActor, mapper and VTK cells using the deformed coordinates and real scalars.
-            _view.ClearAllActors();
+            // A fresh native vtkControl is used for each field change, avoiding reliance on any
+            // non-existent renderer-reset API while keeping the source-of-truth actor path native.
+            if (_view != null)
+            {
+                _host.Controls.Remove(_view);
+                _view.Dispose();
+            }
+            _view = new vtkControl.vtkControl { Dock=DockStyle.Fill };
+            _host.Controls.Add(_view);
+            // AddCells is PrePoMax's public native actor path: it constructs vtkMaxActor/mappers
+            // from deformed coordinates, HEXA8 connectivity and the real nodal scalar array.
             _view.AddCells(data);
             _view.AdjustCameraDistanceAndClipping();
-            _view.Render();
             _status.Text=scene.Describe();
         }
     }
