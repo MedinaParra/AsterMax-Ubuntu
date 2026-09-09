@@ -62,7 +62,7 @@ $methods=@'
             RefreshMetadata();
             return String.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "source=vtkRenderWindow|field={0}|unit={1}|min={2:R}|max={3:R}|invented=false",
-                _scene.Field,_scene.Unit,_scene.MinValue,_scene.MaxValue);
+                _scene.Field,_scene.Unit,_scene.Minimum,_scene.Maximum);
         }
 
 '@
