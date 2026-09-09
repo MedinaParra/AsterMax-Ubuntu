@@ -1,0 +1,29 @@
+{
+  "schema": "astermax-ansys-equivalence/v0",
+  "purpose": "Evidence-driven PMV comparison. Scores are earned only by reproducible gates; missing evidence scores zero.",
+  "scientific_integrity": {
+    "fea_values_invented": false,
+    "ansys_results_invented": false,
+    "rule": "Never claim ANSYS numerical equivalence without an independently obtained ANSYS reference for the same benchmark, mesh/model contract and quantity."
+  },
+  "domains": [
+    {"id":"cad_step_mm","weight":10,"required_evidence":["STEP import in mm","model units preserved","geometry visible/selectable"]},
+    {"id":"model_preparation","weight":10,"required_evidence":["material assignment","sections/regions","deterministic model fingerprint"]},
+    {"id":"meshing","weight":15,"required_evidence":["supported element generation","connectivity validation","mesh quality gates"]},
+    {"id":"boundary_conditions_loads","weight":10,"required_evidence":["BC creation","load creation","region assignment","pre-solve readiness"]},
+    {"id":"linear_static_solver","weight":20,"required_evidence":["real Code_Aster solve","analytical benchmark","ANSYS same-case reference"]},
+    {"id":"postprocessing","weight":15,"required_evidence":["displacement","stress","von Mises","deformed shape","probe","min/max","units"]},
+    {"id":"professional_visualization","weight":10,"required_evidence":["native VTK contour","scalar bar synchronized","probe callout","render evidence"]},
+    {"id":"provenance_audit","weight":10,"required_evidence":["input fingerprint","solver provenance","result hash","tamper rejection"]}
+  ],
+  "benchmark_ladder": [
+    {"id":"B01","name":"Axial HEXA8 bar","physics":"linear_static","reference":"analytical+Code_Aster+ANSYS","status":"ANSYS_REFERENCE_REQUIRED"},
+    {"id":"B02","name":"Cantilever bending","physics":"linear_static","reference":"analytical+Code_Aster+ANSYS","status":"NOT_RUN"},
+    {"id":"B03","name":"Plate with hole","physics":"linear_static_stress_concentration","reference":"Code_Aster+ANSYS","status":"NOT_RUN"},
+    {"id":"B04","name":"Gravity bracket","physics":"linear_static","reference":"Code_Aster+ANSYS","status":"NOT_RUN"},
+    {"id":"B05","name":"Mesh convergence","physics":"linear_static","reference":"convergence+ANSYS","status":"NOT_RUN"}
+  ],
+  "future_domains_not_claimed": ["contact","material_nonlinearity","geometric_nonlinearity","modal","harmonic","transient","thermal_structural","buckling","fatigue"],
+  "equivalence_rule": "ANSYS_EQUIVALENCE=true is forbidden until all mandatory PMV domains pass and the benchmark ladder has independently sourced ANSYS references within predeclared tolerances.",
+  "current_verdict": "NOT_PROVEN"
+}
