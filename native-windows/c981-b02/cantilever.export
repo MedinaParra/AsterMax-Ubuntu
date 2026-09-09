@@ -1,0 +1,12 @@
+P actions make_etude
+P version 15.2
+P mode interactif
+P memory_limit 2048
+P time_limit 300
+P ncpus 1
+P mpi_nbcpu 1
+F comm /analysis/cantilever.comm D 1
+F mail /analysis/cantilever.mail D 20
+F mess /analysis/cantilever.mess R 6
+F resu /analysis/cantilever.resu R 80
+F rmed /analysis/cantilever.rmed R 81
