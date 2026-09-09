@@ -1,0 +1,125 @@
+name: AsterMax C9.68 Professional Results HUD
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c968-professional-results-hud.ps1'
+      - '.github/workflows/astermax-c968-professional-results-hud.yml'
+  workflow_dispatch:
+
+jobs:
+  professional-results-hud:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax result pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Create verified structural result fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fixture | Out-Null
+          @'
+          {
+            "schema":"astermax-results-bundle/v0",
+            "release":"C9.68-visual-fixture",
+            "units":{"length":"mm","force":"N","stress":"MPa"},
+            "mesh":{"node_count":8,"element_count":1,"element_type":"HEXA8"},
+            "arrays":{
+              "coordinates":[[0,0,0],[100,0,0],[100,10,0],[0,10,0],[0,0,10],[100,0,10],[100,10,10],[0,10,10]],
+              "connectivity":[[1,2,3,4,5,6,7,8]],
+              "displacement":[[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0],[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0]],
+              "total_deformation":[0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0],
+              "von_mises":[98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98]
+            },
+            "integrity":{"fea_values_invented":false,"fixture_role":"UI/HUD validation only; numerical extrema copied from prior verified real Code_Aster evidence; no fresh solve claimed"}
+          }
+          '@ | Set-Content fixture\results.json -Encoding UTF8
+      - name: Reflection and evidence gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName
+          $global:AsterMaxReflectionRoot=(Resolve-Path .\upstream).Path
+          $global:AsterMaxReflectionBin=$bin
+          [Environment]::CurrentDirectory=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({
+            param($s,$a)
+            $dll=([Reflection.AssemblyName]$a.Name).Name+'.dll'
+            $direct=Join-Path $global:AsterMaxReflectionBin $dll
+            if(Test-Path $direct){return [Reflection.Assembly]::LoadFrom($direct)}
+            $candidate=Get-ChildItem $global:AsterMaxReflectionRoot -Recurse -Filter $dll -ErrorAction SilentlyContinue | Where-Object {$_.FullName -match 'bin\\(x64\\)?Release|packages'} | Select-Object -First 1
+            if($candidate){return [Reflection.Assembly]::LoadFrom($candidate.FullName)}
+            return $null
+          })
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $bt=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true)
+          $ft=$asm.GetType('PrePoMax.AsterMaxResultsViewportForm',$true)
+          $bundle=$bt.GetMethod('Load',[Reflection.BindingFlags]'Public,Static').Invoke($null,@((Resolve-Path fixture\results.json).Path))
+          $form=[Activator]::CreateInstance($ft,[Reflection.BindingFlags]'Instance,NonPublic,Public',$null,@($bundle),$null)
+          $summary=$ft.GetMethod('EvidenceSummary',[Reflection.BindingFlags]'Instance,Public').Invoke($form,@())
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $png=(Resolve-Path artifact).Path+'\C9.68_RESULTS_HUD.png'
+          $ft.GetMethod('CaptureEvidencePng',[Reflection.BindingFlags]'Instance,Public').Invoke($form,@($png))
+          $form.Dispose()
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            professional_results_form=($null -ne $ft)
+            equivalent_stress_unit=($summary -match '^Equivalent Stress\|MPa\|')
+            extrema_traceable=($summary -match 'max=100\.70793442833039|max=100\.7079344283304')
+            probe_traceable=($summary -match 'probeNode=8\|probe=98')
+            synthetic_values_rejected=($summary -match 'invented=false')
+            evidence_png_created=(Test-Path $png)
+            evidence_png_nontrivial=((Get-Item $png).Length -gt 10000)
+          }
+          $out=[ordered]@{release='C9.68';title='Professional Results HUD';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));summary=$summary;fresh_solver_run='NOT_RUN_IN_C9.68_WINDOWS_JOB';visual_evidence='WINFORMS_RESULTS_HUD_CAPTURE';vtk_binding='PRESERVED_FROM_C9.67';truth_boundary='The screenshot validates the professional HUD, legend/extrema/probe presentation and traceable values. It does not independently prove OpenGL/VTK framebuffer pixels because DrawToBitmap support for native VTK child rendering is not asserted.';fea_values_invented=$false}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.68_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.68 gate failed'}
+      - name: Static professional UI gates
+        shell: pwsh
+        run: |
+          $p='.\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs'
+          foreach($term in @('RESULT DETAILS','Code_Aster field','Nodal probe','MAX  {0:G9}','MIN  {0:G9}','Capture evidence PNG','Synthetic FEA values: rejected','AddCells(data)','AsterMaxLegendPanel')){if(-not(Select-String -Path $p -Pattern $term -SimpleMatch -Quiet)){throw "Missing C9.68 UI term: $term"}}
+      - name: Package evidence
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe'
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs artifact\
+          Copy-Item fixture\results.json artifact\C9.68_UI_FIXTURE.json
+          @'
+          # AsterMax C9.68 — Professional Results HUD
+          Adds a professional result-details rail around the existing C9.67 native vtkControl pipeline: engineering legend with units, traceable min/max node IDs, nodal probe with coordinates, deformation scale and explicit integrity boundary. Windows CI verifies compilation, reflection semantics and a deterministic WinForms HUD evidence PNG. No fresh Code_Aster solve and no claim of captured VTK/OpenGL framebuffer pixels are made in this job.
+          '@ | Set-Content artifact\C9.68_STATUS.md
+          Get-FileHash artifact\* -Algorithm SHA256 | Format-Table -AutoSize | Out-String | Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.68-Professional-Results-HUD
+          path: artifact
+          if-no-files-found: error
