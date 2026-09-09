@@ -1,0 +1,61 @@
+name: AsterMax C9.81 B02 Cantilever Gate
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c981-b02/**'
+      - '.github/workflows/astermax-c981-b02-cantilever.yml'
+  workflow_dispatch:
+
+jobs:
+  b02-cantilever:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v4
+
+      - name: Prepare deterministic B02 benchmark
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c981-work
+          cp native-windows/c981-b02/cantilever.comm c981-work/
+          cp native-windows/c981-b02/cantilever.export c981-work/
+          cp native-windows/c981-b02/validate-c981-b02.py c981-work/
+          python3 native-windows/c981-b02/generate-cantilever-mail.py
+          cp native-windows/c981-b02/cantilever.mail c981-work/
+          chmod -R 0777 c981-work
+          sha256sum c981-work/cantilever.comm c981-work/cantilever.export c981-work/cantilever.mail > c981-work/INPUT_SHA256.txt
+
+      - name: Pull real Code_Aster 15.2 solver image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee c981-work/CODE_ASTER_IMAGE_DIGEST.txt
+
+      - name: Execute real Code_Aster B02
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker run --rm --volume "$PWD/c981-work:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/cantilever.export | tee c981-work/CODE_ASTER_STDOUT.log
+
+      - name: Validate B02 bending evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 c981-work/validate-c981-b02.py c981-work
+
+      - name: Hash outputs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find c981-work -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > c981-work/OUTPUT_SHA256.txt
+
+      - name: Upload C9.81 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.81-B02-Cantilever-Evidence
+          path: c981-work
+          if-no-files-found: error
