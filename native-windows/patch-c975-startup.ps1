@@ -58,3 +58,22 @@ $replacement=@'
 '@
 if(-not $ui.Contains($anchor)){throw 'Smoke timeout anchor missing'}
 Set-Content $uiPath ($ui.Replace($anchor,$replacement)) -Encoding UTF8
+
+# CAD and meshing need a writable scratch directory even without a legacy solver installation.
+$controllerPath=Join-Path $Root 'PrePoMax/Controller.cs'
+$c=Get-Content $controllerPath -Raw
+$anchor='            _settings.LoadFromFile();'
+$replacement=@'
+            _settings.LoadFromFile();
+            if (String.IsNullOrWhiteSpace(_settings.Calculix.WorkDirectory) ||
+                !System.IO.Directory.Exists(_settings.Calculix.WorkDirectory))
+            {
+                string cadWorkDirectory = System.IO.Path.Combine(
+                    System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+                    "AsterMax", "CAD", System.Diagnostics.Process.GetCurrentProcess().Id.ToString());
+                System.IO.Directory.CreateDirectory(cadWorkDirectory);
+                _settings.Calculix.WorkDirectory = cadWorkDirectory;
+            }
+'@
+if(-not $c.Contains($anchor)){throw 'Controller settings initialization anchor missing'}
+Set-Content $controllerPath ($c.Replace($anchor,$replacement)) -Encoding UTF8
