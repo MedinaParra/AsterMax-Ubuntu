@@ -1,0 +1,105 @@
+name: AsterMax C9.80 B01 Equivalence Gate
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c958-benchmark/**'
+      - 'native-windows/c962-benchmark/**'
+      - 'native-windows/validate-c962-solver.py'
+      - 'native-windows/validate-c980-b01-equivalence.py'
+      - 'native-windows/ansys-equivalence-harness-v0.json'
+      - '.github/workflows/astermax-c980-b01-equivalence.yml'
+  workflow_dispatch:
+
+jobs:
+  b01-equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v4
+
+      - name: Prepare B01 deterministic benchmark
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c980-work
+          chmod -R 0777 c980-work
+          cp native-windows/c958-benchmark/axial-bar.comm c980-work/axial-bar.comm
+          cp native-windows/c962-benchmark/axial-bar-refined.mail c980-work/axial-bar.mail
+          cp native-windows/c958-benchmark/axial-bar.export c980-work/axial-bar.export
+          cp native-windows/validate-c962-solver.py c980-work/
+          cp native-windows/validate-c980-b01-equivalence.py c980-work/
+          cp native-windows/ansys-equivalence-harness-v0.json c980-work/
+          sha256sum c980-work/axial-bar.* | tee c980-work/INPUT_SHA256.txt
+
+      - name: Pull real Code_Aster 15.2 solver image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee c980-work/CODE_ASTER_IMAGE_DIGEST.txt
+
+      - name: Execute real Code_Aster B01
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker run --rm \
+            --volume "$PWD/c980-work:/analysis" \
+            scimulate/code_aster:15.2 \
+            /opt/aster/bin/as_run /analysis/axial-bar.export | tee c980-work/CODE_ASTER_STDOUT.log
+
+      - name: Validate Code_Aster numerical evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 c980-work/validate-c962-solver.py c980-work
+
+      - name: Run B01 equivalence harness
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 c980-work/validate-c980-b01-equivalence.py c980-work
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('c980-work/C9.80_B01_EQUIVALENCE.json')
+          d=json.loads(p.read_text())
+          assert d['required_harness_pass'] is True
+          assert d['scientific_integrity']['fea_values_invented'] is False
+          assert d['scientific_integrity']['ansys_values_invented'] is False
+          if d['ansys_reference_state'] != 'VERIFIED':
+              assert d['ansys_equivalence'] == 'NOT_PROVEN'
+          print('B01 integrity gate PASS:', d['ansys_equivalence'])
+          PY
+
+      - name: Hash outputs
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find c980-work -maxdepth 1 -type f -print0 | sort -z | xargs -0 sha256sum > c980-work/OUTPUT_SHA256.txt || true
+
+      - name: Package C9.80 evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p artifact
+          cp -a c980-work/. artifact/
+          cat > artifact/C9.80_STATUS.md <<'EOF'
+          # AsterMax C9.80 — B01 Axial HEXA8 Equivalence Gate
+
+          This artifact contains an actual Code_Aster 15.2 execution of B01 and its analytical comparison.
+          ANSYS numerical equivalence is NOT claimed unless an independently sourced, hash-provenanced B01 ANSYS reference is present and passes the predeclared tolerances.
+          Missing ANSYS evidence is reported as NOT_PROVEN, never substituted with synthetic values.
+          EOF
+
+      - name: Upload C9.80 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.80-B01-Equivalence-Evidence
+          path: artifact
+          if-no-files-found: error
