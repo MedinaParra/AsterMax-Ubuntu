@@ -66,7 +66,7 @@ jobs:
           $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-PoC'));$model.Materials.Add('Steel-PoC',$mat)
           $nodeType=$meshAsm.GetType('CaeMesh.FeNode',$true);$node=[Activator]::CreateInstance($nodeType,@(1,0.0,0.0,0.0));$model.Mesh.Nodes.Add(1,$node)
           $stepType=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($stepType,@('Step-1'))
-          $regionType=$cm.GetType('CaeModel.RegionTypeEnum',$true);$nodeSet=[Enum]::Parse($regionType,'NodeSetName')
+          $regionType=$cg.GetType('CaeGlobals.RegionTypeEnum',$true);$nodeSet=[Enum]::Parse($regionType,'NodeSetName')
           $bcType=$cm.GetType('CaeModel.FixedBC',$true);$bc=[Activator]::CreateInstance($bcType,@('Fixed-1','FIXED',$nodeSet,$false));$step.AddBoundaryCondition($bc)
           $loadType=$cm.GetType('CaeModel.CLoad',$true);$load=[Activator]::CreateInstance($loadType,@('Force-1',1,1000.0,0.0,0.0,$false,$false,0.0));$step.AddLoad($load)
           $model.StepCollection.AddStep($step,$false)
