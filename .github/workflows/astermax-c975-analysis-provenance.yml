@@ -1,0 +1,125 @@
+name: AsterMax C9.75 Analysis Provenance Manifest
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c975-analysis-provenance-manifest.ps1'
+      - '.github/workflows/astermax-c975-analysis-provenance.yml'
+  workflow_dispatch:
+
+jobs:
+  analysis-provenance:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-analysis-provenance-manifest.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Create deterministic provenance chain fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force fixture,artifact | Out-Null
+          'ISO-10303-21; C9.75 provenance-only STEP fixture; UNIT=MM; ENDSEC;' | Set-Content fixture\model.step -Encoding ASCII
+          'C9.75 deterministic HEXA8 mesh provenance fixture; nodes=8; elements=1' | Set-Content fixture\mesh.inp -Encoding ASCII
+          'DEBUT(); # C9.75 provenance-only Code_Aster input fixture; no solve executed in this job' | Set-Content fixture\analysis.comm -Encoding ASCII
+          'C9.75 deterministic MED provenance fixture placeholder; NOT solver output' | Set-Content fixture\analysis.rmed -Encoding ASCII
+          '{"schema":"astermax-results-bundle/v0","integrity":{"fea_values_invented":false},"fixture_role":"hash-chain validation only; not FEA output"}' | Set-Content fixture\results.json -Encoding ASCII
+          function H($p){(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()}
+          $manifest=[ordered]@{
+            schema='astermax-analysis-provenance/v0'
+            analysis_id='C975-DIGITAL-THREAD-POC'
+            units=[ordered]@{length='mm';force='N';stress='MPa'}
+            cad=[ordered]@{file='model.step';sha256=(H fixture\model.step);declared_length_unit='mm';format='STEP'}
+            material=[ordered]@{name='Steel-PoC';youngs_modulus_mpa=200000.0;poisson_ratio=0.30;source='fixture metadata only'}
+            mesh=[ordered]@{file='mesh.inp';sha256=(H fixture\mesh.inp);element_type='HEXA8';node_count=8;element_count=1}
+            boundary_conditions=@([ordered]@{type='Fixed';selection='FACE_X0';entity_count=1})
+            loads=@([ordered]@{type='Force';selection='FACE_X100';magnitude=1000.0;unit='N';entity_count=1})
+            solver=[ordered]@{name='Code_Aster';code_aster_version='DECLARED-FIXTURE';input_file='analysis.comm';input_sha256=(H fixture\analysis.comm)}
+            results=[ordered]@{med_file='analysis.rmed';med_sha256=(H fixture\analysis.rmed);bundle_file='results.json';bundle_sha256=(H fixture\results.json)}
+            integrity=[ordered]@{fea_values_invented=$false;fresh_solver_run='NOT_RUN_IN_C9.75_WINDOWS_JOB';fixture_role='provenance chain contract validation only'}
+          }
+          $manifest|ConvertTo-Json -Depth 10|Set-Content fixture\manifest.json -Encoding UTF8
+          Copy-Item fixture\manifest.json fixture\manifest-bad-units.json
+          $bad=Get-Content fixture\manifest-bad-units.json -Raw|ConvertFrom-Json;$bad.units.length='m';$bad|ConvertTo-Json -Depth 10|Set-Content fixture\manifest-bad-units.json -Encoding UTF8
+          Copy-Item fixture\model.step fixture\model-original.step
+      - name: Reflection digital-thread gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName;$root=(Resolve-Path .\upstream).Path;[Environment]::CurrentDirectory=$bin
+          $global:r=$root;$global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName);$t=$asm.GetType('PrePoMax.AsterMaxAnalysisManifest',$true)
+          $load=$t.GetMethod('Load',[Reflection.BindingFlags]'Public,Static')
+          $valid=(Resolve-Path fixture\manifest.json).Path;$obj=$load.Invoke($null,@($valid))
+          $summary=[string]$t.GetMethod('AuditSummary',[Reflection.BindingFlags]'Instance,Public').Invoke($obj,@())
+          $manifestSha=[string]$t.GetProperty('ManifestSha256').GetValue($obj)
+          $actualManifest=(Get-FileHash $valid -Algorithm SHA256).Hash.ToLowerInvariant()
+          $badUnitsRejected=$false
+          try{$null=$load.Invoke($null,@((Resolve-Path fixture\manifest-bad-units.json).Path))}catch{$badUnitsRejected=$true}
+          Add-Content fixture\model.step 'TAMPERED'
+          $tamperRejected=$false
+          try{$null=$load.Invoke($null,@($valid))}catch{$tamperRejected=$true}
+          Copy-Item fixture\model-original.step fixture\model.step -Force
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            analysis_manifest_type=($null -ne $t)
+            mm_unit_contract=($summary -match 'STEP\(mm\)')
+            material_traced=($summary -match 'Steel-PoC')
+            bc_and_loads_traced=($summary -match '1 BC / 1 loads')
+            solver_traced=($summary -match 'Code_Aster DECLARED-FIXTURE')
+            manifest_sha256_exact=($manifestSha -eq $actualManifest)
+            tampered_cad_rejected=$tamperRejected
+            wrong_units_rejected=$badUnitsRejected
+          }
+          $out=[ordered]@{release='C9.75';title='Analysis Provenance Manifest';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));audit_summary=$summary;manifest_sha256=$manifestSha;fresh_solver_run='NOT_RUN_IN_C9.75_WINDOWS_JOB';fea_values_invented=$false;truth_boundary='C9.75 validates the compiled Windows x64 digital-thread contract and exact SHA-256 links across deterministic provenance fixtures. The STEP, mesh, COMM and MED files in this workflow are contract fixtures, not a physical simulation, and no numerical FEA result is claimed.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.75_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.75 digital-thread gate failed'}
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
+          Copy-Item .\native-windows\patch-c975-analysis-provenance-manifest.ps1 artifact\ -Force
+          Copy-Item fixture\manifest.json artifact\C9.75_ANALYSIS_PROVENANCE_MANIFEST.json -Force
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.75-Analysis-Provenance-Manifest
+          path: artifact
+          if-no-files-found: error
