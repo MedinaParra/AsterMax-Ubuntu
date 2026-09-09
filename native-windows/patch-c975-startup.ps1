@@ -159,3 +159,12 @@ $method=@'
 '@
 if(-not $v.Contains($anchor)){throw 'VTK capture insertion anchor missing'}
 Set-Content $vtkPath ($v.Replace($anchor,$method+$anchor)) -Encoding UTF8
+
+$ui=Get-Content $uiPath -Raw
+# BackColor paints WinForms; the VTK renderer needs its own background setting.
+$ui=$ui.Replace('_vtk.BackColor = Color.FromArgb(250, 250, 250);','_vtk.BackColor = Color.FromArgb(250, 250, 250);' + [Environment]::NewLine + '                _vtk.SetBackground(false, Color.FromArgb(250, 250, 250), Color.FromArgb(250, 250, 250), true);')
+$ui=$ui.Replace('                            tsbZoomToFit_Click(null, EventArgs.Empty);', '                            _vtk.SetIsometricView(false, true);' + [Environment]::NewLine + '                            _vtk.SetZoomToFit(false);')
+Set-Content $uiPath $ui -Encoding UTF8
+$v=Get-Content $vtkPath -Raw
+$v=$v.Replace('            _renderWindow.Render();' + [Environment]::NewLine + '            var image =', '            _renderer.ResetCamera();' + [Environment]::NewLine + '            _renderer.ResetCameraClippingRange();' + [Environment]::NewLine + '            _renderWindow.Render();' + [Environment]::NewLine + '            System.IO.File.WriteAllText(path + ".txt", "actors=" + _actors.Count + "; rendererActors=" + _renderer.GetActors().GetNumberOfItems() + "; bounds=" + String.Join(",", _renderer.ComputeVisiblePropBounds()) + "; background=" + String.Join(",", _renderer.GetBackground()));' + [Environment]::NewLine + '            var image =')
+Set-Content $vtkPath $v -Encoding UTF8
