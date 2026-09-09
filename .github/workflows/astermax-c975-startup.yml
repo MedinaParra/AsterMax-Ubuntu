@@ -184,6 +184,7 @@ jobs:
             ASTERMAX_RUNTIME_STEP.json
             ASTERMAX_RUNTIME_STEP.json.stages.log
             ASTERMAX_RUNTIME_STEP.json.png
+            ASTERMAX_RUNTIME_STEP.json.vtk.png
           if-no-files-found: warn
 
       - name: Package rebuilt application binaries
@@ -198,6 +199,7 @@ jobs:
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
           Copy-Item .\native-windows\README-C9.75.md .\artifact\README-C9.75.md
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.75.png -ErrorAction SilentlyContinue
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png .\artifact\AsterMax-C9.75-Viewport.png -ErrorAction SilentlyContinue
           Copy-Item .\native-windows\patch-c975-startup.ps1 .\artifact\ -Force
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 

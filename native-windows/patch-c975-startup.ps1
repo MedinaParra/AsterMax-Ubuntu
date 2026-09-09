@@ -126,3 +126,36 @@ $replacement=@'
 '@
 $ui=$ui.Replace($anchor,$replacement)
 Set-Content $uiPath $ui -Encoding UTF8
+
+# Dock the native workspace below the ribbon; force a real VTK render before evidence capture.
+$ui=Get-Content $uiPath -Raw
+$ui=$ui.Replace('            titleBar.BringToFront();', '            ribbon.SendToBack();' + [Environment]::NewLine + '            titleBar.SendToBack();' + [Environment]::NewLine + '            toolStripContainer1.BringToFront();')
+$ui=$ui.Replace('                            Refresh();', '                            _vtk.RenderingOn = true;' + [Environment]::NewLine + '                            _vtk.Refresh();' + [Environment]::NewLine + '                            _vtk.SaveAsterMaxCadFramebuffer(reportPath + ".vtk.png");' + [Environment]::NewLine + '                            Refresh();')
+Set-Content $uiPath $ui -Encoding UTF8
+$vtkPath=Join-Path $Root 'vtkControl/vtkControl.cs'
+$v=Get-Content $vtkPath -Raw
+$anchor='        public void SwithchLights()'
+$method=@'
+        public void SaveAsterMaxCadFramebuffer(string path)
+        {
+            if (_actors.Count == 0) throw new InvalidOperationException("No native VTK actors were created.");
+            _renderWindow.Render();
+            var image = Kitware.VTK.vtkWindowToImageFilter.New();
+            var writer = Kitware.VTK.vtkPNGWriter.New();
+            try {
+                image.SetInput(_renderWindow);
+                image.SetInputBufferTypeToRGB();
+                image.ReadFrontBufferOff();
+                image.Update();
+                writer.SetInputConnection(image.GetOutputPort());
+                writer.SetFileName(path);
+                writer.Write();
+            } finally {
+                writer.Dispose();
+                image.Dispose();
+            }
+        }
+
+'@
+if(-not $v.Contains($anchor)){throw 'VTK capture insertion anchor missing'}
+Set-Content $vtkPath ($v.Replace($anchor,$method+$anchor)) -Encoding UTF8
