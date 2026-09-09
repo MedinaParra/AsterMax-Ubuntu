@@ -1,0 +1,113 @@
+name: AsterMax C9.66 Results Scene Contract
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c966-results-scene.ps1'
+      - '.github/workflows/astermax-c966-results-scene.yml'
+  workflow_dispatch:
+
+jobs:
+  results-scene:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Build verified fixture from C9.64 reference arrays
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fixture | Out-Null
+          $json=@{
+            schema='astermax-results-bundle/v0';
+            units=@{length='mm';force='N';stress='MPa'};
+            mesh=@{node_count=2;element_count=1};
+            arrays=@{
+              coordinates=@(@(0.0,0.0,0.0),@(100.0,0.0,0.0));
+              displacement=@(@(0.0,0.0,0.0),@(0.0471697826890255,0.0,0.0));
+              total_deformation=@(0.0,0.0471697826890255);
+              von_mises=@(98.0,100.70793442833039)
+            };
+            integrity=@{fea_values_invented=$false; fixture_role='reflection-only; numerical values are copied from prior real Code_Aster C9.64 evidence and are not a fresh solve'}
+          }
+          $json | ConvertTo-Json -Depth 8 | Set-Content fixture\results.json -Encoding UTF8
+      - name: Native C# scene reflection gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName
+          [Environment]::CurrentDirectory=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a) $p=Join-Path $bin (([Reflection.AssemblyName]$a.Name).Name+'.dll'); if(Test-Path $p){[Reflection.Assembly]::LoadFrom($p)}})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $bt=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true)
+          $st=$asm.GetType('PrePoMax.AsterMaxResultsScene',$true)
+          $bundle=$bt.GetMethod('Load',[Reflection.BindingFlags]'Public,Static').Invoke($null,@((Resolve-Path fixture\results.json).Path))
+          $scale=[double]$st.GetMethod('RecommendDeformationScale').Invoke($null,@($bundle,[double]0.10))
+          $scene=$st.GetMethod('Build').Invoke($null,@($bundle,'Equivalent Stress',$scale))
+          $max=[double]$st.GetProperty('Maximum').GetValue($scene)
+          $maxNode=[int]$st.GetProperty('MaximumNodeIndex').GetValue($scene)
+          $coords=$st.GetProperty('DeformedCoordinates').GetValue($scene)
+          $invented=[bool]$st.GetProperty('FeaValuesInvented').GetValue($scene)
+          $checks=[ordered]@{
+            native_exe_compiled=(Test-Path $exe.FullName)
+            results_scene_type=($null -ne $st)
+            real_bundle_contract=([int]$bt.GetProperty('NodeCount').GetValue($bundle) -eq 2)
+            equivalent_stress_max=([math]::Abs($max-100.70793442833039) -lt 1e-10)
+            maximum_node_index=($maxNode -eq 1)
+            auto_deformation_scale=($scale -gt 1.0)
+            deformed_coordinates=($coords.Length -eq 2)
+            no_synthetic_values=(-not $invented)
+          }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $out=[ordered]@{release='C9.66';title='Native Results Scene Contract';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not ($checks.Values -contains $false));vtk_actor_binding='NOT_CLAIMED';fresh_solver_run='NOT_RUN_IN_C9.66_WINDOWS_JOB';truth_boundary='Scene contract validated; viewport actor binding remains next gate.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.66_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.66 gate failed'}
+      - name: Static professional UI gates
+        shell: pwsh
+        run: |
+          $scene='.\upstream\PrePoMax\Forms\AsterMaxResultsScene.cs'
+          $ui='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          foreach($term in @('RecommendDeformationScale','MinimumNodeIndex','MaximumNodeIndex','AsterMaxResultsExplorerForm','FeaValuesInvented')){if(-not(Select-String -Path $scene -Pattern $term -SimpleMatch -Quiet)){throw "Missing $term"}}
+          if(-not(Select-String -Path $ui -Pattern 'Results Explorer' -SimpleMatch -Quiet)){throw 'Results Explorer ribbon missing'}
+      - name: Package evidence
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe'
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxResultsScene.cs artifact\
+          Copy-Item fixture\results.json artifact\C9.66_REFLECTION_FIXTURE.json
+          @'
+          # AsterMax C9.66 — Results Scene Contract
+          C9.66 adds a native results explorer, field selection, exact extrema/node identification, probe display, and bounded automatic deformation scaling. The Windows reflection fixture uses numerical values copied from previously verified real Code_Aster evidence; C9.66 itself does not claim a new solver run. Direct binding to vtkControl actors remains the next gate.
+          '@ | Set-Content artifact\C9.66_STATUS.md
+          Get-FileHash artifact\* -Algorithm SHA256 | Format-Table -AutoSize | Out-String | Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.66-Results-Scene
+          path: artifact
+          if-no-files-found: error
