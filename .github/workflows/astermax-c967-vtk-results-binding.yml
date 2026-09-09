@@ -41,20 +41,22 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force fixture | Out-Null
-          $json=@{
-            schema='astermax-results-bundle/v0'; release='C9.67-reflection-fixture';
-            units=@{length='mm';force='N';stress='MPa'};
-            mesh=@{node_count=8;element_count=1;element_type='HEXA8'};
-            arrays=@{
-              coordinates=@(@(0,0,0),@(100,0,0),@(100,10,0),@(0,10,0),@(0,0,10),@(100,0,10),@(100,10,10),@(0,10,10));
-              connectivity=@(@(1,2,3,4,5,6,7,8));
-              displacement=@(@(0,0,0),@(0.0471697826890255,0,0),@(0.0471697826890255,0,0),@(0,0,0),@(0,0,0),@(0.0471697826890255,0,0),@(0.0471697826890255,0,0),@(0,0,0));
-              total_deformation=@(0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0);
-              von_mises=@(98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98)
-            };
-            integrity=@{fea_values_invented=$false;fixture_role='VTK binding structural fixture; numerical extrema copied from prior real Code_Aster evidence, no fresh solve claimed'}
+          @'
+          {
+            "schema":"astermax-results-bundle/v0",
+            "release":"C9.67-reflection-fixture",
+            "units":{"length":"mm","force":"N","stress":"MPa"},
+            "mesh":{"node_count":8,"element_count":1,"element_type":"HEXA8"},
+            "arrays":{
+              "coordinates":[[0,0,0],[100,0,0],[100,10,0],[0,10,0],[0,0,10],[100,0,10],[100,10,10],[0,10,10]],
+              "connectivity":[[1,2,3,4,5,6,7,8]],
+              "displacement":[[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0],[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0]],
+              "total_deformation":[0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0],
+              "von_mises":[98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98]
+            },
+            "integrity":{"fea_values_invented":false,"fixture_role":"VTK binding structural fixture; numerical extrema copied from prior real Code_Aster evidence, no fresh solve claimed"}
           }
-          $json|ConvertTo-Json -Depth 8|Set-Content fixture\results.json -Encoding UTF8
+          '@ | Set-Content fixture\results.json -Encoding UTF8
       - name: Native binding reflection gates
         shell: pwsh
         run: |
