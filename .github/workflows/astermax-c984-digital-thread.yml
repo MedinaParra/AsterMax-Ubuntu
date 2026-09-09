@@ -62,12 +62,20 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           python evidence/audit_c984.py verify --case-dir evidence/case --manifest evidence/ASTERMAX_SOLVER_EVIDENCE.json
+          if ($LASTEXITCODE -ne 0) { throw "Untampered evidence failed verification with exit code $LASTEXITCODE" }
       - name: Prove tamper rejection on Windows
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           Copy-Item evidence -Destination tampered -Recurse
           Add-Content -Path tampered/case/c984.comm -Value "# intentional C9.84 tamper"
+
+          $previousPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
           python tampered/audit_c984.py verify --case-dir tampered/case --manifest tampered/ASTERMAX_SOLVER_EVIDENCE.json
-          if ($LASTEXITCODE -eq 0) { throw 'Tampered solver deck was incorrectly accepted.' }
-          Write-Host 'PASS: modified solver deck rejected by SHA-256 verification.'
+          $tamperExitCode = $LASTEXITCODE
+          $ErrorActionPreference = $previousPreference
+
+          if ($tamperExitCode -eq 0) { throw 'Tampered solver deck was incorrectly accepted.' }
+          Write-Host "PASS: modified solver deck rejected by SHA-256 verification (expected exit code $tamperExitCode)."
+          exit 0
