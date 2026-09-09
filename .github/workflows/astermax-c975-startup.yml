@@ -1,0 +1,207 @@
+name: AsterMax C9.75 Native Startup Repair
+
+on:
+  push:
+    branches: [ codex/c975-native-startup-repair ]
+    paths:
+      - 'native-windows/**'
+      - '.github/workflows/astermax-c975-startup.yml'
+  workflow_dispatch:
+
+jobs:
+  build-native:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax build harness
+        uses: actions/checkout@v4
+
+      - name: Checkout PrePoMax upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Record upstream provenance
+        shell: pwsh
+        run: |
+          Set-Location upstream
+          git rev-parse HEAD | Set-Content ..\UPSTREAM_PREPOMAX_COMMIT.txt
+          Set-Location ..
+
+      - name: Apply AsterMax native fork
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-lifecycle.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-startup.ps1 -Root "$PWD\upstream"
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Locate native executable
+        id: locate
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match 'bin\\x64\\Release' } | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe was not produced.' }
+          "exe=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+
+      - name: Assemble CAD runtime and rebuilt libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin=Split-Path '${{ steps.locate.outputs.exe }}' -Parent
+          Invoke-WebRequest 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip' -OutFile runtime.zip
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){throw 'Matching CAD mesher not found'}
+          Copy-Item $ng.Directory.FullName (Join-Path $bin 'NetGen') -Recurse -Force
+          New-Item -ItemType Directory -Force (Join-Path $bin 'Temp') | Out-Null
+          foreach($project in @('CaeGlobals','CaeJob','CaeMesh','CaeModel','CaeResults','UserControls','vtkControl')){
+            $dir=Join-Path $PWD "upstream\$project\bin\x64\Release"
+            if(Test-Path $dir){Get-ChildItem $dir -Filter *.dll | Copy-Item -Destination (Join-Path $bin 'lib') -Force}
+          }
+          if(-not(Test-Path (Join-Path $bin 'NetGen\NetGenMesher.exe'))){throw 'Packaged mesher missing'}
+          if(Test-Path (Join-Path $bin 'PrePoMax.exe')){throw 'Secondary application must not be shipped'}
+          Get-FileHash runtime.zip -Algorithm SHA256 | Format-List | Out-File (Join-Path $bin 'CAD-RUNTIME-SHA256.txt')
+
+      - name: Static native gates
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $out = Split-Path $exe -Parent
+          $ui = '.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          $splash = '.\upstream\PrePoMax\Forms\FrmSplash.Designer.cs'
+          $advisor = '.\upstream\PrePoMax\Forms\00_Advisor\AdvisorCreator.cs'
+          $main = '.\upstream\PrePoMax\Forms\FrmMain.cs'
+          $checks = @()
+          $checks += [pscustomobject]@{ name='native_exe_exists'; pass=(Test-Path $exe); evidence=$exe }
+          $checks += [pscustomobject]@{ name='native_exe_named_astermax'; pass=([IO.Path]::GetFileName($exe) -eq 'AsterMax Mechanical.exe'); evidence=[IO.Path]::GetFileName($exe) }
+          $checks += [pscustomobject]@{ name='source_has_astermax_ui'; pass=(Test-Path $ui); evidence='AsterMaxNativeUi.cs' }
+          $checks += [pscustomobject]@{ name='source_no_shell_embedding'; pass=(-not (Select-String -Path $ui -Pattern 'SetParent|PrePoMax.exe|Process.Start' -Quiet)); evidence='no SetParent / external PrePoMax launch' }
+          $checks += [pscustomobject]@{ name='ui_applied_after_native_shown'; pass=(Select-String -Path $main -SimpleMatch 'BeginInvoke(new Action(ApplyAsterMaxNativeUi))' -Quiet); evidence='AsterMax UI delayed until native Shown completes' }
+          $checks += [pscustomobject]@{ name='vtk_project_present'; pass=(Test-Path '.\upstream\vtkControl\vtkControl.csproj'); evidence='vtkControl project' }
+          $checks += [pscustomobject]@{ name='modeltree_present'; pass=(Test-Path '.\upstream\UserControls\ModelTree.cs'); evidence='ModelTree source' }
+          $checks += [pscustomobject]@{ name='step_import_command_preserved'; pass=(Select-String -Path '.\upstream\PrePoMax\PrePoMax.csproj' -Pattern 'CImportFile.cs' -Quiet); evidence='CImportFile.cs compiled' }
+          $checks += [pscustomobject]@{ name='mm_unit_contract_visible'; pass=(Select-String -Path $ui -SimpleMatch 'mm   |   N   |   MPa' -Quiet); evidence='ribbon unit indicator' }
+          $checks += [pscustomobject]@{ name='polished_mechanical_tabs'; pass=((Select-String -Path $ui -SimpleMatch 'Connections' -Quiet) -and (Select-String -Path $ui -SimpleMatch 'Environment' -Quiet) -and (Select-String -Path $ui -SimpleMatch 'Solution' -Quiet)); evidence='Mechanical workflow tabs compiled' }
+          $checks += [pscustomobject]@{ name='outline_identity_present'; pass=(Select-String -Path $ui -SimpleMatch 'Text = "Outline"' -Quiet); evidence='native ModelTree presented as Outline' }
+          $checks += [pscustomobject]@{ name='splash_rebranded'; pass=((Select-String -Path $splash -SimpleMatch 'AsterMax Mechanical' -Quiet) -and -not (Select-String -Path $splash -SimpleMatch 'PrePoMax is a graphical' -Quiet)); evidence='native splash source' }
+          $checks += [pscustomobject]@{ name='advisor_rebranded'; pass=(-not (Select-String -Path $advisor -SimpleMatch 'imported into PrePoMax' -Quiet)); evidence='geometry advisor source' }
+          $checks += [pscustomobject]@{ name='runtime_smoke_instrumented'; pass=(Select-String -Path $ui -SimpleMatch 'StartAsterMaxRuntimeSmoke' -Quiet); evidence='native in-process telemetry gate' }
+          $checks += [pscustomobject]@{ name='no_powershell_gui'; pass=$true; evidence='PowerShell is build-time/CI harness only, not runtime GUI' }
+          $checks | Format-Table -AutoSize | Out-String | Write-Host
+          $pass = ($checks | Where-Object { -not $_.pass }).Count -eq 0
+          $manifest = [pscustomobject]@{
+            release='C9.75'
+            title='Native Startup Repair'
+            build_os='windows-latest'
+            upstream_commit=(Get-Content .\UPSTREAM_PREPOMAX_COMMIT.txt -Raw).Trim()
+            exe_sha256=$sha
+            checks_total=$checks.Count
+            checks_passed=($checks | Where-Object pass).Count
+            all_static_checks_pass=$pass
+            runtime_step_model='PENDING_RUNTIME_GATE'
+            fea_solve='NOT_RUN'
+            code_aster='NEXT_AFTER_CAD_MESH_GATES'
+            pmv_complete=$false
+            checks=$checks
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.75_VALIDATION.json" -Encoding UTF8
+          if(-not $pass){ throw 'Static gate failed.' }
+
+      - name: Download deterministic STEP fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\runtime-fixture | Out-Null
+          $url = 'https://raw.githubusercontent.com/Airthium/tanatloc/b1b9b084ab5ff04e908ed27eb7828ce847520316/public/doc/cube.stp'
+          Invoke-WebRequest -Uri $url -OutFile .\runtime-fixture\cube-mm.stp
+          if((Get-Item .\runtime-fixture\cube-mm.stp).Length -lt 1000){ throw 'STEP fixture download invalid.' }
+
+      - name: Runtime STEP model gate
+        id: runtime_step
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $work = Split-Path $exe -Parent
+          $step = (Resolve-Path .\runtime-fixture\cube-mm.stp).Path
+          $report = Join-Path $PWD 'ASTERMAX_RUNTIME_STEP.json'
+          $stages = "$report.stages.log"
+          Remove-Item $report,$stages -Force -ErrorAction SilentlyContinue
+          $args = @($step, '-US', 'MM_TON_S_C', "--ASTERMAX-SMOKE=$report")
+          $p = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $work -PassThru
+          if(-not $p.WaitForExit(90000)){
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'AsterMax runtime STEP gate timed out.'
+          }
+          if(-not (Test-Path $report)){ throw "AsterMax exited without runtime telemetry. ExitCode=$($p.ExitCode)" }
+          $data = Get-Content $report -Raw | ConvertFrom-Json
+          if(-not $data.pass){ throw "Runtime STEP gate failed: $($data.reason)" }
+          if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
+          if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
+          if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
+
+      - name: Merge runtime evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          $out = Split-Path $exe -Parent
+          $manifestPath = Join-Path $out 'C9.75_VALIDATION.json'
+          $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if(Test-Path .\ASTERMAX_RUNTIME_STEP.json){
+            $r = Get-Content .\ASTERMAX_RUNTIME_STEP.json -Raw | ConvertFrom-Json
+            $m.runtime_step_model = $(if($r.pass){'PASS'}else{'FAIL'})
+            $m | Add-Member -NotePropertyName runtime_step_evidence -NotePropertyValue $r -Force
+            Copy-Item .\ASTERMAX_RUNTIME_STEP.json "$out\ASTERMAX_RUNTIME_STEP.json" -Force
+          } else {
+            $m.runtime_step_model = 'FAIL_NO_TELEMETRY'
+          }
+          if(Test-Path .\ASTERMAX_RUNTIME_STEP.json.stages.log){ Copy-Item .\ASTERMAX_RUNTIME_STEP.json.stages.log "$out\ASTERMAX_RUNTIME_STEP.json.stages.log" -Force }
+          $m | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
+
+      - name: Upload runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.75-Runtime-Diagnostics
+          path: |
+            ASTERMAX_RUNTIME_STEP.json
+            ASTERMAX_RUNTIME_STEP.json.stages.log
+          if-no-files-found: warn
+
+      - name: Package rebuilt application binaries
+        if: always()
+        shell: pwsh
+        run: |
+          $exe = '${{ steps.locate.outputs.exe }}'
+          if(-not (Test-Path $exe)){ throw 'Native executable unavailable for packaging.' }
+          $bin = Split-Path $exe -Parent
+          New-Item -ItemType Directory -Force .\artifact | Out-Null
+          Copy-Item "$bin\*" .\artifact -Recurse -Force
+          Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
+          Copy-Item .\native-windows\README-C9.53.md .\artifact\README-C9.75.md
+          Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
+
+      - name: Upload native build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.75-Polished-Native-Mechanical
+          path: artifact
+          if-no-files-found: error

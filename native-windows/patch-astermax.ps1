@@ -56,7 +56,7 @@ namespace PrePoMax
 
         private void ApplyAsterMaxNativeUi()
         {
-            if (_asterMaxUiApplied || IsDisposed) return;
+            if (_asterMaxUiApplied || IsDisposed || _controller == null || _modelTree == null || _vtk == null) return;
             _asterMaxUiApplied = true;
 
             SuspendLayout();
@@ -174,7 +174,9 @@ namespace PrePoMax
 
             ribbon.TabPages.Add(BuildRibbonPage("Model", new Control[] {
                 CommandTile("Model Properties", "MODEL", () => tsmiEditModel.PerformClick()),
-                CommandTile("Materials", "MODEL", () => tsmiModel.PerformClick()),
+                CommandTile("Materials", "MODEL", () => tsmiCreateMaterial_Click(null, EventArgs.Empty)),
+                CommandTile("Solid Section", "MODEL", () => tsmiCreateSection_Click(null, EventArgs.Empty)),
+                CommandTile("Analysis Step", "MODEL", () => tsmiCreateStep_Click(null, EventArgs.Empty)),
                 InfoCard("Coordinate systems and named selections live in Outline")
             }));
 
@@ -190,7 +192,8 @@ namespace PrePoMax
             }));
 
             ribbon.TabPages.Add(BuildRibbonPage("Environment", new Control[] {
-                InfoCard("Supports and loads remain connected to native scoping"),
+                CommandTile("Supports", "MODEL", () => tsmiCreateBC_Click(null, EventArgs.Empty)),
+                CommandTile("Loads", "MODEL", () => tsmiCreateLoad_Click(null, EventArgs.Empty)),
                 StateCard("Analysis", "Static Structural")
             }));
 
@@ -429,15 +432,7 @@ if(-not $projText.Contains('Forms\AsterMaxNativeUi.cs')){
   Set-Content $proj $projText -Encoding UTF8
 }
 
-# Mechanical-style terminology while preserving model semantics and handlers.
-$modelTree = Join-Path $Root 'UserControls/ModelTree.cs'
-$mt = Get-Content $modelTree -Raw
-$mt = $mt.Replace('private string _geomPartsName = "Parts";','private string _geomPartsName = "Geometry";')
-$mt = $mt.Replace('private string _meshingParametersName = "Meshing Parameters";','private string _meshingParametersName = "Mesh Controls";')
-$mt = $mt.Replace('private string _meshRefinementsName = "Mesh Refinements";','private string _meshRefinementsName = "Local Mesh Controls";')
-$mt = $mt.Replace('private string _boundaryConditionsName = "BCs";','private string _boundaryConditionsName = "Supports / BCs";')
-$mt = $mt.Replace('private string _loadsName = "Loads";','private string _loadsName = "Loads";')
-$mt = $mt.Replace('private string _analysesName = "Analyses";','private string _analysesName = "Solution";')
-Set-Content $modelTree $mt -Encoding UTF8
 
-Write-Host 'AsterMax polished native Mechanical UI patches applied.' -ForegroundColor Green
+# Keep designer node identifiers stable: ModelTree locates them with Nodes.Find(name)[0].
+# Captions are presentation only and must never replace these lookup keys.
+Write-Host 'AsterMax native UI applied; ModelTree lookup keys preserved.' -ForegroundColor Green
