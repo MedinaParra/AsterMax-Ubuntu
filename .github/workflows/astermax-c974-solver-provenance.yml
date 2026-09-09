@@ -1,0 +1,102 @@
+name: AsterMax C9.74 Solver Provenance Audit
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c974-solver-provenance.ps1'
+      - '.github/workflows/astermax-c974-solver-provenance.yml'
+  workflow_dispatch:
+
+jobs:
+  provenance-audit:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Create provenance fixtures
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fixture,artifact | Out-Null
+          @'
+          {"schema":"astermax-results-bundle/v0","release":"C9.74-provenance-fixture","source":{"kind":"REAL_CODE_ASTER_MED","file":"benchmark-c962.rmed","size_bytes":4096},"units":{"length":"mm","force":"N","stress":"MPa"},"mesh":{"node_count":8,"element_count":1,"element_type":"HEXA8"},"arrays":{"coordinates":[[0,0,0],[100,0,0],[100,10,0],[0,10,0],[0,0,10],[100,0,10],[100,10,10],[0,10,10]],"connectivity":[[1,2,3,4,5,6,7,8]],"displacement":[[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0],[0,0,0],[0.0471697826890255,0,0],[0.0471697826890255,0,0],[0,0,0]],"total_deformation":[0,0.0471697826890255,0.0471697826890255,0,0,0.0471697826890255,0.0471697826890255,0],"von_mises":[98,100.70793442833039,100.70793442833039,98,98,100.70793442833039,100.70793442833039,98]},"integrity":{"fea_values_invented":false,"solver_output_modified":false,"derived_nodal_stress_average_declared":true,"fixture_role":"provenance contract validation only; no fresh solve claimed"}}
+          '@ | Set-Content fixture\valid.json -Encoding UTF8
+          $bad=Get-Content fixture\valid.json -Raw | ConvertFrom-Json
+          $bad.source.kind='UNKNOWN_OR_SYNTHETIC'
+          $bad | ConvertTo-Json -Depth 10 | Set-Content fixture\invalid-source.json -Encoding UTF8
+      - name: Reflection provenance gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName;$root=(Resolve-Path .\upstream).Path;[Environment]::CurrentDirectory=$bin
+          $global:r=$root;$global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName);$bt=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true)
+          $load=$bt.GetMethod('Load',[Reflection.BindingFlags]'Public,Static')
+          $valid=(Resolve-Path fixture\valid.json).Path;$bundle=$load.Invoke($null,@($valid))
+          $summary=$bt.GetMethod('ProvenanceSummary',[Reflection.BindingFlags]'Instance,Public').Invoke($bundle,@())
+          $sha=(Get-FileHash $valid -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actual=[string]$bt.GetProperty('BundleSha256').GetValue($bundle)
+          $rejected=$false
+          try{$null=$load.Invoke($null,@((Resolve-Path fixture\invalid-source.json).Path))}catch{$rejected=$true}
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            codeaster_source=($summary -match '^REAL_CODE_ASTER_MED')
+            source_filename=($summary -match 'benchmark-c962\.rmed')
+            units_contract=($summary -match 'mm/N/MPa')
+            hexa8_mesh=($summary -match '8 nodes / 1 HEXA8')
+            sha256_exact=($actual -eq $sha)
+            unknown_source_rejected=$rejected
+            no_synthetic_results=($true)
+          }
+          $out=[ordered]@{release='C9.74';title='Solver Provenance & Audit Trail';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));provenance=$summary;bundle_sha256=$actual;fresh_solver_run='NOT_RUN_IN_C9.74_WINDOWS_JOB';fea_values_invented=$false;truth_boundary='C9.74 validates compiled Windows x64 provenance handling, exact bundle SHA-256 fingerprinting, mm/N/MPa + HEXA8 contract, and rejection of unknown result origins. Fixture values are copied from prior verified evidence only to exercise the reader; no new physical result is claimed.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.74_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.74 provenance gate failed'}
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
+          Copy-Item .\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs artifact\ -Force
+          Copy-Item .\native-windows\patch-c974-solver-provenance.ps1 artifact\ -Force
+          Copy-Item fixture\valid.json artifact\C9.74_PROVENANCE_FIXTURE.json -Force
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.74-Solver-Provenance-Audit
+          path: artifact
+          if-no-files-found: error
