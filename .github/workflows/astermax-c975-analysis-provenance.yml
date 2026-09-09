@@ -53,18 +53,18 @@ jobs:
           'DEBUT(); # C9.75 provenance-only Code_Aster input fixture; no solve executed in this job' | Set-Content fixture\analysis.comm -Encoding ASCII
           'C9.75 deterministic MED provenance fixture placeholder; NOT solver output' | Set-Content fixture\analysis.rmed -Encoding ASCII
           '{"schema":"astermax-results-bundle/v0","integrity":{"fea_values_invented":false},"fixture_role":"hash-chain validation only; not FEA output"}' | Set-Content fixture\results.json -Encoding ASCII
-          function H($p){(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()}
+          function HashFile([string]$Path){ (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
           $manifest=[ordered]@{
             schema='astermax-analysis-provenance/v0'
             analysis_id='C975-DIGITAL-THREAD-POC'
             units=[ordered]@{length='mm';force='N';stress='MPa'}
-            cad=[ordered]@{file='model.step';sha256=(H fixture\model.step);declared_length_unit='mm';format='STEP'}
+            cad=[ordered]@{file='model.step';sha256=(HashFile 'fixture\model.step');declared_length_unit='mm';format='STEP'}
             material=[ordered]@{name='Steel-PoC';youngs_modulus_mpa=200000.0;poisson_ratio=0.30;source='fixture metadata only'}
-            mesh=[ordered]@{file='mesh.inp';sha256=(H fixture\mesh.inp);element_type='HEXA8';node_count=8;element_count=1}
+            mesh=[ordered]@{file='mesh.inp';sha256=(HashFile 'fixture\mesh.inp');element_type='HEXA8';node_count=8;element_count=1}
             boundary_conditions=@([ordered]@{type='Fixed';selection='FACE_X0';entity_count=1})
             loads=@([ordered]@{type='Force';selection='FACE_X100';magnitude=1000.0;unit='N';entity_count=1})
-            solver=[ordered]@{name='Code_Aster';code_aster_version='DECLARED-FIXTURE';input_file='analysis.comm';input_sha256=(H fixture\analysis.comm)}
-            results=[ordered]@{med_file='analysis.rmed';med_sha256=(H fixture\analysis.rmed);bundle_file='results.json';bundle_sha256=(H fixture\results.json)}
+            solver=[ordered]@{name='Code_Aster';code_aster_version='DECLARED-FIXTURE';input_file='analysis.comm';input_sha256=(HashFile 'fixture\analysis.comm')}
+            results=[ordered]@{med_file='analysis.rmed';med_sha256=(HashFile 'fixture\analysis.rmed');bundle_file='results.json';bundle_sha256=(HashFile 'fixture\results.json')}
             integrity=[ordered]@{fea_values_invented=$false;fresh_solver_run='NOT_RUN_IN_C9.75_WINDOWS_JOB';fixture_role='provenance chain contract validation only'}
           }
           $manifest|ConvertTo-Json -Depth 10|Set-Content fixture\manifest.json -Encoding UTF8
@@ -115,7 +115,7 @@ jobs:
           $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
           if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
           Copy-Item .\native-windows\patch-c975-analysis-provenance-manifest.ps1 artifact\ -Force
-          Copy-Item fixture\manifest.json artifact\C9.75_ANALYSIS_PROVENANCE_MANIFEST.json -Force
+          if(Test-Path fixture\manifest.json){Copy-Item fixture\manifest.json artifact\C9.75_ANALYSIS_PROVENANCE_MANIFEST.json -Force}
           Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
       - uses: actions/upload-artifact@v4
         if: always()
