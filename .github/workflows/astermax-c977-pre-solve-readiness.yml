@@ -1,0 +1,118 @@
+name: AsterMax C9.77 Pre-Solve Readiness
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c977-pre-solve-readiness.ps1'
+      - '.github/workflows/astermax-c977-pre-solve-readiness.yml'
+  workflow_dispatch:
+
+jobs:
+  readiness:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax pipeline patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-analysis-provenance-manifest.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c977-pre-solve-readiness.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Compiled pre-solve readiness gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $bin=$exe.Directory.FullName;$root=(Resolve-Path .\upstream).Path;[Environment]::CurrentDirectory=$bin
+          $global:r=$root;$global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
+          $rt=$asm.GetType('PrePoMax.AsterMaxPreSolveReadiness',$true)
+          $eval=$rt.GetMethod('Evaluate',[Reflection.BindingFlags]'Public,Static')
+          $cm=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeModel.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $meshAsm=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeMesh.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $cg=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeGlobals.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $feType=$cm.GetType('CaeModel.FeModel',$true);$model=[Activator]::CreateInstance($feType,@('C977-POC'))
+          $usType=$cg.GetType('CaeGlobals.UnitSystem',$true);$ust=$cg.GetType('CaeGlobals.UnitSystemType',$true);$mmEnum=[Enum]::Parse($ust,'MM_TON_S_C');$us=[Activator]::CreateInstance($usType,@($mmEnum));$feType.GetProperty('UnitSystem').SetValue($model,$us)
+          $nodeType=$meshAsm.GetType('CaeMesh.FeNode',$true)
+          $xyz=@(@(0,0,0),@(1,0,0),@(1,1,0),@(0,1,0),@(0,0,1),@(1,0,1),@(1,1,1),@(0,1,1))
+          for($i=0;$i -lt 8;$i++){ $p=$xyz[$i];$n=[Activator]::CreateInstance($nodeType,@($i+1,[double]$p[0],[double]$p[1],[double]$p[2]));$model.Mesh.Nodes.Add($i+1,$n) }
+          $hexType=$meshAsm.GetType('CaeMesh.LinearHexaElement',$true);$ids=[int[]](1,2,3,4,5,6,7,8);$hex=[Activator]::CreateInstance($hexType,@(1,$ids));$model.Mesh.Elements.Add(1,$hex)
+          $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-PoC'));$model.Materials.Add('Steel-PoC',$mat)
+          $stepType=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($stepType,@('Step-1'))
+          $regionType=$cg.GetType('CaeGlobals.RegionTypeEnum',$true);$nodeSet=[Enum]::Parse($regionType,'NodeSetName')
+          $bcType=$cm.GetType('CaeModel.FixedBC',$true);$bc=[Activator]::CreateInstance($bcType,@('Fixed-1','FIXED',$nodeSet,$false));$step.AddBoundaryCondition($bc)
+          $loadType=$cm.GetType('CaeModel.CLoad',$true);$load=[Activator]::CreateInstance($loadType,@('Force-1',8,1000.0,0.0,0.0,$false,$false,0.0));$step.AddLoad($load)
+          $model.StepCollection.AddStep($step,$false)
+          function Status($x){[string]$rt.GetProperty('Status').GetValue($x)}
+          $ready=$eval.Invoke($null,@($model));$readyStatus=Status $ready
+          $fp=[string]$rt.GetProperty('ModelFingerprintSha256').GetValue($ready)
+          $step.Loads.Remove('Force-1');$noLoad=$eval.Invoke($null,@($model));$step.AddLoad($load)
+          $step.BoundaryConditions.Remove('Fixed-1');$noBc=$eval.Invoke($null,@($model));$step.AddBoundaryCondition($bc)
+          $model.Materials.Remove('Steel-PoC');$noMat=$eval.Invoke($null,@($model));$model.Materials.Add('Steel-PoC',$mat)
+          $model.Mesh.Nodes.Remove(8);$brokenNode=$eval.Invoke($null,@($model));$n=[Activator]::CreateInstance($nodeType,@(8,0.0,1.0,1.0));$model.Mesh.Nodes.Add(8,$n)
+          $hex.NodeIds[7]=7;$degenerate=$eval.Invoke($null,@($model));$hex.NodeIds[7]=8
+          $model.Mesh.Elements.Remove(1);$noElements=$eval.Invoke($null,@($model));$model.Mesh.Elements.Add(1,$hex)
+          $mEnum=[Enum]::Parse($ust,'M_KG_S_C');$badUs=[Activator]::CreateInstance($usType,@($mEnum));$feType.GetProperty('UnitSystem').SetValue($model,$badUs);$wrongUnits=$eval.Invoke($null,@($model));$feType.GetProperty('UnitSystem').SetValue($model,$us)
+          $checks=[ordered]@{
+            windows_x64_build=(Test-Path $exe.FullName)
+            compiled_readiness_type=($null -ne $rt)
+            healthy_hexa8_model_ready=($readyStatus -eq 'READY')
+            fingerprint_linked=($fp -match '^[0-9a-f]{64}$')
+            missing_load_blocked=((Status $noLoad) -eq 'BLOCKED')
+            missing_bc_blocked=((Status $noBc) -eq 'BLOCKED')
+            missing_material_blocked=((Status $noMat) -eq 'BLOCKED')
+            missing_node_reference_blocked=((Status $brokenNode) -eq 'BLOCKED')
+            degenerate_connectivity_blocked=((Status $degenerate) -eq 'BLOCKED')
+            empty_element_mesh_blocked=((Status $noElements) -eq 'BLOCKED')
+            wrong_units_blocked=((Status $wrongUnits) -eq 'BLOCKED')
+          }
+          $summary=[string]$rt.GetMethod('AuditSummary').Invoke($ready,@())
+          $out=[ordered]@{release='C9.77';title='Engineering Pre-Solve Readiness';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));audit_summary=$summary;model_fingerprint_sha256=$fp;fresh_solver_run='NOT_RUN_IN_C9.77_WINDOWS_JOB';fea_values_invented=$false;truth_boundary='C9.77 validates readiness logic on a real in-memory PrePoMax FeModel with one LinearHexaElement (HEXA8), material metadata, StaticStep, FixedBC and CLoad. It does not claim Jacobian/aspect/skewness quality metrics, section assignment completeness, rigid-body-mode proof, or a new Code_Aster result.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.77_VALIDATION.json -Encoding UTF8
+          $out|ConvertTo-Json -Depth 6|Write-Host
+          if(-not $out.pass){throw 'C9.77 readiness gate failed'}
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact|Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if($exe){Copy-Item $exe.FullName artifact\'AsterMax Mechanical.exe' -Force}
+          Copy-Item .\native-windows\patch-c977-pre-solve-readiness.ps1 artifact\ -Force
+          Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.77-Pre-Solve-Readiness
+          path: artifact
+          if-no-files-found: error
