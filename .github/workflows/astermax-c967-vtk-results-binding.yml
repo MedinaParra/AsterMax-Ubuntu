@@ -64,8 +64,18 @@ jobs:
           $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
           if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
           $bin=$exe.Directory.FullName
+          $global:AsterMaxReflectionRoot=(Resolve-Path .\upstream).Path
+          $global:AsterMaxReflectionBin=$bin
           [Environment]::CurrentDirectory=$bin
-          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a) $p=Join-Path $bin (([Reflection.AssemblyName]$a.Name).Name+'.dll'); if(Test-Path $p){[Reflection.Assembly]::LoadFrom($p)}})
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({
+            param($s,$a)
+            $dll=([Reflection.AssemblyName]$a.Name).Name+'.dll'
+            $direct=Join-Path $global:AsterMaxReflectionBin $dll
+            if(Test-Path $direct){return [Reflection.Assembly]::LoadFrom($direct)}
+            $candidate=Get-ChildItem $global:AsterMaxReflectionRoot -Recurse -Filter $dll -ErrorAction SilentlyContinue | Where-Object {$_.FullName -match 'bin\\(x64\\)?Release|packages'} | Select-Object -First 1
+            if($candidate){return [Reflection.Assembly]::LoadFrom($candidate.FullName)}
+            return $null
+          })
           $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
           $bt=$asm.GetType('PrePoMax.AsterMaxResultsBundle',$true)
           $st=$asm.GetType('PrePoMax.AsterMaxResultsScene',$true)
