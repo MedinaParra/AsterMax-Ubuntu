@@ -65,7 +65,7 @@ jobs:
           $usType=$cg.GetType('CaeGlobals.UnitSystem',$true);$ust=$cg.GetType('CaeGlobals.UnitSystemType',$true);$mmEnum=[Enum]::Parse($ust,'MM_TON_S_C');$us=[Activator]::CreateInstance($usType,@($mmEnum));$feType.GetProperty('UnitSystem').SetValue($model,$us)
           $nodeType=$meshAsm.GetType('CaeMesh.FeNode',$true)
           $xyz=@(@(0,0,0),@(1,0,0),@(1,1,0),@(0,1,0),@(0,0,1),@(1,0,1),@(1,1,1),@(0,1,1))
-          for($i=0;$i -lt 8;$i++){ $p=$xyz[$i];$n=[Activator]::CreateInstance($nodeType,@($i+1,[double]$p[0],[double]$p[1],[double]$p[2]));$model.Mesh.Nodes.Add($i+1,$n) }
+          for($i=0;$i -lt 8;$i++){ $p=$xyz[$i];$nodeId=[int]($i+1);$n=[Activator]::CreateInstance($nodeType,@($nodeId,[double]$p[0],[double]$p[1],[double]$p[2]));$model.Mesh.Nodes.Add($nodeId,$n) }
           $hexType=$meshAsm.GetType('CaeMesh.LinearHexaElement',$true);$ids=[int[]](1,2,3,4,5,6,7,8);$hex=[Activator]::CreateInstance($hexType,@(1,$ids));$model.Mesh.Elements.Add(1,$hex)
           $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-PoC'));$model.Materials.Add('Steel-PoC',$mat)
           $stepType=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($stepType,@('Step-1'))
