@@ -1,0 +1,63 @@
+name: AsterMax C9.82 Mesh Convergence Gate
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native-windows/c982-convergence/**'
+      - '.github/workflows/astermax-c982-convergence.yml'
+
+jobs:
+  convergence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v4
+
+      - name: Generate deterministic refinement ladder
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c982-work/coarse c982-work/medium c982-work/fine
+          python3 native-windows/c982-convergence/generate_case.py --nx 10 --ny 2 --nz 2 --name coarse --out c982-work/coarse
+          python3 native-windows/c982-convergence/generate_case.py --nx 20 --ny 4 --nz 4 --name medium --out c982-work/medium
+          python3 native-windows/c982-convergence/generate_case.py --nx 40 --ny 8 --nz 8 --name fine --out c982-work/fine
+          cp native-windows/c982-convergence/validate_convergence.py c982-work/
+          chmod -R 0777 c982-work
+          find c982-work -type f -print0 | sort -z | xargs -0 sha256sum > c982-work/INPUT_SHA256.txt
+
+      - name: Pull pinned real Code_Aster solver
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee c982-work/CODE_ASTER_IMAGE_DIGEST.txt
+
+      - name: Execute coarse medium fine solves
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for CASE in coarse medium fine; do
+            docker run --rm --volume "$PWD/c982-work/$CASE:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run "/analysis/$CASE.export" | tee "c982-work/$CASE/CODE_ASTER_STDOUT.log"
+          done
+
+      - name: Validate convergence without tolerance relaxation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 c982-work/validate_convergence.py --root c982-work --cases coarse medium fine
+
+      - name: Hash all evidence
+        if: always()
+        shell: bash
+        run: |
+          find c982-work -type f ! -name OUTPUT_SHA256.txt -print0 | sort -z | xargs -0 sha256sum > c982-work/OUTPUT_SHA256.txt
+
+      - name: Upload C9.82 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.82-Mesh-Convergence-Evidence
+          path: c982-work
+          if-no-files-found: error
