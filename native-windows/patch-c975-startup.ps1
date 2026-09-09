@@ -77,3 +77,52 @@ $replacement=@'
 '@
 if(-not $c.Contains($anchor)){throw 'Controller settings initialization anchor missing'}
 Set-Content $controllerPath ($c.Replace($anchor,$replacement)) -Encoding UTF8
+
+# Extend the same runtime test through real NetGen volume meshing.
+$ui=Get-Content $uiPath -Raw
+$ui=$ui.Replace('            int ticks = 0;', '            int ticks = 0;' + [Environment]::NewLine + '            System.Threading.Tasks.Task<bool> meshTask = null;')
+$anchor='                            smokeTimer.Stop();'
+$first=$ui.IndexOf($anchor)
+if($first -lt 0){throw 'Geometry gate anchor missing'}
+$mesh=@'
+                            if (meshTask == null) {
+                                string partName = null;
+                                foreach (var entry in geometry.Parts) { partName = entry.Key; break; }
+                                AsterMaxSmokeTrace.Stage(_args, "volume_mesh_started");
+                                meshTask = System.Threading.Tasks.Task.Run(() => _controller.CreateMesh(partName));
+                                return;
+                            }
+                            if (!meshTask.IsCompleted) return;
+                            if (!meshTask.GetAwaiter().GetResult()) throw new Exception("NetGen volume mesh failed");
+                            if (_controller.Model.Mesh == null || _controller.Model.Mesh.Elements.Count == 0)
+                                throw new Exception("NetGen returned no volume elements");
+                            AsterMaxSmokeTrace.Stage(_args, "volume_mesh_completed");
+'@
+$ui=$ui.Insert($first,$mesh+[Environment]::NewLine)
+$anchor='                                "\"geometry_parts\":" + parts + "," +'
+$replacement=@'
+                                "\"mesh_nodes\":" + _controller.Model.Mesh.Nodes.Count + "," +
+                                "\"mesh_elements\":" + _controller.Model.Mesh.Elements.Count + "," +
+                                "\"geometry_parts\":" + parts + "," +
+'@
+if(-not $ui.Contains($anchor)){throw 'Geometry JSON anchor missing'}
+$ui=$ui.Replace($anchor,$replacement)
+$anchor='                            System.IO.File.WriteAllText(reportPath, json);'
+$replacement=@'
+                            _controller.Redraw();
+                            tsbZoomToFit_Click(null, EventArgs.Empty);
+                            Refresh();
+                            try {
+                                var rect = Bounds;
+                                using (var bitmap = new System.Drawing.Bitmap(rect.Width, rect.Height))
+                                using (var graphics = System.Drawing.Graphics.FromImage(bitmap)) {
+                                    graphics.CopyFromScreen(rect.Location, System.Drawing.Point.Empty, rect.Size);
+                                    bitmap.Save(reportPath + ".png", System.Drawing.Imaging.ImageFormat.Png);
+                                }
+                            } catch (Exception captureError) {
+                                AsterMaxSmokeTrace.Stage(_args, "capture_error_" + captureError.Message);
+                            }
+                            System.IO.File.WriteAllText(reportPath, json);
+'@
+$ui=$ui.Replace($anchor,$replacement)
+Set-Content $uiPath $ui -Encoding UTF8

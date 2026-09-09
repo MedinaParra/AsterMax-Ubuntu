@@ -153,6 +153,7 @@ jobs:
           if(-not $data.pass){ throw "Runtime STEP gate failed: $($data.reason)" }
           if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
           if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
+          if($data.mesh_nodes -lt 1 -or $data.mesh_elements -lt 1){ throw 'No real volume mesh produced.' }
           if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
 
       - name: Merge runtime evidence
@@ -195,7 +196,9 @@ jobs:
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
-          Copy-Item .\native-windows\README-C9.53.md .\artifact\README-C9.75.md
+          Copy-Item .\native-windows\README-C9.75.md .\artifact\README-C9.75.md
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.75.png -ErrorAction SilentlyContinue
+          Copy-Item .\native-windows\patch-c975-startup.ps1 .\artifact\ -Force
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 
       - name: Upload native build
