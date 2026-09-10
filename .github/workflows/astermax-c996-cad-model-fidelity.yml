@@ -1,0 +1,80 @@
+name: AsterMax C9.96 CAD Model Fidelity
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c996-cad-model-fidelity/**'
+      - '.github/workflows/astermax-c996-cad-model-fidelity.yml'
+  workflow_dispatch:
+
+jobs:
+  fidelity-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create deterministic model fixture
+        shell: pwsh
+        run: |
+          @'
+          {
+            "source_step_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "step_unit":{"state":"MM_NATIVE","scale_to_mm":1.0},
+            "geometry":{"bbox_min_mm":[0,0,0],"bbox_max_mm":[100,10,10],"solids":1,"faces":6,"edges":12},
+            "mesh":{"nodes":44,"elements":10,"element_family":"HEXA8"},
+            "model":{
+              "materials":[{"region":"Body1","name":"LinearSteel","E_mpa":210000,"nu":0.3}],
+              "boundary_conditions":[{"region":"x=0","type":"fixed","components":["UX","UY","UZ"]}],
+              "loads":[{"region":"x=100","type":"force","fx_n":10000,"fy_n":0,"fz_n":0}]
+            }
+          }
+          '@ | Set-Content model.json -Encoding UTF8
+      - name: Build fidelity lock
+        shell: pwsh
+        run: python native-windows/c996-cad-model-fidelity/model_fidelity_chain.py --build model.json --out lock.json
+      - name: Verify identical downstream model passes
+        shell: pwsh
+        run: python native-windows/c996-cad-model-fidelity/model_fidelity_chain.py --verify model.json --lock lock.json
+      - name: Unit-scale drift must be rejected
+        shell: pwsh
+        run: |
+          $m=Get-Content model.json -Raw | ConvertFrom-Json
+          $m.step_unit.state='RESCALE_REQUIRED'; $m.step_unit.scale_to_mm=1000.0
+          $m | ConvertTo-Json -Depth 10 | Set-Content drift-unit.json -Encoding UTF8
+          python native-windows/c996-cad-model-fidelity/model_fidelity_chain.py --verify drift-unit.json --lock lock.json
+          if($LASTEXITCODE -eq 0){ throw 'unit drift was not rejected' }
+          exit 0
+      - name: Geometry drift must be rejected
+        shell: pwsh
+        run: |
+          $m=Get-Content model.json -Raw | ConvertFrom-Json
+          $m.geometry.bbox_max_mm[0]=101
+          $m | ConvertTo-Json -Depth 10 | Set-Content drift-geom.json -Encoding UTF8
+          python native-windows/c996-cad-model-fidelity/model_fidelity_chain.py --verify drift-geom.json --lock lock.json
+          if($LASTEXITCODE -eq 0){ throw 'geometry drift was not rejected' }
+          exit 0
+      - name: Mesh drift must be rejected
+        shell: pwsh
+        run: |
+          $m=Get-Content model.json -Raw | ConvertFrom-Json
+          $m.mesh.elements=11
+          $m | ConvertTo-Json -Depth 10 | Set-Content drift-mesh.json -Encoding UTF8
+          python native-windows/c996-cad-model-fidelity/model_fidelity_chain.py --verify drift-mesh.json --lock lock.json
+          if($LASTEXITCODE -eq 0){ throw 'mesh drift was not rejected' }
+          exit 0
+      - name: BC-load drift must be rejected
+        shell: pwsh
+        run: |
+          $m=Get-Content model.json -Raw | ConvertFrom-Json
+          $m.model.loads[0].fx_n=11000
+          $m | ConvertTo-Json -Depth 10 | Set-Content drift-load.json -Encoding UTF8
+          python native-windows/c996-cad-model-fidelity/model_fidelity_chain.py --verify drift-load.json --lock lock.json
+          if($LASTEXITCODE -eq 0){ throw 'load drift was not rejected' }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.96-Fidelity-Evidence
+          path: |
+            lock.json
+            model.json
+          if-no-files-found: error
