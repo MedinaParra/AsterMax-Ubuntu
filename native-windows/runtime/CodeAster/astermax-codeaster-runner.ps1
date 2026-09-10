@@ -12,7 +12,10 @@ function Fail([string]$Message, [int]$Code = 1) {
 
 function ShellQuote([string]$Value) {
     if ($null -eq $Value) { return "''" }
-    return "'" + $Value.Replace("'", "'\"'\"'") + "'"
+    $sq = [string][char]39
+    $dq = [string][char]34
+    $embeddedQuote = $sq + $dq + $sq + $dq + $sq
+    return $sq + $Value.Replace($sq, $embeddedQuote) + $sq
 }
 
 function Get-WslExe {
@@ -25,7 +28,7 @@ function Get-CodeAsterBackend([string]$WslExe) {
     $configured = $env:ASTERMAX_WSL_CODE_ASTER_COMMAND
     if (-not [string]::IsNullOrWhiteSpace($configured)) {
         $q = ShellQuote $configured
-        $script = "candidate=$q; if command -v \"`$candidate\" >/dev/null 2>&1 || [ -x \"`$candidate\" ]; then printf '%s' \"`$candidate\"; exit 0; fi; exit 127"
+        $script = "if command -v $q >/dev/null 2>&1 || [ -x $q ]; then printf '%s' $q; exit 0; fi; exit 127"
         $out = & $WslExe sh -lc $script 2>$null
         if ($LASTEXITCODE -eq 0 -and $out) { return (($out | Select-Object -Last 1).ToString()).Trim() }
         return $null
@@ -38,7 +41,7 @@ function Get-CodeAsterBackend([string]$WslExe) {
 }
 
 function Get-WslPath([string]$WslExe, [string]$WindowsPath) {
-    $out = & $WslExe wslpath -a -u -- $WindowsPath 2>$null
+    $out = & $WslExe wslpath -a -u $WindowsPath 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
     return (($out | Select-Object -Last 1).ToString()).Trim()
 }
