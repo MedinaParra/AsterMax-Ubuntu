@@ -45,15 +45,21 @@ jobs:
           $ErrorActionPreference='Stop'
           $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
           if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
-          $bin=$exe.Directory.FullName
-          $uc=Get-ChildItem $bin -Recurse -Filter 'UserControls.dll' | Select-Object -First 1
-          if(-not $uc){ $uc=Get-ChildItem .\upstream -Recurse -Filter 'UserControls.dll' | Where-Object {$_.FullName -match 'bin\\(x64\\)?Release'} | Select-Object -First 1 }
+          $root=(Resolve-Path .\upstream).Path
+          $uc=Get-ChildItem .\upstream -Recurse -Filter 'UserControls.dll' | Where-Object {$_.FullName -match 'UserControls\\bin\\Release'} | Select-Object -First 1
           if(-not $uc){ throw 'UserControls.dll missing' }
           $script=@"
           `$ErrorActionPreference='Stop'
-          [Environment]::CurrentDirectory='$($uc.Directory.FullName)'
-          [void][Reflection.Assembly]::LoadFrom('$($uc.FullName)')
-          `$type=[Type]::GetType('UserControls.ModelTree, UserControls', `$true)
+          `$global:root='$root'
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({
+            param(`$sender,`$args)
+            `$name=([Reflection.AssemblyName]`$args.Name).Name + '.dll'
+            `$cand=Get-ChildItem `$global:root -Recurse -Filter `$name -ErrorAction SilentlyContinue | Where-Object { `$_.FullName -match 'bin\\(x64\\)?Release|packages' } | Select-Object -First 1
+            if(`$cand){ return [Reflection.Assembly]::LoadFrom(`$cand.FullName) }
+            return `$null
+          })
+          `$asm=[Reflection.Assembly]::LoadFrom('$($uc.FullName)')
+          `$type=`$asm.GetType('UserControls.ModelTree', `$true)
           `$tree=[Activator]::CreateInstance(`$type)
           if(`$null -eq `$tree){ throw 'ModelTree constructor returned null' }
           Write-Host 'MODEL_TREE_CONSTRUCTOR=PASS'
@@ -74,7 +80,7 @@ jobs:
           Copy-Item "$bin\*" .\dist\ -Recurse -Force
           $exeHash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C9.92'
+            release='C9.92.2'
             platform='Windows x64'
             configuration='Release'
             upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571'
@@ -84,12 +90,12 @@ jobs:
             modeltree_constructor_gate='PASS'
             vtk_post_chrome_relayout=$true
             fea_values_invented=$false
-            note='ModelTree validated lookup plus post-ribbon VTK relayout. Code_Aster is not bundled in this artifact.'
+            note='Restores ModelTree internal key compatibility, validates constructor in STA, and recalculates VTK bounds after AsterMax chrome.'
           } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
           Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
           Write-Host "EXE_SHA256=$exeHash"
       - uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.92-Windows-x64-Release
+          name: AsterMax-C9.92.2-Windows-x64-Release
           path: dist
           if-no-files-found: error
