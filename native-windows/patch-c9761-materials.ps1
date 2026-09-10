@@ -39,7 +39,7 @@ $methods=@'
         {
             string path = System.IO.Path.Combine(Application.StartupPath, Globals.MaterialLibraryFileName);
             if (!System.IO.File.Exists(path)) {
-                var root = new PrePoMax.Forms.MaterialLibraryItem("Materiales AsterMax") { Expanded = true };
+                var root = new PrePoMax.Forms.MaterialLibraryItem("Materiales_AsterMax") { Expanded = true };
                 var steel = new Material("Acero_elastico_referencia");
                 steel.Description = "Referencia elastica a temperatura ambiente; no define grado, limite de fluencia ni plasticidad. " +
                     "E=210000 MPa; nu=0.3; densidad=7850 kg/m3. SSAB Precision Steel Tube Handbook, p.187. " +
