@@ -68,7 +68,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
           $runner=Get-Content .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 -Raw
-          foreach($t in @('ASTERMAX_C1005_REAL_BACKEND_PROBE_V1','ProbeCodeAsterRunner','CreateRunnerProcess','code_aster_backend_ready','--probe','P version stable')){
+          foreach($t in @('ASTERMAX_C1005_REAL_BACKEND_PROBE_V1','ProbeCodeAsterRunner','CreateRunnerProcess','code_aster_backend_ready','CreateRunnerProcess(runner,"probe"','P version stable')){
             if(-not $solve.Contains($t)){ throw "C10.05 native Solve token missing: $t" }
           }
           foreach($t in @('wsl.exe','as_run','wslpath','astermax-wsl.export','synthetic_results_allowed = $false','--run')){
@@ -81,7 +81,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Continue'
-          $output = & .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd --probe 2>&1
+          $output = & .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd probe 2>&1
           $exitCode = $LASTEXITCODE
           $text = ($output | Out-String).Trim()
           Write-Host $text
@@ -122,7 +122,7 @@ jobs:
           AsterMax Mechanical C10.05
           The Code_Aster adapter is bundled; the Code_Aster solver itself is not.
           Default transport: WSL2 -> as_run --run <profile.export>.
-          The Runtime/PREFLIGHT command executes --probe and blocks Solve unless the real backend answers successfully.
+          The Runtime/PREFLIGHT command executes an internal runner probe and blocks Solve unless the real backend answers successfully.
           Optional override: ASTERMAX_WSL_CODE_ASTER_COMMAND can point to an as_run executable/path inside WSL.
           Postprocess still requires a validated Python runtime with numpy+h5py via AsterMaxRuntime/Python/python.exe or ASTERMAX_PYTHON.
           No synthetic FEA values are permitted.
