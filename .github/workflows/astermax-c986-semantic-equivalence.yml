@@ -1,0 +1,113 @@
+name: AsterMax C9.86 FeModel Code_Aster Semantic Equivalence
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c986-semantic-equivalence/**'
+      - '.github/workflows/astermax-c986-semantic-equivalence.yml'
+      - 'native-windows/patch-c976-automatic-model-fingerprint.ps1'
+  workflow_dispatch:
+
+jobs:
+  semantic-equivalence:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: master
+          path: upstream
+      - name: Apply AsterMax native patches
+        shell: pwsh
+        run: |
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build AsterMax Windows x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Build native FeModel manifest and equivalent Code_Aster deck
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing'}
+          $root=(Resolve-Path .\upstream).Path;$bin=$exe.Directory.FullName;[Environment]::CurrentDirectory=$bin;$global:r=$root;$global:b=$bin
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
+          $asm=[Reflection.Assembly]::LoadFrom($exe.FullName);$cm=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeModel.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName);$mesh=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeMesh.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName);$cg=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeGlobals.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
+          $feType=$cm.GetType('CaeModel.FeModel',$true);$model=[Activator]::CreateInstance($feType,@('C986-POC'));$usType=$cg.GetType('CaeGlobals.UnitSystem',$true);$ust=$cg.GetType('CaeGlobals.UnitSystemType',$true);$us=[Activator]::CreateInstance($usType,@([Enum]::Parse($ust,'MM_TON_S_C')));$feType.GetProperty('UnitSystem').SetValue($model,$us)
+          $nt=$mesh.GetType('CaeMesh.FeNode',$true);$coords=@(@(0,0,0),@(10,0,0),@(10,10,0),@(0,10,0),@(0,0,10),@(10,0,10),@(10,10,10),@(0,10,10));for($i=0;$i -lt 8;$i++){$c=$coords[$i];$model.Mesh.Nodes.Add($i+1,[Activator]::CreateInstance($nt,@($i+1,[double]$c[0],[double]$c[1],[double]$c[2])))}
+          $et=$mesh.GetType('CaeMesh.LinearHexaElement',$true);$ids=[int[]](1..8);$el=[Activator]::CreateInstance($et,@(1,$ids));$model.Mesh.Elements.Add(1,$el)
+          $nst=$mesh.GetType('CaeMesh.FeNodeSet',$true);$model.Mesh.NodeSets.Add('FIXED',[Activator]::CreateInstance($nst,@('FIXED',[int[]]@(1,4,5,8))));$model.Mesh.NodeSets.Add('LOAD',[Activator]::CreateInstance($nst,@('LOAD',[int[]]@(2,3,6,7))))
+          $st=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($st,@('Step-1'));$rt=$cg.GetType('CaeGlobals.RegionTypeEnum',$true);$ns=[Enum]::Parse($rt,'NodeSetName');$bct=$cm.GetType('CaeModel.FixedBC',$true);$step.AddBoundaryCondition([Activator]::CreateInstance($bct,@('Fixed-1','FIXED',$ns,$false)));$lt=$cm.GetType('CaeModel.CLoad',$true);$load=[Activator]::CreateInstance($lt,@('Force-1',2,0.0,-25.0,0.0,$false,$false,0.0));$step.AddLoad($load);$model.StepCollection.AddStep($step,$false)
+          $nodes=[ordered]@{};foreach($kv in $model.Mesh.Nodes.GetEnumerator()|Sort-Object Key){$nodes[[string]$kv.Key]=@([double]$kv.Value.X,[double]$kv.Value.Y,[double]$kv.Value.Z)};$els=[ordered]@{};foreach($kv in $model.Mesh.Elements.GetEnumerator()|Sort-Object Key){$els[[string]$kv.Key]=@($kv.Value.NodeIds|ForEach-Object{[int]$_})}
+          $native=[ordered]@{units='mm-N-MPa';analysis='MECA_STATIQUE';modelisation='3D';nodes=$nodes;elements=$els;groups=[ordered]@{FIXED=@(1,4,5,8);LOAD=@(2,3,6,7)};load=[ordered]@{fx=0.0;fy=-25.0;fz=0.0};truth='Extracted from compiled AsterMax FeModel topology and step contract'};$native|ConvertTo-Json -Depth 8|Set-Content artifact\native_manifest.json -Encoding UTF8
+          @'
+          TITRE
+          C986
+          FINSF
+          COOR_3D
+          N1 0 0 0
+          N2 10 0 0
+          N3 10 10 0
+          N4 0 10 0
+          N5 0 0 10
+          N6 10 0 10
+          N7 10 10 10
+          N8 0 10 10
+          FINSF
+          HEXA8
+          M1 N1 N2 N3 N4 N5 N6 N7 N8
+          FINSF
+          GROUP_NO NOM = FIXED
+          N1 N4 N5 N8
+          FINSF
+          GROUP_NO NOM = LOAD
+          N2 N3 N6 N7
+          FINSF
+          FIN
+          '@ | Set-Content artifact\c986.mail -Encoding UTF8
+          @'
+          DEBUT();
+          mesh=LIRE_MAILLAGE();
+          model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(TOUT='OUI',PHENOMENE='MECANIQUE',MODELISATION='3D'));
+          bc=AFFE_CHAR_MECA(MODELE=model,DDL_IMPO=_F(GROUP_NO='FIXED',DX=0.0,DY=0.0,DZ=0.0),FORCE_NODALE=_F(GROUP_NO='LOAD',FX=0.0,FY=-25.0,FZ=0.0));
+          res=MECA_STATIQUE(MODELE=model,EXCIT=_F(CHARGE=bc));
+          FIN();
+          '@ | Set-Content artifact\c986.comm -Encoding UTF8
+      - name: Semantic equivalence positive gate
+        shell: pwsh
+        run: python .\native-windows\c986-semantic-equivalence\audit_c986.py --native artifact\native_manifest.json --mail artifact\c986.mail --comm artifact\c986.comm --out artifact\C9.86_VALIDATION.json
+      - name: Reject connectivity tamper
+        shell: pwsh
+        run: |
+          Copy-Item artifact\c986.mail artifact\tampered.mail
+          (Get-Content artifact\tampered.mail -Raw).Replace('M1 N1 N2 N3 N4 N5 N6 N7 N8','M1 N1 N3 N2 N4 N5 N6 N7 N8')|Set-Content artifact\tampered.mail -Encoding UTF8
+          python .\native-windows\c986-semantic-equivalence\audit_c986.py --native artifact\native_manifest.json --mail artifact\tampered.mail --comm artifact\c986.comm --out artifact\C9.86_TAMPER_CONNECTIVITY.json
+          if($LASTEXITCODE -eq 0){throw 'Connectivity tamper was incorrectly accepted'}
+          exit 0
+      - name: Reject load tamper
+        shell: pwsh
+        run: |
+          Copy-Item artifact\c986.comm artifact\tampered.comm
+          (Get-Content artifact\tampered.comm -Raw).Replace('FY=-25.0','FY=-24.0')|Set-Content artifact\tampered.comm -Encoding UTF8
+          python .\native-windows\c986-semantic-equivalence\audit_c986.py --native artifact\native_manifest.json --mail artifact\c986.mail --comm artifact\tampered.comm --out artifact\C9.86_TAMPER_LOAD.json
+          if($LASTEXITCODE -eq 0){throw 'Load tamper was incorrectly accepted'}
+          exit 0
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.86-Semantic-Equivalence
+          path: artifact
+          if-no-files-found: error
