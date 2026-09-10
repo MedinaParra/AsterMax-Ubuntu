@@ -1,10 +1,12 @@
-name: AsterMax C9.97 Windows Professional Demo Build
+name: AsterMax C9.98 Windows Digital Thread Demo Build
 
 on:
   push:
     branches: [ main ]
     paths:
       - '.github/workflows/astermax-c990-windows-build.yml'
+      - 'native-windows/bind-c998-results-fingerprint.py'
+      - 'native-windows/patch-c998-current-model-results-gate.ps1'
       - 'native-windows/patch-c965-results-workspace.ps1'
       - 'native-windows/patch-c966-results-scene.ps1'
       - 'native-windows/patch-c967-vtk-results-binding.ps1'
@@ -36,6 +38,30 @@ jobs:
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
 
+      - name: C9.98 metadata-only result binding harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture = [ordered]@{
+            schema='astermax-results-bundle/v0'
+            units=[ordered]@{length='mm';force='N';stress='MPa'}
+            mesh=[ordered]@{node_count=8;element_count=1;element_type='HEXA8'}
+            arrays=[ordered]@{evidence_token='REAL_MED_ARRAYS_ARE_OPAQUE_TO_THIS_METADATA_TEST'}
+            integrity=[ordered]@{fea_values_invented=$false;solver_output_modified=$false}
+          }
+          $fixture | ConvertTo-Json -Depth 8 | Set-Content c998-input.json -Encoding UTF8
+          $fp=('a' * 64)
+          python .\native-windows\bind-c998-results-fingerprint.py c998-input.json $fp c998-bound.json
+          if($LASTEXITCODE -ne 0){ throw 'C9.98 binder positive gate failed' }
+          $src=Get-Content c998-input.json -Raw | ConvertFrom-Json
+          $dst=Get-Content c998-bound.json -Raw | ConvertFrom-Json
+          if($dst.integrity.model_fingerprint_sha256 -ne $fp){ throw 'C9.98 fingerprint binding missing' }
+          if($dst.integrity.result_values_modified_by_binding -ne $false){ throw 'C9.98 binder modified-value flag invalid' }
+          if(($src.arrays | ConvertTo-Json -Compress) -ne ($dst.arrays | ConvertTo-Json -Compress)){ throw 'C9.98 metadata binder changed FEA arrays' }
+          python .\native-windows\bind-c998-results-fingerprint.py c998-input.json bad-fingerprint c998-reject.json
+          if($LASTEXITCODE -eq 0){ throw 'C9.98 binder must reject malformed fingerprint' }
+          Write-Host 'C998_METADATA_BINDING_GATE=PASS'
+
       - name: Apply AsterMax production + professional demo patches
         shell: pwsh
         run: |
@@ -56,6 +82,7 @@ jobs:
           .\native-windows\patch-c977-pre-solve-readiness.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c978-assignment-hexa8-quality.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c985-model-fidelity-gate.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c998-current-model-results-gate.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c991-startup-hardening.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c992-startup-viewport.ps1 -Root "$PWD\upstream"
 
@@ -64,23 +91,16 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $forms = Join-Path $PWD 'upstream\PrePoMax\Forms'
-          $required = @(
-            'AsterMaxResultsWorkspace.cs',
-            'AsterMaxResultsScene.cs',
-            'AsterMaxVtkResultsBinding.cs'
-          )
-          foreach($f in $required){
-            if(-not (Test-Path (Join-Path $forms $f))){ throw "Professional demo source missing: $f" }
-          }
+          $required = @('AsterMaxResultsWorkspace.cs','AsterMaxResultsScene.cs','AsterMaxVtkResultsBinding.cs')
+          foreach($f in $required){ if(-not (Test-Path (Join-Path $forms $f))){ throw "Professional demo source missing: $f" } }
           $ui = Get-Content (Join-Path $forms 'AsterMaxNativeUi.cs') -Raw
-          foreach($token in @('Results Explorer','FEA Viewport')){
-            if(-not $ui.Contains($token)){ throw "Professional UI command missing: $token" }
-          }
+          foreach($token in @('Results Explorer','FEA Viewport')){ if(-not $ui.Contains($token)){ throw "Professional UI command missing: $token" } }
           $vtk = Get-Content (Join-Path $forms 'AsterMaxVtkResultsBinding.cs') -Raw
-          foreach($token in @('vtkMaxActorData','AddCells','DeformedCoordinates','Connectivity')){
-            if(-not $vtk.Contains($token)){ throw "VTK binding contract missing: $token" }
-          }
+          foreach($token in @('vtkMaxActorData','AddCells','DeformedCoordinates','Connectivity')){ if(-not $vtk.Contains($token)){ throw "VTK binding contract missing: $token" } }
+          $rw = Get-Content (Join-Path $forms 'AsterMaxResultsWorkspace.cs') -Raw
+          foreach($token in @('ModelFingerprintSha256','RequireCurrentModel','STALE results rejected','AsterMaxModelFingerprint.Extract')){ if(-not $rw.Contains($token)){ throw "C9.98 digital-thread token missing: $token" } }
           Write-Host 'PROFESSIONAL_DEMO_SOURCE_GATE=PASS'
+          Write-Host 'C998_ACTIVE_MODEL_RESULT_IDENTITY_GATE=PASS'
 
       - name: Restore packages
         shell: pwsh
@@ -132,7 +152,7 @@ jobs:
           Copy-Item "$bin\*" .\dist\ -Recurse -Force
           $exeHash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C9.97'
+            release='C9.98'
             platform='Windows x64'
             configuration='Release'
             upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571'
@@ -148,17 +168,19 @@ jobs:
             pre_solve_readiness=$true
             hexa8_quality_gate=$true
             model_fidelity_gate=$true
+            current_model_result_identity_gate=$true
+            stale_result_rejection=$true
             solver_backend='Code_Aster'
             unit_contract='MM_N_S_MPA'
             fea_values_invented=$false
             ansys_equivalence='NOT_PROVEN'
-            note='Integrated Windows demo build: verified model preparation gates plus professional real-result VTK/probe/provenance stack. No synthetic FEA values are generated.'
+            note='C9.98 binds verified real result bundles to the exact active FeModel fingerprint and rejects stale cross-model results. The binding operation is metadata-only and does not modify FEA arrays.'
           } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
           Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
           Write-Host "EXE_SHA256=$exeHash"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.97-Windows-x64-Professional-Demo
+          name: AsterMax-C9.98-Windows-x64-Digital-Thread-Demo
           path: dist
           if-no-files-found: error
