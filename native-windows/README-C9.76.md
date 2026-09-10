@@ -1,9 +1,10 @@
 # AsterMax Mechanical C9.76 — Windows x64
 
 ## Cómo ejecutar
-1. Extrae TODO el ZIP en una carpeta nueva.
-2. Abre AsterMax Mechanical.exe.
-3. Conserva las carpetas lib, NetGen y las DLL junto al EXE. Requiere Windows x64 y .NET Framework 4.8.
+Ejecuta AsterMax-Mechanical-C9.76-Setup.exe y sigue el instalador. No necesita permisos de administrador. Después abre AsterMax Mechanical desde el menú Inicio.
+
+Requiere Windows x64 y .NET Framework 4.8.
+Si utilizas el paquete ZIP portable, extrae TODO su contenido y abre AsterMax Mechanical.exe; conserva lib, NetGen y las DLL junto al EXE.
 
 ## Qué puedes revisar
 - Importar Cube-mm.stp o tu geometría STEP desde Home / Import Geometry.

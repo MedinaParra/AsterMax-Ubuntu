@@ -29,6 +29,7 @@ jobs:
           Set-Location upstream
           git rev-parse HEAD | Set-Content ..\UPSTREAM_PREPOMAX_COMMIT.txt
           Set-Location ..
+          $env:GITHUB_SHA | Set-Content BUILD_COMMIT.txt
 
       - name: Apply AsterMax native fork
         shell: pwsh
@@ -252,6 +253,9 @@ jobs:
           $bin = Split-Path $exe -Parent
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
+          # Never ship the CI session settings or history as user defaults.
+          Get-ChildItem .\artifact -File | Where-Object {$_.Name -eq 'settings.bin' -or $_.Name -like 'history*'} | Remove-Item -Force
+          Copy-Item .\BUILD_COMMIT.txt .\artifact\
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
           Copy-Item .\native-windows\patch-c976-release.ps1 .\artifact\ -Force
           Copy-Item .\runtime-fixture\cube-mm.stp .\artifact\Cube-mm.stp
