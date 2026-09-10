@@ -1,0 +1,157 @@
+name: AsterMax C10.05 Code_Aster WSL Runner
+
+on:
+  push:
+    branches: [ codex/c1004-unified-native-codeaster ]
+    paths:
+      - 'native-windows/patch-c1005-codeaster-runner-probe.ps1'
+      - 'native-windows/runtime/CodeAster/**'
+      - '.github/workflows/astermax-c1005-codeaster-wsl-runner.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-x64-c1005:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax integration branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply integrated AsterMax chain through C10.05
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1',
+            'patch-branding.ps1',
+            'patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1',
+            'patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1',
+            'patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1',
+            'patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1',
+            'patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1',
+            'patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1',
+            'patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1',
+            'patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1',
+            'patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1',
+            'patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1',
+            'patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1',
+            'patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1',
+            'patch-c1005-codeaster-runner-probe.ps1'
+          )
+          foreach($p in $patches){
+            Write-Host "Applying $p"
+            & ".\native-windows\$p" -Root "$PWD\upstream"
+          }
+
+      - name: C10.05 genuine-backend source gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          $runner=Get-Content .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 -Raw
+          foreach($t in @('ASTERMAX_C1005_REAL_BACKEND_PROBE_V1','ProbeCodeAsterRunner','CreateRunnerProcess','code_aster_backend_ready','CreateRunnerProcess(runner,"probe"','P version stable')){
+            if(-not $solve.Contains($t)){ throw "C10.05 native Solve token missing: $t" }
+          }
+          foreach($t in @('wsl.exe','as_run','wslpath','astermax-wsl.export','synthetic_results_allowed = $false','--run')){
+            if(-not $runner.Contains($t)){ throw "C10.05 WSL adapter token missing: $t" }
+          }
+          if($solve.Contains('P version 15.2')){ throw 'Obsolete fixed Code_Aster version remains in export profile.' }
+          Write-Host 'C1005_REAL_BACKEND_SOURCE_GATE=PASS'
+
+      - name: Exercise runner probe contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          $output = & .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd probe 2>&1
+          $exitCode = $LASTEXITCODE
+          $text = ($output | Out-String).Trim()
+          Write-Host $text
+          Write-Host "PROBE_EXIT=$exitCode"
+          if($exitCode -eq 0){
+            if($text -notmatch '"ready":true'){ throw 'Runner returned success without ready=true.' }
+          } else {
+            if($text -notmatch '"ready":false'){ throw 'Runner failed without a fail-closed ready=false diagnostic.' }
+          }
+          Write-Host 'C1005_RUNNER_PROBE_CONTRACT=PASS'
+          exit 0
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Stage C10.05 portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          @'
+          AsterMax Mechanical C10.05
+          The Code_Aster adapter is bundled; the Code_Aster solver itself is not.
+          Default transport: WSL2 -> as_run --run <profile.export>.
+          The Runtime/PREFLIGHT command executes an internal runner probe and blocks Solve unless the real backend answers successfully.
+          Optional override: ASTERMAX_WSL_CODE_ASTER_COMMAND can point to an as_run executable/path inside WSL.
+          Postprocess still requires a validated Python runtime with numpy+h5py via AsterMaxRuntime/Python/python.exe or ASTERMAX_PYTHON.
+          No synthetic FEA values are permitted.
+          '@ | Set-Content .\dist\AsterMaxRuntime\README.txt -Encoding UTF8
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.05'
+            branch='codex/c1004-unified-native-codeaster'
+            platform='Windows x64'
+            executable_sha256=$hash
+            solver_backend='Code_Aster'
+            solver_adapter_bundled=$true
+            solver_binary_bundled=$false
+            solver_transport='WSL2'
+            solver_command='as_run --run profile.export'
+            runtime_backend_probe=$true
+            native_element_types=@('TETRA4','TETRA10','HEXA8')
+            materials_ribbon=$true
+            automatic_results_handoff=$true
+            unit_contract='MM_N_S_MPA'
+            fea_values_invented=$false
+            numerical_solve_claimed=$false
+            limitation='Build and real-backend probe contract are validated. A numerical result is admitted only on a machine where WSL Code_Aster and the MED postprocess runtime are genuinely available.'
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Upload C10.05 Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.05-Windows-x64-WSL-CodeAster-Runner
+          path: dist
+          if-no-files-found: error

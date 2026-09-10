@@ -1,0 +1,162 @@
+name: AsterMax C10.06 Python MED Runtime
+
+on:
+  push:
+    branches: [ codex/c1004-unified-native-codeaster ]
+    paths:
+      - 'native-windows/patch-c1006-python-med-runtime-probe.ps1'
+      - '.github/workflows/astermax-c1006-python-med-runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-x64-c1006:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax integration branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Setup Python postprocess reference runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Qualify Python numpy and h5py capability
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check numpy h5py
+          python -c "import sys,numpy,h5py,tempfile,os; p=tempfile.mktemp(suffix='.h5'); f=h5py.File(p,'w'); f['gate']=numpy.arange(4); f.close(); f=h5py.File(p,'r'); assert list(f['gate'][:])==[0,1,2,3]; f.close(); os.remove(p); print('ASTERMAX_PYTHON_MED_OK|'+sys.version.split()[0]+'|numpy='+numpy.__version__+'|h5py='+h5py.__version__)"
+
+      - name: Apply integrated AsterMax chain through C10.06
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1',
+            'patch-branding.ps1',
+            'patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1',
+            'patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1',
+            'patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1',
+            'patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1',
+            'patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1',
+            'patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1',
+            'patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1',
+            'patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1',
+            'patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1',
+            'patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1',
+            'patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1',
+            'patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1',
+            'patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1'
+          )
+          foreach($p in $patches){
+            Write-Host "Applying $p"
+            & ".\native-windows\$p" -Root "$PWD\upstream"
+          }
+
+      - name: C10.06 source contract gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
+          foreach($t in @(
+            'ASTERMAX_C1006_FULL_RUNTIME_PROBE_V1',
+            'ProbePythonRuntime',
+            'ASTERMAX_PYTHON_MED_OK|',
+            'new JArray("numpy","h5py")',
+            'python_executable_found',
+            'python_probe',
+            'Path.PathSeparator',
+            'AsterMax requires a real Python runtime with numpy+h5py',
+            'code_aster_backend_ready'
+          )){
+            if(-not $solve.Contains($t)){ throw "C10.06 Solve token missing: $t" }
+          }
+          foreach($t in @('TETRA4','TETRA10','HEXA8','C10.04-native-codeaster-tetra-v1')){
+            if(-not $exporter.Contains($t)){ throw "C10.06 exporter token missing: $t" }
+          }
+          if($solve.Contains('["python_ready"]=!String.IsNullOrWhiteSpace(python)')){
+            throw 'Legacy existence-only Python readiness is still present.'
+          }
+          Write-Host 'C1006_PYTHON_MED_SOURCE_GATE=PASS'
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Stage C10.06 portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          @'
+          AsterMax Mechanical C10.06
+          Solver: Code_Aster through the verified WSL2 as_run adapter.
+          Mesh families admitted by the native exporter: TETRA4, TETRA10, HEXA8.
+          Python postprocess is accepted only after executing a capability probe that imports numpy and h5py.
+          Runtime discovery order: AsterMaxRuntime/Python/python.exe, ASTERMAX_PYTHON, then python.exe on PATH.
+          Code_Aster itself is not fabricated or bundled by this build. The Solve command remains blocked until the real backend probe succeeds.
+          No synthetic FEA values are permitted.
+          '@ | Set-Content .\dist\AsterMaxRuntime\README.txt -Encoding UTF8
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.06'
+            branch='codex/c1004-unified-native-codeaster'
+            executable_sha256=$hash
+            platform='Windows x64'
+            solver_backend='Code_Aster'
+            solver_transport='WSL2'
+            solver_backend_probe=$true
+            python_med_capability_probe=$true
+            python_required_modules=@('numpy','h5py')
+            native_element_types=@('TETRA4','TETRA10','HEXA8')
+            materials_ribbon=$true
+            automatic_results_handoff=$true
+            unit_contract='MM_N_S_MPA'
+            fea_values_invented=$false
+            numerical_solve_claimed=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Upload C10.06 Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.06-Windows-x64-Verified-Runtime
+          path: dist
+          if-no-files-found: error
