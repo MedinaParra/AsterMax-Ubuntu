@@ -4,6 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
+      - 'native-windows/patch-c960-native-bridge.ps1'
+      - 'native-windows/patch-c961-native-codeaster-export.ps1'
       - 'native-windows/patch-c1000-native-solve-transaction.ps1'
       - 'native-windows/patch-c999-portable-workspace-step.ps1'
       - '.github/workflows/astermax-c1000-windows-native-solve.yml'
@@ -74,14 +76,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          # This harness validates the process/result acceptance contract without fabricating FEA fields.
-          # A fake runner may create only control-plane evidence; it must never create a MED result.
-          New-Item -ItemType Directory -Force .\harness | Out-Null
-          @'
-          param([string]$Export,[string]$Workspace)
-          Set-Content (Join-Path $Workspace 'astermax-analysis.mess') '<I> <FIN> ARRET NORMAL'
-          exit 0
-          '@ | Set-Content .\harness\fake-runner-no-med.ps1 -Encoding UTF8
+          # Control-plane only: deliberately no MED is fabricated by the test harness.
           $source=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
           foreach($required in @(
             'if(!File.Exists(MedFile) || new FileInfo(MedFile).Length==0)',
