@@ -1,0 +1,150 @@
+name: AsterMax C9.89 Native Solve Transaction
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c989-solve-transaction/**'
+      - '.github/workflows/astermax-c989-native-solve-transaction.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  native-solve-transaction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v5
+
+      - name: Acquire latest successful C9.88 native gate artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow astermax-c988-native-femodel-serializer.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          test -n "$RUN_ID"
+          echo "$RUN_ID" > C988_SOURCE_RUN_ID.txt
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name AsterMax-C9.88-Native-FeModel-Production-Gate --dir source-artifact
+          find source-artifact -maxdepth 3 -type f -print
+
+      - name: Lock exact pre-solve inputs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c989-work artifact
+          cp source-artifact/c988.model.json c989-work/
+          cp source-artifact/native-serializer-evidence.json c989-work/
+          cp source-artifact/C9.88_SEMANTIC_GATE.json c989-work/
+          cp source-artifact/C9.88_VALIDATION.json c989-work/
+          cp source-artifact/deck/c988.mail c989-work/
+          cp source-artifact/deck/c988.comm c989-work/
+          cp source-artifact/deck/c988.adapter.json c989-work/
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          wd=Path('c989-work')
+          names=['c988.model.json','c988.mail','c988.comm','c988.adapter.json','C9.88_SEMANTIC_GATE.json','C9.88_VALIDATION.json','native-serializer-evidence.json']
+          def h(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+          data={n:h(wd/n) for n in names}
+          Path('c989-work/PRE_SOLVE_INPUT_SHA256.json').write_text(json.dumps(data,indent=2,sort_keys=True),encoding='utf-8')
+          PY
+          cat c989-work/PRE_SOLVE_INPUT_SHA256.json
+
+      - name: Build Code_Aster export transaction
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > c989-work/c988.export <<'EOF'
+          P actions make_etude
+          P version 15.2
+          P mode interactif
+          P time_limit 300
+          P memory_limit 2048
+          P ncpus 1
+          P mpi_nbcpu 1
+
+          F comm /analysis/c988.comm D 1
+          F mail /analysis/c988.mail D 20
+          F mess /analysis/c988.mess R 6
+          F resu /analysis/c988.resu R 80
+          F rmed /analysis/c988.rmed R 81
+          EOF
+
+      - name: Pin real Code_Aster runtime identity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee c989-work/CODE_ASTER_IMAGE_DIGEST.txt
+
+      - name: Execute locked native solve transaction
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm \
+            --volume "$PWD/c989-work:/analysis" \
+            scimulate/code_aster:15.2 \
+            /opt/aster/bin/as_run /analysis/c988.export 2>&1 | tee c989-work/CODE_ASTER_STDOUT.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > c989-work/CODE_ASTER_EXIT_CODE.txt
+          exit "$status"
+
+      - name: Validate model-to-result transaction
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 native-windows/c989-solve-transaction/validate_c989_transaction.py \
+            --workdir c989-work \
+            --expected-input-hashes c989-work/PRE_SOLVE_INPUT_SHA256.json \
+            --out c989-work/C9.89_SOLVE_TRANSACTION.json
+
+      - name: Reject post-solve input tampering
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp -a c989-work c989-tamper
+          printf '\n# deliberate C9.89 tamper\n' >> c989-tamper/c988.comm
+          set +e
+          python3 native-windows/c989-solve-transaction/validate_c989_transaction.py \
+            --workdir c989-tamper \
+            --expected-input-hashes c989-work/PRE_SOLVE_INPUT_SHA256.json \
+            --out c989-tamper/C9.89_TAMPER_REJECTION.json
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          python3 - <<'PY'
+          import json
+          p=json.load(open('c989-tamper/C9.89_TAMPER_REJECTION.json',encoding='utf-8'))
+          assert p['checks']['input_hash_lock_preserved'] is False
+          print('C9.89 tamper rejection: PASS')
+          PY
+
+      - name: Package transaction evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp -a c989-work/. artifact/ || true
+          cp C988_SOURCE_RUN_ID.txt artifact/ || true
+          if [ -d c989-tamper ]; then cp c989-tamper/C9.89_TAMPER_REJECTION.json artifact/ || true; fi
+          (cd artifact && find . -type f -print0 | sort -z | xargs -0 sha256sum) > artifact/SHA256.txt
+          cat > artifact/C9.89_STATUS.md <<'EOF'
+          # AsterMax C9.89 — Native Solve Transaction
+
+          This gate consumes the exact production deck emitted by a successful C9.88 native FeModel gate, locks all pre-solve hashes, executes real Code_Aster 15.2, requires a normal solver stop and non-empty MED/result outputs, binds output hashes to the native model fingerprint, and proves that post-solve input tampering invalidates the transaction.
+
+          It does not claim ANSYS numerical equivalence and does not invent FEA values.
+          EOF
+
+      - name: Upload C9.89 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.89-Native-Solve-Transaction
+          path: artifact
+          if-no-files-found: error
