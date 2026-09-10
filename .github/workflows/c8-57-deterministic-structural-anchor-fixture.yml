@@ -1,0 +1,69 @@
+name: C8.57 Deterministic Structural Anchor Fixture Windows
+
+on:
+  push:
+    branches: [agent/c8-57-deterministic-structural-anchor-fixture]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify C8.57 fixture contract
+        shell: pwsh
+        run: |
+          $layer=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxNativeVtkAnchorLayer.cs' -Raw
+          foreach($token in @('ASTERMAX_STRUCTURAL_ANCHOR_FIXTURE','BuildDeterministicFixtureModel','FIXTURE_FIXED','FIXTURE_FORCE_1000N_X','FIXED_SET','FORCE_SET','NodeSetName','100, 0, 0','fixture_runtime_verified','fixture_is_loaded_pmx_file')) {
+            if($layer -notmatch [regex]::Escape($token)){throw "Missing C8.57 fixture token: $token"}
+          }
+          foreach($token in @('CollectAnchorsFromModel','TryResolveFeAnchor','AsterMaxRegionBindingInspector','AddArrowWidget','RemoveArrowWidgets')) {
+            if($layer -notmatch [regex]::Escape($token)){throw "Missing production-path token: $token"}
+          }
+          if($layer -match 'solver_verified\s*[=:]\s*true|model_or_solver_evidence[^\n]*true'){throw 'C8.57 must not claim solver/model verification.'}
+      - name: Launch deterministic structural fixture proof
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $env:ASTERMAX_STRUCTURAL_ANCHOR_FIXTURE='1'
+          $env:ASTERMAX_VTK_ANCHOR_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.57_STRUCTURAL_FIXTURE_RUNTIME.json')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(30)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited early'}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          Start-Sleep -Seconds 4
+          if($p.HasExited){throw 'GUI exited during structural fixture proof'}
+          $runtimePath=$env:ASTERMAX_VTK_ANCHOR_EVIDENCE_PATH
+          if(-not (Test-Path $runtimePath)){throw 'C8.57 runtime evidence was not written.'}
+          $runtime=Get-Content $runtimePath -Raw | ConvertFrom-Json
+          if(-not $runtime.fixture_in_memory){throw 'Fixture was not identified as deterministic in-memory fixture.'}
+          if($runtime.fixture_is_loaded_pmx_file){throw 'C8.57 must not claim a PMX file was loaded.'}
+          if(-not $runtime.fixed_expected_xyz_verified){throw 'Fixed support expected XYZ was not verified.'}
+          if(-not $runtime.force_expected_xyz_verified){throw 'Force expected XYZ was not verified.'}
+          if(-not $runtime.fixture_runtime_verified){throw 'End-to-end fixture anchor runtime proof failed.'}
+          if([int]$runtime.native_arrow_widget_count -lt 2){throw 'Expected at least two native VTK widgets.'}
+          if($runtime.model_or_solver_evidence -or $runtime.solver_verified){throw 'Fixture proof must not be classified as solver/model evidence.'}
+          @{schema='astermax.structural-anchor-fixture.v1';commit='${{ github.sha }}';fixture_units='mm';fixed_expected_xyz=@(0,0,0);force_expected_xyz=@(100,0,0);production_region_resolver_path_exercised=$true;native_vtk_widget_path_exercised=$true;fixed_expected_xyz_verified=$true;force_expected_xyz_verified=$true;native_arrow_widget_count=[int]$runtime.native_arrow_widget_count;fixture_runtime_verified=$true;loaded_pmx_fixture_proven=$false;solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.57_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.57-Deterministic-Structural-Anchor-Fixture-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 14

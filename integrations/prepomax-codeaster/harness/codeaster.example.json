@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "case_name": "linear-static-3d-smoke",
+  "solver": "code_aster",
+  "job_name": "Job-1",
+  "working_directory": "./work/linear-static-3d-smoke",
+  "solver_executable": "as_run",
+  "timeout_seconds": 3600,
+  "min_input_bytes": 1,
+  "min_output_bytes": 1,
+  "environment": {},
+  "required_inputs": [
+    "Job-1.comm",
+    "Job-1.mail",
+    "Job-1.export"
+  ],
+  "required_outputs": [
+    "Job-1.mess",
+    "Job-1.rmed",
+    "Job-1.resu"
+  ],
+  "result_contract": {
+    "required_tables": [
+      "PPM_DEPL",
+      "PPM_STRESS_N",
+      "PPM_STRESS_S",
+      "PPM_STRAIN_N",
+      "PPM_STRAIN_S"
+    ],
+    "min_rows_per_table": 1
+  }
+}

@@ -1,0 +1,138 @@
+name: C8.35 Native scalar-bar contract
+
+on:
+  push:
+    branches:
+      - agent/c8-35-native-scalarbar-contract
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/c8-35-native-scalarbar-contract.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-35-native-scalarbar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  genuine-solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Genuine Code_Aster 17.4.0 solve
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/codeaster-linear-tetra
+          docker pull simvia/code_aster:17.4.0
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.manifest.json
+      - name: Independent mm-N-MPa oracle
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/validate_numeric_reference.py \
+            --resu integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.resu \
+            --contract integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/c8-29-reference-contract.json
+      - name: Stage genuine evidence
+        shell: bash
+        run: |
+          mkdir -p artifact/genuine
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/{smoke.rmed,smoke.resu,smoke.mess,smoke.harness.json} artifact/genuine/
+          sha256sum artifact/genuine/* > artifact/genuine/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c8-35-genuine-${{ github.sha }}
+          path: artifact/genuine/**
+          if-no-files-found: error
+
+  windows-native-scalarbar:
+    needs: genuine-solve
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: c8-35-genuine-${{ github.sha }}
+          path: genuine
+      - name: Bootstrap pinned AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+      - name: Launch Results scene and gate native scalar-bar contract
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $rmed=(Resolve-Path 'genuine/smoke.rmed').Path
+          $resu=(Resolve-Path 'genuine/smoke.resu').Path
+          New-Item -ItemType Directory -Force 'artifact/c8-35' | Out-Null
+          $ready=(Join-Path $PWD 'artifact/c8-35/RESULTS_DEMO_READY.json')
+          $stdout=(Join-Path $PWD 'artifact/c8-35/results-demo.stdout.log')
+          $stderr=(Join-Path $PWD 'artifact/c8-35/results-demo.stderr.log')
+          $p=Start-Process -FilePath $exe -ArgumentList @('--astermax-results-demo',$rmed,$resu,$ready) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $deadline=(Get-Date).AddSeconds(45)
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if($p.HasExited){
+              Write-Host (Get-Content $stdout -Raw -ErrorAction SilentlyContinue)
+              Write-Host (Get-Content $stderr -Raw -ErrorAction SilentlyContinue)
+              throw "C8.35 demo exited before READY. ExitCode=$($p.ExitCode)"
+            }
+          } while(-not (Test-Path $ready) -and (Get-Date) -lt $deadline)
+          if(-not (Test-Path $ready)){ throw 'Timed out waiting for C8.35 READY marker.' }
+          $state=Get-Content $ready -Raw | ConvertFrom-Json
+          if(-not $state.scene_ready -or -not $state.result_admitted -or -not $state.native_draw_invoked){ throw 'Results scene admission is incomplete.' }
+          if($state.view -ne 'Results' -or $state.view_results_type -ne 'ColorContours'){ throw 'Results/ColorContours state was not retained.' }
+          if($state.field -ne 'STRESS' -or $state.component -ne 'MISES'){ throw 'C8.35 did not select STRESS/MISES.' }
+          if(-not $state.native_scalar_bar_control_found){ throw 'Native vtkControl was not found in the live form.' }
+          if(-not $state.native_scalar_bar_method_invoked){ throw 'SetScalarBarColorSpectrum was not invoked.' }
+          if(-not $state.native_scalar_bar_automatic_range_contract){ throw 'Native scalar-bar automatic range contract was not retained.' }
+          $expectedMises=1.0392304845413265
+          if([Math]::Abs([double]$state.mises_max_mpa-$expectedMises) -gt 1e-5){ throw "Mises oracle mismatch: $($state.mises_max_mpa)" }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - name: Emit content-addressed C8.35 evidence
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $ready=(Resolve-Path 'artifact/c8-35/RESULTS_DEMO_READY.json').Path
+          $state=Get-Content $ready -Raw | ConvertFrom-Json
+          @{
+            schema='astermax.c8-35-native-scalarbar-contract.v1'
+            commit='${{ github.sha }}'
+            solver='Code_Aster 17.4.0'
+            unit_system='mm-N-MPa'
+            genuine_solve=$true
+            numerical_oracle=$true
+            selected_field='STRESS/MISES'
+            native_draw_invoked=$true
+            native_scalar_bar_control_found=[bool]$state.native_scalar_bar_control_found
+            native_scalar_bar_method_invoked=[bool]$state.native_scalar_bar_method_invoked
+            native_scalar_bar_automatic_range_contract=[bool]$state.native_scalar_bar_automatic_range_contract
+            executable_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            rmed_sha256=(Get-FileHash genuine/smoke.rmed -Algorithm SHA256).Hash.ToLowerInvariant()
+            resu_sha256=(Get-FileHash genuine/smoke.resu -Algorithm SHA256).Hash.ToLowerInvariant()
+            ready_state_sha256=(Get-FileHash $ready -Algorithm SHA256).Hash.ToLowerInvariant()
+            native_scalar_bar_semantically_verified=$false
+            probe_visual_verified=$false
+            contour_pixels_semantically_verified=$false
+            industrial_validation=$false
+            ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content artifact/c8-35/C8_35_EVIDENCE.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.35-native-scalarbar-contract-${{ github.sha }}
+          path: artifact/c8-35/**
+          if-no-files-found: error
+          retention-days: 14

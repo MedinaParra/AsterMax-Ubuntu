@@ -1,0 +1,209 @@
+name: C8.78 One Click Professional Demo Contract
+
+on:
+  push:
+    branches: [agent/c8-78-one-click-professional-demo-contract]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-78-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-demo-contract:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      actions: read
+    env:
+      C876_RUN_ID: '34004247235'
+      C876_PACKAGE_SHA256: '43068b02f6356de6dfd56666dcbdf7d3da1d1b0799157c233990d7f479833f65'
+      C865_RUN_ID: '33963671896'
+      C865_SHA: '86b123a2df7a481a06451358e299bac69db2b7e4'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch exact admitted package and solver evidence
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source/package,source/windows,source/solve,artifact/c8-78 | Out-Null
+          gh run download $env:C876_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.76-x64-Demo-Package-d2a16ff08e9552e1f4a172f8f7978b086f30425e" --dir source/package
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "C8.65-Windows-Generated-Study-$env:C865_SHA" --dir source/windows
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.65-Product-Native-Reaction-$env:C865_SHA" --dir source/solve
+
+          $zip=Get-ChildItem source/package -Recurse -Filter 'AsterMax-Mechanical-PMV-x64.zip'|Select-Object -First 1
+          $c876=Get-ChildItem source/package -Recurse -Filter 'C8_76_X64_PACKAGE_EVIDENCE.json'|Select-Object -First 1
+          $pmx=Get-ChildItem source/windows -Recurse -Filter 'AsterMax_C862_Structural.pmx'|Select-Object -First 1
+          $rmed=Get-ChildItem source/solve -Recurse -Filter 'astermax_c862_static.rmed'|Select-Object -First 1
+          $resu=Get-ChildItem source/solve -Recurse -Filter 'astermax_c862_static.resu'|Select-Object -First 1
+          $prior=Get-ChildItem source/solve -Recurse -Filter 'C8.65_PRODUCT_NATIVE_REACTION_EVIDENCE.json'|Select-Object -First 1
+          if(-not $zip -or -not $c876 -or -not $pmx -or -not $rmed -or -not $resu -or -not $prior){throw 'C8.78 source evidence incomplete.'}
+
+          $zipHash=(Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($zipHash -ne $env:C876_PACKAGE_SHA256){throw "C8.78 source ZIP hash mismatch: $zipHash"}
+          $pkg=Get-Content $c876.FullName -Raw|ConvertFrom-Json
+          $solve=Get-Content $prior.FullName -Raw|ConvertFrom-Json
+          if(-not $pkg.x64_solution_alignment_verified -or -not $pkg.deterministic_normal_shutdown_verified){throw 'C8.76 package contract not admitted.'}
+          if(-not $solve.solver_verified -or -not $solve.result_field_values_verified -or -not $solve.reaction_equilibrium_verified){throw 'C8.65 solver contract not admitted.'}
+          if((Get-FileHash $pmx.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$pkg.pmx_sha256){throw 'C8.78 PMX provenance mismatch.'}
+          if((Get-FileHash $rmed.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$pkg.rmed_sha256){throw 'C8.78 RMED provenance mismatch.'}
+          if((Get-FileHash $resu.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$pkg.resu_sha256){throw 'C8.78 RESU provenance mismatch.'}
+          "C878_ZIP=$($zip.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C878_PMX=$($pmx.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C878_RMED=$($rmed.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C878_RESU=$($resu.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C878_PRIOR=$($prior.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Assemble read-only one-click demo package
+        shell: pwsh
+        run: |
+          $stage=Join-Path $PWD 'artifact/c8-78/package/AsterMax-Mechanical-PMV-Demo'
+          New-Item -ItemType Directory -Force $stage,(Join-Path $stage 'DemoData'),(Join-Path $stage 'Logs')|Out-Null
+          $tmp=Join-Path $env:RUNNER_TEMP 'c878-source-bin'
+          if(Test-Path $tmp){Remove-Item $tmp -Recurse -Force}
+          Expand-Archive -LiteralPath $env:C878_ZIP -DestinationPath $tmp -Force
+          $exe=Get-ChildItem $tmp -Recurse -Filter PrePoMax.exe|Select-Object -First 1
+          if(-not $exe){throw 'C8.78 source package missing PrePoMax.exe.'}
+          Copy-Item (Join-Path $exe.Directory.FullName '*') $stage -Recurse -Force
+          Copy-Item $env:C878_PMX (Join-Path $stage 'DemoData/AsterMax_C862_Structural.pmx') -Force
+          Copy-Item $env:C878_RMED (Join-Path $stage 'DemoData/astermax_c862_static.rmed') -Force
+          Copy-Item $env:C878_RESU (Join-Path $stage 'DemoData/astermax_c862_static.resu') -Force
+          Copy-Item integrations/prepomax-codeaster/demo/Launch-AsterMax-Demo.ps1 $stage -Force
+          Copy-Item integrations/prepomax-codeaster/demo/Launch-AsterMax-Demo.cmd $stage -Force
+
+          $solve=Get-Content $env:C878_PRIOR -Raw|ConvertFrom-Json
+          $contract=@{
+            schema='astermax.c8.78.one-click-demo-contract.v1';source_package_sha256=$env:C876_PACKAGE_SHA256;source_solver_run=[long]$env:C865_RUN_ID
+            dataset=@{
+              pmx=@{path='DemoData/AsterMax_C862_Structural.pmx';sha256=(Get-FileHash (Join-Path $stage 'DemoData/AsterMax_C862_Structural.pmx') -Algorithm SHA256).Hash.ToLowerInvariant()}
+              rmed=@{path='DemoData/astermax_c862_static.rmed';sha256=(Get-FileHash (Join-Path $stage 'DemoData/astermax_c862_static.rmed') -Algorithm SHA256).Hash.ToLowerInvariant()}
+              resu=@{path='DemoData/astermax_c862_static.resu';sha256=(Get-FileHash (Join-Path $stage 'DemoData/astermax_c862_static.resu') -Algorithm SHA256).Hash.ToLowerInvariant()}
+            }
+            expected=@{node_count=[int]$solve.node_count;element_count=2474;max_von_mises_mpa=[double]$solve.max_von_mises_mpa;max_displacement_mm=[double]$solve.max_displacement_mm;max_von_mises_node=[int]$solve.max_von_mises_node;max_displacement_node=[int]$solve.max_displacement_node}
+            units='mm-N-MPa';field='STRESS/MISES';deformation='UserDefined x10';industrial_validation=$false;ansys_equivalence=$false
+          }
+          $contract|ConvertTo-Json -Depth 8|Set-Content (Join-Path $stage 'demo-contract.json') -Encoding UTF8
+          @'
+          AsterMax Mechanical PMV — One-click verified demo
+
+          Double-click Launch-AsterMax-Demo.cmd.
+          The launcher validates the bundled solver evidence by SHA-256 before starting AsterMax.
+          Logs and READY evidence are written only under the local Logs folder.
+
+          Demo claim boundary:
+          - solver/result/reaction evidence is pinned from the admitted C8.65 study;
+          - viewport deformation x10 and Results presentation are previously qualified;
+          - industrial_validation=false;
+          - ansys_equivalence=false.
+          '@ | Set-Content (Join-Path $stage 'README-DEMO.txt') -Encoding UTF8
+
+          Get-ChildItem (Join-Path $stage 'DemoData') -File | ForEach-Object { $_.IsReadOnly=$true }
+          $files=Get-ChildItem $stage -File -Recurse|Sort-Object FullName
+          $manifest=@($files|ForEach-Object{[pscustomobject]@{path=$_.FullName.Substring($stage.Length+1).Replace('\','/');bytes=$_.Length;sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();read_only=$_.IsReadOnly}})
+          $manifest|ConvertTo-Json -Depth 5|Set-Content artifact/c8-78/C8_78_PACKAGE_MANIFEST.json -Encoding UTF8
+          Compress-Archive -Path "$stage\*" -DestinationPath artifact/c8-78/AsterMax-Mechanical-PMV-OneClick-Demo.zip -CompressionLevel Optimal
+          $hash=(Get-FileHash artifact/c8-78/AsterMax-Mechanical-PMV-OneClick-Demo.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash|Set-Content artifact/c8-78/AsterMax-Mechanical-PMV-OneClick-Demo.zip.sha256 -Encoding ascii
+          @{schema='astermax.c8.78.package-build.v1';commit='${{ github.sha }}';one_click_launcher=$true;dataset_bundled=$true;dataset_read_only=$true;dataset_hash_gate=$true;logs_local_only=$true;package_file_count=@($files).Count;package_zip_sha256=$hash;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json|Set-Content artifact/c8-78/C8_78_PACKAGE_BUILD_EVIDENCE.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.78-OneClick-Demo-${{ github.sha }}
+          path: artifact/c8-78/**
+          if-no-files-found: error
+          retention-days: 14
+
+  qualify-one-click-on-fresh-windows:
+    needs: package-demo-contract
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      # Deliberately no repository checkout, build, NuGet restore, MSBuild setup or Python setup.
+      - uses: actions/download-artifact@v4
+        with:
+          name: AsterMax-C8.78-OneClick-Demo-${{ github.sha }}
+          path: incoming
+
+      - name: Extract package outside workspace and clear CI-only AsterMax variables
+        shell: pwsh
+        run: |
+          $zip=Get-ChildItem incoming -Recurse -Filter 'AsterMax-Mechanical-PMV-OneClick-Demo.zip'|Select-Object -First 1
+          $sha=Get-ChildItem incoming -Recurse -Filter 'AsterMax-Mechanical-PMV-OneClick-Demo.zip.sha256'|Select-Object -First 1
+          if(-not $zip -or -not $sha){throw 'C8.78 downloadable package incomplete.'}
+          $expected=(Get-Content $sha.FullName -Raw).Trim().ToLowerInvariant()
+          $actual=(Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $expected){throw 'C8.78 downloadable package ZIP hash mismatch.'}
+          $root=Join-Path $env:RUNNER_TEMP 'AsterMax One Click Demo Qualification'
+          if(Test-Path $root){Remove-Item $root -Recurse -Force}
+          New-Item -ItemType Directory -Force $root|Out-Null
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $root -Force
+          $cmd=Get-ChildItem $root -Recurse -Filter 'Launch-AsterMax-Demo.cmd'|Select-Object -First 1
+          if(-not $cmd){throw 'One-click launcher missing from extracted demo.'}
+          Get-ChildItem Env: | Where-Object {$_.Name -like 'ASTERMAX_*'} | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+          "C878_ROOT=$($cmd.Directory.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C878_CMD=$($cmd.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Execute actual CMD launcher and qualify self-contained contract
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class C878Win {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd,out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
+          if(Get-ChildItem Env:|Where-Object{$_.Name -like 'ASTERMAX_*'}){throw 'CI AsterMax variables unexpectedly remain before launcher execution.'}
+          $logs=Join-Path $env:C878_ROOT 'Logs'
+          if(Test-Path $logs){Get-ChildItem $logs -Force|Remove-Item -Recurse -Force}
+          $cmdProc=Start-Process cmd.exe -ArgumentList @('/d','/c',('"'+$env:C878_CMD+'"')) -WorkingDirectory $env:C878_ROOT -PassThru
+          $deadline=(Get-Date).AddSeconds(90);$app=$null;$ready=$null
+          while((Get-Date)-lt $deadline){
+            Start-Sleep -Milliseconds 400
+            $app=Get-Process -Name PrePoMax -ErrorAction SilentlyContinue|Select-Object -First 1
+            $ready=Get-ChildItem $logs -Filter 'READY-*.json' -ErrorAction SilentlyContinue|Select-Object -First 1
+            if($app -and $ready){break}
+            if($cmdProc.HasExited){throw "One-click CMD exited before READY with code $($cmdProc.ExitCode)"}
+          }
+          if(-not $app -or -not $ready){throw 'One-click launcher did not reach a live Results READY state.'}
+          $s=Get-Content $ready.FullName -Raw|ConvertFrom-Json
+          if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded){throw 'C8.78 launcher lost admitted full-model Results.'}
+          if(-not $s.rendered_viewport_deformation_verified -or [string]$s.deformation_state -ne 'user-defined-x10-contour'){throw 'C8.78 launcher lost qualified x10 viewport state.'}
+          if(-not $s.native_scalar_bar_semantically_verified){throw 'C8.78 launcher lost native scalar-bar semantics.'}
+
+          $windowDeadline=(Get-Date).AddSeconds(15)
+          do{Start-Sleep -Milliseconds 200;$app.Refresh()}while($app.MainWindowHandle -eq 0 -and -not $app.HasExited -and (Get-Date)-lt $windowDeadline)
+          if($app.MainWindowHandle -eq 0){throw 'C8.78 live demo has no capturable main window.'}
+          [C878Win]::SetForegroundWindow($app.MainWindowHandle)|Out-Null;Start-Sleep -Seconds 1
+          $r=New-Object C878Win+RECT
+          if(-not [C878Win]::GetWindowRect($app.MainWindowHandle,[ref]$r)){throw 'C8.78 GetWindowRect failed.'}
+          $w=$r.Right-$r.Left;$h=$r.Bottom-$r.Top
+          $bmp=New-Object Drawing.Bitmap($w,$h);$g=[Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)
+          $shot=Join-Path $logs 'C8.78-one-click-qualified.png';$bmp.Save($shot,[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+          if((Get-Item $shot).Length -lt 15000){throw 'C8.78 screenshot unexpectedly small.'}
+
+          if(-not $cmdProc.WaitForExit(120000)){Stop-Process -Id $cmdProc.Id -Force;throw 'One-click launcher did not terminate deterministically.'}
+          if($cmdProc.ExitCode -ne 0){throw "One-click CMD exit code $($cmdProc.ExitCode)"}
+          $launch=Get-Content (Join-Path $logs 'last-launch.json') -Raw|ConvertFrom-Json
+          if(-not $launch.dataset_verified -or -not $launch.result_admitted -or -not $launch.rendered_x10 -or [int]$launch.exit_code -ne 0){throw 'Launcher completion summary is not admitted.'}
+          $stderr=Get-Content (Join-Path $logs 'AsterMax-demo.stderr.log') -Raw -ErrorAction SilentlyContinue
+          if($stderr -match 'FileNotFoundException|DllNotFoundException|BadImageFormatException|AccessViolationException|FatalExecutionEngineError|SEHException'){throw 'C8.78 launcher emitted deployment/native failure signature.'}
+          Copy-Item $logs (Join-Path $PWD 'qualified-logs') -Recurse -Force
+          @{schema='astermax.c8.78.one-click-qualification.v1';commit='${{ github.sha }}';actual_cmd_launcher_executed=$true;ci_astermax_env_preseeded=$false;dataset_hash_verified_by_launcher=$true;full_model_results_admitted=$true;rendered_x10_verified=$true;scalar_bar_semantics_verified=$true;exit_code=0;logs_local_only=$true;screenshot_sha256=(Get-FileHash $shot -Algorithm SHA256).Hash.ToLowerInvariant();industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json|Set-Content qualified-logs/C8_78_ONE_CLICK_QUALIFICATION.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.78-OneClick-Qualification-${{ github.sha }}
+          path: qualified-logs/**
+          if-no-files-found: warn
+          retention-days: 14

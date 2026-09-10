@@ -1,0 +1,110 @@
+name: C8.61 Structural Model Setup Qualification Windows
+
+on:
+  push:
+    branches: [agent/c8-61-structural-model-setup-qualification]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify native structural setup contract
+        shell: pwsh
+        run: |
+          $controller=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/Controller.cs' -Raw
+          foreach($token in @('public void AddMaterial(Material material)','public void AddSection(Section section)','public void AddStep(Step step, bool copyBCsAndLoads)','public void AddBoundaryCondition(string stepName, BoundaryCondition boundaryCondition)','public void AddLoad(string stepName, Load load)','public void AddNodeSet(FeNodeSet nodeSet, bool update = true)')) {
+            if($controller -notmatch [regex]::Escape($token)){throw "Pinned Controller setup contract changed: $token"}
+          }
+          $h=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxStructuralSetupHarness.cs' -Raw
+          foreach($token in @('ASTERMAX_STRUCTURAL_SETUP_FIXTURE','new Material(materialName)','new Elastic','new SolidSection','new StaticStep','new FixedBC','new CLoad','model.CheckValidity','structural_setup_qualified')) {
+            if($h -notmatch [regex]::Escape($token)){throw "Missing C8.61 structural token: $token"}
+          }
+          if($h -match 'solver_verified\s*[=:]\s*true|industrial_validation\s*[=:]\s*true|ansys_equivalence\s*[=:]\s*true'){throw 'C8.61 must not synthesize solver or industrial validation.'}
+      - name: Fetch pinned CAD runtime and STEP fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $source=Join-Path $runtimeRoot $folder; if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.61_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres.'}
+          "ASTERMAX_STEP_FIXTURE=$((Resolve-Path $fixture).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Launch STEP mesh plus structural setup qualification
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public static class NativeWin61 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+          $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_STEP_FIXTURE
+          $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.61_STEP_NETGEN_RUNTIME.json')
+          $env:ASTERMAX_STRUCTURAL_SETUP_FIXTURE='1'
+          $env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.61_STRUCTURAL_SETUP_RUNTIME.json')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $meshEv=$env:ASTERMAX_STEP_MESH_EVIDENCE_PATH; $setupEv=$env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(180)
+          while(((-not (Test-Path $meshEv)) -or (-not (Test-Path $setupEv))) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during C8.61 runtime proof'}}
+          if(-not (Test-Path $meshEv)){throw 'C8.60 mesh prerequisite evidence missing.'}
+          if(-not (Test-Path $setupEv)){throw 'C8.61 setup evidence missing.'}
+          $m=Get-Content $meshEv -Raw | ConvertFrom-Json
+          $r=Get-Content $setupEv -Raw | ConvertFrom-Json
+          Write-Host '--- C8.61 setup evidence ---'; Get-Content $setupEv -Raw; Write-Host '--- end evidence ---'
+          if(-not $m.step_to_netgen_mesh_qualified){throw "STEP->mesh prerequisite failed: $($m.error)"}
+          if(-not $r.native_fe_mesh_present -or -not $r.material_added -or -not $r.solid_section_added -or -not $r.static_step_added){throw "Structural definition incomplete: $($r.error)"}
+          if(-not $r.fixed_support_added -or -not $r.fixed_region_nonempty){throw "Fixed support gate failed: $($r.error)"}
+          if(-not $r.load_added -or -not $r.load_node_exists -or -not $r.fixed_and_load_regions_distinct){throw "Load region gate failed: $($r.error)"}
+          if(-not $r.model_check_validity_pass -or -not $r.structural_setup_qualified){throw "Native model validity gate failed: $($r.error)"}
+          if($r.solver_executed -or $r.solver_verified -or $r.industrial_validation -or $r.ansys_equivalence){throw 'C8.61 must remain pre-solve qualification.'}
+          [NativeWin61]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 3
+          $rect=New-Object NativeWin61+RECT; [NativeWin61]::GetWindowRect($p.MainWindowHandle,[ref]$rect)|Out-Null
+          $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
+          $bmp=New-Object Drawing.Bitmap $w,$h;$g=[Drawing.Graphics]::FromImage($bmp)
+          try{$g.CopyFromScreen($rect.Left,$rect.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
+          $png='artifact/C8.61_STRUCTURAL_MODEL_SETUP.png';$bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png);$bmp.Dispose()
+          @{schema='astermax.structural-model-setup-qualification.v1';commit='${{ github.sha }}';mesh_node_count=[int]$m.mesh_node_count;mesh_element_count=[int]$m.mesh_element_count;material_added=$true;solid_section_added=$true;static_step_added=$true;fixed_support_added=$true;fixed_node_count=[int]$r.fixed_node_count;load_added=$true;load_node_id=[int]$r.load_node_id;fixed_and_load_regions_distinct=$true;model_check_validity_pass=$true;structural_setup_qualified=$true;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.61_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.61-Structural-Model-Setup-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: warn
+          retention-days: 14
