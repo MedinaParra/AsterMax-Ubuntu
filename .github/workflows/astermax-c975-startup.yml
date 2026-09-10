@@ -235,6 +235,7 @@ jobs:
             ASTERMAX_RUNTIME_STEP.json.vtk.png.txt
             ASTERMAX_RUNTIME_STEP.json.vtk.png.opengl.txt
             ASTERMAX_RUNTIME_STEP.json.vtk.png.base.png
+            FRAMEBUFFER_VALIDATION.json
           if-no-files-found: warn
 
       - name: Package rebuilt application binaries

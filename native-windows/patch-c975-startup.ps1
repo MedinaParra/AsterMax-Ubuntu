@@ -194,3 +194,56 @@ $replace=@'
 '@
 $v=$v.Replace($anchor,$replace)
 Set-Content $vtkPath $v -Encoding UTF8
+
+
+# Load the application-owned OpenGL implementation before the CLR touches VTK.
+# The native VTK wrappers live in lib; their altered DLL search path can skip the EXE folder.
+$programPath=Join-Path $Root 'PrePoMax/Program.cs'
+$p=Get-Content $programPath -Raw
+$anchor='        static void Main(string[] args)'
+$bootstrap=@'
+        static void Main(string[] args)
+        {
+            try {
+                string driver = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "opengl32.dll");
+                if (!System.IO.File.Exists(driver))
+                    throw new System.IO.FileNotFoundException("The graphics runtime is missing. Extract the complete AsterMax package.", driver);
+                IntPtr handle = LoadLibraryEx(driver, IntPtr.Zero, 0x00000008);
+                if (handle == IntPtr.Zero)
+                    throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error(),
+                        "AsterMax could not load its OpenGL runtime.");
+                AsterMaxSmokeTrace.Stage(args, "opengl_preloaded_" + driver);
+                RunApplication(args);
+            } catch (Exception ex) {
+                AsterMaxSmokeTrace.Stage(args, "bootstrap_failed_" + ex.ToString());
+                if (String.IsNullOrWhiteSpace(AsterMaxSmokeTrace.GetReportPath(args)))
+                    MessageBox.Show(ex.Message, "AsterMax Mechanical", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Environment.ExitCode = 1;
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibraryEx(string fileName, IntPtr file, uint flags);
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void RunApplication(string[] args)
+'@
+if(-not $p.Contains($anchor)){throw 'Native graphics bootstrap anchor missing'}
+Set-Content $programPath ($p.Replace($anchor,$bootstrap)) -Encoding UTF8
+
+$v=Get-Content $vtkPath -Raw
+$anchor='            System.IO.File.WriteAllText(path + ".opengl.txt", _renderWindow.ReportCapabilities());'
+$replace=@'
+            string graphicsModules = "";
+            foreach (System.Diagnostics.ProcessModule module in System.Diagnostics.Process.GetCurrentProcess().Modules)
+                if (module.ModuleName.IndexOf("opengl", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    module.ModuleName.IndexOf("gallium", StringComparison.OrdinalIgnoreCase) >= 0)
+                    graphicsModules += Environment.NewLine + module.FileName;
+            System.IO.File.WriteAllText(path + ".opengl.txt", _renderWindow.ReportCapabilities() + graphicsModules);
+'@
+if(-not $v.Contains($anchor)){throw 'OpenGL diagnostics anchor missing'}
+Set-Content $vtkPath ($v.Replace($anchor,$replace)) -Encoding UTF8
+$ui=Get-Content $uiPath -Raw
+$ui=$ui.Replace('Code_Aster ready path','CAD / Mesh preview')
+$ui=$ui.Replace('Native PMV','CAD / Mesh Preview')
+Set-Content $uiPath $ui -Encoding UTF8
