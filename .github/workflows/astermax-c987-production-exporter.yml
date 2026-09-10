@@ -1,0 +1,75 @@
+name: AsterMax C9.87 Production Exporter Fidelity
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/Export-AsterMaxCodeAster.ps1'
+      - 'native-windows/c987-production-exporter/**'
+      - '.github/workflows/astermax-c987-production-exporter.yml'
+  workflow_dispatch:
+
+jobs:
+  production-exporter-fidelity:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build deterministic production model contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'; New-Item -ItemType Directory -Force artifact | Out-Null
+          $nodes=@(); for($i=1;$i -le 24;$i++){ $nodes += [ordered]@{id=$i;x=[double](($i-1)%4)*10;y=[double]([math]::Floor((($i-1)%8)/4))*10;z=[double]([math]::Floor(($i-1)/8))*10} }
+          $elements=@(
+            [ordered]@{id=1;nodes=@(1,2,6,5,9,10,14,13)},
+            [ordered]@{id=2;nodes=@(2,3,7,6,10,11,15,14)},
+            [ordered]@{id=3;nodes=@(3,4,8,7,11,12,16,15)}
+          )
+          $model=[ordered]@{
+            schema='astermax-model-contract/v0'; name='C987-production-exporter'; unit_system='MM_N_S_MPA'; analysis=[ordered]@{type='static_structural'}
+            mesh=[ordered]@{element_type='HEXA8';nodes=$nodes;elements=$elements;node_groups=[ordered]@{FIXED=@(1,5,9,13);LOAD=@(2..24)}}
+            materials=@([ordered]@{name='Steel';young_modulus_mpa=210000.0;poisson=0.3})
+            supports=@([ordered]@{name='Fixed-1';group='FIXED';dx=0.0;dy=0.0;dz=0.0})
+            loads=@([ordered]@{name='Force-1';group='LOAD';fx_total_n=0.0;fy_total_n=-115.0;fz_total_n=0.0})
+            postprocess=[ordered]@{displacement_probe_group='LOAD'}
+          }
+          $model|ConvertTo-Json -Depth 12|Set-Content artifact\c987.model.json -Encoding UTF8
+      - name: Run production exporter
+        shell: pwsh
+        run: .\native-windows\Export-AsterMaxCodeAster.ps1 -ModelPath artifact\c987.model.json -OutDir artifact\deck
+      - name: Gate wrapped GROUP_NO records
+        shell: pwsh
+        run: |
+          $mail=Get-Content artifact\deck\c987.model.mail
+          if(-not ($mail -contains 'NOM = LOAD')){throw 'Explicit GROUP_NO NOM record missing'}
+          $idx=[array]::IndexOf($mail,'NOM = LOAD'); $max=0
+          for($i=$idx+1;$i -lt $mail.Count -and $mail[$i] -ne 'FINSF';$i++){ $n=($mail[$i].Trim() -split '\s+').Count; if($n -gt $max){$max=$n} }
+          if($max -gt 16){throw "GROUP_NO wrap regression: $max ids on one record"}
+          "max_group_ids_per_record=$max"|Set-Content artifact\group-wrap.txt
+      - name: Production semantic equivalence positive gate
+        shell: pwsh
+        run: python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.model.mail --comm artifact\deck\c987.model.comm --adapter artifact\deck\c987.model.adapter.json --out artifact\C9.87_VALIDATION.json
+      - name: Reject material tamper
+        shell: pwsh
+        run: |
+          Copy-Item artifact\deck\c987.model.comm artifact\tampered-material.comm
+          (Get-Content artifact\tampered-material.comm -Raw).Replace('E=210000','E=205000')|Set-Content artifact\tampered-material.comm -Encoding UTF8
+          python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.model.mail --comm artifact\tampered-material.comm --adapter artifact\deck\c987.model.adapter.json --out artifact\C9.87_TAMPER_MATERIAL.json
+          if($LASTEXITCODE -eq 0){throw 'Material tamper was incorrectly accepted'}
+          exit 0
+      - name: Reject load tamper
+        shell: pwsh
+        run: |
+          Copy-Item artifact\deck\c987.model.comm artifact\tampered-load.comm
+          (Get-Content artifact\tampered-load.comm -Raw).Replace('FY=-5','FY=-4.5')|Set-Content artifact\tampered-load.comm -Encoding UTF8
+          python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.model.mail --comm artifact\tampered-load.comm --adapter artifact\deck\c987.model.adapter.json --out artifact\C9.87_TAMPER_LOAD.json
+          if($LASTEXITCODE -eq 0){throw 'Load tamper was incorrectly accepted'}
+          exit 0
+      - name: Package evidence
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem artifact -Recurse -File|Get-FileHash -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C9.87-Production-Exporter-Fidelity
+          path: artifact
+          if-no-files-found: error
