@@ -1,10 +1,24 @@
-name: AsterMax C9.92 Windows Startup + Viewport Build
+name: AsterMax C9.97 Windows Professional Demo Build
 
 on:
   push:
     branches: [ main ]
     paths:
       - '.github/workflows/astermax-c990-windows-build.yml'
+      - 'native-windows/patch-c965-results-workspace.ps1'
+      - 'native-windows/patch-c966-results-scene.ps1'
+      - 'native-windows/patch-c967-vtk-results-binding.ps1'
+      - 'native-windows/patch-c968-professional-results-hud.ps1'
+      - 'native-windows/patch-c969-renderer-synchronized-results.ps1'
+      - 'native-windows/patch-c970-native-3d-probe.ps1'
+      - 'native-windows/patch-c971-native-probe-callout.ps1'
+      - 'native-windows/patch-c972-native-framebuffer-evidence.ps1'
+      - 'native-windows/patch-c974-solver-provenance.ps1'
+      - 'native-windows/patch-c975-analysis-provenance-manifest.ps1'
+      - 'native-windows/patch-c976-automatic-model-fingerprint.ps1'
+      - 'native-windows/patch-c977-pre-solve-readiness.ps1'
+      - 'native-windows/patch-c978-assignment-hexa8-quality.ps1'
+      - 'native-windows/patch-c985-model-fidelity-gate.ps1'
       - 'native-windows/patch-c991-startup-hardening.ps1'
       - 'native-windows/patch-c992-startup-viewport.ps1'
   workflow_dispatch:
@@ -12,7 +26,7 @@ on:
 jobs:
   windows-x64-release:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
       - name: Checkout pinned PrePoMax upstream
@@ -21,17 +35,53 @@ jobs:
           repository: tsvilans/PrePoMax
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
-      - name: Apply AsterMax production patches
+
+      - name: Apply AsterMax production + professional demo patches
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-analysis-provenance-manifest.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c977-pre-solve-readiness.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c978-assignment-hexa8-quality.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c985-model-fidelity-gate.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c991-startup-hardening.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c992-startup-viewport.ps1 -Root "$PWD\upstream"
+
+      - name: Gate professional demo source composition
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $forms = Join-Path $PWD 'upstream\PrePoMax\Forms'
+          $required = @(
+            'AsterMaxResultsWorkspace.cs',
+            'AsterMaxResultsScene.cs',
+            'AsterMaxVtkResultsBinding.cs'
+          )
+          foreach($f in $required){
+            if(-not (Test-Path (Join-Path $forms $f))){ throw "Professional demo source missing: $f" }
+          }
+          $ui = Get-Content (Join-Path $forms 'AsterMaxNativeUi.cs') -Raw
+          foreach($token in @('Results Explorer','FEA Viewport')){
+            if(-not $ui.Contains($token)){ throw "Professional UI command missing: $token" }
+          }
+          $vtk = Get-Content (Join-Path $forms 'AsterMaxVtkResultsBinding.cs') -Raw
+          foreach($token in @('vtkMaxActorData','AddCells','DeformedCoordinates','Connectivity')){
+            if(-not $vtk.Contains($token)){ throw "VTK binding contract missing: $token" }
+          }
+          Write-Host 'PROFESSIONAL_DEMO_SOURCE_GATE=PASS'
+
       - name: Restore packages
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -39,6 +89,7 @@ jobs:
       - name: Rebuild AsterMax Mechanical Windows x64 Release
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
       - name: ModelTree constructor smoke gate
         shell: pwsh
         run: |
@@ -69,7 +120,8 @@ jobs:
           Set-Content $smoke $script -Encoding UTF8
           & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $smoke
           if($LASTEXITCODE -ne 0){ throw "ModelTree smoke gate failed: $LASTEXITCODE" }
-      - name: Stage distributable runtime
+
+      - name: Stage distributable professional demo runtime
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -80,7 +132,7 @@ jobs:
           Copy-Item "$bin\*" .\dist\ -Recurse -Force
           $exeHash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C9.92.2'
+            release='C9.97'
             platform='Windows x64'
             configuration='Release'
             upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571'
@@ -88,14 +140,25 @@ jobs:
             executable_sha256=$exeHash
             startup_hardening=$true
             modeltree_constructor_gate='PASS'
-            vtk_post_chrome_relayout=$true
+            professional_results_workspace=$true
+            vtk_real_result_binding=$true
+            result_probe=$true
+            provenance_ui=$true
+            automatic_model_fingerprint=$true
+            pre_solve_readiness=$true
+            hexa8_quality_gate=$true
+            model_fidelity_gate=$true
+            solver_backend='Code_Aster'
+            unit_contract='MM_N_S_MPA'
             fea_values_invented=$false
-            note='Restores ModelTree internal key compatibility, validates constructor in STA, and recalculates VTK bounds after AsterMax chrome.'
+            ansys_equivalence='NOT_PROVEN'
+            note='Integrated Windows demo build: verified model preparation gates plus professional real-result VTK/probe/provenance stack. No synthetic FEA values are generated.'
           } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
           Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
           Write-Host "EXE_SHA256=$exeHash"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.92.2-Windows-x64-Release
+          name: AsterMax-C9.97-Windows-x64-Professional-Demo
           path: dist
           if-no-files-found: error
