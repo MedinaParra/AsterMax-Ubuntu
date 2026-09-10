@@ -4,6 +4,10 @@ on:
   push:
     branches: [ main ]
     paths:
+      - 'native-windows/patch-astermax.ps1'
+      - 'native-windows/patch-branding.ps1'
+      - 'native-windows/patch-c965-results-workspace.ps1'
+      - 'native-windows/patch-c976-automatic-model-fingerprint.ps1'
       - 'native-windows/patch-c985-model-fidelity-gate.ps1'
       - '.github/workflows/astermax-c985-model-fidelity.yml'
   workflow_dispatch:
@@ -81,19 +85,21 @@ jobs:
             stale_material_blocked=$materialRejected
             restored_model_allowed=$freshAgain
           }
-          $out=[ordered]@{release='C9.85';title='Native FeModel Fidelity Gate';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));model_fingerprint_sha256=$sha;fea_values_invented=$false;fresh_solver_run='NOT_RUN';truth_boundary='C9.85 proves a compiled Windows AsterMax gate can block Solve when the real in-memory FeModel changes after fingerprint capture. It does not yet prove automatic Code_Aster deck equivalence.'}
-          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.85_VALIDATION.json -Encoding UTF8
+          $out=[ordered]@{release='C9.85.1';title='Native FeModel Fidelity Gate';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));model_fingerprint_sha256=$sha;fea_values_invented=$false;fresh_solver_run='NOT_RUN';truth_boundary='C9.85.1 proves a compiled Windows AsterMax gate can block Solve when the real in-memory FeModel changes after fingerprint capture. It does not yet prove automatic Code_Aster deck equivalence.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.85.1_VALIDATION.json -Encoding UTF8
           $out|ConvertTo-Json -Depth 6|Write-Host
-          if(-not $out.pass){throw 'C9.85 FeModel fidelity gate failed'}
+          if(-not $out.pass){throw 'C9.85.1 FeModel fidelity gate failed'}
       - name: Package evidence
         if: always()
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item .\native-windows\patch-c985-model-fidelity-gate.ps1 artifact\ -Force
+          Copy-Item .\native-windows\patch-c976-automatic-model-fingerprint.ps1 artifact\ -Force
           Get-FileHash artifact\* -Algorithm SHA256|Format-Table -AutoSize|Out-String|Set-Content artifact\SHA256.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C9.85-Native-FeModel-Fidelity
+          name: AsterMax-C9.85.1-Native-FeModel-Fidelity
           path: artifact
           if-no-files-found: error
