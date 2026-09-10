@@ -35,15 +35,31 @@ jobs:
       - name: Run production exporter
         shell: pwsh
         run: .\native-windows\Export-AsterMaxCodeAster.ps1 -ModelPath artifact\c987.model.json -OutDir artifact\deck
-      - name: Gate wrapped GROUP_NO records
+      - name: Gate validated ASTER GROUP_NO wrapping
         shell: pwsh
         run: |
           $mail=Get-Content artifact\deck\c987.mail
-          if(-not ($mail -contains 'NOM = LOAD')){throw 'Explicit GROUP_NO NOM record missing'}
-          $idx=[array]::IndexOf($mail,'NOM = LOAD'); $max=0
-          for($i=$idx+1;$i -lt $mail.Count -and $mail[$i] -ne 'FINSF';$i++){ $n=($mail[$i].Trim() -split '\s+').Count; if($n -gt $max){$max=$n} }
-          if($max -gt 16){throw "GROUP_NO wrap regression: $max ids on one record"}
-          "max_group_ids_per_record=$max"|Set-Content artifact\group-wrap.txt
+          $found=$false; $max=0
+          for($g=0;$g -lt $mail.Count;$g++){
+            if($mail[$g].Trim() -ne 'GROUP_NO'){continue}
+            $i=$g+1
+            if($i -ge $mail.Count){continue}
+            $first=($mail[$i].Trim() -split '\s+')
+            if($first.Count -lt 2){continue}
+            if($first[0] -eq 'LOAD'){
+              $found=$true
+              $n=$first.Count-1; if($n -gt $max){$max=$n}
+              $i++
+              while($i -lt $mail.Count -and $mail[$i].Trim() -ne 'FINSF'){
+                $n=(($mail[$i].Trim() -split '\s+')).Count
+                if($n -gt $max){$max=$n}
+                $i++
+              }
+            }
+          }
+          if(-not $found){throw 'LOAD GROUP_NO block missing'}
+          if($max -gt 16){throw "GROUP_NO wrap regression: $max node ids on one record"}
+          "aster_group_syntax=GROUP_NO/name-plus-N#;max_group_ids_per_record=$max"|Set-Content artifact\group-wrap.txt
       - name: Production semantic equivalence positive gate
         shell: pwsh
         run: python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.mail --comm artifact\deck\c987.comm --adapter artifact\deck\c987.adapter.json --out artifact\C9.87_VALIDATION.json
