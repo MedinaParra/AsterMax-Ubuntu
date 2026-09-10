@@ -2,16 +2,16 @@ param([string]$Root)
 $ErrorActionPreference='Stop'
 $p=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 $ui=Get-Content $p -Raw
-$anchor='            Controls.Add(ribbon);'
+$anchor='            ribbon.TabPages.Add(BuildRibbonPage("Connections", new Control[] {'
 $tabs=@'
-            ribbon.TabPages.Insert(3, BuildRibbonPage("Materiales", new Control[] {
+            ribbon.TabPages.Add(BuildRibbonPage("Materiales", new Control[] {
                 CommandTile("Biblioteca", "MATERIALES", () => AsterMaxMaterialAction(() => tsmiMaterialLibrary_Click(null, EventArgs.Empty)), true),
                 CommandTile("Nuevo material", "MATERIALES", () => AsterMaxMaterialAction(() => tsmiCreateMaterial_Click(null, EventArgs.Empty))),
                 CommandTile("Editar material", "MATERIALES", () => AsterMaxMaterialAction(() => tsmiEditMaterial_Click(null, EventArgs.Empty))),
                 CommandTile("Asignar a pieza", "SECCION SOLIDA", () => AsterMaxMaterialAction(() => tsmiCreateSection_Click(null, EventArgs.Empty))),
                 InfoCard("Biblioteca > copiar al modelo > guardar. Luego asignar mediante una seccion solida.")
             }));
-            Controls.Add(ribbon);
+            ribbon.TabPages.Add(BuildRibbonPage("Connections", new Control[] {
 '@
 if(-not $ui.Contains($anchor)){throw 'Ribbon anchor missing'}
 $ui=$ui.Replace($anchor,$tabs)
@@ -109,3 +109,22 @@ $ui=$ui.Replace('                                "\"project_roundtrip\":true," +
 Set-Content $p $ui -Encoding UTF8
 $g=Join-Path $Root 'PrePoMax/Globals.cs'
 Set-Content $g ((Get-Content $g -Raw).Replace('AsterMax Mechanical C9.76','AsterMax Mechanical C9.76.1')) -Encoding UTF8
+
+$ui=Get-Content $p -Raw
+$anchor='                            AsterMaxSmokeTrace.Stage(_args, "project_roundtrip_passed");'
+$replacement=@'
+                            TabControl materialRibbon = Controls.Find("asterMaxRibbon", true)[0] as TabControl;
+                            TabPage materialPage = null;
+                            foreach (TabPage page in materialRibbon.TabPages)
+                                if (page.Text == "Materiales") materialPage = page;
+                            if (materialPage == null) throw new Exception("Materiales ribbon page is missing");
+                            materialRibbon.SelectedTab = materialPage;
+                            materialRibbon.PerformLayout();
+                            materialRibbon.Refresh();
+                            if (materialRibbon.SelectedTab != materialPage || !materialPage.Visible)
+                                throw new Exception("Materiales ribbon page is not visible");
+                            AsterMaxSmokeTrace.Stage(_args, "materials_ribbon_visible");
+                            AsterMaxSmokeTrace.Stage(_args, "project_roundtrip_passed");
+'@
+if(-not $ui.Contains($anchor)){throw 'Visible material ribbon smoke anchor missing'}
+Set-Content $p ($ui.Replace($anchor,$replacement)) -Encoding UTF8
