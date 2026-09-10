@@ -120,133 +120,72 @@ namespace PrePoMax
             }
             root["materials"] = materials;
 
-            Step selectedStep = null;
-            if (model.StepCollection != null && model.StepCollection.StepsList != null)
-                selectedStep = model.StepCollection.StepsList.FirstOrDefault(s => s is StaticStep && s.RunAnalysis);
-            if (selectedStep == null)
-                throw new NotSupportedException("C9.60 bridge requires an enabled StaticStep.");
-
             JArray supports = new JArray();
-            foreach (var entry in selectedStep.BoundaryConditions)
-            {
-                BoundaryCondition bc = entry.Value;
-                if (bc is FixedBC)
-                {
-                    supports.Add(new JObject
-                    {
-                        ["name"] = bc.Name,
-                        ["group"] = bc.RegionName,
-                        ["type"] = "fixed_support",
-                        ["dx"] = 0.0,
-                        ["dy"] = 0.0,
-                        ["dz"] = 0.0,
-                        ["source_type"] = "FixedBC"
-                    });
-                }
-                else
-                {
-                    supports.Add(new JObject
-                    {
-                        ["name"] = bc.Name,
-                        ["source_type"] = bc.GetType().Name,
-                        ["unsupported_for_code_aster_adapter_v0"] = true
-                    });
-                }
-            }
-            root["supports"] = supports;
-
             JArray loads = new JArray();
-            string firstLoadGroup = null;
-            foreach (var entry in selectedStep.Loads)
+            int stepCount = 0;
+            foreach (Step step in model.StepCollection.StepsList)
             {
-                Load load = entry.Value;
-                CLoad cload = load as CLoad;
-                if (cload == null)
+                if (step is InitialStep) continue;
+                stepCount++;
+                foreach (var bcEntry in step.BoundaryConditions)
                 {
-                    loads.Add(new JObject
+                    FixedBC fixedBc = bcEntry.Value as FixedBC;
+                    if (fixedBc != null)
                     {
-                        ["name"] = load.Name,
-                        ["source_type"] = load.GetType().Name,
-                        ["unsupported_for_code_aster_adapter_v0"] = true
-                    });
-                    continue;
+                        string group = RegionToNodeGroup(model, fixedBc.RegionName, fixedBc.RegionType, nodeGroups);
+                        supports.Add(new JObject { ["name"] = fixedBc.Name, ["type"] = "fixed", ["group"] = group, ["dx"] = 0.0, ["dy"] = 0.0, ["dz"] = 0.0 });
+                    }
+                    else supports.Add(new JObject { ["name"] = bcEntry.Value.Name, ["type"] = bcEntry.Value.GetType().Name, ["unsupported_for_code_aster_adapter_v0"] = true });
                 }
-
-                string group;
-                int multiplicity;
-                if (cload.RegionType == RegionTypeEnum.NodeId)
+                foreach (var loadEntry in step.Loads)
                 {
-                    group = "ASTERMAX_NODE_" + cload.NodeId;
-                    multiplicity = 1;
-                    if (nodeGroups[group] == null) nodeGroups[group] = new JArray("N" + cload.NodeId);
+                    CLoad cload = loadEntry.Value as CLoad;
+                    if (cload != null)
+                    {
+                        string group = RegionToNodeGroup(model, cload.RegionName, cload.RegionType, nodeGroups);
+                        loads.Add(new JObject
+                        {
+                            ["name"] = cload.Name,
+                            ["type"] = "nodal_force_total",
+                            ["group"] = group,
+                            ["fx_total_n"] = cload.F1.Value,
+                            ["fy_total_n"] = cload.F2.Value,
+                            ["fz_total_n"] = cload.F3.Value
+                        });
+                    }
+                    else loads.Add(new JObject { ["name"] = loadEntry.Value.Name, ["type"] = loadEntry.Value.GetType().Name, ["unsupported_for_code_aster_adapter_v0"] = true });
                 }
-                else
-                {
-                    group = cload.RegionName;
-                    FeNodeSet nodeSet;
-                    if (String.IsNullOrWhiteSpace(group) || !model.Mesh.NodeSets.TryGetValue(group, out nodeSet) || nodeSet.Labels == null)
-                        throw new NotSupportedException("CLoad region must resolve to an FE node set for Code_Aster adapter v0.");
-                    multiplicity = nodeSet.Labels.Length;
-                }
-                if (firstLoadGroup == null) firstLoadGroup = group;
-                loads.Add(new JObject
-                {
-                    ["name"] = cload.Name,
-                    ["group"] = group,
-                    ["type"] = "total_nodal_force",
-                    ["source_semantics"] = "PrePoMax_CLoad_per_node",
-                    ["node_count"] = multiplicity,
-                    ["fx_per_node_n"] = cload.F1,
-                    ["fy_per_node_n"] = cload.F2,
-                    ["fz_per_node_n"] = cload.F3,
-                    ["fx_total_n"] = cload.F1 * multiplicity,
-                    ["fy_total_n"] = cload.F2 * multiplicity,
-                    ["fz_total_n"] = cload.F3 * multiplicity
-                });
             }
+            if (stepCount != 1) throw new NotSupportedException("C9.60 native bridge v0 requires exactly one non-initial analysis step.");
+            root["analysis"] = new JObject { ["type"] = "static_structural", ["step_count"] = stepCount };
+            root["supports"] = supports;
             root["loads"] = loads;
-            root["analysis"] = new JObject
-            {
-                ["type"] = "static_structural",
-                ["source_step"] = selectedStep.Name,
-                ["nlgeom"] = selectedStep.Nlgeom
-            };
-            root["postprocess"] = new JObject
-            {
-                ["displacement_probe_group"] = firstLoadGroup,
-                ["stress_fields"] = new JArray("SIGM_ELNO", "SIEQ_ELNO"),
-                ["export_med"] = true,
-                ["policy"] = "requested_outputs_only_not_fea_results"
-            };
-            root["validation"] = new JObject
-            {
-                ["node_count"] = model.Mesh.Nodes.Count,
-                ["element_count"] = model.Mesh.Elements.Count,
-                ["material_count"] = model.Materials.Count,
-                ["support_count"] = supports.Count,
-                ["load_count"] = loads.Count,
-                ["no_fea_results_claimed"] = true
-            };
+            root["postprocess"] = new JObject { ["displacement_probe_group"] = loads.Count > 0 ? (string)loads[0]["group"] : null };
             return root;
         }
 
-        public static string Export(FeModel model, string fileName)
+        public static void Export(FeModel model, string fileName)
         {
             JObject contract = Build(model);
-            string json = contract.ToString(Formatting.Indented);
-            File.WriteAllText(fileName, json);
-            return json;
+            File.WriteAllText(fileName, contract.ToString(Formatting.Indented), new System.Text.UTF8Encoding(false));
         }
 
         private static string GetElementType(FeElement e)
         {
             if (e is LinearHexaElement) return "HEXA8";
-            if (e is ParabolicHexaElement) return "HEXA20";
             if (e is LinearTetraElement) return "TETRA4";
             if (e is ParabolicTetraElement) return "TETRA10";
-            if (e is LinearWedgeElement) return "PENTA6";
-            if (e is ParabolicWedgeElement) return "PENTA15";
-            throw new NotSupportedException("Unsupported solid element for C9.60 bridge: " + e.GetType().Name);
+            return e.GetType().Name;
+        }
+
+        private static string RegionToNodeGroup(FeModel model, string regionName, RegionTypeEnum regionType, JObject nodeGroups)
+        {
+            if (regionType == RegionTypeEnum.NodeSetName)
+            {
+                if (nodeGroups[regionName] == null) throw new InvalidOperationException("Node group not found: " + regionName);
+                return regionName;
+            }
+            throw new NotSupportedException("C9.60 native bridge v0 currently requires node-set scoping for fixed BCs and nodal loads. Region: " + regionName + " / " + regionType);
         }
     }
 }
@@ -258,6 +197,7 @@ $ui = @'
 using System;
 using System.IO;
 using System.Windows.Forms;
+using CaeGlobals;
 
 namespace PrePoMax
 {
@@ -303,22 +243,28 @@ if(-not $proj.Contains('AsterMaxModelContractBridge.cs')) {
     Set-Content $projPath $proj -Encoding UTF8
 }
 
+# Modern AsterMax ribbon compatibility. Older C9.60 used a one-line prototype ribbon;
+# current PMV uses the professional CommandTile/StateCard layout. Preserve both paths.
 $nativeUi = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 if(Test-Path $nativeUi) {
     $text = Get-Content $nativeUi -Raw
-    $old = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] { InfoChip("Code_Aster adapter: next integration gate") }));'
-    if($text.Contains($old)) {
-        $new = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] {' + [Environment]::NewLine +
-               '                CommandButton("Export Solver Contract", () => ExportAsterMaxModelContract()),' + [Environment]::NewLine +
-               '                InfoChip("Code_Aster | model contract v0 | no synthetic results")' + [Environment]::NewLine +
-               '            }));'
-        $text = $text.Replace($old, $new)
+    if(-not $text.Contains('Export Solver Contract')) {
+        $legacy = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] { InfoChip("Code_Aster adapter: next integration gate") }));'
+        if($text.Contains($legacy)) {
+            $replacement = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] {' + [Environment]::NewLine +
+                           '                CommandButton("Export Solver Contract", () => ExportAsterMaxModelContract()),' + [Environment]::NewLine +
+                           '                InfoChip("Code_Aster | model contract v0 | no synthetic results")' + [Environment]::NewLine +
+                           '            }));'
+            $text = $text.Replace($legacy, $replacement)
+        } else {
+            $modern = '                StateCard("Solver", "Code_Aster integration path"),'
+            if(-not $text.Contains($modern)){ throw 'C9.60/C10.00 Solution ribbon anchor not found.' }
+            $insert = '                CommandTile("Export Solver Contract", "SOLVER", () => ExportAsterMaxModelContract(), true),' + [Environment]::NewLine + $modern
+            $text = $text.Replace($modern,$insert)
+        }
         Set-Content $nativeUi $text -Encoding UTF8
-    }
-    elseif(-not $text.Contains('Export Solver Contract')) {
-        throw 'C9.60 Solution ribbon anchor not found.'
     }
 }
 else { throw 'AsterMaxNativeUi.cs missing; apply native UI patch before C9.60 bridge.' }
 
-Write-Host 'C9.60 native FeModel -> solver contract bridge injected.' -ForegroundColor Green
+Write-Host 'C9.60 native FeModel -> solver contract bridge injected (professional ribbon compatible).' -ForegroundColor Green
