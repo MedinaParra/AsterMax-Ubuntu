@@ -1,0 +1,86 @@
+name: AsterMax C9.93 ANSYS Evidence Gate
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c993-ansys-evidence/**'
+      - '.github/workflows/astermax-c993-ansys-evidence.yml'
+  workflow_dispatch:
+
+jobs:
+  evidence-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Comparator arithmetic self-test
+        run: python3 native-windows/c993-ansys-evidence/validate_ansys_evidence.py --self-test
+      - name: Reject synthetic ANSYS evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/fake.json <<'JSON'
+          {
+            "schema":"astermax-ansys-reference/v1",
+            "benchmark_id":"B01",
+            "solver":{"product":"ANSYS Mechanical","version":"TEST"},
+            "provenance":{"independent":true,"synthetic":true,"fea_values_invented":false,"source_kind":"ANSYS_EXPORT","source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+            "model_contract":{"units":{"length":"mm","force":"N","stress":"MPa"},"contract_sha256":"test","mesh":{"nodes":1,"elements":1}},
+            "results":{"Ux":{"value":1.0,"unit":"mm"}}
+          }
+          JSON
+          if python3 native-windows/c993-ansys-evidence/validate_ansys_evidence.py --ansys /tmp/fake.json; then
+            echo 'ERROR: synthetic reference was accepted'
+            exit 1
+          fi
+          echo 'SYNTHETIC_REFERENCE_REJECTION=PASS'
+      - name: Reject non-independent evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/nonindependent.json <<'JSON'
+          {
+            "schema":"astermax-ansys-reference/v1",
+            "benchmark_id":"B01",
+            "solver":{"product":"ANSYS Mechanical","version":"TEST"},
+            "provenance":{"independent":false,"synthetic":false,"fea_values_invented":false,"source_kind":"ANSYS_REPORT","source_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+            "model_contract":{"units":{"length":"mm","force":"N","stress":"MPa"},"contract_sha256":"test","mesh":{"nodes":1,"elements":1}},
+            "results":{"Ux":{"value":1.0,"unit":"mm"}}
+          }
+          JSON
+          if python3 native-windows/c993-ansys-evidence/validate_ansys_evidence.py --ansys /tmp/nonindependent.json; then
+            echo 'ERROR: non-independent reference was accepted'
+            exit 1
+          fi
+          echo 'NONINDEPENDENT_REFERENCE_REJECTION=PASS'
+      - name: Reject source hash mismatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'real-file-content' > /tmp/source.txt
+          cat > /tmp/hashmismatch.json <<'JSON'
+          {
+            "schema":"astermax-ansys-reference/v1",
+            "benchmark_id":"B01",
+            "solver":{"product":"ANSYS Mechanical","version":"TEST"},
+            "provenance":{"independent":true,"synthetic":false,"fea_values_invented":false,"source_kind":"ANSYS_EXPORT","source_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+            "model_contract":{"units":{"length":"mm","force":"N","stress":"MPa"},"contract_sha256":"test","mesh":{"nodes":1,"elements":1}},
+            "results":{"Ux":{"value":1.0,"unit":"mm"}}
+          }
+          JSON
+          if python3 native-windows/c993-ansys-evidence/validate_ansys_evidence.py --ansys /tmp/hashmismatch.json --evidence-file /tmp/source.txt; then
+            echo 'ERROR: hash mismatch was accepted'
+            exit 1
+          fi
+          echo 'SOURCE_HASH_REJECTION=PASS'
+      - name: Assert project equivalence remains blocked without real ANSYS evidence
+        run: |
+          python3 - <<'PY'
+          import json
+          p='native-windows/ansys-equivalence-harness-v0.json'
+          d=json.load(open(p))
+          assert d['current_verdict']=='NOT_PROVEN'
+          assert d['scientific_integrity']['ansys_results_invented'] is False
+          print('ANSYS_EQUIVALENCE=NOT_PROVEN')
+          print('C9.93_EVIDENCE_GATE_BEHAVIOR=PASS')
+          PY
