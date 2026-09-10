@@ -1,0 +1,135 @@
+name: AsterMax C9.99 Native Solve-to-Results Transaction
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c999-native-solve-results/**'
+      - 'native-windows/bind-c998-results-fingerprint.py'
+      - 'native-windows/bridge-c964-med-results.py'
+      - '.github/workflows/astermax-c999-native-solve-results.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  solve-to-results:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v5
+
+      - name: Acquire latest successful C9.89 real solve transaction
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          RUN_ID="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow astermax-c989-native-solve-transaction.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          test -n "$RUN_ID"
+          echo "$RUN_ID" > C989_SOURCE_RUN_ID.txt
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name AsterMax-C9.89-Native-Solve-Transaction --dir c989-source
+          test -s c989-source/C9.89_SOLVE_TRANSACTION.json
+          test -s c989-source/c988.rmed
+
+      - name: Install MED bridge Python dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check --quiet numpy h5py
+
+      - name: Bridge the exact real MED into AsterMax results
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p c999-work artifact
+          cp c989-source/c988.rmed c999-work/c988.rmed
+          cp c989-source/C9.89_SOLVE_TRANSACTION.json c999-work/
+          python3 native-windows/bridge-c964-med-results.py \
+            c999-work/c988.rmed \
+            c999-work/results-unbound.json \
+            c999-work/results.vtu | tee c999-work/C964_BRIDGE_STDOUT.log
+          test -s c999-work/results-unbound.json
+          test -s c999-work/results.vtu
+
+      - name: Bind results to the exact C9.89 FeModel fingerprint
+        shell: bash
+        run: |
+          set -euxo pipefail
+          FP="$(python3 - <<'PY'
+          import json
+          d=json.load(open('c999-work/C9.89_SOLVE_TRANSACTION.json',encoding='utf-8'))
+          print(d['model_fingerprint'])
+          PY
+          )"
+          test "${#FP}" -eq 64
+          python3 native-windows/bind-c998-results-fingerprint.py \
+            c999-work/results-unbound.json "$FP" c999-work/results-bound.json | tee c999-work/C998_BIND_STDOUT.log
+
+      - name: Validate full solve-to-results digital thread
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 native-windows/c999-native-solve-results/validate_c999_full_transaction.py \
+            --transaction c999-work/C9.89_SOLVE_TRANSACTION.json \
+            --bundle c999-work/results-bound.json \
+            --med c999-work/c988.rmed \
+            --vtu c999-work/results.vtu \
+            --out c999-work/C9.99_FULL_TRANSACTION.json
+
+      - name: Prove stale-result rejection semantics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp c999-work/results-bound.json c999-work/results-stale.json
+          python3 - <<'PY'
+          import json
+          p='c999-work/results-stale.json'
+          d=json.load(open(p,encoding='utf-8'))
+          d['integrity']['model_fingerprint_sha256']='0'*64
+          open(p,'w',encoding='utf-8').write(json.dumps(d,indent=2,sort_keys=True)+'\n')
+          PY
+          set +e
+          python3 native-windows/c999-native-solve-results/validate_c999_full_transaction.py \
+            --transaction c999-work/C9.89_SOLVE_TRANSACTION.json \
+            --bundle c999-work/results-stale.json \
+            --med c999-work/c988.rmed \
+            --vtu c999-work/results.vtu \
+            --out c999-work/C9.99_STALE_REJECTION.json
+          rc=$?
+          set -e
+          test "$rc" -ne 0
+          python3 - <<'PY'
+          import json
+          d=json.load(open('c999-work/C9.99_STALE_REJECTION.json',encoding='utf-8'))
+          assert d['checks']['bundle_matches_solve_fingerprint'] is False
+          assert d['solution_state'] == 'SOLUTION_UNTRUSTED'
+          print('C9.99 STALE rejection: PASS')
+          PY
+
+      - name: Package auditable evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp -a c999-work/. artifact/ || true
+          cp C989_SOURCE_RUN_ID.txt artifact/ || true
+          (cd artifact && find . -type f -print0 | sort -z | xargs -0 sha256sum) > artifact/SHA256.txt
+          cat > artifact/C9.99_STATUS.md <<'EOF'
+          # AsterMax C9.99 — Native Solve-to-Results Transaction
+
+          This evidence consumes a successful C9.89 transaction produced by a real Code_Aster 15.2 execution, bridges the exact MED file to an AsterMax results bundle and VTU, binds that bundle to the exact native FeModel fingerprint, validates the complete identity chain, and proves that a mismatched fingerprint is rejected as stale/untrusted.
+
+          No FEA values are invented or altered by C9.99. ANSYS numerical equivalence remains NOT_PROVEN.
+          EOF
+
+      - name: Upload C9.99 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.99-Native-Solve-to-Results-Evidence
+          path: artifact
+          if-no-files-found: error
