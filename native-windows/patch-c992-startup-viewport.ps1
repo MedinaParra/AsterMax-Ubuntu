@@ -87,4 +87,11 @@ if(Test-Path $ui) {
     throw 'AsterMax native UI partial not found; apply patch-astermax.ps1 before C9.92'
 }
 
-Write-Host 'C9.92.3 ModelTree identity + viewport hardening applied.' -ForegroundColor Green
+# 3) Clean-install workspace repair. STEP/CAD import requires a valid work directory even before
+# any solver execution. Delegate to the dedicated C9.99 patch so the workspace policy stays isolated.
+$self = Split-Path -Parent $MyInvocation.MyCommand.Path
+$c999 = Join-Path $self 'patch-c999-portable-workspace-step.ps1'
+if(-not (Test-Path $c999)){ throw 'C9.99 portable workspace patch missing' }
+& $c999 -Root $Root
+
+Write-Host 'C9.99 ModelTree + viewport + portable workspace hardening applied.' -ForegroundColor Green
