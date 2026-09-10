@@ -1,0 +1,2 @@
+C8.47 Professional Results Workspace validation trigger.
+This marker intentionally changes no solver logic.

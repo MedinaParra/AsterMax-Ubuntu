@@ -1,0 +1,159 @@
+name: C8.74 Rendered Viewport Deformation Qualification
+
+on:
+  push:
+    branches: [agent/c8-74-rendered-viewport-deformation-qualification]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-74-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-rendered-viewport-deformation:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    env:
+      C865_RUN_ID: '33963671896'
+      C865_SHA: '86b123a2df7a481a06451358e299bac69db2b7e4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Pin exact solver-verified evidence
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force prior/windows,prior/solve | Out-Null
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "C8.65-Windows-Generated-Study-$env:C865_SHA" --dir prior/windows
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.65-Product-Native-Reaction-$env:C865_SHA" --dir prior/solve
+          $pmx=Get-ChildItem prior/windows -Recurse -Filter 'AsterMax_C862_Structural.pmx'|Select-Object -First 1
+          $rmed=Get-ChildItem prior/solve -Recurse -Filter 'astermax_c862_static.rmed'|Select-Object -First 1
+          $resu=Get-ChildItem prior/solve -Recurse -Filter 'astermax_c862_static.resu'|Select-Object -First 1
+          $ev=Get-ChildItem prior/solve -Recurse -Filter 'C8.65_PRODUCT_NATIVE_REACTION_EVIDENCE.json'|Select-Object -First 1
+          if(-not $pmx -or -not $rmed -or -not $resu -or -not $ev){throw 'Pinned evidence bundle incomplete.'}
+          $e=Get-Content $ev.FullName -Raw|ConvertFrom-Json
+          if(-not $e.solver_verified -or -not $e.result_field_values_verified -or -not $e.reaction_equilibrium_verified){throw 'Source solve is not admitted.'}
+          "C874_PMX=$($pmx.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_RMED=$($rmed.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_RESU=$($resu.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_PRIOR=$($ev.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_NODES=$($e.node_count)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_MISES=$($e.max_von_mises_mpa.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_DISP=$($e.max_displacement_mm.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_MISES_NODE=$($e.max_von_mises_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C874_DISP_NODE=$($e.max_displacement_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Bootstrap and apply C8.66-C8.74 qualification chain
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_full_model_results_demo.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_results_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_clean_verified_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_extrema_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_native_node_probe_qualification.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_deformation_geometry.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_render_mesh_deformation_qualification.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_native_deformation_ui_qualification.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_native_deformation_ui_evidence_fix.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_rendered_viewport_deformation_qualification.py build/PrePoMax-CodeAster
+
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Run fail-closed rendered viewport qualification and capture
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeWindowC874 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
+          New-Item -ItemType Directory -Force artifact/c8-74|Out-Null
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $ready=(Join-Path $PWD 'artifact/c8-74/RESULTS_RENDERED_VIEWPORT_READY.json')
+          $stdout=(Join-Path $PWD 'artifact/c8-74/results.stdout.log')
+          $stderr=(Join-Path $PWD 'artifact/c8-74/results.stderr.log')
+          $env:ASTERMAX_RESULTS_FULL_MODEL_PMX=$env:C874_PMX
+          $env:ASTERMAX_RESULTS_EXPECTED_NODES=$env:C874_NODES
+          $env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS='2474'
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX=$env:C874_MISES
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX=$env:C874_DISP
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE=$env:C874_MISES_NODE
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE=$env:C874_DISP_NODE
+          $p=Start-Process $exe -ArgumentList @('--astermax-results-demo',$env:C874_RMED,$env:C874_RESU,$ready) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $deadline=(Get-Date).AddSeconds(90)
+          while(-not(Test-Path $ready) -and (Get-Date)-lt $deadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){Get-Content $stderr -ErrorAction SilentlyContinue;throw "Results process exited early: $($p.ExitCode)"}}
+          if(-not(Test-Path $ready)){throw 'Timed out waiting for Results READY.'}
+          $s=Get-Content $ready -Raw|ConvertFrom-Json
+          if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded){throw 'Full-model Results gate failed.'}
+          if(-not [bool]$s.deformation_ui_scale_selector_verified -or [string]$s.deformation_state -ne 'user-defined-x10-contour'){throw 'C8.73 deformation UI prerequisite lost.'}
+          if(-not [bool]$s.rendered_viewport_deformation_verified){throw 'C8.74 rendered viewport deformation gate failed.'}
+          if([int]$s.rendered_viewport_contour_actor_count -lt 1 -or [long]$s.rendered_viewport_contour_point_count -lt 1){throw 'No visible rendered contour geometry admitted.'}
+          if([double]$s.rendered_viewport_point_mesh_max_error_mm -gt 1e-6){throw "Rendered VTK point/mesh mismatch: $($s.rendered_viewport_point_mesh_max_error_mm) mm"}
+          if([double]$s.rendered_viewport_required_extrema_max_error_mm -gt 1e-6){throw "Rendered extrema-node mismatch: $($s.rendered_viewport_required_extrema_max_error_mm) mm"}
+          if(-not [bool]$s.native_scalar_bar_semantically_verified){throw 'Native scalar bar semantic gate lost.'}
+
+          $windowDeadline=(Get-Date).AddSeconds(20)
+          do{Start-Sleep -Milliseconds 250;$p.Refresh()}while($p.MainWindowHandle -eq 0 -and -not $p.HasExited -and (Get-Date)-lt $windowDeadline)
+          if($p.HasExited -or $p.MainWindowHandle -eq 0){throw 'No live AsterMax native window for capture.'}
+          [NativeWindowC874]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
+          Start-Sleep -Seconds 2
+          $r=New-Object NativeWindowC874+RECT
+          if(-not [NativeWindowC874]::GetWindowRect($p.MainWindowHandle,[ref]$r)){throw 'GetWindowRect failed.'}
+          $w=$r.Right-$r.Left;$h=$r.Bottom-$r.Top
+          if($w -lt 640 -or $h -lt 480){throw "Window too small: ${w}x${h}"}
+          $bmp=New-Object Drawing.Bitmap($w,$h)
+          $g=[Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)
+          $png=(Join-Path $PWD 'artifact/c8-74/AsterMax-C8.74-rendered-x10-verified.png')
+          $bmp.Save($png,[Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose();$bmp.Dispose()
+          if((Get-Item $png).Length -lt 15000){throw 'Native Results screenshot unexpectedly small.'}
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+
+      - name: Emit C8.74 evidence
+        shell: pwsh
+        run: |
+          $s=Get-Content artifact/c8-74/RESULTS_RENDERED_VIEWPORT_READY.json -Raw|ConvertFrom-Json
+          $prior=Get-Content $env:C874_PRIOR -Raw|ConvertFrom-Json
+          @{
+            schema='astermax.c8.74.rendered-viewport-deformation.v2';commit='${{ github.sha }}';source_solver_run=[long]$env:C865_RUN_ID;source_solver_commit=$env:C865_SHA
+            solver_verified=[bool]$prior.solver_verified;result_fields_verified=[bool]$prior.result_field_values_verified;reaction_equilibrium_verified=[bool]$prior.reaction_equilibrium_verified
+            mesh_nodes=[int]$s.mesh_nodes;mesh_elements=2474;field='STRESS/MISES';unit='MPa'
+            deformation_state=[string]$s.deformation_state;deformation_ui_scale_selector_verified=[bool]$s.deformation_ui_scale_selector_verified;deformation_ui_final_scale=[double]$s.deformation_ui_final_scale
+            rendered_viewport_deformation_source=[string]$s.rendered_viewport_deformation_source
+            rendered_viewport_contour_actor_count=[int]$s.rendered_viewport_contour_actor_count
+            rendered_viewport_contour_point_count=[long]$s.rendered_viewport_contour_point_count
+            rendered_viewport_point_mesh_max_error_mm=[double]$s.rendered_viewport_point_mesh_max_error_mm
+            rendered_viewport_required_extrema_max_error_mm=[double]$s.rendered_viewport_required_extrema_max_error_mm
+            rendered_viewport_deformation_verified=[bool]$s.rendered_viewport_deformation_verified
+            native_scalar_bar_verified=[bool]$s.native_scalar_bar_semantically_verified
+            pmx_sha256=(Get-FileHash $env:C874_PMX -Algorithm SHA256).Hash.ToLowerInvariant();rmed_sha256=(Get-FileHash $env:C874_RMED -Algorithm SHA256).Hash.ToLowerInvariant();resu_sha256=(Get-FileHash $env:C874_RESU -Algorithm SHA256).Hash.ToLowerInvariant();screenshot_sha256=(Get-FileHash artifact/c8-74/AsterMax-C8.74-rendered-x10-verified.png -Algorithm SHA256).Hash.ToLowerInvariant()
+            screenshot_captured_after_render_gate=$true;industrial_validation=$false;ansys_equivalence=$false
+          }|ConvertTo-Json -Depth 6|Set-Content artifact/c8-74/C8_74_RENDERED_VIEWPORT_DEFORMATION_EVIDENCE.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.74-Rendered-Viewport-Deformation-${{ github.sha }}
+          path: artifact/c8-74/**
+          if-no-files-found: warn
+          retention-days: 14

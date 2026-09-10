@@ -1,0 +1,58 @@
+name: C8.54 Entity Coordinate Resolver Windows
+
+on:
+  push:
+    branches: [agent/c8-54-entity-coordinate-resolver]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify C8.54 step-aware coordinate contract
+        shell: pwsh
+        run: |
+          $src=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxRegionBindingInspector.cs' -Raw
+          foreach($token in @('ENTITY COORDINATE RESOLVER','StepCollection','StepsList','BoundaryConditions','Loads','ResolveAnchor','NodeSetName','ElementSetName','ReferencePointName','FE_CENTROID','SURFACE_TO_FACE_CENTROID_NOT_QUALIFIED','SELECTION_IDS_ARE_GEOMETRY_ENCODED','no viewport anchoring or solver verification inferred')) {
+            if($src -notmatch [regex]::Escape($token)){throw "Missing C8.54 token: $token"}
+          }
+          if($src -match 'solver_verified\s*=\s*true|entity_anchored\s*=\s*true|SurfaceName.*Resolved'){throw 'C8.54 must remain fail-closed for solver/entity/surface anchoring.'}
+          $upstreamModel=(Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/tsvilans/PrePoMax/3669e65581650e5d9d868aa761db9efd856f8571/CaeModel/FeModel.cs').Content
+          $upstreamStep=(Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/tsvilans/PrePoMax/3669e65581650e5d9d868aa761db9efd856f8571/CaeModel/Steps/Step.cs').Content
+          $upstreamNode=(Invoke-WebRequest -UseBasicParsing 'https://raw.githubusercontent.com/tsvilans/PrePoMax/3669e65581650e5d9d868aa761db9efd856f8571/CaeMesh/Nodes/FeNode.cs').Content
+          foreach($token in @('public StepCollection StepCollection','public FeMesh Mesh')){if($upstreamModel -notmatch [regex]::Escape($token)){throw "Pinned upstream FeModel contract moved: $token"}}
+          foreach($token in @('public OrderedDictionary<string, BoundaryCondition> BoundaryConditions','public OrderedDictionary<string, Load> Loads')){if($upstreamStep -notmatch [regex]::Escape($token)){throw "Pinned upstream Step contract moved: $token"}}
+          foreach($token in @('public double X','public double Y','public double Z')){if($upstreamNode -notmatch [regex]::Escape($token)){throw "Pinned upstream FeNode contract moved: $token"}}
+      - name: Native GUI smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(30)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited early'}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          @{schema='astermax.entity-coordinate-resolver.v1';title=$p.MainWindowTitle;step_aware_region_path=$true;fe_node_centroid_resolver=$true;fe_element_centroid_resolver=$true;node_set_resolver=$true;element_set_resolver=$true;reference_point_resolver=$true;surface_face_mapping_qualified=$false;selection_geometry_mapping_qualified=$false;viewport_projection_qualified=$false;entity_anchored_verified=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false;commit='${{ github.sha }}'}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.54_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.54-Entity-Coordinate-Resolver-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 14

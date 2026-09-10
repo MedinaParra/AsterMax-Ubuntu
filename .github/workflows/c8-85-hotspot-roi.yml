@@ -1,0 +1,76 @@
+name: C8.85 Hotspot ROI Qualification
+
+on:
+  push:
+    branches: [agent/c8-85-hotspot-roi-qualification]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-85-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-hotspot-roi:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact admitted C8.83 distributed-traction evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact/c8-85
+          gh run download 34033613470 \
+            --repo '${{ github.repository }}' \
+            --name 'AsterMax-C8.83-Distributed-Traction-Convergence-86302f91a4974eb1ae8b5a813d144c845589707c' \
+            --dir artifact/c8-85
+          test -s artifact/c8-85/C8.83_CONVERGENCE_QUALIFICATION.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('artifact/c8-85/C8.83_CONVERGENCE_QUALIFICATION.json')
+          j=json.loads(p.read_text(encoding='utf-8-sig'))
+          if j.get('solver')!='Code_Aster 17.4.0': raise SystemExit('solver provenance drift')
+          if j.get('unit_system')!='mm-N-MPa': raise SystemExit('unit-system drift')
+          if not j.get('all_reaction_balances_verified'): raise SystemExit('source reaction equilibrium not admitted')
+          if j.get('solution_convergence_admitted'): raise SystemExit('source unexpectedly claims convergence; C8.85 assumptions changed')
+          print('Pinned C8.83 source provenance PASS')
+          PY
+
+      - name: Qualify hotspot migration and persistent physical ROIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile integrations/prepomax-codeaster/tools/c8_85_hotspot_roi.py
+          python integrations/prepomax-codeaster/tools/c8_85_hotspot_roi.py artifact/c8-85 \
+            | tee artifact/c8-85/C8.85_ANALYSIS_STDOUT.log
+          test -s artifact/c8-85/C8.85_HOTSPOT_ROI.json
+          test -s artifact/c8-85/C8.85_TOPK_HOTSPOTS.csv
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          j=json.loads(Path('artifact/c8-85/C8.85_HOTSPOT_ROI.json').read_text())
+          if j['new_solver_results_generated']: raise SystemExit('C8.85 may not claim fresh solver results')
+          if j['mesh_adaptation_verified']: raise SystemExit('C8.85 may not claim adaptation before a new mesh exists')
+          if j['global_peak_stationary']: raise SystemExit('Expected global peak migration was not detected')
+          if not j['multi_roi_refinement_ready']: raise SystemExit('Persistent multi-ROI strategy not admitted')
+          if j['recommended_adaptive_strategy']!='multi_roi': raise SystemExit('Unexpected adaptation strategy')
+          print('Hotspot migration / multi-ROI admission PASS')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.85-Hotspot-ROI-${{ github.sha }}
+          path: |
+            artifact/c8-85/C8.85_HOTSPOT_ROI.json
+            artifact/c8-85/C8.85_TOPK_HOTSPOTS.csv
+            artifact/c8-85/C8.85_ANALYSIS_STDOUT.log
+          if-no-files-found: warn
+          retention-days: 14

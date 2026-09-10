@@ -1,0 +1,218 @@
+name: C8.38 Visual benchmark native postprocess
+
+on:
+  push:
+    branches:
+      - agent/c8-38-visual-native-postprocess
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/c8-38-visual-native-postprocess.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-38-visual-native-postprocess-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  genuine-visual-solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Genuine Code_Aster 17.4.0 visual solve
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra
+          docker pull simvia/code_aster:17.4.0
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/visual.harness.manifest.json
+      - name: Parse genuine nondegenerate VMIS evidence
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math, pathlib, re
+          p=pathlib.Path('integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/visual.resu')
+          text=p.read_text(encoding='utf-8', errors='replace')
+          i=text.find('PPM_MISES')
+          if i < 0: raise SystemExit('PPM_MISES table missing')
+          vals=[]; rows=[]; started=False
+          num=re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$')
+          node=re.compile(r'^(?:N)?(\d+)$', re.I)
+          for raw in text[i:].splitlines()[1:]:
+              line=raw.strip()
+              if not line:
+                  if started: break
+                  continue
+              cols=[c.strip() for c in line.split(';')]
+              if len(cols)<2: continue
+              m=node.fullmatch(cols[0])
+              if not m: continue
+              numeric=[c for c in cols[1:] if num.fullmatch(c)]
+              if not numeric: raise SystemExit(f'VMIS row without value: {raw!r}')
+              v=float(numeric[-1])
+              if not math.isfinite(v): raise SystemExit('Non-finite VMIS')
+              vals.append(v); rows.append({'node':f'N{int(m.group(1))}','source_node_label':cols[0],'vmis_mpa':v}); started=True
+          if len(rows)!=5 or len({r['node'] for r in rows})!=5:
+              raise SystemExit(f'Expected exactly five VMIS nodes, got {rows}')
+          lo=min(vals); hi=max(vals); span=hi-lo; scale=max(1.0,abs(lo),abs(hi))
+          if span <= 1e-6*scale: raise SystemExit(f'Degenerate VMIS field: {lo}..{hi}')
+          out=pathlib.Path('artifact/genuine'); out.mkdir(parents=True, exist_ok=True)
+          evidence={
+            'schema':'astermax.c8-38-genuine-visual-field.v1',
+            'solver':'Code_Aster 17.4.0','unit_system':'mm-N-MPa',
+            'mesh_nodes':5,'mesh_elements':2,'mises_rows':rows,
+            'mises_min_mpa':lo,'mises_max_mpa':hi,'mises_span_mpa':span,
+            'nondegenerate_field':True,'result_source':'genuine Code_Aster RESU PPM_MISES',
+            'industrial_validation':False,'ansys_equivalence':False
+          }
+          (out/'C8_38_SOLVER_FIELD.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Stage genuine solver evidence
+        shell: bash
+        run: |
+          cp integrations/prepomax-codeaster/smoke/codeaster-visual-two-tetra/{visual.rmed,visual.resu,visual.mess,visual.harness.json} artifact/genuine/
+          sha256sum artifact/genuine/* > artifact/genuine/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c8-38-genuine-${{ github.sha }}
+          path: artifact/genuine/**
+          if-no-files-found: error
+
+  windows-native-postprocess:
+    needs: genuine-visual-solve
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: c8-38-genuine-${{ github.sha }}
+          path: genuine
+      - name: Bootstrap pinned AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){ exit $LASTEXITCODE }
+      - name: Admit genuine visual field and verify native postprocess
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $rmed=(Resolve-Path 'genuine/visual.rmed').Path
+          $resu=(Resolve-Path 'genuine/visual.resu').Path
+          New-Item -ItemType Directory -Force 'artifact/c8-38' | Out-Null
+          $ready=(Join-Path $PWD 'artifact/c8-38/RESULTS_DEMO_READY.json')
+          $stdout=(Join-Path $PWD 'artifact/c8-38/results-demo.stdout.log')
+          $stderr=(Join-Path $PWD 'artifact/c8-38/results-demo.stderr.log')
+          $p=Start-Process -FilePath $exe -ArgumentList @('--astermax-results-demo',$rmed,$resu,$ready) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $deadline=(Get-Date).AddSeconds(50)
+          do {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if($p.HasExited){
+              Write-Host (Get-Content $stdout -Raw -ErrorAction SilentlyContinue)
+              Write-Host (Get-Content $stderr -Raw -ErrorAction SilentlyContinue)
+              throw "C8.38 demo exited before READY. ExitCode=$($p.ExitCode)"
+            }
+          } while(-not (Test-Path $ready) -and (Get-Date) -lt $deadline)
+          if(-not (Test-Path $ready)){ throw 'Timed out waiting for C8.38 READY marker.' }
+
+          $state=Get-Content $ready -Raw | ConvertFrom-Json
+          $solver=Get-Content 'genuine/C8_38_SOLVER_FIELD.json' -Raw | ConvertFrom-Json
+          if($state.benchmark -ne 'C8.37-two-tetra-visual'){ throw "Wrong benchmark admitted: $($state.benchmark)" }
+          if(-not $state.scene_ready -or -not $state.result_admitted -or -not $state.native_draw_invoked){ throw 'Results scene admission incomplete.' }
+          if($state.mesh_nodes -ne 5 -or -not $state.mises_nondegenerate){ throw 'Visual mesh/nondegeneracy contract failed.' }
+          if($state.view -ne 'Results' -or $state.view_results_type -ne 'ColorContours'){ throw 'Results/ColorContours state not retained.' }
+          if($state.field -ne 'STRESS' -or $state.component -ne 'MISES'){ throw 'STRESS/MISES not selected.' }
+          if(-not $state.native_scalar_bar_range_matches_field -or -not $state.native_scalar_bar_semantically_verified){ throw 'Native scalar-bar numerical semantics failed.' }
+
+          $fieldMin=[double]$state.mises_min_mpa; $fieldMax=[double]$state.mises_max_mpa
+          $nativeMin=[double]$state.native_scalar_bar_min_mpa; $nativeMax=[double]$state.native_scalar_bar_max_mpa
+          $solverMin=[double]$solver.mises_min_mpa; $solverMax=[double]$solver.mises_max_mpa
+          $tol=1e-7*[Math]::Max(1.0,[Math]::Max([Math]::Abs($solverMin),[Math]::Abs($solverMax)))
+          if([Math]::Abs($fieldMin-$solverMin) -gt $tol -or [Math]::Abs($fieldMax-$solverMax) -gt $tol){
+            throw "FeResults range does not match genuine solver table. solver=[$solverMin,$solverMax] field=[$fieldMin,$fieldMax] tol=$tol"
+          }
+          if([Math]::Abs($nativeMin-$solverMin) -gt $tol -or [Math]::Abs($nativeMax-$solverMax) -gt $tol){
+            throw "Native LUT range does not match genuine solver table. solver=[$solverMin,$solverMax] native=[$nativeMin,$nativeMax] tol=$tol"
+          }
+
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeWin32 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+          }
+          '@
+          $p.Refresh()
+          if($p.MainWindowHandle -eq [IntPtr]::Zero){ throw 'No native main-window handle after READY.' }
+          $rect=New-Object NativeWin32+RECT
+          if(-not [NativeWin32]::GetWindowRect($p.MainWindowHandle,[ref]$rect)){ throw 'GetWindowRect failed.' }
+          $w=$rect.Right-$rect.Left; $h=$rect.Bottom-$rect.Top
+          if($w -lt 640 -or $h -lt 480){ throw "Implausible Results window ${w}x${h}" }
+          Add-Type -AssemblyName System.Drawing
+          $bmp=New-Object System.Drawing.Bitmap $w,$h
+          $g=[System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($rect.Left,$rect.Top,0,0,$bmp.Size)
+          $png=(Join-Path $PWD 'artifact/c8-38/AsterMax-C8.38-native-results.png')
+          $bmp.Save($png,[System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose(); $bmp.Dispose()
+          if((Get-Item $png).Length -lt 15000){ throw 'Native Results screenshot is unexpectedly small.' }
+          Write-Host "C8.38 VERIFIED solver=[$solverMin,$solverMax] field=[$fieldMin,$fieldMax] native=[$nativeMin,$nativeMax] window=${w}x${h}"
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - name: Emit content-addressed C8.38 evidence
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $ready=(Resolve-Path 'artifact/c8-38/RESULTS_DEMO_READY.json').Path
+          $png=(Resolve-Path 'artifact/c8-38/AsterMax-C8.38-native-results.png').Path
+          $state=Get-Content $ready -Raw | ConvertFrom-Json
+          $solver=Get-Content 'genuine/C8_38_SOLVER_FIELD.json' -Raw | ConvertFrom-Json
+          @{
+            schema='astermax.c8-38-visual-native-postprocess.v1'
+            commit='${{ github.sha }}'
+            solver='Code_Aster 17.4.0'
+            unit_system='mm-N-MPa'
+            benchmark='five-node / two-linear-tetra'
+            genuine_solve=$true
+            nondegenerate_solver_field=[bool]$solver.nondegenerate_field
+            selected_field='STRESS/MISES'
+            solver_mises_min_mpa=[double]$solver.mises_min_mpa
+            solver_mises_max_mpa=[double]$solver.mises_max_mpa
+            fe_results_mises_min_mpa=[double]$state.mises_min_mpa
+            fe_results_mises_max_mpa=[double]$state.mises_max_mpa
+            native_scalar_bar_min_mpa=[double]$state.native_scalar_bar_min_mpa
+            native_scalar_bar_max_mpa=[double]$state.native_scalar_bar_max_mpa
+            native_scalar_bar_range_matches_field=[bool]$state.native_scalar_bar_range_matches_field
+            native_scalar_bar_semantically_verified=[bool]$state.native_scalar_bar_semantically_verified
+            native_results_screenshot=$true
+            executable_sha256=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            rmed_sha256=(Get-FileHash genuine/visual.rmed -Algorithm SHA256).Hash.ToLowerInvariant()
+            resu_sha256=(Get-FileHash genuine/visual.resu -Algorithm SHA256).Hash.ToLowerInvariant()
+            solver_field_evidence_sha256=(Get-FileHash genuine/C8_38_SOLVER_FIELD.json -Algorithm SHA256).Hash.ToLowerInvariant()
+            ready_state_sha256=(Get-FileHash $ready -Algorithm SHA256).Hash.ToLowerInvariant()
+            screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant()
+            native_scalar_bar_visual_labels_verified=$false
+            probe_visual_verified=$false
+            contour_pixels_semantically_verified=$false
+            industrial_validation=$false
+            ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content artifact/c8-38/C8_38_EVIDENCE.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.38-visual-native-postprocess-${{ github.sha }}
+          path: artifact/c8-38/**
+          if-no-files-found: error
+          retention-days: 14

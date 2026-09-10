@@ -1,0 +1,187 @@
+name: C8.77 Fresh Machine Portable Package Qualification
+
+on:
+  push:
+    branches: [agent/c8-77-fresh-machine-package-qualification]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-77-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fresh-windows-package:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    env:
+      C876_RUN_ID: '34004247235'
+      C876_PACKAGE_SHA256: '43068b02f6356de6dfd56666dcbdf7d3da1d1b0799157c233990d7f479833f65'
+      C865_RUN_ID: '33963671896'
+      C865_SHA: '86b123a2df7a481a06451358e299bac69db2b7e4'
+    steps:
+      # Deliberately no actions/checkout, no setup-msbuild, no setup-python, no NuGet restore.
+      # The qualification consumes only the previously emitted C8.76 ZIP and pinned C8.65 evidence.
+      - name: Fetch exact C8.76 package and pinned solver evidence
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force source-package,source-evidence/windows,source-evidence/solve,artifact/c8-77 | Out-Null
+          gh run download $env:C876_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.76-x64-Demo-Package-d2a16ff08e9552e1f4a172f8f7978b086f30425e" --dir source-package
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "C8.65-Windows-Generated-Study-$env:C865_SHA" --dir source-evidence/windows
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.65-Product-Native-Reaction-$env:C865_SHA" --dir source-evidence/solve
+
+          $zip=Get-ChildItem source-package -Recurse -Filter 'AsterMax-Mechanical-PMV-x64.zip'|Select-Object -First 1
+          $c876=Get-ChildItem source-package -Recurse -Filter 'C8_76_X64_PACKAGE_EVIDENCE.json'|Select-Object -First 1
+          $pmx=Get-ChildItem source-evidence/windows -Recurse -Filter 'AsterMax_C862_Structural.pmx'|Select-Object -First 1
+          $rmed=Get-ChildItem source-evidence/solve -Recurse -Filter 'astermax_c862_static.rmed'|Select-Object -First 1
+          $resu=Get-ChildItem source-evidence/solve -Recurse -Filter 'astermax_c862_static.resu'|Select-Object -First 1
+          $prior=Get-ChildItem source-evidence/solve -Recurse -Filter 'C8.65_PRODUCT_NATIVE_REACTION_EVIDENCE.json'|Select-Object -First 1
+          if(-not $zip -or -not $c876 -or -not $pmx -or -not $rmed -or -not $resu -or -not $prior){throw 'C8.77 source artifact bundle incomplete.'}
+
+          $actual=(Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $env:C876_PACKAGE_SHA256){throw "C8.77 exact package hash mismatch: $actual"}
+          $pkgEv=Get-Content $c876.FullName -Raw|ConvertFrom-Json
+          $solveEv=Get-Content $prior.FullName -Raw|ConvertFrom-Json
+          if(-not $pkgEv.x64_solution_alignment_verified -or [int]$pkgEv.architecture_mismatch_warning_count -ne 0 -or -not $pkgEv.deterministic_normal_shutdown_verified){throw 'C8.76 package evidence is not admitted.'}
+          if([int]$pkgEv.package_file_count -ne 93){throw "Unexpected C8.76 package manifest count: $($pkgEv.package_file_count)"}
+          if(-not $solveEv.solver_verified -or -not $solveEv.result_field_values_verified -or -not $solveEv.reaction_equilibrium_verified){throw 'Pinned C8.65 solve evidence is not admitted.'}
+          if((Get-FileHash $pmx.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$pkgEv.pmx_sha256){throw 'PMX provenance mismatch.'}
+          if((Get-FileHash $rmed.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$pkgEv.rmed_sha256){throw 'RMED provenance mismatch.'}
+          if((Get-FileHash $resu.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne [string]$pkgEv.resu_sha256){throw 'RESU provenance mismatch.'}
+
+          "C877_ZIP=$($zip.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_PMX=$($pmx.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_RMED=$($rmed.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_RESU=$($resu.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_PRIOR=$($prior.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_C876=$($c876.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_NODES=$($solveEv.node_count)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_MISES=$($solveEv.max_von_mises_mpa.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_DISP=$($solveEv.max_displacement_mm.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_MISES_NODE=$($solveEv.max_von_mises_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_DISP_NODE=$($solveEv.max_displacement_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Extract exact ZIP into isolated path with spaces
+        shell: pwsh
+        run: |
+          $root=Join-Path $env:RUNNER_TEMP 'AsterMax Portable Qualification'
+          if(Test-Path $root){Remove-Item $root -Recurse -Force}
+          New-Item -ItemType Directory -Force $root|Out-Null
+          Expand-Archive -LiteralPath $env:C877_ZIP -DestinationPath $root -Force
+          $exe=Get-ChildItem $root -Recurse -Filter PrePoMax.exe|Select-Object -First 1
+          if(-not $exe){throw 'Portable ZIP does not contain PrePoMax.exe.'}
+          if($exe.FullName -match [regex]::Escape($env:GITHUB_WORKSPACE)){throw 'C8.77 executable unexpectedly resides in repository workspace.'}
+          $packageRoot=$exe.Directory.FullName
+          $files=Get-ChildItem $packageRoot -File -Recurse
+          if(@($files).Count -ne 93){throw "Extracted package file count differs from C8.76 manifest: $(@($files).Count)"}
+          "C877_EXE=$($exe.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C877_PACKAGE_ROOT=$packageRoot"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          @{zip_sha256=$env:C876_PACKAGE_SHA256;package_root=$packageRoot;file_count=@($files).Count;repository_checkout_present=(Test-Path (Join-Path $env:GITHUB_WORKSPACE '.git'));msbuild_setup_used=$false;nuget_restore_used=$false;python_setup_used=$false}|ConvertTo-Json|Set-Content artifact/c8-77/C8_77_ISOLATION.json -Encoding UTF8
+
+      - name: Execute portable package three times and inventory external native modules
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeWindowC877 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
+          $env:ASTERMAX_RESULTS_FULL_MODEL_PMX=$env:C877_PMX
+          $env:ASTERMAX_RESULTS_EXPECTED_NODES=$env:C877_NODES
+          $env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS='2474'
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX=$env:C877_MISES
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX=$env:C877_DISP
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE=$env:C877_MISES_NODE
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE=$env:C877_DISP_NODE
+
+          $cycles=@();$externalModules=@{}
+          1..3 | ForEach-Object {
+            $i=$_
+            $ready=(Join-Path $PWD "artifact/c8-77/READY_$i.json")
+            $stdout=(Join-Path $PWD "artifact/c8-77/stdout_$i.log")
+            $stderr=(Join-Path $PWD "artifact/c8-77/stderr_$i.log")
+            $p=Start-Process $env:C877_EXE -ArgumentList @('--astermax-results-demo',$env:C877_RMED,$env:C877_RESU,$ready) -WorkingDirectory $env:C877_PACKAGE_ROOT -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $deadline=(Get-Date).AddSeconds(120)
+            while(-not(Test-Path $ready) -and (Get-Date)-lt $deadline){Start-Sleep -Milliseconds 400;$p.Refresh();if($p.HasExited){$err=Get-Content $stderr -Raw -ErrorAction SilentlyContinue;throw "Portable cycle $i exited before READY: $($p.ExitCode) $err"}}
+            if(-not(Test-Path $ready)){throw "Portable cycle $i timed out before READY"}
+            $s=Get-Content $ready -Raw|ConvertFrom-Json
+            if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded){throw "Portable cycle $i lost full-model Results admission"}
+            if(-not $s.rendered_viewport_deformation_verified -or [string]$s.deformation_state -ne 'user-defined-x10-contour'){throw "Portable cycle $i lost verified x10 render state"}
+            if(-not $s.native_scalar_bar_semantically_verified){throw "Portable cycle $i lost scalar-bar semantic admission"}
+
+            # Inventory native modules while the real portable process is alive. Dependencies outside
+            # the package are allowed only when provided by the Windows OS itself.
+            try {
+              $mods=Get-Process -Id $p.Id -Module -ErrorAction Stop
+              foreach($m in $mods){
+                $path=[string]$m.FileName
+                if([string]::IsNullOrWhiteSpace($path)){continue}
+                $inPackage=$path.StartsWith($env:C877_PACKAGE_ROOT,[StringComparison]::OrdinalIgnoreCase)
+                $inWindows=$path.StartsWith($env:WINDIR,[StringComparison]::OrdinalIgnoreCase)
+                if(-not $inPackage -and -not $inWindows){$externalModules[$path]=$true}
+              }
+            } catch { throw "C8.77 could not inventory process modules: $($_.Exception.Message)" }
+
+            if($i -eq 1){
+              $windowDeadline=(Get-Date).AddSeconds(20)
+              do{Start-Sleep -Milliseconds 250;$p.Refresh()}while($p.MainWindowHandle -eq 0 -and -not $p.HasExited -and (Get-Date)-lt $windowDeadline)
+              if($p.HasExited -or $p.MainWindowHandle -eq 0){throw 'Portable process has no live main window for capture.'}
+              [NativeWindowC877]::SetForegroundWindow($p.MainWindowHandle)|Out-Null;Start-Sleep -Seconds 2
+              $r=New-Object NativeWindowC877+RECT
+              if(-not [NativeWindowC877]::GetWindowRect($p.MainWindowHandle,[ref]$r)){throw 'GetWindowRect failed for portable package.'}
+              $w=$r.Right-$r.Left;$h=$r.Bottom-$r.Top
+              if($w -lt 640 -or $h -lt 480){throw "Portable window too small: ${w}x${h}"}
+              $bmp=New-Object Drawing.Bitmap($w,$h);$g=[Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)
+              $png=(Join-Path $PWD 'artifact/c8-77/AsterMax-C8.77-fresh-machine-portable-results.png');$bmp.Save($png,[Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()
+              if((Get-Item $png).Length -lt 15000){throw 'Portable fresh-machine screenshot unexpectedly small.'}
+            }
+
+            if(-not $p.WaitForExit(30000)){Stop-Process -Id $p.Id -Force;throw "Portable cycle $i did not close normally"}
+            $out=Get-Content $stdout -Raw -ErrorAction SilentlyContinue
+            $err=Get-Content $stderr -Raw -ErrorAction SilentlyContinue
+            if($p.ExitCode -ne 0){throw "Portable cycle $i exit code $($p.ExitCode)"}
+            if($err -match 'AccessViolationException|FatalExecutionEngineError|SEHException|FileNotFoundException|DllNotFoundException|BadImageFormatException'){throw "Portable cycle $i emitted a deployment/native failure signature"}
+            if($out -notmatch 'Application.Run returned' -or $out -notmatch 'FrmMain disposed' -or $out -notmatch 'finalizer drain complete'){throw "Portable cycle $i lifecycle checkpoints incomplete"}
+            $cycles += [pscustomobject]@{cycle=$i;ready=$true;full_model=$true;rendered_x10=$true;exit_code=$p.ExitCode;lifecycle_ok=$true}
+          }
+          $external=@($externalModules.Keys|Sort-Object)
+          $external|ConvertTo-Json|Set-Content artifact/c8-77/C8_77_EXTERNAL_NATIVE_MODULES.json -Encoding UTF8
+          if($external.Count -gt 0){$external|ForEach-Object{Write-Host "External non-Windows native module: $_"};throw "C8.77 found $($external.Count) undeclared non-Windows native runtime module(s)."}
+          $cycles|ConvertTo-Json|Set-Content artifact/c8-77/C8_77_PORTABLE_CYCLES.json -Encoding UTF8
+
+      - name: Emit fresh-machine admission evidence
+        shell: pwsh
+        run: |
+          $prior=Get-Content $env:C877_PRIOR -Raw|ConvertFrom-Json
+          $c876=Get-Content $env:C877_C876 -Raw|ConvertFrom-Json
+          $cycles=Get-Content artifact/c8-77/C8_77_PORTABLE_CYCLES.json -Raw|ConvertFrom-Json
+          $external=Get-Content artifact/c8-77/C8_77_EXTERNAL_NATIVE_MODULES.json -Raw -ErrorAction SilentlyContinue|ConvertFrom-Json
+          $shot='artifact/c8-77/AsterMax-C8.77-fresh-machine-portable-results.png'
+          @{
+            schema='astermax.c8.77.fresh-machine-portable-package.v1';commit='${{ github.sha }}';source_package_run=[long]$env:C876_RUN_ID;source_solver_run=[long]$env:C865_RUN_ID
+            exact_c876_zip_sha256=$env:C876_PACKAGE_SHA256;exact_c876_zip_verified=$true;package_manifest_file_count=[int]$c876.package_file_count
+            fresh_runner_without_checkout=$true;build_tree_absent=$true;nuget_restore_used=$false;msbuild_used=$false;python_used=$false;portable_path_contains_spaces=$true
+            portable_launch_verified=$true;portable_cycles=@($cycles).Count;all_exit_codes=@($cycles|ForEach-Object{[int]$_.exit_code});deterministic_shutdown_verified=$true
+            solver_verified=[bool]$prior.solver_verified;result_fields_verified=[bool]$prior.result_field_values_verified;reaction_equilibrium_verified=[bool]$prior.reaction_equilibrium_verified
+            full_model_pmx_loaded=$true;rendered_viewport_deformation_verified=$true;deformation_state='user-defined-x10-contour';native_scalar_bar_semantics_verified=$true
+            undeclared_non_windows_native_module_count=@($external).Count;undeclared_non_windows_native_modules=@($external)
+            pmx_sha256=(Get-FileHash $env:C877_PMX -Algorithm SHA256).Hash.ToLowerInvariant();rmed_sha256=(Get-FileHash $env:C877_RMED -Algorithm SHA256).Hash.ToLowerInvariant();resu_sha256=(Get-FileHash $env:C877_RESU -Algorithm SHA256).Hash.ToLowerInvariant();screenshot_sha256=(Get-FileHash $shot -Algorithm SHA256).Hash.ToLowerInvariant()
+            industrial_validation=$false;ansys_equivalence=$false
+          }|ConvertTo-Json -Depth 7|Set-Content artifact/c8-77/C8_77_FRESH_MACHINE_PACKAGE_EVIDENCE.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.77-Fresh-Machine-Package-${{ github.sha }}
+          path: artifact/c8-77/**
+          if-no-files-found: warn
+          retention-days: 14

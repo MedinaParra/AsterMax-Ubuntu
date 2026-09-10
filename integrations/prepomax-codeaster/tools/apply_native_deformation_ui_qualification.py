@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path('build/PrePoMax-CodeAster').resolve()
+
+# Expose a narrow qualification seam on the real FrmMain deformation controls.
+# This does not bypass Controller.GetScale(): it changes the same ToolStrip controls
+# used by an interactive user and then lets the existing Controller read them back.
+frm = root / 'PrePoMax' / 'Forms' / 'FrmMain.cs'
+text = frm.read_text(encoding='utf-8-sig')
+anchor = '''        public string GetDeformationVariable()\n        {\n'''
+helper = '''        // AsterMax C8.73 qualification seam: drive the real deformation selector controls.\n        // Kept intentionally narrow so the harness cannot inject a scale directly into Controller.\n        public void AsterMaxSetDeformationUiForQualification(DeformationScaleFactorTypeEnum type, float userFactor)\n        {\n            if (InvokeRequired)\n            {\n                Invoke(new Action<DeformationScaleFactorTypeEnum, float>(AsterMaxSetDeformationUiForQualification), type, userFactor);\n                return;\n            }\n\n            string target = type.GetDisplayedName();\n            object matched = null;\n            foreach (object item in tscbDeformationType.Items)\n            {\n                if (item != null && String.Equals(item.ToString(), target, StringComparison.Ordinal))\n                {\n                    matched = item;\n                    break;\n                }\n            }\n            if (matched == null)\n                throw new InvalidOperationException("Deformation selector does not expose requested item: " + target);\n\n            // SelectedItem is the production ToolStripComboBox state consumed by GetDeformationType().\n            tscbDeformationType.SelectedItem = matched;\n            if (type == DeformationScaleFactorTypeEnum.UserDefined)\n                tstbDeformationFactor.Text = userFactor.ToString("R", System.Globalization.CultureInfo.InvariantCulture);\n\n            UpdateScaleFactorTextBoxState();\n            Application.DoEvents();\n        }\n\n'''
+if helper not in text:
+    if anchor not in text:
+        raise SystemExit('FrmMain deformation getter anchor not found; refusing partial C8.73 patch.')
+    text = text.replace(anchor, helper + anchor, 1)
+frm.write_text(text, encoding='utf-8')
+
+# Qualify selector readback -> Controller.GetScale -> DrawResults -> live FeResults mesh.
+demo = root / 'PrePoMax' / 'CodeAster' / 'CodeAsterResultsDemo.cs'
+d = demo.read_text(encoding='utf-8')
+old = '''                // Restore the demonstrator to undeformed contour after qualification; no visual overclaim.\n                results.SetMeshDeformation(0f, 1, 1);\n                controller.DrawResults(false);\n                Application.DoEvents();\n\n                NativeScalarBarGate.Report scalarBarReport = NativeScalarBarGate.Verify(controller, min, max);\n'''
+new = '''                // C8.73: qualify the actual FrmMain deformation selector contract end-to-end.\n                // The harness changes the production ToolStrip controls, then Controller.GetScale() must\n                // independently read them, DrawResults() must apply the factor, and the live FeResults\n                // mesh feeding rendering must agree with Xd = X0 + scale*U.\n                DeformationScaleFactorTypeEnum[] uiTypes = new DeformationScaleFactorTypeEnum[]\n                {\n                    DeformationScaleFactorTypeEnum.Undeformed,\n                    DeformationScaleFactorTypeEnum.TrueScale,\n                    DeformationScaleFactorTypeEnum.UserDefined\n                };\n                float[] uiExpectedScales = new float[] { 0f, 1f, qualifiedUserScale };\n                double uiRenderMaxError = 0;\n                for (int uiIndex = 0; uiIndex < uiTypes.Length; uiIndex++)\n                {\n                    DeformationScaleFactorTypeEnum uiType = uiTypes[uiIndex];\n                    float expectedUiScale = uiExpectedScales[uiIndex];\n                    controller.Form.AsterMaxSetDeformationUiForQualification(uiType, qualifiedUserScale);\n                    Application.DoEvents();\n\n                    if (controller.Form.GetDeformationType() != uiType)\n                        throw new InvalidDataException("C8.73 native deformation selector readback mismatch for " + uiType);\n                    if (uiType == DeformationScaleFactorTypeEnum.UserDefined &&\n                        Math.Abs(controller.Form.GetDeformationFactor() - qualifiedUserScale) > 1e-6)\n                        throw new InvalidDataException("C8.73 user-defined factor text-box readback mismatch.");\n\n                    float effectiveUiScale = controller.GetScale();\n                    if (Math.Abs(effectiveUiScale - expectedUiScale) > 1e-6)\n                        throw new InvalidDataException("C8.73 Controller.GetScale mismatch. type=" + uiType +\n                            " expected=" + expectedUiScale + " actual=" + effectiveUiScale);\n\n                    controller.DrawResults(false);\n                    Application.DoEvents();\n                    foreach (int controlNodeId in renderControlNodes)\n                    {\n                        FeNode expectedUiNode = controller.GetScaledNode(expectedUiScale, controlNodeId);\n                        FeNode actualUiNode = results.Mesh.Nodes[controlNodeId];\n                        for (int c = 0; c < 3; c++)\n                            uiRenderMaxError = Math.Max(uiRenderMaxError,\n                                Math.Abs(actualUiNode.Coor[c] - expectedUiNode.Coor[c]));\n                    }\n                }\n                if (uiRenderMaxError > deformationCoordinateTolerance)\n                    throw new InvalidDataException("C8.73 native UI -> render-mesh deformation failed. max_error=" + uiRenderMaxError);\n\n                // Last qualified state is UserDefined x10, intentionally retained for the presentation.\n                // This is now evidence-backed rather than a cosmetic deformation.\n                if (controller.Form.GetDeformationType() != DeformationScaleFactorTypeEnum.UserDefined ||\n                    Math.Abs(controller.GetScale() - qualifiedUserScale) > 1e-6)\n                    throw new InvalidDataException("C8.73 final presentation deformation state was not retained.");\n\n                NativeScalarBarGate.Report scalarBarReport = NativeScalarBarGate.Verify(controller, min, max);\n'''
+if old not in d:
+    raise SystemExit('C8.72 render-mesh restore anchor not found; refusing partial C8.73 patch.')
+d = d.replace(old, new, 1)
+
+payload_old = '''                    "  \\\"deformation_ui_scale_selector_verified\\\": false,\\n" +\n                    "  \\\"render_mesh_deformation_source\\\": \\\"FeResults.SetMeshDeformation(scale,step,increment)\\\",\\n" +'''
+payload_new = '''                    "  \\\"deformation_ui_scale_selector_source\\\": \\\"FrmMain.tscbDeformationType+tstbDeformationFactor -> Controller.GetScale -> DrawResults\\\",\\n" +\n                    "  \\\"deformation_ui_states_verified\\\": [\\\"Undeformed\\\",\\\"TrueScale\\\",\\\"UserDefined x10\\\"],\\n" +\n                    "  \\\"deformation_ui_effective_scales_verified\\\": [0.0,1.0,10.0],\\n" +\n                    "  \\\"deformation_ui_render_max_coordinate_error_mm\\\": " + uiRenderMaxError.ToString("R", CultureInfo.InvariantCulture) + ",\\n" +\n                    "  \\\"deformation_ui_final_scale\\\": " + controller.GetScale().ToString("R", CultureInfo.InvariantCulture) + ",\\n" +\n                    "  \\\"deformation_ui_scale_selector_verified\\\": true,\\n" +\n                    "  \\\"render_mesh_deformation_source\\\": \\\"FeResults.SetMeshDeformation(scale,step,increment)\\\",\\n" +'''
+if payload_old not in d:
+    raise SystemExit('C8.72 READY payload selector anchor not found; refusing partial C8.73 patch.')
+d = d.replace(payload_old, payload_new, 1)
+
+old_provenance = '''            provenance.Text = "SOLVER VERIFIED  |  render-mesh deformation qualified  |  mm-N-MPa";\n'''
+new_provenance = '''            provenance.Text = "SOLVER VERIFIED  |  native deformation UI x10 verified  |  mm-N-MPa";\n'''
+if old_provenance not in d:
+    raise SystemExit('C8.72 provenance anchor not found; refusing partial C8.73 patch.')
+d = d.replace(old_provenance, new_provenance, 1)
+
+demo.write_text(d, encoding='utf-8')
+print(f'Patched {frm} with native deformation selector qualification seam')
+print(f'Patched {demo} with C8.73 native UI -> Controller -> render-mesh qualification')

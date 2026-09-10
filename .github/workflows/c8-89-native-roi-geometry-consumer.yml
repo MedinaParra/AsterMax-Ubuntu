@@ -1,0 +1,92 @@
+name: C8.89 Native ROI CAD Binding and NetGen Consumer
+
+on:
+  push:
+    branches: [agent/c8-89-native-roi-geometry-consumer]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-89-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-native-roi-consumer:
+    runs-on: windows-2025
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap pinned AsterMax and qualified BREP observer
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python -m py_compile integrations/prepomax-codeaster/tools/apply_c8_82f_netgen_consumer_sizing.py integrations/prepomax-codeaster/tools/apply_c8_89_native_refinement_observer.py integrations/prepomax-codeaster/tools/apply_c8_89_harness_compile_fix.py
+          python integrations/prepomax-codeaster/tools/apply_c8_82f_netgen_consumer_sizing.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_c8_89_native_refinement_observer.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_c8_89_harness_compile_fix.py build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore and build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Install pinned NetGen runtime and SI-mm STEP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/c8-89 | Out-Null
+          $zip='build/PrePoMax-v1.4.0-portable.zip'; $extract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgen=Get-ChildItem -Path $extract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName; $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $src=Join-Path $runtimeRoot $folder; if(Test-Path $src){Copy-Item -Path $src -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.89_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres'}
+          "ASTERMAX_C889_STEP=$((Resolve-Path $fixture).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Prove native ROI to CAD binding, PMX reload, and NetGen consumption
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $env:ASTERMAX_NATIVE_ROI_CONSUMER_FIXTURE='1'
+          $env:ASTERMAX_NATIVE_ROI_CONSUMER_STEP_PATH=$env:ASTERMAX_C889_STEP
+          $env:ASTERMAX_NATIVE_ROI_CONSUMER_EVIDENCE_PATH=(Join-Path $PWD 'artifact/c8-89/C8.89_NATIVE_ROI_CONSUMER.json')
+          $env:ASTERMAX_NATIVE_ROI_CONSUMER_PMX_PATH=(Join-Path $PWD 'artifact/c8-89/AsterMax_C8.89_NativeRoiConsumer.pmx')
+          $env:ASTERMAX_NATIVE_REFINEMENT_CONSUMER_COPY_PATH=(Join-Path $PWD 'artifact/c8-89/meshRefinement.native.txt')
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native AsterMax window'}
+          $required=@($env:ASTERMAX_NATIVE_ROI_CONSUMER_EVIDENCE_PATH,$env:ASTERMAX_NATIVE_ROI_CONSUMER_PMX_PATH,$env:ASTERMAX_NATIVE_REFINEMENT_CONSUMER_COPY_PATH)
+          $proof=(Get-Date).AddSeconds(900)
+          while((@($required|Where-Object{-not(Test-Path $_)}).Count -gt 0) -and (Get-Date)-lt $proof){Start-Sleep -Milliseconds 750;$p.Refresh();if($p.HasExited){throw 'GUI exited during C8.89 qualification'}}
+          foreach($f in $required){if(-not(Test-Path $f)){throw "Missing C8.89 evidence: $f"}}
+          if((Get-Item $env:ASTERMAX_NATIVE_REFINEMENT_CONSUMER_COPY_PATH).Length -le 0){throw 'Observed native meshRefinement file is empty'}
+          $ev=Get-Content $env:ASTERMAX_NATIVE_ROI_CONSUMER_EVIDENCE_PATH -Raw|ConvertFrom-Json
+          if(-not $ev.source_step_declares_si_millimetres){throw 'STEP SI-mm gate failed'}
+          if(-not $ev.native_roi_geometry_binding_verified){throw "ROI-to-CAD gate failed: $($ev.error)"}
+          if(-not $ev.native_add_mesh_refinement_command_used){throw 'Native AddMeshRefinementCommand gate failed'}
+          if(-not $ev.native_refinement_roundtrip_verified){throw 'Native PMX refinement roundtrip failed'}
+          if(-not $ev.native_netgen_after_reload){throw 'Reloaded native NetGen path failed'}
+          if(-not $ev.native_refinement_consumer_verified){throw "Native refinement consumer gate failed: $($ev.error)"}
+          if($ev.mesh_element_count -le 0){throw 'Reloaded native mesh has no elements'}
+          if($ev.solver_executed){throw 'C8.89 must not claim or execute a solver'}
+          if($ev.industrial_validation -or $ev.ansys_equivalence){throw 'C8.89 must not overclaim validation/equivalence'}
+          Get-Content $env:ASTERMAX_NATIVE_ROI_CONSUMER_EVIDENCE_PATH
+          Write-Host 'Observed native refinement contract:'
+          Get-Content $env:ASTERMAX_NATIVE_REFINEMENT_CONSUMER_COPY_PATH
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.89-Native-ROI-Consumer-${{ github.sha }}
+          path: artifact/c8-89/**
+          if-no-files-found: warn
+          retention-days: 14
