@@ -1,0 +1,141 @@
+name: AsterMax C10.04 Tetra Native Solve
+
+on:
+  push:
+    branches: [ codex/c1004-unified-native-codeaster ]
+    paths:
+      - 'native-windows/patch-c1004-tetra-native-solve.ps1'
+      - '.github/workflows/astermax-c1004-tetra-native-solve.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-x64-c1004:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax integration branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply integrated AsterMax chain through C10.04
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1',
+            'patch-branding.ps1',
+            'patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1',
+            'patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1',
+            'patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1',
+            'patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1',
+            'patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1',
+            'patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1',
+            'patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1',
+            'patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1',
+            'patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1',
+            'patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1',
+            'patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1',
+            'patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1'
+          )
+          foreach($p in $patches){
+            Write-Host "Applying $p"
+            & ".\native-windows\$p" -Root "$PWD\upstream"
+          }
+
+      - name: C10.04 source contract gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
+          $readiness=Get-Content .\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs -Raw
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          foreach($t in @('C10.04-native-codeaster-tetra-v1','TETRA4','TETRA10','HEXA8','tetrahedral_export_enabled','actualElementTypes')){
+            if(-not $exporter.Contains($t)){ throw "Exporter token missing: $t" }
+          }
+          foreach($t in @('LinearTetraElement','ParabolicTetraElement','supported volume elements')){
+            if(-not $readiness.Contains($t)){ throw "Readiness token missing: $t" }
+          }
+          foreach($t in @('RequireRuntimeReady','ResolveCodeAsterRunner','CompleteVerifiedResultsHandoff')){
+            if(-not $solve.Contains($t)){ throw "Native Solve token missing: $t" }
+          }
+          foreach($t in @('BuildRibbonPage("Materiales"','AsterMaxC1004MaterialAction','TET4 / TET10 / HEXA8 native Code_Aster path')){
+            if(-not $ui.Contains($t)){ throw "UI token missing: $t" }
+          }
+          if($exporter.Contains('currently supports HEXA8 only')){ throw 'Legacy HEXA8-only exporter gate is still present.' }
+          if($readiness.Contains('if (!(e is CaeMesh.LinearHexaElement))')){ throw 'Legacy HEXA8-only readiness gate is still present.' }
+          Write-Host 'C1004_TETRA_NATIVE_SOLVE_SOURCE_GATE=PASS'
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Stage C10.04 development package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          @'
+          C10.04 runtime slots
+          AsterMaxRuntime/Python/python.exe: packaged Python runtime with numpy+h5py, or ASTERMAX_PYTHON.
+          AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd: packaged/local Code_Aster launcher, or ASTERMAX_CODE_ASTER_RUNNER.
+          The native export/readiness path supports TETRA4, TETRA10 and HEXA8.
+          No solver executable or numerical result is fabricated by this package.
+          '@ | Set-Content .\dist\AsterMaxRuntime\README.txt -Encoding UTF8
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.04'
+            branch='codex/c1004-unified-native-codeaster'
+            platform='Windows x64'
+            executable_sha256=$hash
+            native_element_types=@('TETRA4','TETRA10','HEXA8')
+            materials_ribbon=$true
+            solver_backend='Code_Aster'
+            runtime_preflight=$true
+            automatic_results_handoff=$true
+            solver_runtime_bundled=$false
+            python_runtime_bundled=$false
+            unit_contract='MM_N_S_MPA'
+            fea_values_invented=$false
+            numerical_solve_claimed=$false
+            limitation='This CI gate validates compilation and the native TET/HEXA solve contract. A fresh Code_Aster numerical solve still requires a validated runtime.'
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Upload C10.04 Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.04-Windows-x64-Tetra-Native-Solve
+          path: dist
+          if-no-files-found: error
