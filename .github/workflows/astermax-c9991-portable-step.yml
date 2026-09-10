@@ -1,0 +1,80 @@
+name: AsterMax C9.99.1 Portable STEP Workspace
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c999-portable-workspace-step.ps1'
+      - '.github/workflows/astermax-c9991-portable-step.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-x64-release:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply AsterMax patches including portable workspace fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c991-startup-hardening.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c992-startup-viewport.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c999-portable-workspace-step.ps1 -Root "$PWD\upstream"
+
+      - name: Source gate portable workspace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $calc=Get-Content .\upstream\PrePoMax\Settings\CalculixSettings.cs -Raw
+          $set=Get-Content .\upstream\PrePoMax\Settings\SettingsContainer.cs -Raw
+          foreach($token in @('LocalApplicationData','AsterMax','Work','Directory.CreateDirectory(portableWork)','_workDirectory = Tools.GetLocalPath(portableWork)')) {
+            if(-not $calc.Contains($token)){ throw "CalculixSettings portable workspace token missing: $token" }
+          }
+          foreach($token in @('GetWorkDirectory','Directory.CreateDirectory(portableWork)')) {
+            if(-not $set.Contains($token)){ throw "SettingsContainer portable workspace token missing: $token" }
+          }
+          Write-Host 'PORTABLE_WORKSPACE_SOURCE_GATE=PASS'
+
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Stage runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C9.99.1'
+            fix='portable STEP workspace direct-access hardening'
+            platform='Windows x64'
+            upstream='3669e65581650e5d9d868aa761db9efd856f8571'
+            exe_sha256=$hash
+            workspace='%LOCALAPPDATA%\\AsterMax\\Work'
+            fea_values_invented=$false
+          } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Write-Host "EXE_SHA256=$hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.99.1-Windows-x64-Portable-STEP-Fix
+          path: dist
+          if-no-files-found: error
