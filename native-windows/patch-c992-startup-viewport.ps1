@@ -1,14 +1,15 @@
 param([string]$Root)
 $ErrorActionPreference='Stop'
 
-# 1) Restore stable internal ModelTree keys. C9.x presentation renamed these lookup strings,
-# but the WinForms designer still owns the persistent TreeNode.Name values. Internal keys must
-# remain compatible; visible captions can be themed later without changing lookup identity.
+# 1) Restore stable internal ModelTree keys. Presentation text must never replace the
+# persistent TreeNode.Name contract used by ModelTree's constructor and command routing.
 $modelTree = Join-Path $Root 'UserControls/ModelTree.cs'
 $t = Get-Content $modelTree -Raw
 $t = $t.Replace('private string _geomPartsName = "Geometry";','private string _geomPartsName = "Parts";')
 $t = $t.Replace('private string _meshingParametersName = "Mesh Controls";','private string _meshingParametersName = "Meshing Parameters";')
 $t = $t.Replace('private string _meshRefinementsName = "Local Mesh Controls";','private string _meshRefinementsName = "Mesh Refinements";')
+$t = $t.Replace('private string _boundaryConditionsName = "Supports / BCs";','private string _boundaryConditionsName = "BCs";')
+$t = $t.Replace('private string _analysesName = "Solution";','private string _analysesName = "Analyses";')
 
 # Harden all static tree lookups so future designer/key drift reports the missing node explicitly
 # instead of throwing IndexOutOfRangeException from Nodes.Find(...)[0].
@@ -47,7 +48,9 @@ $helper = @'
 $t = [regex]::Replace($t, '([A-Za-z0-9_]+)\.Nodes\.Find\((_[A-Za-z0-9_]+), true\)\[0\]', 'RequireTreeNode($1, $2)')
 Set-Content $modelTree $t -Encoding UTF8
 
-# 2) Re-align VTK after AsterMax adds its title/ribbon chrome after the native Shown layout.
+# 2) Re-align VTK after AsterMax adds title/ribbon chrome after the native Shown layout.
+# Native FrmMain_Shown calculates VTK bounds before our AsterMax chrome exists; recalculate once
+# the custom chrome has changed the client area.
 $ui = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 if(Test-Path $ui) {
     $u = Get-Content $ui -Raw
@@ -84,4 +87,4 @@ if(Test-Path $ui) {
     throw 'AsterMax native UI partial not found; apply patch-astermax.ps1 before C9.92'
 }
 
-Write-Host 'C9.92.1 ModelTree identity + viewport hardening applied.' -ForegroundColor Green
+Write-Host 'C9.92.3 ModelTree identity + viewport hardening applied.' -ForegroundColor Green
