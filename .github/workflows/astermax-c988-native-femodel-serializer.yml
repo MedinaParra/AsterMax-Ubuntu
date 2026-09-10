@@ -75,10 +75,10 @@ jobs:
         shell: pwsh
         run: |
           $audit=Get-Content artifact\C9.88_SEMANTIC_GATE.json -Raw|ConvertFrom-Json
-          if(-not $audit.pass){throw 'Semantic gate did not pass; Solve must remain blocked'}
+          if(-not $audit.passed){throw 'Semantic gate did not pass; Solve must remain blocked'}
           $e=Get-Content artifact\native-serializer-evidence.json -Raw|ConvertFrom-Json
           if(-not $e.serializer_non_mutating){throw 'Serializer mutation detected; Solve must remain blocked'}
-          [ordered]@{release='C9.88.4';model_fidelity='VERIFIED';production_serializer='VERIFIED';solver_input='VERIFIED';solve_authorization='READY';solver_execution='NOT_RUN';fea_values_invented=$false;ansys_equivalence='NOT_PROVEN';truth_boundary='READY means the validated deck may proceed to Code_Aster; this workflow does not claim a solver result.'}|ConvertTo-Json|Set-Content artifact\C9.88_VALIDATION.json -Encoding UTF8
+          [ordered]@{release='C9.88.5';model_fidelity='VERIFIED';production_serializer='VERIFIED';solver_input='VERIFIED';solve_authorization='READY';solver_execution='NOT_RUN';fea_values_invented=$false;ansys_equivalence='NOT_PROVEN';truth_boundary='READY means the validated deck may proceed to Code_Aster; this workflow does not claim a solver result.'}|ConvertTo-Json|Set-Content artifact\C9.88_VALIDATION.json -Encoding UTF8
       - name: Reject stale native FeModel after serialization
         shell: pwsh
         run: |
