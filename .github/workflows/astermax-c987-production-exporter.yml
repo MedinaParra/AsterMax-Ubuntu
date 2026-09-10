@@ -38,7 +38,7 @@ jobs:
       - name: Gate wrapped GROUP_NO records
         shell: pwsh
         run: |
-          $mail=Get-Content artifact\deck\c987.model.mail
+          $mail=Get-Content artifact\deck\c987.mail
           if(-not ($mail -contains 'NOM = LOAD')){throw 'Explicit GROUP_NO NOM record missing'}
           $idx=[array]::IndexOf($mail,'NOM = LOAD'); $max=0
           for($i=$idx+1;$i -lt $mail.Count -and $mail[$i] -ne 'FINSF';$i++){ $n=($mail[$i].Trim() -split '\s+').Count; if($n -gt $max){$max=$n} }
@@ -46,21 +46,21 @@ jobs:
           "max_group_ids_per_record=$max"|Set-Content artifact\group-wrap.txt
       - name: Production semantic equivalence positive gate
         shell: pwsh
-        run: python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.model.mail --comm artifact\deck\c987.model.comm --adapter artifact\deck\c987.model.adapter.json --out artifact\C9.87_VALIDATION.json
+        run: python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.mail --comm artifact\deck\c987.comm --adapter artifact\deck\c987.adapter.json --out artifact\C9.87_VALIDATION.json
       - name: Reject material tamper
         shell: pwsh
         run: |
-          Copy-Item artifact\deck\c987.model.comm artifact\tampered-material.comm
+          Copy-Item artifact\deck\c987.comm artifact\tampered-material.comm
           (Get-Content artifact\tampered-material.comm -Raw).Replace('E=210000','E=205000')|Set-Content artifact\tampered-material.comm -Encoding UTF8
-          python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.model.mail --comm artifact\tampered-material.comm --adapter artifact\deck\c987.model.adapter.json --out artifact\C9.87_TAMPER_MATERIAL.json
+          python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.mail --comm artifact\tampered-material.comm --adapter artifact\deck\c987.adapter.json --out artifact\C9.87_TAMPER_MATERIAL.json
           if($LASTEXITCODE -eq 0){throw 'Material tamper was incorrectly accepted'}
           exit 0
       - name: Reject load tamper
         shell: pwsh
         run: |
-          Copy-Item artifact\deck\c987.model.comm artifact\tampered-load.comm
+          Copy-Item artifact\deck\c987.comm artifact\tampered-load.comm
           (Get-Content artifact\tampered-load.comm -Raw).Replace('FY=-5','FY=-4.5')|Set-Content artifact\tampered-load.comm -Encoding UTF8
-          python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.model.mail --comm artifact\tampered-load.comm --adapter artifact\deck\c987.model.adapter.json --out artifact\C9.87_TAMPER_LOAD.json
+          python .\native-windows\c987-production-exporter\audit_c987.py --model artifact\c987.model.json --mail artifact\deck\c987.mail --comm artifact\tampered-load.comm --adapter artifact\deck\c987.adapter.json --out artifact\C9.87_TAMPER_LOAD.json
           if($LASTEXITCODE -eq 0){throw 'Load tamper was incorrectly accepted'}
           exit 0
       - name: Package evidence
