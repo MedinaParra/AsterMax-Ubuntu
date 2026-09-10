@@ -56,7 +56,7 @@ jobs:
           $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-C988'))
           $elType=$cm.GetType('CaeModel.Elastic',$true);$rows=New-Object 'double[][]' 1;$rows[0]=[double[]]@(210000.0,0.3,20.0)
           $elasticCtor=$elType.GetConstructor([Type[]]@([double[][]]));if(-not $elasticCtor){throw 'CaeModel.Elastic(double[][]) constructor missing from pinned upstream'}
-          $elastic=$elasticCtor.Invoke([object[]]@([object]$rows));$mat.AddProperty($elastic);$model.Materials.Add('Steel-C988',$mat)
+          $ctorArgs=New-Object 'object[]' 1;$ctorArgs[0]=$rows;$elastic=$elasticCtor.Invoke($ctorArgs);$mat.AddProperty($elastic);$model.Materials.Add('Steel-C988',$mat)
           $st=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($st,@('Step-1'));$rt=$cg.GetType('CaeGlobals.RegionTypeEnum',$true);$ns=[Enum]::Parse($rt,'NodeSetName');$bct=$cm.GetType('CaeModel.FixedBC',$true);$step.AddBoundaryCondition([Activator]::CreateInstance($bct,@('Fixed-1','FIXED',$ns,$false)));$lt=$cm.GetType('CaeModel.CLoad',$true);$step.AddLoad([Activator]::CreateInstance($lt,@('Force-1','LOAD',$ns,0.0,-100.0,0.0,$false,$false,0.0)));$model.StepCollection.AddStep($step,$false)
           $fpType=$asm.GetType('PrePoMax.AsterMaxModelFingerprint',$true);$extract=$fpType.GetMethod('Extract',[Reflection.BindingFlags]'Public,Static');$fpBefore=[string]$fpType.GetProperty('Sha256').GetValue($extract.Invoke($null,@($model)))
           . .\native-windows\Serialize-AsterMaxFeModelContract.ps1
@@ -66,7 +66,7 @@ jobs:
           if($contract.source.kind -ne 'compiled_native_femodel'){throw 'Native source provenance missing'}
           if($contract.mesh.nodes.Count -ne 8 -or $contract.mesh.elements.Count -ne 1){throw 'Native mesh serialization mismatch'}
           if($contract.materials[0].young_modulus_mpa -ne 210000.0 -or $contract.materials[0].poisson -ne 0.3){throw 'Native material serialization mismatch'}
-          [ordered]@{fingerprint_before=$fpBefore;fingerprint_after=$fpAfter;serializer_non_mutating=($fpBefore -eq $fpAfter);native_source=$contract.source.kind;upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571';elastic_api='Elastic(double[][])'}|ConvertTo-Json|Set-Content artifact\native-serializer-evidence.json -Encoding UTF8
+          [ordered]@{fingerprint_before=$fpBefore;fingerprint_after=$fpAfter;serializer_non_mutating=($fpBefore -eq $fpAfter);native_source=$contract.source.kind;upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571';elastic_api='Elastic(double[][])';reflection_argument_shape='object[1] containing double[][]'}|ConvertTo-Json|Set-Content artifact\native-serializer-evidence.json -Encoding UTF8
       - name: Run production Code_Aster exporter
         shell: pwsh
         run: .\native-windows\Export-AsterMaxCodeAster.ps1 -ModelPath artifact\c988.model.json -OutDir artifact\deck
@@ -80,7 +80,7 @@ jobs:
           if(-not $audit.pass){throw 'Semantic gate did not pass; Solve must remain blocked'}
           $e=Get-Content artifact\native-serializer-evidence.json -Raw|ConvertFrom-Json
           if(-not $e.serializer_non_mutating){throw 'Serializer mutation detected; Solve must remain blocked'}
-          [ordered]@{release='C9.88.1';model_fidelity='VERIFIED';production_serializer='VERIFIED';solver_input='VERIFIED';solve_authorization='READY';solver_execution='NOT_RUN';fea_values_invented=$false;ansys_equivalence='NOT_PROVEN';truth_boundary='READY means the validated deck may proceed to Code_Aster; this workflow does not claim a solver result.'}|ConvertTo-Json|Set-Content artifact\C9.88_VALIDATION.json -Encoding UTF8
+          [ordered]@{release='C9.88.2';model_fidelity='VERIFIED';production_serializer='VERIFIED';solver_input='VERIFIED';solve_authorization='READY';solver_execution='NOT_RUN';fea_values_invented=$false;ansys_equivalence='NOT_PROVEN';truth_boundary='READY means the validated deck may proceed to Code_Aster; this workflow does not claim a solver result.'}|ConvertTo-Json|Set-Content artifact\C9.88_VALIDATION.json -Encoding UTF8
       - name: Reject stale native FeModel after serialization
         shell: pwsh
         run: |
