@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""C9.64: translate a real Code_Aster MED result into an auditable AsterMax results bundle + VTU.
+"""Translate a real Code_Aster MED result into an auditable AsterMax results bundle + VTU.
 
 No synthetic FEA values are created. Displacements are read directly from MED.
 SIGM_ELNO/SIEQ_ELNO values are element-node fields; for point contours the bridge computes a
 plain arithmetic average over incident element-node values and records that derivation explicitly.
+
+Validation modes:
+- regression (default): preserves the historical C9.62 44-node/10-HEXA8 numerical regression gate.
+- production: validates the actual MED dimensions dynamically and does not require C9.62 dimensions/results.
 """
 import json, math, os, sys, xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -15,6 +19,10 @@ if len(sys.argv) != 4:
 med_path, bundle_path, vtu_path = sys.argv[1:]
 if not os.path.isfile(med_path):
     raise SystemExit(f"MED file missing: {med_path}")
+
+validation_mode=os.environ.get("ASTERMAX_MED_BRIDGE_MODE","regression").strip().lower()
+if validation_mode not in {"regression","production"}:
+    raise SystemExit("ASTERMAX_MED_BRIDGE_MODE must be regression or production")
 
 MESH_ROOT = "ENS_MAA/00000001/-0000000000000000001-0000000000000000001"
 STEP = "0000000000000000000100000000000000000001"
@@ -38,7 +46,10 @@ def avg_element_node(values, conn):
         raise RuntimeError("element-node value count does not match connectivity")
     for nid, value in zip(flat_nodes, values):
         accum[int(nid)].append(float(value))
-    return np.array([sum(accum[i])/len(accum[i]) for i in range(1, int(conn.max())+1)], dtype=float)
+    max_node=int(conn.max())
+    if any(i not in accum for i in range(1,max_node+1)):
+        raise RuntimeError("MED connectivity is not contiguous from node 1; production bridge requires explicit node-id mapping before supporting this mesh")
+    return np.array([sum(accum[i])/len(accum[i]) for i in range(1,max_node+1)], dtype=float)
 
 def write_data_array(parent, name, values, ncomp=1, vtk_type="Float64"):
     attrs={"type":vtk_type,"Name":name,"format":"ascii"}
@@ -76,7 +87,7 @@ with h5py.File(med_path, "r") as h:
 
 bundle={
     "schema":"astermax-results-bundle/v0",
-    "release":"C9.64",
+    "release":"C9.64-production" if validation_mode=="production" else "C9.64",
     "source":{"kind":"REAL_CODE_ASTER_MED","file":os.path.basename(med_path),"size_bytes":os.path.getsize(med_path)},
     "units":{"length":"mm","force":"N","stress":"MPa"},
     "mesh":{"node_count":int(n_nodes),"element_count":int(n_elem),"element_type":"HEXA8"},
@@ -94,7 +105,8 @@ bundle={
     "arrays":{"coordinates":coords.tolist(),"connectivity":conn.tolist(),
         "displacement":displacement.tolist(),"total_deformation":total.tolist(),
         "von_mises":von_mises.tolist(),"stress":{k:v.tolist() for k,v in nodal_stress.items()}},
-    "integrity":{"fea_values_invented":False,"solver_output_modified":False,"derived_nodal_stress_average_declared":True}
+    "integrity":{"fea_values_invented":False,"solver_output_modified":False,"derived_nodal_stress_average_declared":True,
+                 "bridge_validation_mode":validation_mode}
 }
 with open(bundle_path,"w",encoding="utf-8") as f: json.dump(bundle,f,indent=2)
 
@@ -114,17 +126,27 @@ write_data_array(pd,"Equivalent Stress",von_mises)
 for name,arr in nodal_stress.items(): write_data_array(pd,f"Stress {name}",arr)
 ET.ElementTree(vtk).write(vtu_path,encoding="utf-8",xml_declaration=True)
 
-checks={
+production_checks={
     "real_med_source":bool(bundle["source"]["size_bytes"]>1000),
-    "mesh_44_nodes_10_hex":bool(n_nodes==44 and n_elem==10 and conn.shape==(10,8)),
-    "displacement_present":bool(displacement.shape==(44,3)),
-    "c962_dx_reproduced":bool(abs(float(displacement[:,0].max())-0.0471697826890255)<1e-12),
-    "stress_present":bool(len(scomp)==6 and all(len(v)==44 for v in nodal_stress.values())),
-    "von_mises_present":bool(len(von_mises)==44 and np.isfinite(von_mises).all()),
+    "mesh_nonempty_hexa8":bool(n_nodes>0 and n_elem>0 and conn.shape==(n_elem,8)),
+    "coordinates_present_finite":bool(coords.shape==(n_nodes,3) and np.isfinite(coords).all()),
+    "displacement_present_finite":bool(displacement.shape==(n_nodes,3) and np.isfinite(displacement).all()),
+    "stress_present_finite":bool(len(scomp)>0 and all(len(v)==n_nodes and np.isfinite(v).all() for v in nodal_stress.values())),
+    "von_mises_present_finite":bool(len(von_mises)==n_nodes and np.isfinite(von_mises).all()),
     "no_invented_results":bool(bundle["integrity"]["fea_values_invented"] is False),
     "vtu_written":bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path)>1000)
 }
-summary={"release":"C9.64","checks":checks,"checks_passed":int(sum(checks.values())),"checks_total":len(checks),"pass":bool(all(checks.values())),
+if validation_mode=="regression":
+    checks=dict(production_checks)
+    checks.update({
+        "mesh_44_nodes_10_hex":bool(n_nodes==44 and n_elem==10 and conn.shape==(10,8)),
+        "c962_dx_reproduced":bool(abs(float(displacement[:,0].max())-0.0471697826890255)<1e-12)
+    })
+else:
+    checks=production_checks
+
+summary={"release":"C9.64","validation_mode":validation_mode,"checks":checks,"checks_passed":int(sum(checks.values())),"checks_total":len(checks),"pass":bool(all(checks.values())),
+         "node_count":int(n_nodes),"element_count":int(n_elem),
          "dx_max_mm":float(displacement[:,0].max()),"total_deformation_max_mm":float(total.max()),
          "von_mises_nodal_max_mpa":float(von_mises.max()),"von_mises_raw_elno_max_mpa":float(vm_elno.max()),
          "fea_values_invented":False}
