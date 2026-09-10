@@ -4,6 +4,9 @@ $ErrorActionPreference='Stop'
 $workspace=Join-Path $Root 'PrePoMax/Forms/AsterMaxResultsWorkspace.cs'
 if(!(Test-Path $workspace)){throw 'C9.65 results workspace must exist before C9.76.'}
 $s=Get-Content $workspace -Raw
+if(-not $s.Contains('using System.Security.Cryptography;')){
+  $s=$s.Replace('using System.Linq;','using System.Linq;' + [Environment]::NewLine + 'using System.Security.Cryptography;')
+}
 if(-not $s.Contains('internal sealed class AsterMaxModelFingerprint')){
 $anchor='    public partial class FrmMain'
 $code=@'
