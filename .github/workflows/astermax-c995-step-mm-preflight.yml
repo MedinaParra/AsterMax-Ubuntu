@@ -1,0 +1,72 @@
+name: AsterMax C9.95 STEP mm Preflight
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/c995-step-mm-preflight/**'
+      - '.github/workflows/astermax-c995-step-mm-preflight.yml'
+  workflow_dispatch:
+
+jobs:
+  unit-contract-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create deterministic STEP unit fixtures
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\tmp-step | Out-Null
+          @"
+          ISO-10303-21;
+          HEADER; ENDSEC;
+          DATA;
+          #1=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+          ENDSEC;
+          END-ISO-10303-21;
+          "@ | Set-Content .\tmp-step\mm.step -Encoding ascii
+          @"
+          ISO-10303-21;
+          HEADER; ENDSEC;
+          DATA;
+          #1=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT($,.METRE.));
+          ENDSEC;
+          END-ISO-10303-21;
+          "@ | Set-Content .\tmp-step\metre.step -Encoding ascii
+          @"
+          ISO-10303-21;
+          HEADER; ENDSEC;
+          DATA;
+          #1=CONVERSION_BASED_UNIT('INCH',#2)LENGTH_UNIT()NAMED_UNIT(#3);
+          ENDSEC;
+          END-ISO-10303-21;
+          "@ | Set-Content .\tmp-step\inch.step -Encoding ascii
+          'ISO-10303-21; DATA; #1=CARTESIAN_POINT(''P'',(0.,0.,0.)); ENDSEC; END-ISO-10303-21;' | Set-Content .\tmp-step\unknown.step -Encoding ascii
+      - name: Accept native millimetres
+        shell: pwsh
+        run: python .\native-windows\c995-step-mm-preflight\step_unit_guard.py .\tmp-step\mm.step --require-mm-native
+      - name: Detect metre rescale requirement
+        shell: pwsh
+        run: |
+          python .\native-windows\c995-step-mm-preflight\step_unit_guard.py .\tmp-step\metre.step --json-out .\tmp-step\metre.json
+          $j=Get-Content .\tmp-step\metre.json -Raw | ConvertFrom-Json
+          if($j.status -ne 'RESCALE_REQUIRED' -or [double]$j.scale_to_mm -ne 1000.0){ throw 'metre scaling gate failed' }
+      - name: Detect inch rescale requirement
+        shell: pwsh
+        run: |
+          python .\native-windows\c995-step-mm-preflight\step_unit_guard.py .\tmp-step\inch.step --json-out .\tmp-step\inch.json
+          $j=Get-Content .\tmp-step\inch.json -Raw | ConvertFrom-Json
+          if($j.status -ne 'RESCALE_REQUIRED' -or [math]::Abs([double]$j.scale_to_mm-25.4) -gt 1e-12){ throw 'inch scaling gate failed' }
+      - name: Reject unknown direct-mm claim
+        shell: pwsh
+        run: |
+          python .\native-windows\c995-step-mm-preflight\step_unit_guard.py .\tmp-step\unknown.step --require-mm-native
+          if($LASTEXITCODE -eq 0){ throw 'unknown STEP units were incorrectly accepted as mm' }
+          exit 0
+      - name: Assert no geometry or FEA claim is emitted
+        shell: pwsh
+        run: |
+          python .\native-windows\c995-step-mm-preflight\step_unit_guard.py .\tmp-step\mm.step --json-out .\tmp-step\mm.json
+          $j=Get-Content .\tmp-step\mm.json -Raw | ConvertFrom-Json
+          if($j.geometry_import_proven -ne $false){ throw 'unit preflight must not claim geometry import' }
+          if($j.fea_values_invented -ne $false){ throw 'integrity flag failed' }
