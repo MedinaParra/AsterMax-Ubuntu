@@ -38,6 +38,7 @@ jobs:
           .\native-windows\patch-lifecycle.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c975-startup.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c976-release.ps1 -Root "$PWD\upstream"
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -177,6 +178,7 @@ jobs:
           if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
           if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
           if($data.mesh_nodes -lt 1 -or $data.mesh_elements -lt 1){ throw 'No real volume mesh produced.' }
+          if(-not $data.project_roundtrip -or -not $data.workspace_navigation){throw 'Project roundtrip or workspace navigation failed'}
           if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
 
 
@@ -220,6 +222,9 @@ jobs:
             $m.runtime_step_model = 'FAIL_NO_TELEMETRY'
           }
           if(Test-Path .\ASTERMAX_RUNTIME_STEP.json.stages.log){ Copy-Item .\ASTERMAX_RUNTIME_STEP.json.stages.log "$out\ASTERMAX_RUNTIME_STEP.json.stages.log" -Force }
+          if(Test-Path .\FRAMEBUFFER_VALIDATION.json){
+            $m | Add-Member -NotePropertyName native_framebuffer -NotePropertyValue (Get-Content .\FRAMEBUFFER_VALIDATION.json -Raw | ConvertFrom-Json) -Force
+          }
           $m | ConvertTo-Json -Depth 8 | Set-Content $manifestPath -Encoding UTF8
 
       - name: Upload runtime diagnostics
@@ -248,6 +253,10 @@ jobs:
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
+          Copy-Item .\native-windows\patch-c976-release.ps1 .\artifact\ -Force
+          Copy-Item .\runtime-fixture\cube-mm.stp .\artifact\Cube-mm.stp
+          Copy-Item '.\AsterMax revision.pmx' .\artifact\Example-mesh.pmx -ErrorAction SilentlyContinue
+          Get-ChildItem .\artifact -Recurse -File -Include *.pdb,*.vshost.* | Remove-Item -Force
           Copy-Item .\FRAMEBUFFER_VALIDATION.json .\artifact\ -ErrorAction SilentlyContinue
           Copy-Item .\native-windows\README-C9.76.md .\artifact\README-C9.76.md
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.76.png -ErrorAction SilentlyContinue
