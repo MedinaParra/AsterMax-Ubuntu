@@ -1,4 +1,4 @@
-name: AsterMax C9.75 Native Startup Repair
+name: AsterMax C9.76 Native Startup Repair
 
 on:
   push:
@@ -78,6 +78,29 @@ jobs:
           if(Test-Path (Join-Path $bin 'PrePoMax.exe')){throw 'Secondary application must not be shipped'}
           Get-FileHash runtime.zip -Algorithm SHA256 | Format-List | Out-File (Join-Path $bin 'CAD-RUNTIME-SHA256.txt')
 
+
+      - name: Package compatible OpenGL runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin=Split-Path '${{ steps.locate.outputs.exe }}' -Parent
+          Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z' -OutFile mesa.7z
+          $expected='dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          if((Get-FileHash mesa.7z -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'Mesa archive digest mismatch'}
+          & 7z x mesa.7z -omesa -y | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'Mesa extraction failed'}
+          foreach($name in @('opengl32.dll','libgallium_wgl.dll','dxil.dll')){
+            $dll=Get-ChildItem mesa -Recurse -Filter $name | Where-Object {$_.FullName -match '\\x64\\'} | Select-Object -First 1
+            if(-not $dll){throw "Missing x64 OpenGL dependency: $name"}
+            Copy-Item $dll.FullName $bin -Force
+          }
+          $licenseDir=Join-Path $bin 'licenses\Mesa'
+          New-Item -ItemType Directory -Force $licenseDir | Out-Null
+          Get-ChildItem mesa -Recurse -File | Where-Object {$_.Name -match 'license|copying|copyright'} | Copy-Item -Destination $licenseDir -Force
+          "Mesa 26.2.0; archive SHA256 $expected; https://github.com/pal1000/mesa-dist-win" | Set-Content (Join-Path $licenseDir 'SOURCE.txt')
+          # Use the software driver to make CI independent of a hardware GPU.
+          'GALLIUM_DRIVER=llvmpipe' | Out-File $env:GITHUB_ENV -Append
+
       - name: Static native gates
         shell: pwsh
         run: |
@@ -107,7 +130,7 @@ jobs:
           $checks | Format-Table -AutoSize | Out-String | Write-Host
           $pass = ($checks | Where-Object { -not $_.pass }).Count -eq 0
           $manifest = [pscustomobject]@{
-            release='C9.75'
+            release='C9.76'
             title='Native Startup Repair'
             build_os='windows-latest'
             upstream_commit=(Get-Content .\UPSTREAM_PREPOMAX_COMMIT.txt -Raw).Trim()
@@ -121,7 +144,7 @@ jobs:
             pmv_complete=$false
             checks=$checks
           }
-          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.75_VALIDATION.json" -Encoding UTF8
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.76_VALIDATION.json" -Encoding UTF8
           if(-not $pass){ throw 'Static gate failed.' }
 
       - name: Download deterministic STEP fixture
@@ -156,13 +179,37 @@ jobs:
           if($data.mesh_nodes -lt 1 -or $data.mesh_elements -lt 1){ throw 'No real volume mesh produced.' }
           if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
 
+
+      - name: Verify visible native framebuffer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Drawing
+          $png=Join-Path $PWD 'ASTERMAX_RUNTIME_STEP.json.vtk.png'
+          $img=[Drawing.Bitmap]::FromFile($png)
+          try {
+            $sampled=0;$lit=0;$dark=0;$colors=[Collections.Generic.HashSet[int]]::new()
+            for($y=0;$y -lt $img.Height;$y+=4){
+              for($x=0;$x -lt $img.Width;$x+=4){
+                $c=$img.GetPixel($x,$y);$sampled++
+                if(($c.R+$c.G+$c.B) -gt 90){$lit++}
+                if(($c.R+$c.G+$c.B) -lt 600){$dark++}
+                $null=$colors.Add($c.ToArgb())
+              }
+            }
+            $e=[ordered]@{nonblack_fraction=$lit/$sampled;foreground_fraction=$dark/$sampled;distinct_colors=$colors.Count;width=$img.Width;height=$img.Height}
+            $e.pass=($e.nonblack_fraction -gt 0.25 -and $e.foreground_fraction -gt 0.01 -and $e.distinct_colors -gt 20)
+            $e | ConvertTo-Json | Set-Content FRAMEBUFFER_VALIDATION.json
+            if(-not $e.pass){throw 'Native VTK framebuffer is blank or has no visible foreground'}
+          } finally {$img.Dispose()}
+
       - name: Merge runtime evidence
         if: always()
         shell: pwsh
         run: |
           $exe = '${{ steps.locate.outputs.exe }}'
           $out = Split-Path $exe -Parent
-          $manifestPath = Join-Path $out 'C9.75_VALIDATION.json'
+          $manifestPath = Join-Path $out 'C9.76_VALIDATION.json'
           $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
           if(Test-Path .\ASTERMAX_RUNTIME_STEP.json){
             $r = Get-Content .\ASTERMAX_RUNTIME_STEP.json -Raw | ConvertFrom-Json
@@ -179,7 +226,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.75-Runtime-Diagnostics
+          name: AsterMax-C9.76-Runtime-Diagnostics
           path: |
             ASTERMAX_RUNTIME_STEP.json
             ASTERMAX_RUNTIME_STEP.json.stages.log
@@ -200,9 +247,10 @@ jobs:
           New-Item -ItemType Directory -Force .\artifact | Out-Null
           Copy-Item "$bin\*" .\artifact -Recurse -Force
           Copy-Item .\UPSTREAM_PREPOMAX_COMMIT.txt .\artifact\UPSTREAM_PREPOMAX_COMMIT.txt
-          Copy-Item .\native-windows\README-C9.75.md .\artifact\README-C9.75.md
-          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.75.png -ErrorAction SilentlyContinue
-          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png .\artifact\AsterMax-C9.75-Viewport.png -ErrorAction SilentlyContinue
+          Copy-Item .\FRAMEBUFFER_VALIDATION.json .\artifact\ -ErrorAction SilentlyContinue
+          Copy-Item .\native-windows\README-C9.76.md .\artifact\README-C9.76.md
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.76.png -ErrorAction SilentlyContinue
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png .\artifact\AsterMax-C9.76-Viewport.png -ErrorAction SilentlyContinue
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png.txt .\artifact\Viewport-diagnostics.txt -ErrorAction SilentlyContinue
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png.opengl.txt .\artifact\OpenGL.txt -ErrorAction SilentlyContinue
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png.base.png .\artifact\Base-renderer.png -ErrorAction SilentlyContinue
@@ -213,6 +261,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.75-Polished-Native-Mechanical
+          name: AsterMax-C9.76-Polished-Native-Mechanical
           path: artifact
           if-no-files-found: error
