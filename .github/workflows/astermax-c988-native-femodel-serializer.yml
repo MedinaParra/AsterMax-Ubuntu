@@ -6,6 +6,7 @@ on:
       - 'native-windows/Serialize-AsterMaxFeModelContract.ps1'
       - 'native-windows/Export-AsterMaxCodeAster.ps1'
       - 'native-windows/c987-production-exporter/**'
+      - 'native-windows/c988-native-femodel-harness/**'
       - 'native-windows/patch-c976-automatic-model-fingerprint.ps1'
       - '.github/workflows/astermax-c988-native-femodel-serializer.yml'
   workflow_dispatch:
@@ -45,19 +46,12 @@ jobs:
           $root=(Resolve-Path .\upstream).Path;$bin=$exe.Directory.FullName;[Environment]::CurrentDirectory=$bin;$global:r=$root;$global:b=$bin
           [AppDomain]::CurrentDomain.add_AssemblyResolve({param($s,$a);$d=([Reflection.AssemblyName]$a.Name).Name+'.dll';$p=Join-Path $global:b $d;if(Test-Path $p){return [Reflection.Assembly]::LoadFrom($p)};$c=Get-ChildItem $global:r -Recurse -Filter $d -ErrorAction SilentlyContinue|Where-Object{$_.FullName -match 'bin\\(x64\\)?Release|packages'}|Select-Object -First 1;if($c){return [Reflection.Assembly]::LoadFrom($c.FullName)};return $null})
           $asm=[Reflection.Assembly]::LoadFrom($exe.FullName)
-          $cm=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeModel.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
-          $mesh=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeMesh.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
-          $cg=[Reflection.Assembly]::LoadFrom((Get-ChildItem $root -Recurse -Filter 'CaeGlobals.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName)
-          $feType=$cm.GetType('CaeModel.FeModel',$true);$model=[Activator]::CreateInstance($feType,@('C988-native-production'))
-          $usType=$cg.GetType('CaeGlobals.UnitSystem',$true);$ust=$cg.GetType('CaeGlobals.UnitSystemType',$true);$us=[Activator]::CreateInstance($usType,@([Enum]::Parse($ust,'MM_TON_S_C')));$feType.GetProperty('UnitSystem').SetValue($model,$us)
-          $nt=$mesh.GetType('CaeMesh.FeNode',$true);$coords=@(@(0,0,0),@(10,0,0),@(10,10,0),@(0,10,0),@(0,0,10),@(10,0,10),@(10,10,10),@(0,10,10));for($i=0;$i -lt 8;$i++){$c=$coords[$i];$id=[int]$i+1;$model.Mesh.Nodes.Add($id,[Activator]::CreateInstance($nt,@($id,[double]$c[0],[double]$c[1],[double]$c[2]))) }
-          $et=$mesh.GetType('CaeMesh.LinearHexaElement',$true);$model.Mesh.Elements.Add(1,[Activator]::CreateInstance($et,@(1,[int[]](1..8))))
-          $nst=$mesh.GetType('CaeMesh.FeNodeSet',$true);$model.Mesh.NodeSets.Add('FIXED',[Activator]::CreateInstance($nst,@('FIXED',[int[]]@(1,4,5,8))));$model.Mesh.NodeSets.Add('LOAD',[Activator]::CreateInstance($nst,@('LOAD',[int[]]@(2,3,6,7))))
-          $matType=$cm.GetType('CaeModel.Material',$true);$mat=[Activator]::CreateInstance($matType,@('Steel-C988'))
-          $elType=$cm.GetType('CaeModel.Elastic',$true);$rows=New-Object 'double[][]' 1;$rows[0]=[double[]]@(210000.0,0.3,20.0)
-          $elasticCtor=$elType.GetConstructor([Type[]]@([double[][]]));if(-not $elasticCtor){throw 'CaeModel.Elastic(double[][]) constructor missing from pinned upstream'}
-          $ctorArgs=New-Object 'object[]' 1;$ctorArgs[0]=$rows;$elastic=$elasticCtor.Invoke($ctorArgs);$mat.AddProperty($elastic);$model.Materials.Add('Steel-C988',$mat)
-          $st=$cm.GetType('CaeModel.StaticStep',$true);$step=[Activator]::CreateInstance($st,@('Step-1'));$rt=$cg.GetType('CaeGlobals.RegionTypeEnum',$true);$ns=[Enum]::Parse($rt,'NodeSetName');$bct=$cm.GetType('CaeModel.FixedBC',$true);$step.AddBoundaryCondition([Activator]::CreateInstance($bct,@('Fixed-1','FIXED',$ns,$false)));$lt=$cm.GetType('CaeModel.CLoad',$true);$step.AddLoad([Activator]::CreateInstance($lt,@('Force-1','LOAD',$ns,0.0,-100.0,0.0,$false,$false,0.0)));$model.StepCollection.AddStep($step,$false)
+          $cmPath=(Get-ChildItem $root -Recurse -Filter 'CaeModel.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName
+          $meshPath=(Get-ChildItem $root -Recurse -Filter 'CaeMesh.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName
+          $cgPath=(Get-ChildItem $root -Recurse -Filter 'CaeGlobals.dll'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1).FullName
+          [Reflection.Assembly]::LoadFrom($cmPath)|Out-Null;[Reflection.Assembly]::LoadFrom($meshPath)|Out-Null;[Reflection.Assembly]::LoadFrom($cgPath)|Out-Null
+          Add-Type -Path .\native-windows\c988-native-femodel-harness\C988NativeModelFactory.cs -ReferencedAssemblies @($cmPath,$meshPath,$cgPath)
+          $model=[AsterMax.Harness.C988NativeModelFactory]::Build()
           $fpType=$asm.GetType('PrePoMax.AsterMaxModelFingerprint',$true);$extract=$fpType.GetMethod('Extract',[Reflection.BindingFlags]'Public,Static');$fpBefore=[string]$fpType.GetProperty('Sha256').GetValue($extract.Invoke($null,@($model)))
           . .\native-windows\Serialize-AsterMaxFeModelContract.ps1
           $contract=Export-AsterMaxFeModelContract -Model $model -OutPath artifact\c988.model.json
@@ -66,7 +60,7 @@ jobs:
           if($contract.source.kind -ne 'compiled_native_femodel'){throw 'Native source provenance missing'}
           if($contract.mesh.nodes.Count -ne 8 -or $contract.mesh.elements.Count -ne 1){throw 'Native mesh serialization mismatch'}
           if($contract.materials[0].young_modulus_mpa -ne 210000.0 -or $contract.materials[0].poisson -ne 0.3){throw 'Native material serialization mismatch'}
-          [ordered]@{fingerprint_before=$fpBefore;fingerprint_after=$fpAfter;serializer_non_mutating=($fpBefore -eq $fpAfter);native_source=$contract.source.kind;upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571';elastic_api='Elastic(double[][])';reflection_argument_shape='object[1] containing double[][]'}|ConvertTo-Json|Set-Content artifact\native-serializer-evidence.json -Encoding UTF8
+          [ordered]@{fingerprint_before=$fpBefore;fingerprint_after=$fpAfter;serializer_non_mutating=($fpBefore -eq $fpAfter);native_source=$contract.source.kind;upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571';elastic_api='Elastic(double[][])';harness_binding='strongly_typed_csharp_factory';powershell_reflection_for_model_construction=$false}|ConvertTo-Json|Set-Content artifact\native-serializer-evidence.json -Encoding UTF8
       - name: Run production Code_Aster exporter
         shell: pwsh
         run: .\native-windows\Export-AsterMaxCodeAster.ps1 -ModelPath artifact\c988.model.json -OutDir artifact\deck
@@ -80,7 +74,7 @@ jobs:
           if(-not $audit.pass){throw 'Semantic gate did not pass; Solve must remain blocked'}
           $e=Get-Content artifact\native-serializer-evidence.json -Raw|ConvertFrom-Json
           if(-not $e.serializer_non_mutating){throw 'Serializer mutation detected; Solve must remain blocked'}
-          [ordered]@{release='C9.88.2';model_fidelity='VERIFIED';production_serializer='VERIFIED';solver_input='VERIFIED';solve_authorization='READY';solver_execution='NOT_RUN';fea_values_invented=$false;ansys_equivalence='NOT_PROVEN';truth_boundary='READY means the validated deck may proceed to Code_Aster; this workflow does not claim a solver result.'}|ConvertTo-Json|Set-Content artifact\C9.88_VALIDATION.json -Encoding UTF8
+          [ordered]@{release='C9.88.3';model_fidelity='VERIFIED';production_serializer='VERIFIED';solver_input='VERIFIED';solve_authorization='READY';solver_execution='NOT_RUN';fea_values_invented=$false;ansys_equivalence='NOT_PROVEN';truth_boundary='READY means the validated deck may proceed to Code_Aster; this workflow does not claim a solver result.'}|ConvertTo-Json|Set-Content artifact\C9.88_VALIDATION.json -Encoding UTF8
       - name: Reject stale native FeModel after serialization
         shell: pwsh
         run: |
