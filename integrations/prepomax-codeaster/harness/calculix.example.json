@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "case_name": "calculix-regression-smoke",
+  "solver": "calculix",
+  "job_name": "Job-1",
+  "working_directory": "./work/calculix-regression-smoke",
+  "solver_executable": "ccx",
+  "timeout_seconds": 3600,
+  "min_input_bytes": 1,
+  "min_output_bytes": 1,
+  "environment": {},
+  "required_inputs": [
+    "Job-1.inp"
+  ],
+  "required_outputs": [
+    "Job-1.frd"
+  ]
+}

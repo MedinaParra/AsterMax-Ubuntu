@@ -1,0 +1,254 @@
+name: C8.29 Genuine results evidence chain
+
+on:
+  push:
+    branches:
+      - agent/c8-29-genuine-results-evidence-chain
+    paths:
+      - 'integrations/prepomax-codeaster/**'
+      - '.github/workflows/c8-29-genuine-results-evidence-chain.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-29-genuine-results-evidence-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  genuine-codeaster-solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Prepare writable solver workspace
+        shell: bash
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/codeaster-linear-tetra
+          docker --version
+
+      - name: Pull pinned Code_Aster 17.4.0
+        shell: bash
+        run: docker pull simvia/code_aster:17.4.0
+
+      - name: Execute genuine solve through AsterMax harness
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.manifest.json
+
+      - name: Verify genuine result against pinned engineering oracle
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/validate_numeric_reference.py \
+            --resu integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.resu \
+            --contract integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/c8-29-reference-contract.json \
+            | tee c8-29-numeric-reference.log
+
+      - name: Build content-addressed solver evidence
+        shell: bash
+        run: |
+          mkdir -p artifact/c8-29-solver
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.mess artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.resu artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.rmed artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.mail artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.comm artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.export artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/smoke.harness.json artifact/c8-29-solver/
+          cp integrations/prepomax-codeaster/smoke/codeaster-linear-tetra/c8-29-reference-contract.json artifact/c8-29-solver/
+          cp c8-29-numeric-reference.log artifact/c8-29-solver/
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('artifact/c8-29-solver')
+          harness = json.loads((root / 'smoke.harness.json').read_text())
+          if str(harness.get('status', '')).upper() != 'PASS':
+              raise SystemExit('Harness status is not PASS.')
+          files = {}
+          for p in sorted(root.iterdir()):
+              if p.is_file() and p.name != 'C8_29_SOLVER_EVIDENCE.json':
+                  files[p.name] = hashlib.sha256(p.read_bytes()).hexdigest()
+          evidence = {
+              'schema': 'astermax.c8-29-genuine-solver-evidence.v1',
+              'commit': '${{ github.sha }}',
+              'solver': 'Code_Aster 17.4.0',
+              'unit_system': 'mm-N-MPa',
+              'real_solver_process': True,
+              'fea_solve_executed': True,
+              'numerical_reference_passed': True,
+              'results_verified_for_reference_case': True,
+              'files_sha256': files,
+              'industrial_validation': False,
+              'ansys_equivalence': False,
+              'note': 'Claims apply only to the pinned linear tetra reference case.'
+          }
+          (root / 'C8_29_SOLVER_EVIDENCE.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
+
+      - name: Upload genuine solver evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.29-genuine-CodeAster-${{ github.sha }}
+          path: artifact/c8-29-solver/**
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-production-admission-and-gui:
+    needs: genuine-codeaster-solve
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download genuine Code_Aster evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: AsterMax-C8.29-genuine-CodeAster-${{ github.sha }}
+          path: real-codeaster-output
+
+      - name: Verify downloaded provenance before production import
+        shell: pwsh
+        run: |
+          $evidence = Get-Content real-codeaster-output/C8_29_SOLVER_EVIDENCE.json -Raw | ConvertFrom-Json
+          if (-not $evidence.real_solver_process) { throw 'Downloaded evidence is not marked as a real solver process.' }
+          if (-not $evidence.fea_solve_executed) { throw 'Genuine solve claim is absent.' }
+          if (-not $evidence.numerical_reference_passed) { throw 'Numerical reference did not pass.' }
+          if (-not $evidence.results_verified_for_reference_case) { throw 'Reference results are not verified.' }
+          if ($evidence.industrial_validation -or $evidence.ansys_equivalence) { throw 'Forbidden claim promotion detected.' }
+          foreach ($name in $evidence.files_sha256.PSObject.Properties.Name) {
+            $path = Join-Path 'real-codeaster-output' $name
+            if (-not (Test-Path $path)) { throw "Missing provenance file: $name" }
+            $actual = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expected = [string]$evidence.files_sha256.$name
+            if ($actual -ne $expected) { throw "SHA-256 mismatch for $name" }
+          }
+
+      - name: Bootstrap production AsterMax tree
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build production Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 | Tee-Object -FilePath c8-29-msbuild.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Admit genuine solver results through production CodeAsterResultBridge
+        id: import
+        shell: pwsh
+        run: |
+          $exe = Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe' -ErrorAction Stop
+          $rmed = (Resolve-Path real-codeaster-output/smoke.rmed).Path
+          $resu = (Resolve-Path real-codeaster-output/smoke.resu).Path
+          $stdout = Join-Path $PWD 'c8-29-import.stdout.log'
+          $stderr = Join-Path $PWD 'c8-29-import.stderr.log'
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList @('--codeaster-import-probe', $rmed, $resu) -WorkingDirectory $exe.DirectoryName -RedirectStandardOutput $stdout -RedirectStandardError $stderr -NoNewWindow -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+            throw "Production CodeAsterResultBridge rejected genuine verified results. ExitCode=$($p.ExitCode)"
+          }
+          "exe=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "exe_sha256=$((Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Launch real branded GUI and capture native evidence
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class C829Window {
+              [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+              [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
+          New-Item -ItemType Directory -Force -Path artifact/c8-29-windows | Out-Null
+          $exe = '${{ steps.import.outputs.exe }}'
+          $proc = Start-Process -FilePath $exe -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "GUI exited before creating a native window. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'No native GUI window was observed.' }
+          $title = $proc.MainWindowTitle
+          if ($title -notmatch '^AsterMax Mechanical') { throw "Unexpected product title: $title" }
+          [C829Window]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 2
+          $rect = New-Object C829Window+RECT
+          if (-not [C829Window]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)) { throw 'GetWindowRect failed.' }
+          $width = $rect.Right - $rect.Left
+          $height = $rect.Bottom - $rect.Top
+          if ($width -lt 640 -or $height -lt 480) { throw "Unexpected GUI size ${width}x${height}." }
+          $bmp = New-Object System.Drawing.Bitmap $width, $height
+          $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+          try {
+            $gfx.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size)
+            $bmp.Save((Join-Path $PWD 'artifact/c8-29-windows/AsterMax-C8.29-real-GUI.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+          } finally {
+            $gfx.Dispose(); $bmp.Dispose()
+          }
+          Stop-Process -Id $proc.Id -Force
+
+          $png = Get-Item artifact/c8-29-windows/AsterMax-C8.29-real-GUI.png
+          if ($png.Length -lt 10000) { throw 'Real GUI screenshot is suspiciously small.' }
+          $solverEvidence = Get-Content real-codeaster-output/C8_29_SOLVER_EVIDENCE.json -Raw | ConvertFrom-Json
+          @{
+            schema = 'astermax.c8-29-cross-platform-evidence-chain.v1'
+            commit = '${{ github.sha }}'
+            solver = 'Code_Aster 17.4.0'
+            unit_system = 'mm-N-MPa'
+            genuine_solver_evidence_sha256 = (Get-FileHash real-codeaster-output/C8_29_SOLVER_EVIDENCE.json -Algorithm SHA256).Hash.ToLowerInvariant()
+            result_resu_sha256 = (Get-FileHash real-codeaster-output/smoke.resu -Algorithm SHA256).Hash.ToLowerInvariant()
+            result_rmed_sha256 = (Get-FileHash real-codeaster-output/smoke.rmed -Algorithm SHA256).Hash.ToLowerInvariant()
+            windows_executable_sha256 = '${{ steps.import.outputs.exe_sha256 }}'
+            production_result_bridge_admitted = $true
+            real_windows_process = $true
+            branded_native_gui_observed = $true
+            gui_title = $title
+            screenshot_sha256 = (Get-FileHash $png.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            fea_solve_executed = [bool]$solverEvidence.fea_solve_executed
+            numerical_verification = [bool]$solverEvidence.numerical_reference_passed
+            results_verified = [bool]$solverEvidence.results_verified_for_reference_case
+            contour_rendered_from_verified_result = $false
+            rendering_semantics_verified = $false
+            industrial_validation = $false
+            ansys_equivalence = $false
+            note = 'C8.29 proves genuine verified Code_Aster results survive provenance checks and the production Windows result bridge. The native GUI is real, but this iteration does not claim that the screenshot displays the imported contour.'
+          } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 artifact/c8-29-windows/C8_29_EVIDENCE_CHAIN.json
+
+      - name: Upload Windows evidence chain
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.29-Windows-evidence-${{ github.sha }}
+          path: |
+            artifact/c8-29-windows/**
+            c8-29-import.stdout.log
+            c8-29-import.stderr.log
+            c8-29-msbuild.log
+          if-no-files-found: warn
+          retention-days: 14

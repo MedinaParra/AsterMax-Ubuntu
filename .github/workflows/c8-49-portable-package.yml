@@ -1,0 +1,89 @@
+name: C8.49 Portable Windows Package
+
+on:
+  push:
+    branches: [agent/c8-49-full-dark-cae-shell]
+    paths:
+      - '.github/workflows/c8-49-portable-package.yml'
+      - 'integrations/prepomax-codeaster/**'
+  workflow_dispatch:
+
+jobs:
+  package-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Fetch portable runtime assets
+        shell: pwsh
+        run: |
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $zip='build/PrePoMax-v1.4.0-portable.zip'
+          $extract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip $url
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgen=Get-ChildItem -Path $extract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if (-not $netgen) { throw 'Portable runtime missing NetGenMesher.exe' }
+          "PREPOMAX_RUNTIME_ROOT=$($netgen.Directory.Parent.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Assemble portable package
+        shell: pwsh
+        run: |
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $package=Join-Path $PWD 'artifact/AsterMax Mechanical C8.49'
+          New-Item -ItemType Directory -Force -Path $package | Out-Null
+          Copy-Item -Path (Join-Path $release '*') -Destination $package -Recurse -Force
+          foreach($folder in @('NetGen','Solver','Models','Temp')) {
+            $source=Join-Path $env:PREPOMAX_RUNTIME_ROOT $folder
+            if(Test-Path $source){ Copy-Item -Path $source -Destination $package -Recurse -Force }
+          }
+          python integrations/prepomax-codeaster/tools/generate_materials_lib.py --output (Join-Path $package 'materials.lib')
+          Copy-Item integrations/prepomax-codeaster/assets/MATERIAL_LIBRARY_SOURCES.md (Join-Path $package 'MATERIAL_LIBRARY_SOURCES.md') -Force
+          $srcExe=Join-Path $package 'PrePoMax.exe'
+          $dstExe=Join-Path $package 'AsterMax Mechanical.exe'
+          if(-not (Test-Path $srcExe)){ throw 'Compiled PrePoMax.exe missing' }
+          Move-Item $srcExe $dstExe -Force
+          $srcCfg=Join-Path $package 'PrePoMax.exe.config'
+          if(Test-Path $srcCfg){ Move-Item $srcCfg (Join-Path $package 'AsterMax Mechanical.exe.config') -Force }
+          @{
+            schema='astermax.c849.portable-windows.v1'; version='C8.49'; commit='${{ github.sha }}';
+            executable='AsterMax Mechanical.exe'; executable_sha256=(Get-FileHash $dstExe -Algorithm SHA256).Hash.ToLowerInvariant();
+            build='Release/x64'; dark_cae_shell=$true; ai_copilot=$true; analysis_setup=$true;
+            solver_authority='Code_Aster'; unit_contract='mm-N-MPa'; industrial_validation=$false; ansys_equivalence=$false
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $package 'BUILD_EVIDENCE.json')
+      - name: Smoke launch packaged executable
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'artifact/AsterMax Mechanical C8.49/AsterMax Mechanical.exe').Path
+          $p=Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(30)
+          do { Start-Sleep -Milliseconds 500; $p.Refresh(); if($p.HasExited){ throw "GUI exited early: $($p.ExitCode)" } } while($p.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          if($p.MainWindowHandle -eq 0){ throw 'No native window' }
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){ throw "Unexpected title: $($p.MainWindowTitle)" }
+          Stop-Process -Id $p.Id -Force
+      - name: Create ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path 'artifact/AsterMax Mechanical C8.49/*' -DestinationPath 'artifact/AsterMax-Mechanical-C8.49-Windows-x64.zip' -CompressionLevel Optimal
+          (Get-FileHash 'artifact/AsterMax-Mechanical-C8.49-Windows-x64.zip' -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content -Encoding ascii 'artifact/AsterMax-Mechanical-C8.49-Windows-x64.zip.sha256'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-C8.49-Windows-x64-${{ github.sha }}
+          path: |
+            artifact/AsterMax-Mechanical-C8.49-Windows-x64.zip
+            artifact/AsterMax-Mechanical-C8.49-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
