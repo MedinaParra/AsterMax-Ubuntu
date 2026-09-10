@@ -1,10 +1,11 @@
-name: AsterMax C9.90 Windows Distribution Build
+name: AsterMax C9.91 Windows Distribution Build
 
 on:
   push:
     branches: [ main ]
     paths:
       - '.github/workflows/astermax-c990-windows-build.yml'
+      - 'native-windows/patch-c991-startup-hardening.ps1'
   workflow_dispatch:
 
 jobs:
@@ -28,6 +29,7 @@ jobs:
           .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c985-model-fidelity-gate.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c991-startup-hardening.ps1 -Root "$PWD\upstream"
       - name: Restore packages
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -46,19 +48,20 @@ jobs:
           Copy-Item "$bin\*" .\dist\ -Recurse -Force
           $exeHash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C9.90'
+            release='C9.91'
             platform='Windows x64'
             configuration='Release'
             upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571'
             executable='AsterMax Mechanical.exe'
             executable_sha256=$exeHash
+            startup_hardening=$true
             fea_values_invented=$false
-            note='Compiled distributable runtime. Code_Aster is not bundled in this artifact.'
+            note='Startup null-dereference hardening and root initialization diagnostics. Code_Aster is not bundled in this artifact.'
           } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
           Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
           Write-Host "EXE_SHA256=$exeHash"
       - uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.90-Windows-x64-Release
+          name: AsterMax-C9.91-Windows-x64-Release
           path: dist
           if-no-files-found: error
