@@ -76,7 +76,7 @@ $helpers=@'
             if(String.IsNullOrWhiteSpace(runner) || !File.Exists(runner)) return p;
             try
             {
-                using(Process process=Process.Start(CreateRunnerProcess(runner,"--probe",Application.StartupPath)))
+                using(Process process=Process.Start(CreateRunnerProcess(runner,"probe",Application.StartupPath)))
                 {
                     string stdout=process.StandardOutput.ReadToEnd();
                     string stderr=process.StandardError.ReadToEnd();
