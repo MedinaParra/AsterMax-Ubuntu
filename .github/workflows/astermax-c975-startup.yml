@@ -267,6 +267,70 @@ jobs:
           Copy-Item .\native-windows\patch-c975-startup.ps1 .\artifact\ -Force
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $iscc=Get-ChildItem (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup*\ISCC.exe') | Select-Object -First 1
+          if(-not $iscc){throw 'Inno Setup compiler missing'}
+          & $iscc.FullName "/DSourceDir=$PWD\artifact" "/O$PWD\installer" .\native-windows\astermax-installer.iss
+          if($LASTEXITCODE -ne 0){throw 'Installer compilation failed'}
+
+      - name: Verify installed application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=(Resolve-Path '.\installer\AsterMax-Mechanical-C9.76-Setup.exe').Path
+          $installed=Join-Path $env:RUNNER_TEMP 'AsterMax installed smoke'
+          $setupArgs='/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + $installed + '"'
+          $p=Start-Process $setup -ArgumentList $setupArgs -PassThru
+          if(-not $p.WaitForExit(120000)){throw 'Installer timeout'}
+          if($p.ExitCode -ne 0){throw "Installer failed: $($p.ExitCode)"}
+          $exe=Join-Path $installed 'AsterMax Mechanical.exe'
+          if(-not(Test-Path $exe)){throw 'Installed application missing'}
+          $step=(Resolve-Path '.\runtime-fixture\cube-mm.stp').Path
+          $report=Join-Path $PWD 'ASTERMAX_INSTALLED.json'
+          $appArgs='"' + $step + '" -US MM_TON_S_C "--ASTERMAX-SMOKE=' + $report + '"'
+          $p=Start-Process $exe -ArgumentList $appArgs -WorkingDirectory $installed -PassThru
+          if(-not $p.WaitForExit(90000)){Stop-Process $p.Id -Force;throw 'Installed application timeout'}
+          if(-not(Test-Path $report)){throw 'Installed application produced no report'}
+          $r=Get-Content $report -Raw | ConvertFrom-Json
+          if(-not $r.pass -or -not $r.project_roundtrip -or -not $r.workspace_navigation){throw 'Installed application runtime failed'}
+          Add-Type -AssemblyName System.Drawing
+          $img=[Drawing.Bitmap]::FromFile("$report.vtk.png")
+          try {
+            $samples=0;$lit=0;$foreground=0;$colors=[Collections.Generic.HashSet[int]]::new()
+            for($y=0;$y -lt $img.Height;$y+=4){
+              for($x=0;$x -lt $img.Width;$x+=4){
+                $c=$img.GetPixel($x,$y);$samples++
+                if(($c.R+$c.G+$c.B) -gt 90){$lit++}
+                if(($c.R+$c.G+$c.B) -lt 600){$foreground++}
+                $null=$colors.Add($c.ToArgb())
+              }
+            }
+            if($lit/$samples -le 0.25 -or $foreground/$samples -le 0.01 -or $colors.Count -le 20){throw 'Installed viewport is blank'}
+          } finally {$img.Dispose()}
+          $hash=(Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  AsterMax-Mechanical-C9.76-Setup.exe" | Set-Content '.\installer\SHA256.txt'
+          Copy-Item .\ASTERMAX_INSTALLED.json .\installer\
+          Copy-Item .\ASTERMAX_INSTALLED.json.png .\installer\AsterMax-C9.76.png
+          Copy-Item .\native-windows\README-C9.76.md .\installer\
+
+      - name: Upload installed application diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.76-Installer-Diagnostics
+          path: ASTERMAX_INSTALLED.json*
+          if-no-files-found: warn
+
+      - name: Upload validated Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C9.76-Windows-Installer
+          path: installer
+          if-no-files-found: error
+
       - name: Upload native build
         if: always()
         uses: actions/upload-artifact@v4
