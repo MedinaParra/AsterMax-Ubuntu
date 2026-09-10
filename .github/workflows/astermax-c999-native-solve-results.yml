@@ -42,6 +42,8 @@ jobs:
           python3 -m pip install --disable-pip-version-check --quiet numpy h5py
 
       - name: Bridge the exact real MED into AsterMax results
+        env:
+          ASTERMAX_MED_BRIDGE_MODE: production
         shell: bash
         run: |
           set -euxo pipefail
