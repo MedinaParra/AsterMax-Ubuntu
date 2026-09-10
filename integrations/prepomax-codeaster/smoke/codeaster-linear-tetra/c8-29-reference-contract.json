@@ -1,0 +1,25 @@
+{
+  "schema": "astermax.numeric-reference-contract.v1",
+  "units": {
+    "length": "mm",
+    "force": "N",
+    "stress": "MPa"
+  },
+  "case": "codeaster-linear-tetra-mm-n-mpa",
+  "claim_boundary": {
+    "industrial_validation": false,
+    "ansys_equivalence": false
+  },
+  "expectations": [
+    {"table": "PPM_DEPL", "node": 1, "component": "DX", "expected": 0.0, "abs_tol": 1e-12, "rel_tol": 0.0},
+    {"table": "PPM_DEPL", "node": 2, "component": "DX", "expected": 0.0, "abs_tol": 1e-12, "rel_tol": 0.0},
+    {"table": "PPM_DEPL", "node": 3, "component": "DX", "expected": 0.0, "abs_tol": 1e-12, "rel_tol": 0.0},
+    {"table": "PPM_DEPL", "node": 4, "component": "DX", "expected": 0.0007428571428571429, "abs_tol": 1e-12, "rel_tol": 1e-8},
+    {"table": "PPM_DEPL", "node": 4, "component": "DY", "expected": 0.0, "abs_tol": 1e-12, "rel_tol": 0.0},
+    {"table": "PPM_DEPL", "node": 4, "component": "DZ", "expected": 0.0, "abs_tol": 1e-12, "rel_tol": 0.0},
+    {"table": "PPM_STRESS_S", "node": 1, "component": "SIXZ", "expected": 0.6, "abs_tol": 1e-10, "rel_tol": 1e-8},
+    {"table": "PPM_STRESS_S", "node": 2, "component": "SIXZ", "expected": 0.6, "abs_tol": 1e-10, "rel_tol": 1e-8},
+    {"table": "PPM_STRESS_S", "node": 3, "component": "SIXZ", "expected": 0.6, "abs_tol": 1e-10, "rel_tol": 1e-8},
+    {"table": "PPM_STRESS_S", "node": 4, "component": "SIXZ", "expected": 0.6, "abs_tol": 1e-10, "rel_tol": 1e-8}
+  ]
+}

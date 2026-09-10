@@ -1,0 +1,81 @@
+name: C8.88 Native FeMeshRefinement Persistence
+
+on:
+  push:
+    branches: [agent/c8-88-native-refinement-persistence]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-88-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-native-persistence:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap pinned AsterMax
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore and build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Install pinned NetGen runtime and SI-mm STEP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/c8-88 | Out-Null
+          $zip='build/PrePoMax-v1.4.0-portable.zip'; $extract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $zip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgen=Get-ChildItem -Path $extract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName; $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $src=Join-Path $runtimeRoot $folder; if(Test-Path $src){Copy-Item -Path $src -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.88_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres'}
+          "ASTERMAX_C888_STEP=$((Resolve-Path $fixture).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Prove STEP mesh plus native FeMeshRefinement PMX roundtrip
+        shell: pwsh
+        run: |
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+          $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_C888_STEP
+          $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=(Join-Path $PWD 'artifact/c8-88/STEP_NETGEN.json')
+          $env:ASTERMAX_NATIVE_REFINEMENT_PERSISTENCE_FIXTURE='1'
+          $env:ASTERMAX_NATIVE_REFINEMENT_PERSISTENCE_EVIDENCE_PATH=(Join-Path $PWD 'artifact/c8-88/C8.88_NATIVE_REFINEMENT_PERSISTENCE.json')
+          $env:ASTERMAX_NATIVE_REFINEMENT_PERSISTENCE_PMX_PATH=(Join-Path $PWD 'artifact/c8-88/AsterMax_C8.88_NativeRefinement.pmx')
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native AsterMax window'}
+          $required=@($env:ASTERMAX_STEP_MESH_EVIDENCE_PATH,$env:ASTERMAX_NATIVE_REFINEMENT_PERSISTENCE_EVIDENCE_PATH,$env:ASTERMAX_NATIVE_REFINEMENT_PERSISTENCE_PMX_PATH)
+          $proof=(Get-Date).AddSeconds(720)
+          while((@($required|Where-Object{-not(Test-Path $_)}).Count -gt 0) -and (Get-Date)-lt $proof){Start-Sleep -Milliseconds 750;$p.Refresh();if($p.HasExited){throw 'GUI exited during C8.88 qualification'}}
+          foreach($f in $required){if(-not(Test-Path $f)){throw "Missing C8.88 evidence: $f"}}
+          $mesh=Get-Content $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH -Raw|ConvertFrom-Json
+          if(-not $mesh.step_to_netgen_mesh_qualified){throw "STEP/NetGen prerequisite failed: $($mesh.error)"}
+          $ev=Get-Content $env:ASTERMAX_NATIVE_REFINEMENT_PERSISTENCE_EVIDENCE_PATH -Raw|ConvertFrom-Json
+          if(-not $ev.native_femeshrefinement_persistence_verified){throw "Native persistence gate failed: $($ev.error)"}
+          if($ev.native_roi_geometry_binding_verified){throw 'C8.88 must not overclaim native ROI geometry binding'}
+          if($ev.native_refinement_consumer_verified){throw 'C8.88 must not overclaim native refinement consumption'}
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.88-Native-Refinement-Persistence-${{ github.sha }}
+          path: artifact/c8-88/**
+          if-no-files-found: warn
+          retention-days: 14
