@@ -55,6 +55,18 @@ jobs:
           PY
           cat c989-work/PRE_SOLVE_INPUT_SHA256.json
 
+      - name: Gate ASTER mesh identifier syntax before solver
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -Eq '^N[0-9]+[[:space:]]' c989-work/c988.mail
+          grep -Eq '^E[0-9]+[[:space:]]' c989-work/c988.mail
+          if grep -Eq '^[0-9]+[[:space:]]+[-+0-9.]' c989-work/c988.mail; then
+            echo 'Bare numeric ASTER mesh identifier detected' >&2
+            exit 1
+          fi
+          printf 'node_ids=N#\nelement_ids=E#\nstatus=PASS\n' > c989-work/ASTER_IDENTIFIER_GATE.txt
+
       - name: Build Code_Aster export transaction
         shell: bash
         run: |
@@ -134,9 +146,9 @@ jobs:
           if [ -d c989-tamper ]; then cp c989-tamper/C9.89_TAMPER_REJECTION.json artifact/ || true; fi
           (cd artifact && find . -type f -print0 | sort -z | xargs -0 sha256sum) > artifact/SHA256.txt
           cat > artifact/C9.89_STATUS.md <<'EOF'
-          # AsterMax C9.89 — Native Solve Transaction
+          # AsterMax C9.89.3 — Native Solve Transaction
 
-          This gate consumes the exact production deck emitted by a successful C9.88 native FeModel gate, locks all pre-solve hashes, executes real Code_Aster 15.2, requires a normal solver stop and non-empty MED/result outputs, binds output hashes to the native model fingerprint, and proves that post-solve input tampering invalidates the transaction.
+          This gate consumes the exact production deck emitted by a successful C9.88 native FeModel gate, verifies Code_Aster ASTER-format N#/E# identifiers, locks all pre-solve hashes, executes real Code_Aster 15.2, requires a normal solver stop and non-empty MED/result outputs, binds output hashes to the native model fingerprint, and proves that post-solve input tampering invalidates the transaction.
 
           It does not claim ANSYS numerical equivalence and does not invent FEA values.
           EOF
