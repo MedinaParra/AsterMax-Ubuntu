@@ -67,28 +67,53 @@ jobs:
           $bcType=$cm.GetType('CaeModel.FixedBC',$true);$bc=[Activator]::CreateInstance($bcType,@('Fixed-1','FIXED',$nodeSet,$false));$step.AddBoundaryCondition($bc)
           $loadType=$cm.GetType('CaeModel.CLoad',$true);$load=[Activator]::CreateInstance($loadType,@('Force-1',1,1000.0,0.0,0.0,$false,$false,0.0));$step.AddLoad($load)
           $model.StepCollection.AddStep($step,$false)
+
           $fp=$extract.Invoke($null,@($model));$sha=[string]$fpType.GetProperty('Sha256').GetValue($fp)
+          $shaRepeat=[string]$fpType.GetProperty('Sha256').GetValue($extract.Invoke($null,@($model)))
           $same=[bool]$verify.Invoke($null,@($model,$sha))
           $accepted=[string]$require.Invoke($null,@($model,$sha))
-          $load.F1=1001.0;$loadRejected=$false;try{$null=$require.Invoke($null,@($model,$sha))}catch{$loadRejected=$true};$load.F1=1000.0
-          $node.X=1.0;$meshRejected=$false;try{$null=$require.Invoke($null,@($model,$sha))}catch{$meshRejected=$true};$node.X=0.0
-          $mat.Description='changed';$materialRejected=$false;try{$null=$require.Invoke($null,@($model,$sha))}catch{$materialRejected=$true};$mat.Description=$null
+
+          $originalF1=$load.F1
+          $load.F1=$originalF1+1.0
+          $loadRejected=$false;try{$null=$require.Invoke($null,@($model,$sha))}catch{$loadRejected=$true}
+          $load.F1=$originalF1
+          $loadRestored=[bool]$verify.Invoke($null,@($model,$sha))
+
+          # FeNode is a value type (struct). Mutating the local copy does not mutate FeMesh.Nodes.
+          # Replace the dictionary value explicitly so this gate tests the real in-memory mesh.
+          $originalNode=$model.Mesh.Nodes[1]
+          $changedNode=[Activator]::CreateInstance($nodeType,@(1,1.0,0.0,0.0))
+          $model.Mesh.Nodes[1]=$changedNode
+          $meshRejected=$false;try{$null=$require.Invoke($null,@($model,$sha))}catch{$meshRejected=$true}
+          $model.Mesh.Nodes[1]=$originalNode
+          $meshRestored=[bool]$verify.Invoke($null,@($model,$sha))
+
+          $originalDescription=$mat.Description
+          $mat.Description='changed'
+          $materialRejected=$false;try{$null=$require.Invoke($null,@($model,$sha))}catch{$materialRejected=$true}
+          $mat.Description=$originalDescription
+          $materialRestored=[bool]$verify.Invoke($null,@($model,$sha))
+
           $freshAgain=[bool]$verify.Invoke($null,@($model,$sha))
           $checks=[ordered]@{
             windows_x64_build=(Test-Path $exe.FullName)
             compiled_native_gate=($null -ne $gateType)
             fingerprint_sha256_shape=($sha -match '^[0-9a-f]{64}$')
+            deterministic_reextract=($shaRepeat -eq $sha)
             unchanged_model_allowed=$same
             require_returns_same_fingerprint=($accepted -eq $sha)
             stale_load_blocked=$loadRejected
+            load_restore_exact=$loadRestored
             stale_mesh_blocked=$meshRejected
+            mesh_restore_exact=$meshRestored
             stale_material_blocked=$materialRejected
+            material_restore_exact=$materialRestored
             restored_model_allowed=$freshAgain
           }
-          $out=[ordered]@{release='C9.85.1';title='Native FeModel Fidelity Gate';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));model_fingerprint_sha256=$sha;fea_values_invented=$false;fresh_solver_run='NOT_RUN';truth_boundary='C9.85.1 proves a compiled Windows AsterMax gate can block Solve when the real in-memory FeModel changes after fingerprint capture. It does not yet prove automatic Code_Aster deck equivalence.'}
-          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.85.1_VALIDATION.json -Encoding UTF8
+          $out=[ordered]@{release='C9.85.2';title='Native FeModel Fidelity Gate';checks=$checks;passed=($checks.Values|Where-Object{$_}).Count;total=$checks.Count;pass=(-not($checks.Values -contains $false));model_fingerprint_sha256=$sha;fea_values_invented=$false;fresh_solver_run='NOT_RUN';truth_boundary='C9.85.2 validates deterministic compiled-Windows FeModel fingerprinting and blocks load, real mesh-dictionary, and material mutations. It does not yet prove automatic Code_Aster deck equivalence.'}
+          $out|ConvertTo-Json -Depth 6|Set-Content artifact\C9.85.2_VALIDATION.json -Encoding UTF8
           $out|ConvertTo-Json -Depth 6|Write-Host
-          if(-not $out.pass){throw 'C9.85.1 FeModel fidelity gate failed'}
+          if(-not $out.pass){throw 'C9.85.2 FeModel fidelity gate failed'}
       - name: Package evidence
         if: always()
         shell: pwsh
@@ -100,6 +125,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C9.85.1-Native-FeModel-Fidelity
+          name: AsterMax-C9.85.2-Native-FeModel-Fidelity
           path: artifact
           if-no-files-found: error
