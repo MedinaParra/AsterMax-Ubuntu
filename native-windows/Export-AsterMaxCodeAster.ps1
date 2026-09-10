@@ -5,10 +5,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $culture = [System.Globalization.CultureInfo]::InvariantCulture
 function F([double]$v){ $v.ToString('0.###############',$culture) }
-function Add-WrappedIds([System.Collections.Generic.List[string]]$Target, [object[]]$Ids, [int]$Width=16){
-  for($i=0; $i -lt $Ids.Count; $i += $Width){
-    $last=[Math]::Min($i+$Width-1,$Ids.Count-1)
-    $Target.Add((@($Ids[$i..$last]) -join ' '))
+function NodeName([object]$id){ "N$([int]$id)" }
+function ElemName([object]$id){ "E$([int]$id)" }
+function Add-AsterNodeGroup([System.Collections.Generic.List[string]]$Target,[string]$Name,[object[]]$Ids,[int]$Width=16){
+  if($Ids.Count -lt 1){ throw "Node group $Name is empty." }
+  $tokens=@($Ids | ForEach-Object { NodeName $_ })
+  for($i=0; $i -lt $tokens.Count; $i += $Width){
+    $last=[Math]::Min($i+$Width-1,$tokens.Count-1)
+    $chunk=@($tokens[$i..$last]) -join ' '
+    if($i -eq 0){ $Target.Add("$Name $chunk") } else { $Target.Add($chunk) }
   }
 }
 $model = Get-Content $ModelPath -Raw | ConvertFrom-Json
@@ -34,17 +39,15 @@ $mail.Add('TITRE')
 $mail.Add("ASTERMAX PRODUCTION EXPORT - $($model.name)")
 $mail.Add('FINSF')
 $mail.Add('COOR_3D')
-foreach($n in $nodes){ $mail.Add("$($n.id)  $(F $n.x)  $(F $n.y)  $(F $n.z)") }
+foreach($n in $nodes){ $mail.Add("$(NodeName $n.id) $(F $n.x) $(F $n.y) $(F $n.z)") }
 $mail.Add('FINSF')
 $mail.Add($model.mesh.element_type)
-foreach($e in $elements){ $mail.Add("$($e.id) " + (($e.nodes) -join ' ')) }
+foreach($e in $elements){ $mail.Add("$(ElemName $e.id) " + ((@($e.nodes | ForEach-Object { NodeName $_ })) -join ' ')) }
 $mail.Add('FINSF')
 foreach($p in $groups.PSObject.Properties | Sort-Object Name){
   $ids=@($p.Value)
-  if($ids.Count -lt 1){ throw "Node group $($p.Name) is empty." }
   $mail.Add('GROUP_NO')
-  $mail.Add("NOM = $($p.Name)")
-  Add-WrappedIds $mail $ids 16
+  Add-AsterNodeGroup $mail $p.Name $ids 16
   $mail.Add('FINSF')
 }
 $mail.Add('FIN')
