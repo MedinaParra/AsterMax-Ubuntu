@@ -168,3 +168,29 @@ Set-Content $uiPath $ui -Encoding UTF8
 $v=Get-Content $vtkPath -Raw
 $v=$v.Replace('            _renderWindow.Render();' + [Environment]::NewLine + '            var image =', '            _renderer.ResetCamera();' + [Environment]::NewLine + '            _renderer.ResetCameraClippingRange();' + [Environment]::NewLine + '            _renderWindow.Render();' + [Environment]::NewLine + '            System.IO.File.WriteAllText(path + ".txt", "actors=" + _actors.Count + "; rendererActors=" + _renderer.GetActors().GetNumberOfItems() + "; bounds=" + String.Join(",", _renderer.ComputeVisiblePropBounds()) + "; background=" + String.Join(",", _renderer.GetBackground()));' + [Environment]::NewLine + '            var image =')
 Set-Content $vtkPath $v -Encoding UTF8
+
+# Separate display-layer defects from driver failures without changing the saved model.
+$v=Get-Content $vtkPath -Raw
+$anchor='            var image = Kitware.VTK.vtkWindowToImageFilter.New();'
+$v=$v.Replace($anchor,
+ '            System.IO.File.WriteAllText(path + ".opengl.txt", _renderWindow.ReportCapabilities());' +
+ [Environment]::NewLine + $anchor)
+$anchor='                writer.Write();'
+$replace=@'
+                writer.Write();
+                _renderWindow.RemoveRenderer(_overlayRenderer);
+                _renderWindow.RemoveRenderer(_selectionRenderer);
+                try {
+                    _renderWindow.Render();
+                    image.Modified();
+                    image.Update();
+                    writer.SetFileName(path + ".base.png");
+                    writer.Write();
+                } finally {
+                    _renderWindow.AddRenderer(_overlayRenderer);
+                    _renderWindow.AddRenderer(_selectionRenderer);
+                    _renderWindow.Render();
+                }
+'@
+$v=$v.Replace($anchor,$replace)
+Set-Content $vtkPath $v -Encoding UTF8
