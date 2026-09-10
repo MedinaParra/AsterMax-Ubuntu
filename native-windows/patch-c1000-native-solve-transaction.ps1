@@ -2,9 +2,8 @@ param([string]$Root)
 $ErrorActionPreference='Stop'
 
 # C10.00 — Native Solve transaction controller.
-# This integrates the already-validated live FeModel fingerprint/readiness/export path into
-# AsterMax Mechanical. It does NOT fabricate FEA values and it does NOT claim that a Code_Aster
-# runtime is bundled with Windows. Execution requires an explicitly configured runner.
+# Integrates live FeModel readiness/fingerprint/export into AsterMax Mechanical.
+# It never fabricates FEA values and never claims a bundled Windows solver runtime.
 
 $src=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
 $code=@'
@@ -13,21 +12,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Windows.Forms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace PrePoMax
 {
-    internal enum AsterMaxSolveState
-    {
-        Idle,
-        Preparing,
-        ReadyToRun,
-        Running,
-        SolutionCurrent,
-        SolutionStale,
-        Failed
-    }
+    internal enum AsterMaxSolveState { Idle, Preparing, ReadyToRun, Running, SolutionCurrent, SolutionStale, Failed }
 
     internal sealed class AsterMaxNativeSolveTransaction
     {
@@ -135,14 +126,11 @@ namespace PrePoMax
                 WriteFinalState();
                 throw new InvalidOperationException(Message);
             }
-            if(!File.Exists(MessFile) || new FileInfo(MessFile).Length==0)
-                Fail("Code_Aster .mess evidence is missing or empty.");
-            if(!File.Exists(MedFile) || new FileInfo(MedFile).Length==0)
-                Fail("Code_Aster MED result is missing or empty.");
+            if(!File.Exists(MessFile) || new FileInfo(MessFile).Length==0) Fail("Code_Aster .mess evidence is missing or empty.");
+            if(!File.Exists(MedFile) || new FileInfo(MedFile).Length==0) Fail("Code_Aster MED result is missing or empty.");
 
             string mess=File.ReadAllText(MessFile);
-            if(mess.IndexOf("<I> <FIN> ARRET NORMAL",StringComparison.OrdinalIgnoreCase)<0 &&
-               mess.IndexOf("ARRET NORMAL",StringComparison.OrdinalIgnoreCase)<0)
+            if(mess.IndexOf("<I> <FIN> ARRET NORMAL",StringComparison.OrdinalIgnoreCase)<0 && mess.IndexOf("ARRET NORMAL",StringComparison.OrdinalIgnoreCase)<0)
                 Fail("Code_Aster normal termination marker was not found in .mess.");
 
             RequireUnchangedModel(liveModel);
@@ -215,9 +203,7 @@ namespace PrePoMax
                 _asterMaxSolveTransaction.ExecuteConfiguredRunner(_controller.Model);
                 tsslState.Text="AsterMax Solve: SOLUTION_CURRENT";
                 MessageBox.Show(this,
-                    "Code_Aster finished with verified normal-stop + non-empty MED evidence.\n\n"+
-                    "Model fingerprint remained CURRENT. No FEA values were invented.\n\n"+
-                    "Workspace: "+_asterMaxSolveTransaction.Workspace,
+                    "Code_Aster finished with verified normal-stop + non-empty MED evidence.\n\nModel fingerprint remained CURRENT. No FEA values were invented.\n\nWorkspace: "+_asterMaxSolveTransaction.Workspace,
                     "AsterMax Native Solve",MessageBoxButtons.OK,MessageBoxIcon.Information);
             }
             catch(Exception ex)
@@ -250,4 +236,4 @@ if(-not $u.Contains('CommandTile("Solve", "CODE_ASTER"')){
   Set-Content $ui $u -Encoding UTF8
 }
 
-Write-Host 'C10.00 native Solve transaction controller injected.' -ForegroundColor Green
+Write-Host 'C10.00 native Solve transaction controller injected (WinForms compile contract fixed).' -ForegroundColor Green
