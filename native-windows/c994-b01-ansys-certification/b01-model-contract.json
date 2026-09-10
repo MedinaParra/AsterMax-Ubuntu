@@ -1,0 +1,17 @@
+{
+  "schema": "astermax-cross-solver-model-contract/v1",
+  "benchmark_id": "B01",
+  "name": "Axial HEXA8 bar",
+  "units": {"length":"mm","force":"N","stress":"MPa"},
+  "geometry": {"length":100.0,"width":10.0,"height":10.0},
+  "material": {"model":"isotropic_linear_elastic","young_modulus_mpa":210000.0,"poisson_ratio":0.30},
+  "boundary_conditions": [{"type":"fixed_support","face":"x=0","components":["UX","UY","UZ"]}],
+  "loads": [{"type":"total_force","face":"x=100","fx_n":10000.0,"fy_n":0.0,"fz_n":0.0}],
+  "mesh": {"element_family":"linear_hexa8","divisions":[10,1,1],"elements":10,"nodes":44},
+  "comparison_quantities": {
+    "loaded_face_mean_ux_mm":{"tolerance_ansys_vs_code_aster_percent":2.0,"definition":"Arithmetic mean UX of all nodes on x=100 loaded face"},
+    "loaded_face_ux_dispersion_mm":{"absolute_tolerance_mm":0.000001,"definition":"max(UX)-min(UX) over nodes on x=100"}
+  },
+  "analytical_reference": {"ux_mm":0.047619047619047616,"basis":"PL/(AE), comparison aid only; not an ANSYS result"},
+  "scientific_integrity": {"ansys_values_present":false,"fea_values_invented":false,"ansys_equivalence":"NOT_PROVEN"}
+}
