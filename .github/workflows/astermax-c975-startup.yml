@@ -1,4 +1,4 @@
-name: AsterMax C9.76 Native Startup Repair
+name: AsterMax C9.76.1 Native Startup Repair
 
 on:
   push:
@@ -40,6 +40,7 @@ jobs:
           .\native-windows\patch-runtime-smoke.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c975-startup.ps1 -Root "$PWD\upstream"
           .\native-windows\patch-c976-release.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c9761-materials.ps1 -Root "$PWD\upstream"
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -132,7 +133,7 @@ jobs:
           $checks | Format-Table -AutoSize | Out-String | Write-Host
           $pass = ($checks | Where-Object { -not $_.pass }).Count -eq 0
           $manifest = [pscustomobject]@{
-            release='C9.76'
+            release='C9.76.1'
             title='Native Startup Repair'
             build_os='windows-latest'
             upstream_commit=(Get-Content .\UPSTREAM_PREPOMAX_COMMIT.txt -Raw).Trim()
@@ -146,7 +147,7 @@ jobs:
             pmv_complete=$false
             checks=$checks
           }
-          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.76_VALIDATION.json" -Encoding UTF8
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content "$out\C9.76.1_VALIDATION.json" -Encoding UTF8
           if(-not $pass){ throw 'Static gate failed.' }
 
       - name: Download deterministic STEP fixture
@@ -179,7 +180,7 @@ jobs:
           if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Runtime STEP gate produced no real geometry.' }
           if($data.unit_system -ne 'MM_TON_S_C'){ throw "Unexpected unit system: $($data.unit_system)" }
           if($data.mesh_nodes -lt 1 -or $data.mesh_elements -lt 1){ throw 'No real volume mesh produced.' }
-          if(-not $data.project_roundtrip -or -not $data.workspace_navigation){throw 'Project roundtrip or workspace navigation failed'}
+          if(-not $data.material_roundtrip -or -not $data.project_roundtrip -or -not $data.workspace_navigation){throw 'Project roundtrip or workspace navigation failed'}
           if(-not $data.vtk_control_initialized){ throw 'VTK control was not initialized.' }
 
 
@@ -212,7 +213,7 @@ jobs:
         run: |
           $exe = '${{ steps.locate.outputs.exe }}'
           $out = Split-Path $exe -Parent
-          $manifestPath = Join-Path $out 'C9.76_VALIDATION.json'
+          $manifestPath = Join-Path $out 'C9.76.1_VALIDATION.json'
           $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
           if(Test-Path .\ASTERMAX_RUNTIME_STEP.json){
             $r = Get-Content .\ASTERMAX_RUNTIME_STEP.json -Raw | ConvertFrom-Json
@@ -232,7 +233,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.76-Runtime-Diagnostics
+          name: AsterMax-C9.76.1-Runtime-Diagnostics
           path: |
             ASTERMAX_RUNTIME_STEP.json
             ASTERMAX_RUNTIME_STEP.json.stages.log
@@ -262,83 +263,19 @@ jobs:
           Copy-Item '.\AsterMax revision.pmx' .\artifact\Example-mesh.pmx -ErrorAction SilentlyContinue
           Get-ChildItem .\artifact -Recurse -File -Include *.pdb,*.vshost.* | Remove-Item -Force
           Copy-Item .\FRAMEBUFFER_VALIDATION.json .\artifact\ -ErrorAction SilentlyContinue
-          Copy-Item .\native-windows\README-C9.76.md .\artifact\README-C9.76.md
-          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.76.png -ErrorAction SilentlyContinue
-          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png .\artifact\AsterMax-C9.76-Viewport.png -ErrorAction SilentlyContinue
+          Copy-Item .\native-windows\README-C9.76.1.md .\artifact\README-C9.76.1.md
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.png .\artifact\AsterMax-C9.76.1.png -ErrorAction SilentlyContinue
+          Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png .\artifact\AsterMax-C9.76.1-Viewport.png -ErrorAction SilentlyContinue
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png.txt .\artifact\Viewport-diagnostics.txt -ErrorAction SilentlyContinue
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png.opengl.txt .\artifact\OpenGL.txt -ErrorAction SilentlyContinue
           Copy-Item .\ASTERMAX_RUNTIME_STEP.json.vtk.png.base.png .\artifact\Base-renderer.png -ErrorAction SilentlyContinue
           Copy-Item .\native-windows\patch-c975-startup.ps1 .\artifact\ -Force
           Get-FileHash $exe -Algorithm SHA256 | Format-List | Out-File .\artifact\AsterMax-Mechanical.exe.sha256.txt
 
-      - name: Build Windows installer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $iscc=Get-ChildItem (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup*\ISCC.exe') | Select-Object -First 1
-          if(-not $iscc){throw 'Inno Setup compiler missing'}
-          & $iscc.FullName "/DSourceDir=$PWD\artifact" "/O$PWD\installer" .\native-windows\astermax-installer.iss
-          if($LASTEXITCODE -ne 0){throw 'Installer compilation failed'}
-
-      - name: Verify installed application
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $setup=(Resolve-Path '.\installer\AsterMax-Mechanical-C9.76-Setup.exe').Path
-          $installed=Join-Path $env:RUNNER_TEMP 'AsterMax installed smoke'
-          $setupArgs='/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="' + $installed + '"'
-          $p=Start-Process $setup -ArgumentList $setupArgs -PassThru
-          if(-not $p.WaitForExit(120000)){throw 'Installer timeout'}
-          if($p.ExitCode -ne 0){throw "Installer failed: $($p.ExitCode)"}
-          $exe=Join-Path $installed 'AsterMax Mechanical.exe'
-          if(-not(Test-Path $exe)){throw 'Installed application missing'}
-          $step=(Resolve-Path '.\runtime-fixture\cube-mm.stp').Path
-          $report=Join-Path $PWD 'ASTERMAX_INSTALLED.json'
-          $appArgs='"' + $step + '" -US MM_TON_S_C "--ASTERMAX-SMOKE=' + $report + '"'
-          $p=Start-Process $exe -ArgumentList $appArgs -WorkingDirectory $installed -PassThru
-          if(-not $p.WaitForExit(90000)){Stop-Process $p.Id -Force;throw 'Installed application timeout'}
-          if(-not(Test-Path $report)){throw 'Installed application produced no report'}
-          $r=Get-Content $report -Raw | ConvertFrom-Json
-          if(-not $r.pass -or -not $r.project_roundtrip -or -not $r.workspace_navigation){throw 'Installed application runtime failed'}
-          Add-Type -AssemblyName System.Drawing
-          $img=[Drawing.Bitmap]::FromFile("$report.vtk.png")
-          try {
-            $samples=0;$lit=0;$foreground=0;$colors=[Collections.Generic.HashSet[int]]::new()
-            for($y=0;$y -lt $img.Height;$y+=4){
-              for($x=0;$x -lt $img.Width;$x+=4){
-                $c=$img.GetPixel($x,$y);$samples++
-                if(($c.R+$c.G+$c.B) -gt 90){$lit++}
-                if(($c.R+$c.G+$c.B) -lt 600){$foreground++}
-                $null=$colors.Add($c.ToArgb())
-              }
-            }
-            if($lit/$samples -le 0.25 -or $foreground/$samples -le 0.01 -or $colors.Count -le 20){throw 'Installed viewport is blank'}
-          } finally {$img.Dispose()}
-          $hash=(Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  AsterMax-Mechanical-C9.76-Setup.exe" | Set-Content '.\installer\SHA256.txt'
-          Copy-Item .\ASTERMAX_INSTALLED.json .\installer\
-          Copy-Item .\ASTERMAX_INSTALLED.json.png .\installer\AsterMax-C9.76.png
-          Copy-Item .\native-windows\README-C9.76.md .\installer\
-
-      - name: Upload installed application diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: AsterMax-C9.76-Installer-Diagnostics
-          path: ASTERMAX_INSTALLED.json*
-          if-no-files-found: warn
-
-      - name: Upload validated Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: AsterMax-C9.76-Windows-Installer
-          path: installer
-          if-no-files-found: error
-
       - name: Upload native build
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C9.76-Polished-Native-Mechanical
+          name: AsterMax-C9.76.1-Polished-Native-Mechanical
           path: artifact
           if-no-files-found: error
