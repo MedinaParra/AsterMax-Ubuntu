@@ -1,12 +1,20 @@
 param([string]$Root)
 $ErrorActionPreference='Stop'
 
-# C9.99 — Portable workspace for clean Windows installs.
-# PrePoMax's default CalculixSettings.Reset() leaves WorkDirectory null. CAD/STEP import uses the
-# common work-directory contract before meshing/solver stages, so a clean portable build can reach
-# the file chooser and then fail with "The work directory does not exist.".
-# AsterMax owns a solver-neutral workspace under LocalApplicationData and creates it on demand.
+# C9.99.1 — Portable workspace for clean Windows installs.
+# Root cause follow-up: STEP import still reaches Settings.Calculix.WorkDirectory directly in legacy code,
+# bypassing SettingsContainer.GetWorkDirectory(). Therefore both access paths must self-heal.
 
+function PortableWorkspaceBody {
+@'
+            string localRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (String.IsNullOrWhiteSpace(localRoot)) localRoot = Path.GetTempPath();
+            string portableWork = Path.Combine(localRoot, "AsterMax", "Work");
+            Directory.CreateDirectory(portableWork);
+'@
+}
+
+# 1) Harden SettingsContainer.GetWorkDirectory().
 $settings = Join-Path $Root 'PrePoMax/Settings/SettingsContainer.cs'
 $t = Get-Content $settings -Raw
 $old = @'
@@ -31,17 +39,7 @@ $new = @'
                 string pmxDirectory = Path.GetDirectoryName(lastFileName);
                 if (!String.IsNullOrWhiteSpace(pmxDirectory) && Directory.Exists(pmxDirectory)) return pmxDirectory;
             }
-
-            string configured = null;
-            try
-            {
-                if (_calculix != null) configured = _calculix.WorkDirectory;
-            }
-            catch
-            {
-                configured = null;
-            }
-            if (!String.IsNullOrWhiteSpace(configured) && Directory.Exists(configured)) return configured;
+            if (_calculix != null) return _calculix.WorkDirectory;
 
             string localRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (String.IsNullOrWhiteSpace(localRoot)) localRoot = Path.GetTempPath();
@@ -50,16 +48,41 @@ $new = @'
             return portableWork;
         }
 '@
-if(-not $t.Contains($old)){ throw 'SettingsContainer.GetWorkDirectory anchor not found' }
-$t = $t.Replace($old,$new)
+if($t.Contains($old)) { $t = $t.Replace($old,$new) }
+elseif(-not $t.Contains('string portableWork = Path.Combine(localRoot, "AsterMax", "Work");')) { throw 'SettingsContainer.GetWorkDirectory anchor not found' }
 Set-Content $settings $t -Encoding UTF8
 
-# Add explicit startup/workspace diagnostics without changing solver physics.
+# 2) Harden the legacy direct Settings.Calculix.WorkDirectory getter itself.
+$calc = Join-Path $Root 'PrePoMax/Settings/CalculixSettings.cs'
+$c = Get-Content $calc -Raw
+$oldGetter = '            get { return Tools.GetGlobalPath(_workDirectory); }'
+$newGetter = @'
+            get
+            {
+                string path = null;
+                try { path = Tools.GetGlobalPath(_workDirectory); }
+                catch { path = null; }
+                if (!String.IsNullOrWhiteSpace(path) && Directory.Exists(path)) return path;
+
+                string localRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (String.IsNullOrWhiteSpace(localRoot)) localRoot = Path.GetTempPath();
+                string portableWork = Path.Combine(localRoot, "AsterMax", "Work");
+                Directory.CreateDirectory(portableWork);
+                _workDirectory = Tools.GetLocalPath(portableWork);
+                return portableWork;
+            }
+'@
+if(-not $c.Contains($oldGetter)) { throw 'CalculixSettings.WorkDirectory getter anchor not found' }
+$c = $c.Replace($oldGetter,$newGetter)
+Set-Content $calc $c -Encoding UTF8
+
+# 3) Startup diagnostic: resolve and create workspace before CAD import is possible.
 $ui = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 if(Test-Path $ui){
   $u = Get-Content $ui -Raw
-  $anchor = '                Text = "AsterMax Mechanical";'
-  $inject = @'
+  if(-not $u.Contains('AsterMax workspace initialization failed.')) {
+    $anchor = '                Text = "AsterMax Mechanical";'
+    $inject = @'
                 Text = "AsterMax Mechanical";
                 try
                 {
@@ -73,9 +96,10 @@ if(Test-Path $ui){
                     throw new InvalidOperationException("AsterMax could not initialize a writable portable workspace.", ex);
                 }
 '@
-  if(-not $u.Contains($anchor)){ throw 'AsterMaxNativeUi title anchor not found' }
-  $u = $u.Replace($anchor,$inject)
-  Set-Content $ui $u -Encoding UTF8
+    if(-not $u.Contains($anchor)){ throw 'AsterMaxNativeUi title anchor not found' }
+    $u = $u.Replace($anchor,$inject)
+    Set-Content $ui $u -Encoding UTF8
+  }
 }
 
-Write-Host 'C9.99 portable workspace + STEP import prerequisite applied.' -ForegroundColor Green
+Write-Host 'C9.99.1 direct + container workspace hardening applied.' -ForegroundColor Green
