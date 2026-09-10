@@ -67,8 +67,6 @@ namespace PrePoMax
                 Font = new Font("Segoe UI", 9.0f, FontStyle.Regular, GraphicsUnit.Point);
                 MinimumSize = new Size(1040, 680);
 
-                // The legacy toolbars remain alive because their real handlers are reused by AsterMax commands,
-                // but they are no longer user-facing.
                 menuStripMain.Visible = false;
                 tsFile.Visible = false;
                 tsViews.Visible = false;
@@ -79,7 +77,6 @@ namespace PrePoMax
                 BuildAsterMaxTopChrome();
                 PolishNativeWorkspace();
                 ThemeRecursive(this);
-                StartAsterMaxRuntimeSmoke();
             }
             finally
             {
@@ -228,7 +225,6 @@ namespace PrePoMax
             splitContainer1.Panel1.BackColor = AxSurface;
             splitContainer1.Panel2.BackColor = AxWindow;
 
-            // Give the native ModelTree an ANSYS-like Outline identity without replacing its data model.
             splitContainer1.Panel1.Padding = new Padding(0, 30, 0, 0);
             var outlineHeader = new Panel
             {
@@ -261,7 +257,6 @@ namespace PrePoMax
             splitContainer1.Panel1.Controls.Add(outlineHeader);
             outlineHeader.BringToFront();
 
-            // Make the native VTK workspace read as a dedicated Graphics area.
             var graphicsBadge = new Label
             {
                 Name = "asterMaxGraphicsBadge",
@@ -419,7 +414,6 @@ namespace PrePoMax
 $uiPath = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 Set-Content $uiPath $ui -Encoding UTF8
 
-# Register new source file in project.
 $proj = Join-Path $Root 'PrePoMax/PrePoMax.csproj'
 $projText = Get-Content $proj -Raw
 if(-not $projText.Contains('Forms\AsterMaxNativeUi.cs')){
@@ -429,7 +423,6 @@ if(-not $projText.Contains('Forms\AsterMaxNativeUi.cs')){
   Set-Content $proj $projText -Encoding UTF8
 }
 
-# Mechanical-style terminology while preserving model semantics and handlers.
 $modelTree = Join-Path $Root 'UserControls/ModelTree.cs'
 $mt = Get-Content $modelTree -Raw
 $mt = $mt.Replace('private string _geomPartsName = "Parts";','private string _geomPartsName = "Geometry";')
