@@ -92,6 +92,7 @@ jobs:
             if($text -notmatch '"ready":false'){ throw 'Runner failed without a fail-closed ready=false diagnostic.' }
           }
           Write-Host 'C1005_RUNNER_PROBE_CONTRACT=PASS'
+          exit 0
 
       - name: Restore NuGet packages
         shell: pwsh
