@@ -58,8 +58,8 @@ jobs:
           if($dst.integrity.model_fingerprint_sha256 -ne $fp){ throw 'C9.98 fingerprint binding missing' }
           if($dst.integrity.result_values_modified_by_binding -ne $false){ throw 'C9.98 binder modified-value flag invalid' }
           if(($src.arrays | ConvertTo-Json -Compress) -ne ($dst.arrays | ConvertTo-Json -Compress)){ throw 'C9.98 metadata binder changed FEA arrays' }
-          python .\native-windows\bind-c998-results-fingerprint.py c998-input.json bad-fingerprint c998-reject.json
-          if($LASTEXITCODE -eq 0){ throw 'C9.98 binder must reject malformed fingerprint' }
+          python -c "import subprocess,sys; p=subprocess.run([sys.executable,r'.\native-windows\bind-c998-results-fingerprint.py','c998-input.json','bad-fingerprint','c998-reject.json']); sys.exit(0 if p.returncode != 0 else 1)"
+          if($LASTEXITCODE -ne 0){ throw 'C9.98 binder failed to reject malformed fingerprint' }
           Write-Host 'C998_METADATA_BINDING_GATE=PASS'
 
       - name: Apply AsterMax production + professional demo patches
