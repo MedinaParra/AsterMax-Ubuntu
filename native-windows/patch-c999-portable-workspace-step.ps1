@@ -1,18 +1,11 @@
 param([string]$Root)
 $ErrorActionPreference='Stop'
 
-# C9.99.1 — Portable workspace for clean Windows installs.
-# Root cause follow-up: STEP import still reaches Settings.Calculix.WorkDirectory directly in legacy code,
-# bypassing SettingsContainer.GetWorkDirectory(). Therefore both access paths must self-heal.
-
-function PortableWorkspaceBody {
-@'
-            string localRoot = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (String.IsNullOrWhiteSpace(localRoot)) localRoot = Path.GetTempPath();
-            string portableWork = Path.Combine(localRoot, "AsterMax", "Work");
-            Directory.CreateDirectory(portableWork);
-'@
-}
+# C9.99.2 — Portable workspace for clean Windows installs.
+# STEP import reaches Settings.Calculix.WorkDirectory directly in legacy code, so both
+# SettingsContainer.GetWorkDirectory() and CalculixSettings.WorkDirectory must self-heal.
+# This patch is intentionally idempotent because C9.92 delegates to it and some release
+# workflows apply it explicitly again.
 
 # 1) Harden SettingsContainer.GetWorkDirectory().
 $settings = Join-Path $Root 'PrePoMax/Settings/SettingsContainer.cs'
@@ -48,8 +41,14 @@ $new = @'
             return portableWork;
         }
 '@
-if($t.Contains($old)) { $t = $t.Replace($old,$new) }
-elseif(-not $t.Contains('string portableWork = Path.Combine(localRoot, "AsterMax", "Work");')) { throw 'SettingsContainer.GetWorkDirectory anchor not found' }
+$settingsToken='string portableWork = Path.Combine(localRoot, "AsterMax", "Work");'
+if($t.Contains($old)) {
+    $t = $t.Replace($old,$new)
+} elseif($t.Contains($settingsToken) -and $t.Contains('public string GetWorkDirectory()')) {
+    Write-Host 'C9.99.2 SettingsContainer portable workspace already applied.' -ForegroundColor DarkGray
+} else {
+    throw 'SettingsContainer.GetWorkDirectory portable-workspace anchor/state not recognized'
+}
 Set-Content $settings $t -Encoding UTF8
 
 # 2) Harden the legacy direct Settings.Calculix.WorkDirectory getter itself.
@@ -72,8 +71,14 @@ $newGetter = @'
                 return portableWork;
             }
 '@
-if(-not $c.Contains($oldGetter)) { throw 'CalculixSettings.WorkDirectory getter anchor not found' }
-$c = $c.Replace($oldGetter,$newGetter)
+$calcToken='_workDirectory = Tools.GetLocalPath(portableWork);'
+if($c.Contains($oldGetter)) {
+    $c = $c.Replace($oldGetter,$newGetter)
+} elseif($c.Contains($calcToken) -and $c.Contains('Directory.CreateDirectory(portableWork);')) {
+    Write-Host 'C9.99.2 CalculixSettings portable workspace already applied.' -ForegroundColor DarkGray
+} else {
+    throw 'CalculixSettings.WorkDirectory portable-workspace anchor/state not recognized'
+}
 Set-Content $calc $c -Encoding UTF8
 
 # 3) Startup diagnostic: resolve and create workspace before CAD import is possible.
@@ -99,7 +104,9 @@ if(Test-Path $ui){
     if(-not $u.Contains($anchor)){ throw 'AsterMaxNativeUi title anchor not found' }
     $u = $u.Replace($anchor,$inject)
     Set-Content $ui $u -Encoding UTF8
+  } else {
+    Write-Host 'C9.99.2 startup workspace diagnostic already applied.' -ForegroundColor DarkGray
   }
 }
 
-Write-Host 'C9.99.1 direct + container workspace hardening applied.' -ForegroundColor Green
+Write-Host 'C9.99.2 portable workspace patch PASS (idempotent).' -ForegroundColor Green
