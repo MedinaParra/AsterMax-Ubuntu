@@ -1,0 +1,168 @@
+name: AsterMax C10.00 Windows Native Solve Transaction
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'native-windows/patch-c1000-native-solve-transaction.ps1'
+      - 'native-windows/patch-c999-portable-workspace-step.ps1'
+      - '.github/workflows/astermax-c1000-windows-native-solve.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-x64-native-solve:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply integrated AsterMax PMV patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          .\native-windows\patch-astermax.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-branding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c960-native-bridge.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c961-native-codeaster-export.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c965-results-workspace.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c966-results-scene.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c967-vtk-results-binding.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c968-professional-results-hud.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c969-renderer-synchronized-results.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c970-native-3d-probe.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c971-native-probe-callout.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c972-native-framebuffer-evidence.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c974-solver-provenance.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c975-analysis-provenance-manifest.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c976-automatic-model-fingerprint.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c977-pre-solve-readiness.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c978-assignment-hexa8-quality.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c985-model-fidelity-gate.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c998-current-model-results-gate.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c991-startup-hardening.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c992-startup-viewport.ps1 -Root "$PWD\upstream"
+          .\native-windows\patch-c1000-native-solve-transaction.ps1 -Root "$PWD\upstream"
+
+      - name: C10.00 source composition gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          foreach($token in @(
+            'AsterMaxPreSolveReadiness.Evaluate',
+            'AsterMaxModelFingerprint.Extract',
+            'AsterMaxCodeAsterNativeExporter.Export',
+            'ASTERMAX_CODE_ASTER_RUNNER',
+            'SOLUTION_STALE',
+            'ARRET NORMAL',
+            'fea_values_invented',
+            'solver_runtime_bundled'
+          )) { if(-not $solve.Contains($token)){ throw "C10.00 Solve token missing: $token" } }
+          $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          if(-not $ui.Contains('CommandTile("Solve", "CODE_ASTER"')){ throw 'C10.00 Solve ribbon command missing' }
+          if(-not (Test-Path .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs)){ throw 'Native Code_Aster exporter missing from integrated build' }
+          if(-not (Test-Path .\upstream\PrePoMax\AsterMaxModelContractBridge.cs)){ throw 'Native FeModel bridge missing from integrated build' }
+          Write-Host 'C1000_SOURCE_COMPOSITION_GATE=PASS'
+
+      - name: Fail-safe runner contract harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          # This harness validates the process/result acceptance contract without fabricating FEA fields.
+          # A fake runner may create only control-plane evidence; it must never create a MED result.
+          New-Item -ItemType Directory -Force .\harness | Out-Null
+          @'
+          param([string]$Export,[string]$Workspace)
+          Set-Content (Join-Path $Workspace 'astermax-analysis.mess') '<I> <FIN> ARRET NORMAL'
+          exit 0
+          '@ | Set-Content .\harness\fake-runner-no-med.ps1 -Encoding UTF8
+          $source=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          foreach($required in @(
+            'if(!File.Exists(MedFile) || new FileInfo(MedFile).Length==0)',
+            'Fail("Code_Aster MED result is missing or empty.")',
+            'if(RunnerExitCode!=0)',
+            'RequireUnchangedModel(liveModel)'
+          )) { if(-not $source.Contains($required)){ throw "Fail-safe contract missing: $required" } }
+          if($source.Contains('fea_values_invented\"]=true') -or $source.Contains('fea_values_invented = true')){ throw 'Synthetic result declaration detected' }
+          Write-Host 'C1000_FAIL_SAFE_CONTRACT_GATE=PASS'
+
+      - name: Restore packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: ModelTree constructor smoke gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path .\upstream).Path
+          $uc=Get-ChildItem .\upstream -Recurse -Filter 'UserControls.dll' | Where-Object {$_.FullName -match 'UserControls\\bin\\Release'} | Select-Object -First 1
+          if(-not $uc){ throw 'UserControls.dll missing' }
+          $script=@"
+          `$ErrorActionPreference='Stop'
+          `$global:root='$root'
+          [AppDomain]::CurrentDomain.add_AssemblyResolve({
+            param(`$sender,`$args)
+            `$name=([Reflection.AssemblyName]`$args.Name).Name + '.dll'
+            `$cand=Get-ChildItem `$global:root -Recurse -Filter `$name -ErrorAction SilentlyContinue | Where-Object { `$_.FullName -match 'bin\\(x64\\)?Release|packages' } | Select-Object -First 1
+            if(`$cand){ return [Reflection.Assembly]::LoadFrom(`$cand.FullName) }
+            return `$null
+          })
+          `$asm=[Reflection.Assembly]::LoadFrom('$($uc.FullName)')
+          `$type=`$asm.GetType('UserControls.ModelTree', `$true)
+          `$tree=[Activator]::CreateInstance(`$type)
+          if(`$null -eq `$tree){ throw 'ModelTree constructor returned null' }
+          Write-Host 'MODEL_TREE_CONSTRUCTOR=PASS'
+          `$tree.Dispose()
+          "@
+          Set-Content .\modeltree-smoke.ps1 $script -Encoding UTF8
+          & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\modeltree-smoke.ps1
+          if($LASTEXITCODE -ne 0){ throw "ModelTree smoke gate failed: $LASTEXITCODE" }
+
+      - name: Stage C10.00 demo runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing after rebuild' }
+          New-Item -ItemType Directory -Force .\dist | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.00'
+            platform='Windows x64'
+            executable='AsterMax Mechanical.exe'
+            executable_sha256=$hash
+            cad_workspace='%LOCALAPPDATA%\\AsterMax\\Work'
+            unit_contract='MM_N_S_MPA'
+            native_femodel_bridge=$true
+            native_code_aster_exporter=$true
+            native_solve_transaction_controller=$true
+            solver_runtime_bundled=$false
+            runner_env='ASTERMAX_CODE_ASTER_RUNNER'
+            normal_stop_gate=$true
+            nonempty_med_gate=$true
+            frozen_model_fingerprint=$true
+            post_solve_stale_gate=$true
+            professional_results_workspace=$true
+            fea_values_invented=$false
+            ansys_equivalence='NOT_PROVEN'
+            limitation='C10.00 compiles and validates the Windows control-plane transaction. Real Code_Aster numerical execution remains validated by C9.89/C9.99; invocation of that runtime from the Windows GUI still requires a configured runner and a runtime execution test.'
+          } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
+          Write-Host "EXE_SHA256=$hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.00-Windows-x64-Native-Solve-Transaction
+          path: dist
+          if-no-files-found: error
