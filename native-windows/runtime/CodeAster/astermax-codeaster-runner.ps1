@@ -47,7 +47,7 @@ function Get-WslPath([string]$WslExe, [string]$WindowsPath) {
 }
 
 $wsl = Get-WslExe
-if ($ExportFile -eq '--probe') {
+if ($ExportFile -eq 'probe') {
     $backend = $null
     if ($wsl) { $backend = Get-CodeAsterBackend $wsl }
     $ready = (-not [string]::IsNullOrWhiteSpace($wsl)) -and (-not [string]::IsNullOrWhiteSpace($backend))
