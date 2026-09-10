@@ -144,18 +144,8 @@ if(-not $s.Contains('["result_bundle_exists"]')){
   $s=$s.Replace($anchor,$insert)
 }
 
-$oldUi=@'
-                _asterMaxSolveTransaction.ExecuteConfiguredRunner(_controller.Model);
-                tsslState.Text="AsterMax Solve: SOLUTION_CURRENT";
-                MessageBox.Show(this,
-                    "Code_Aster finished with verified normal-stop + non-empty MED evidence.
-
-Model fingerprint remained CURRENT. No FEA values were invented.
-
-Workspace: "+_asterMaxSolveTransaction.Workspace,
-                    "AsterMax Native Solve",MessageBoxButtons.OK,MessageBoxIcon.Information);
-'@
-$newUi=@'
+$pattern='(?s)                _asterMaxSolveTransaction\.ExecuteConfiguredRunner\(_controller\.Model\);.*?                    "AsterMax Native Solve",MessageBoxButtons\.OK,MessageBoxIcon\.Information\);'
+$replacement=@'
                 _asterMaxSolveTransaction.ExecuteConfiguredRunner(_controller.Model);
                 tsslState.Text="AsterMax Solve: POSTPROCESSING";
                 _asterMaxLoadedResults=_asterMaxSolveTransaction.CompleteVerifiedResultsHandoff(_controller.Model);
@@ -163,8 +153,9 @@ $newUi=@'
                 using(var viewport=new AsterMaxResultsViewportForm(_asterMaxLoadedResults)) viewport.ShowDialog(this);
 '@
 if(-not $s.Contains('_asterMaxLoadedResults=_asterMaxSolveTransaction.CompleteVerifiedResultsHandoff(')){
-  if(-not $s.Contains($oldUi)){ throw 'C10.01 FrmMain handoff anchor missing.' }
-  $s=$s.Replace($oldUi,$newUi)
+  $next=[regex]::Replace($s,$pattern,$replacement.TrimEnd(),1)
+  if($next -eq $s){ throw 'C10.01 FrmMain structural handoff anchor missing.' }
+  $s=$next
 }
 
 Set-Content $solvePath $s -Encoding UTF8
