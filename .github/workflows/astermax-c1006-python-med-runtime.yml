@@ -79,6 +79,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
           foreach($t in @(
             'ASTERMAX_C1006_FULL_RUNTIME_PROBE_V1',
             'ProbePythonRuntime',
@@ -88,10 +89,12 @@ jobs:
             'python_probe',
             'Path.PathSeparator',
             'AsterMax requires a real Python runtime with numpy+h5py',
-            'code_aster_backend_ready',
-            'TETRA10'
+            'code_aster_backend_ready'
           )){
-            if(-not $solve.Contains($t)){ throw "C10.06 token missing: $t" }
+            if(-not $solve.Contains($t)){ throw "C10.06 Solve token missing: $t" }
+          }
+          foreach($t in @('TETRA4','TETRA10','HEXA8','C10.04-native-codeaster-tetra-v1')){
+            if(-not $exporter.Contains($t)){ throw "C10.06 exporter token missing: $t" }
           }
           if($solve.Contains('["python_ready"]=!String.IsNullOrWhiteSpace(python)')){
             throw 'Legacy existence-only Python readiness is still present.'
