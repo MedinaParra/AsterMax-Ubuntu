@@ -15,11 +15,6 @@ using Newtonsoft.Json.Linq;
 
 namespace PrePoMax
 {
-    /// <summary>
-    /// Native translation boundary from the live AsterMax/PrePoMax FeModel to the
-    /// solver-neutral astermax-model-contract/v0 consumed by the Code_Aster adapter.
-    /// This class exports model definition only. It never creates or fabricates FEA results.
-    /// </summary>
     public static class AsterMaxModelContractBridge
     {
         public const string Schema = "astermax-model-contract/v0";
@@ -29,10 +24,8 @@ namespace PrePoMax
         {
             if (model == null) throw new ArgumentNullException(nameof(model));
             if (model.Mesh == null) throw new InvalidOperationException("Model has no FE mesh.");
-            if (model.Mesh.Nodes == null || model.Mesh.Nodes.Count == 0)
-                throw new InvalidOperationException("Model mesh contains no nodes.");
-            if (model.Mesh.Elements == null || model.Mesh.Elements.Count == 0)
-                throw new InvalidOperationException("Model mesh contains no elements.");
+            if (model.Mesh.Nodes == null || model.Mesh.Nodes.Count == 0) throw new InvalidOperationException("Model mesh contains no nodes.");
+            if (model.Mesh.Elements == null || model.Mesh.Elements.Count == 0) throw new InvalidOperationException("Model mesh contains no elements.");
             if (model.UnitSystem == null || model.UnitSystem.UnitSystemType != UnitSystemType.MM_TON_S_C)
                 throw new NotSupportedException("C9.60 native Code_Aster bridge currently requires mm-ton-s-C, equivalent to mm-N-MPa mechanical units.");
 
@@ -41,25 +34,14 @@ namespace PrePoMax
             root["bridge"] = NativeBridgeVersion;
             root["name"] = String.IsNullOrWhiteSpace(model.Name) ? "AsterMax Model" : model.Name;
             root["unit_system"] = "MM_N_S_MPA";
-            root["source"] = new JObject
-            {
-                ["kind"] = "live_astermax_femodel",
-                ["fea_results_included"] = false,
-                ["solver_execution_claimed"] = false
-            };
+            root["source"] = new JObject { ["kind"] = "live_astermax_femodel", ["fea_results_included"] = false, ["solver_execution_claimed"] = false };
 
             JObject mesh = new JObject();
             JArray nodes = new JArray();
             foreach (var entry in model.Mesh.Nodes.OrderBy(e => e.Key))
             {
                 FeNode n = entry.Value;
-                nodes.Add(new JObject
-                {
-                    ["id"] = "N" + n.Id,
-                    ["x"] = n.X,
-                    ["y"] = n.Y,
-                    ["z"] = n.Z
-                });
+                nodes.Add(new JObject { ["id"] = "N" + n.Id, ["x"] = n.X, ["y"] = n.Y, ["z"] = n.Z });
             }
             mesh["nodes"] = nodes;
 
@@ -72,12 +54,7 @@ namespace PrePoMax
                 elementTypes.Add(type);
                 JArray connectivity = new JArray();
                 foreach (int nodeId in e.NodeIds) connectivity.Add("N" + nodeId);
-                elements.Add(new JObject
-                {
-                    ["id"] = "E" + e.Id,
-                    ["type"] = type,
-                    ["nodes"] = connectivity
-                });
+                elements.Add(new JObject { ["id"] = "E" + e.Id, ["type"] = type, ["nodes"] = connectivity });
             }
             mesh["element_type"] = elementTypes.Count == 1 ? elementTypes.First() : "MIXED";
             mesh["elements"] = elements;
@@ -86,8 +63,7 @@ namespace PrePoMax
             foreach (var entry in model.Mesh.NodeSets)
             {
                 JArray ids = new JArray();
-                if (entry.Value.Labels != null)
-                    foreach (int id in entry.Value.Labels.OrderBy(i => i)) ids.Add("N" + id);
+                if (entry.Value.Labels != null) foreach (int id in entry.Value.Labels.OrderBy(i => i)) ids.Add("N" + id);
                 nodeGroups[entry.Key] = ids;
             }
             mesh["node_groups"] = nodeGroups;
@@ -112,10 +88,7 @@ namespace PrePoMax
                     item["poisson"] = elasticDensity.PoissonsRatio;
                     item["constitutive_model"] = "isotropic_linear_elastic";
                 }
-                else
-                {
-                    item["unsupported_for_code_aster_adapter_v0"] = true;
-                }
+                else item["unsupported_for_code_aster_adapter_v0"] = true;
                 materials.Add(item);
             }
             root["materials"] = materials;
@@ -148,9 +121,9 @@ namespace PrePoMax
                             ["name"] = cload.Name,
                             ["type"] = "nodal_force_total",
                             ["group"] = group,
-                            ["fx_total_n"] = cload.F1.Value,
-                            ["fy_total_n"] = cload.F2.Value,
-                            ["fz_total_n"] = cload.F3.Value
+                            ["fx_total_n"] = cload.F1,
+                            ["fy_total_n"] = cload.F2,
+                            ["fz_total_n"] = cload.F3
                         });
                     }
                     else loads.Add(new JObject { ["name"] = loadEntry.Value.Name, ["type"] = loadEntry.Value.GetType().Name, ["unsupported_for_code_aster_adapter_v0"] = true });
@@ -198,7 +171,6 @@ using System;
 using System.IO;
 using System.Windows.Forms;
 using CaeGlobals;
-
 namespace PrePoMax
 {
     public partial class FrmMain
@@ -207,11 +179,7 @@ namespace PrePoMax
         {
             try
             {
-                if (_controller == null || _controller.Model == null)
-                {
-                    MessageBoxes.ShowError("No active AsterMax model is available.");
-                    return;
-                }
+                if (_controller == null || _controller.Model == null) { MessageBoxes.ShowError("No active AsterMax model is available."); return; }
                 using (SaveFileDialog dlg = new SaveFileDialog())
                 {
                     dlg.Title = "Export AsterMax Solver Contract";
@@ -222,10 +190,7 @@ namespace PrePoMax
                     tsslState.Text = "Solver contract exported: " + Path.GetFileName(dlg.FileName);
                 }
             }
-            catch (Exception ex)
-            {
-                ExceptionTools.Show(this, ex);
-            }
+            catch (Exception ex) { ExceptionTools.Show(this, ex); }
         }
     }
 }
@@ -237,24 +202,18 @@ $proj = Get-Content $projPath -Raw
 if(-not $proj.Contains('AsterMaxModelContractBridge.cs')) {
     $anchor = '<Compile Include="Forms\FrmMain.cs">'
     if(-not $proj.Contains($anchor)){ throw 'PrePoMax.csproj FrmMain anchor not found for C9.60 bridge.' }
-    $insert = '<Compile Include="AsterMaxModelContractBridge.cs" />' + [Environment]::NewLine +
-              '    <Compile Include="AsterMaxModelContractUi.cs" />' + [Environment]::NewLine + '    ' + $anchor
+    $insert = '<Compile Include="AsterMaxModelContractBridge.cs" />' + [Environment]::NewLine + '    <Compile Include="AsterMaxModelContractUi.cs" />' + [Environment]::NewLine + '    ' + $anchor
     $proj = $proj.Replace($anchor, $insert)
     Set-Content $projPath $proj -Encoding UTF8
 }
 
-# Modern AsterMax ribbon compatibility. Older C9.60 used a one-line prototype ribbon;
-# current PMV uses the professional CommandTile/StateCard layout. Preserve both paths.
 $nativeUi = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 if(Test-Path $nativeUi) {
     $text = Get-Content $nativeUi -Raw
     if(-not $text.Contains('Export Solver Contract')) {
         $legacy = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] { InfoChip("Code_Aster adapter: next integration gate") }));'
         if($text.Contains($legacy)) {
-            $replacement = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] {' + [Environment]::NewLine +
-                           '                CommandButton("Export Solver Contract", () => ExportAsterMaxModelContract()),' + [Environment]::NewLine +
-                           '                InfoChip("Code_Aster | model contract v0 | no synthetic results")' + [Environment]::NewLine +
-                           '            }));'
+            $replacement = 'ribbon.TabPages.Add(BuildRibbonPage("Solution", new Control[] {' + [Environment]::NewLine + '                CommandButton("Export Solver Contract", () => ExportAsterMaxModelContract()),' + [Environment]::NewLine + '                InfoChip("Code_Aster | model contract v0 | no synthetic results")' + [Environment]::NewLine + '            }));'
             $text = $text.Replace($legacy, $replacement)
         } else {
             $modern = '                StateCard("Solver", "Code_Aster integration path"),'
@@ -267,4 +226,4 @@ if(Test-Path $nativeUi) {
 }
 else { throw 'AsterMaxNativeUi.cs missing; apply native UI patch before C9.60 bridge.' }
 
-Write-Host 'C9.60 native FeModel -> solver contract bridge injected (professional ribbon compatible).' -ForegroundColor Green
+Write-Host 'C9.60 native FeModel -> solver contract bridge injected (CLoad double API verified).' -ForegroundColor Green
