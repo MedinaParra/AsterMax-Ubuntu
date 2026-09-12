@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <StartupObject>AsterMax.WindowsNative.ProgramV2</StartupObject>
+    <AssemblyName>AsterMax-Windows-Native</AssemblyName>
+    <RootNamespace>AsterMax.WindowsNative</RootNamespace>
+    <Version>0.2.0-beta</Version>
+    <Authors>Exequiel Medina</Authors>
+    <Company>AsterMax</Company>
+    <Product>AsterMax Windows Native Bridge</Product>
+    <Description>Native Windows validation bridge for running and diagnosing Code_Aster export jobs.</Description>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+</Project>
