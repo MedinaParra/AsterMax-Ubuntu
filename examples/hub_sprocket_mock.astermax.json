@@ -1,0 +1,11 @@
+{
+  "schema_version": "ProjectSnapshotV1",
+  "project_id": "pmv-hub-sprocket-001",
+  "name": "Hub-Sprocket Excessive Gap PMV",
+  "engineering_question": "How does increasing gap alter contact/load transfer and local mechanical response?",
+  "state": "NEW",
+  "parameters": {
+    "gap_mm": 0.0,
+    "torque_nm": 1000.0
+  }
+}

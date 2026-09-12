@@ -77,6 +77,10 @@ The application also includes:
 - multistep load histories;
 - Mechanical-style failure-theory Stress Tool.
 
+## Windows PMV and coding harness
+
+The `pmv/future-simulation-ansys-demo` branch contains the Windows-first agentic PMV and a deterministic coding harness. Development work is bounded by versioned WorkPackages, scope policies, executable gates and human merge approval. See `harness/README.md` on that branch.
+
 ## Install
 
 ```bash

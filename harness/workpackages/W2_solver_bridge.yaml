@@ -1,0 +1,63 @@
+schema_version: WorkPackageV1
+workpackage_id: W2-SOLVER-BRIDGE-001
+title: Solver bridge and authentic baseline result
+issue: 17
+objective: >-
+  Implement the first bounded solver bridge so AsterMax Windows can serialize a
+  versioned solver request, execute a real backend worker, import authentic
+  result artifacts, and fail explicitly when required solver evidence is absent.
+allowed_files:
+  - "src/astermax/solver/**"
+  - "src/astermax/domain/**"
+  - "src/astermax/ui/**"
+  - "contracts/Solver*.schema.json"
+  - "tests/test_solver_*.py"
+  - "tests/benchmarks/**"
+  - "docs/W2_*.md"
+forbidden_paths:
+  - "harness/**"
+  - "config/agents.v1.yaml"
+  - "contracts/AgentTaskV1.schema.json"
+max_files_changed: 18
+prohibited_actions:
+  - fabricate FEA result fields
+  - label surrogate or mock data as solver evidence
+  - silently downgrade unsupported contact or nonlinear physics
+  - weaken verification tolerances to make a test pass
+  - bypass SolverRunManifestV1 provenance
+  - edit frozen evaluation material to improve the score
+acceptance_criteria:
+  - Solver request and result use versioned contracts.
+  - Backend capability mismatch fails explicitly.
+  - Solver manifest records backend, version, timestamps, hashes and termination status.
+  - Authentic returned fields can be loaded by the Windows result path.
+  - Missing or malformed solver artifacts fail closed.
+  - A benchmark or reference case establishes numerical evidence for the implemented path.
+  - Release-relevant claims have machine-checkable evidence lineage.
+  - Frontier validity suite passes without modifying the frozen suite.
+required_gates:
+  - scope_policy
+  - syntax_compile
+  - harness_tests
+  - frontier_validity
+  - unit_tests
+  - numerical_validation
+numerical_impact: true
+human_merge_required: true
+validity_risks:
+  - reward_hacking
+  - scope_escape
+  - evidence_fabrication
+  - provenance_loss
+  - unsupported_numerical_claim
+  - silent_fallback
+evaluation_budget:
+  max_agent_turns: 24
+  max_tool_calls: 80
+  max_retries: 4
+  max_wall_clock_seconds: 7200
+metadata:
+  target_backend: code_aster_wsl2
+  future_adapter: pyansys
+  evidence_rule: solver_truth_only
+  methodology: evidence_driven_autonomous_engineering
