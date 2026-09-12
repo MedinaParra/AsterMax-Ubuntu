@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1",
+  "units": {"length": "mm", "force": "N", "stress": "MPa"},
+  "analysis": {"type": "static_structural", "linear": true, "small_displacement": true},
+  "geometry": {
+    "part_count": 1,
+    "source": {"path": "cantilever.step", "format": "STEP", "scale_to_mm": 1.0}
+  },
+  "material": {
+    "name": "Steel reference",
+    "model": "isotropic_linear_elastic",
+    "youngs_modulus_mpa": 200000.0,
+    "poisson_ratio": 0.30
+  },
+  "mesh": {"element_type": "TET4", "global_size_mm": 5.0},
+  "boundary_conditions": [
+    {"name": "Fixed root", "type": "fixed_support", "scope": "root_face"}
+  ],
+  "loads": [
+    {"name": "Tip force", "type": "force", "scope": "tip_face", "vector_n": [0.0, -1000.0, 0.0]}
+  ],
+  "unsupported_objects": [],
+  "analytical_reference": {
+    "length_mm": 100.0,
+    "width_mm": 10.0,
+    "height_mm": 10.0,
+    "tip_force_n": 1000.0
+  }
+}
