@@ -69,5 +69,45 @@ $gate=@'
 if(-not $u.Contains($anchor)){throw 'Portable outline smoke anchor missing.'}
 $u=$u.Replace($anchor,$gate+[Environment]::NewLine+$anchor)
 $u=$u.Replace('"\"pass\":true," +','"\"pass\":true," + "\"visible_outline_contains_cad_body\":true," +')
+$u=$u.Replace('CommandTile("Materials", "MODEL", () => tsmiModel.PerformClick()),',
+    'CommandTile("Materials", "MODEL", () => AsterMaxC1004MaterialAction(() => tsmiCreateMaterial_Click(null, EventArgs.Empty))),')
+$u=$u.Replace('                InfoCard("Supports and loads remain connected to native scoping"),',@'
+                CommandTile("Analysis Step", "MODEL", () => AsterMaxC1004MaterialAction(() => tsmiCreateStep_Click(null, EventArgs.Empty))),
+                CommandTile("Supports", "MODEL", () => AsterMaxC1004MaterialAction(() => tsmiCreateBC_Click(null, EventArgs.Empty))),
+                CommandTile("Loads", "MODEL", () => AsterMaxC1004MaterialAction(() => tsmiCreateLoad_Click(null, EventArgs.Empty))),
+'@)
+$u=$u.Replace('C10.08','C10.09')
 Set-Content $path $u -Encoding UTF8
+$globals=Join-Path $Root 'PrePoMax/Globals.cs'
+$g=(Get-Content $globals -Raw).Replace('AsterMax Mechanical C10.08','AsterMax Mechanical C10.09')
+Set-Content $globals $g -Encoding UTF8
+
+# Drain stdout/stderr concurrently. Sequential ReadToEnd can deadlock on a full error pipe.
+# Capability probes must begin their timeout before waiting for either redirected stream.
+$solve=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
+$s=Get-Content $solve -Raw
+$s=$s.Replace(@'
+                string stdout=p.StandardOutput.ReadToEnd();
+                string stderr=p.StandardError.ReadToEnd();
+                p.WaitForExit();
+'@,@'
+                var stdoutTask=p.StandardOutput.ReadToEndAsync();
+                var stderrTask=p.StandardError.ReadToEndAsync();
+                p.WaitForExit();
+                string stdout=stdoutTask.GetAwaiter().GetResult();
+                string stderr=stderrTask.GetAwaiter().GetResult();
+'@)
+$s=$s.Replace(@'
+                    string stdout=process.StandardOutput.ReadToEnd();
+                    string stderr=process.StandardError.ReadToEnd();
+'@,@'
+                    var stdoutTask=process.StandardOutput.ReadToEndAsync();
+                    var stderrTask=process.StandardError.ReadToEndAsync();
+'@)
+$s=$s.Replace('                    p["exit_code"]=process.ExitCode;',@'
+                    string stdout=stdoutTask.GetAwaiter().GetResult();
+                    string stderr=stderrTask.GetAwaiter().GetResult();
+                    p["exit_code"]=process.ExitCode;
+'@)
+Set-Content $solve $s -Encoding UTF8
 Write-Host 'C10.09 functional Outline and native Code_Aster Run routing applied.'

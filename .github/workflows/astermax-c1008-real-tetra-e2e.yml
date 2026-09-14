@@ -1,4 +1,4 @@
-name: AsterMax C10.08.1 Real Tetra + Portable CAD Runtime
+name: AsterMax C10.09 Real Tetra + Portable CAD Runtime
 
 on:
   workflow_dispatch:
@@ -185,7 +185,7 @@ jobs:
           Get-ChildItem mesa -Recurse -File | Where-Object {$_.Name -match 'license|copying|copyright'} | Copy-Item -Destination $licenseDir -Force
           "Mesa 26.2.0; archive SHA256 $mesaSha256; https://github.com/pal1000/mesa-dist-win" | Set-Content (Join-Path $licenseDir 'SOURCE.txt')
           'GALLIUM_DRIVER=llvmpipe' | Out-File $env:GITHUB_ENV -Append
-      - name: Stage C10.08.1 portable package with CAD and Python MED runtimes
+      - name: Stage C10.09 portable package with CAD and Python MED runtimes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -205,19 +205,20 @@ jobs:
           & .\dist\AsterMaxRuntime\Python\python.exe -c "import sys,numpy,h5py; print('ASTERMAX_PACKAGED_PYTHON_MED_OK|'+sys.version.split()[0]+'|numpy='+numpy.__version__+'|h5py='+h5py.__version__)"
           if($LASTEXITCODE -ne 0){ throw 'Packaged Python MED runtime is not portable.' }
           Copy-Item .\C10.08-Validation .\dist\Validation\C10.08 -Recurse -Force
+          Copy-Item .\native-windows\AUDIT-C10.09.md .\dist\AUDIT-C10.09.md -Force
           @'
-          AsterMax Mechanical C10.08.1 portable hotfix
+          AsterMax Mechanical C10.09 portable hotfix
           1. Extract the complete ZIP before starting AsterMax Mechanical.exe.
           2. The native CAD/STEP and NetGen meshing runtime is included and package-tested.
           3. The Python MED/VTK postprocessor is included and pre-qualified.
           4. A genuine Code_Aster installation inside WSL2 is still required for local Solve.
           5. Use Solution > Runtime/PREFLIGHT; Solve remains blocked if the genuine backend is absent.
           6. The included Validation/C10.08 evidence comes from a real Code_Aster TETRA4 run; it is not synthetic FEA output.
-          '@ | Set-Content .\dist\LEEME-C10.08.1.txt -Encoding UTF8
+          '@ | Set-Content .\dist\LEEME-C10.09.txt -Encoding UTF8
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           $netgenHash=(Get-FileHash '.\dist\NetGen\NetGenMesher.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.08.1'
+            release='C10.09'
             base_application_release='C10.08'
             branch='codex/c1004-unified-native-codeaster'
             executable_sha256=$hash
@@ -266,13 +267,13 @@ jobs:
           if(-not $data.pass){ throw "Portable STEP gate failed: $($data.reason)" }
           if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Portable STEP import produced no real geometry.' }
           if($data.mesh_nodes -lt 1 -or $data.mesh_elements -lt 1){ throw 'Portable NetGen run produced no real volume mesh.' }
-          New-Item -ItemType Directory -Force .\dist\Validation\C10.08.1 | Out-Null
-          Copy-Item $report .\dist\Validation\C10.08.1\ASTERMAX_C10081_RUNTIME_STEP.json -Force
+          New-Item -ItemType Directory -Force .\dist\Validation\C10.09 | Out-Null
+          Copy-Item $report .\dist\Validation\C10.09\ASTERMAX_C10081_RUNTIME_STEP.json -Force
           foreach($suffix in @('.outline.png','.stages.log','.png','.vtk.png','.vtk.png.txt','.vtk.png.opengl.txt','.vtk.png.base.png')){
             $candidate="$report$suffix"
-            if(Test-Path $candidate){ Copy-Item $candidate .\dist\Validation\C10.08.1\ -Force }
+            if(Test-Path $candidate){ Copy-Item $candidate .\dist\Validation\C10.09\ -Force }
           }
-          Copy-Item .\runtime-fixture\cube-mm.stp .\dist\Validation\C10.08.1\Cube-mm.stp -Force
+          Copy-Item .\runtime-fixture\cube-mm.stp .\dist\Validation\C10.09\Cube-mm.stp -Force
       - name: Seal and audit final portable package
         shell: pwsh
         run: |
@@ -286,7 +287,7 @@ jobs:
             "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$relative
           } | Set-Content .\dist\PACKAGE_SHA256.txt -Encoding UTF8
           if(-not(Test-Path '.\dist\NetGen\NetGenMesher.exe')){ throw 'Final audit lost NetGenMesher.exe.' }
-      - name: Upload C10.08.1 Windows portable build
+      - name: Upload C10.09 Windows portable build
         uses: actions/upload-artifact@v4
         with:
           name: AsterMax-C10.09-Windows-x64-Outline
