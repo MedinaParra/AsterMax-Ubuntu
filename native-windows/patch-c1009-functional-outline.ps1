@@ -26,9 +26,10 @@ $u=$u.Replace($anchor,$anchor+@'
                 _modelTree.AsterMaxSolveRequested += RunAsterMaxNativeSolve;
                 _modelTree.BringToFront();
                 var outlineHeader = splitContainer1.Panel1.Controls["asterMaxOutlineHeader"];
-                if (outlineHeader != null) outlineHeader.BringToFront();
+                if (outlineHeader != null) outlineHeader.SendToBack();
                 toolStripContainer1.TopToolStripPanelVisible = false;
-                toolStripContainer1.SendToBack();
+                // WinForms docks in reverse z-order: Fill must be processed after Top/Bottom.
+                toolStripContainer1.BringToFront();
                 splitContainer1.Panel1.PerformLayout();
 '@)
 Set-Content $path $u -Encoding UTF8
@@ -60,6 +61,10 @@ $gate=@'
                             foreach (var entry in geometry.Parts) { outlinePart = entry.Key; break; }
                             if (!_modelTree.AsterMaxOutlineHasGeometry(outlinePart))
                                 throw new InvalidOperationException("Visible Outline does not contain the imported CAD body.");
+                            var ribbon = Controls["asterMaxRibbon"];
+                            if (ribbon == null || !ribbon.Visible || ribbon.Height < 70 ||
+                                toolStripContainer1.Top < ribbon.Bottom)
+                                throw new InvalidOperationException("Workspace overlaps the command ribbon.");
                             using (var bitmap = new Bitmap(Width, Height))
                             {
                                 DrawToBitmap(bitmap, new Rectangle(0, 0, Width, Height));

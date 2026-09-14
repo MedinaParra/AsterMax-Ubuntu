@@ -146,6 +146,8 @@ namespace UserControls
                 _axOutline.Nodes.Add(project);
                 AxRestoreExpansion(_axOutline.Nodes, expanded, selected, first);
                 project.Expand(); model.Expand();
+                // Keep the imported-body branch discoverable after a previously empty project is filled.
+                if (model.Nodes.Count > 0) model.Nodes[0].Expand();
             }
             finally { _axOutline.EndUpdate(); _axRefreshing = false; }
         }
