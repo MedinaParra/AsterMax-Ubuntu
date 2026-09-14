@@ -1,4 +1,4 @@
-name: AsterMax C10.08 Real Tetra End-to-End
+name: AsterMax C10.08.1 Real Tetra + Portable CAD Runtime
 
 on:
   workflow_dispatch:
@@ -68,7 +68,7 @@ jobs:
   windows-x64-portable:
     needs: real-codeaster-tetra
     runs-on: windows-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - name: Checkout AsterMax integration branch
         uses: actions/checkout@v5
@@ -135,7 +135,53 @@ jobs:
       - name: Rebuild Windows x64 Release
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
-      - name: Stage C10.08 portable package with Python MED runtime
+      - name: Assemble pinned CAD and NetGen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing before CAD runtime assembly.' }
+          $bin=$exe.Directory.FullName
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          $actual=(Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $runtimeSha256){ throw "Pinned CAD runtime digest mismatch: $actual" }
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'Matching NetGen CAD mesher not found in pinned runtime.' }
+          Copy-Item $ng.Directory.FullName (Join-Path $bin 'NetGen') -Recurse -Force
+          New-Item -ItemType Directory -Force (Join-Path $bin 'Temp') | Out-Null
+          foreach($project in @('CaeGlobals','CaeJob','CaeMesh','CaeModel','CaeResults','UserControls','vtkControl')){
+            $dir=Join-Path $PWD "upstream\$project\bin\x64\Release"
+            if(Test-Path $dir){ Get-ChildItem $dir -Filter *.dll | Copy-Item -Destination (Join-Path $bin 'lib') -Force }
+          }
+          $mesher=Join-Path $bin 'NetGen\NetGenMesher.exe'
+          if(-not(Test-Path $mesher)){ throw 'NetGenMesher.exe was not assembled beside AsterMax.' }
+          if((Get-Item $mesher).Length -lt 50000){ throw 'NetGenMesher.exe payload is unexpectedly small.' }
+          "source=$runtimeUrl`nsha256=$runtimeSha256`nnetgen=$mesher" | Set-Content (Join-Path $bin 'CAD-RUNTIME-PROVENANCE.txt') -Encoding UTF8
+      - name: Package pinned OpenGL fallback
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          $bin=$exe.Directory.FullName
+          $mesaSha256='dcb2719ef346dab5b609fcb193a5f13cfc4b0502e3f4de1ad43d349477402f47'
+          Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.0/mesa3d-26.2.0-release-msvc.7z' -OutFile mesa.7z
+          if((Get-FileHash mesa.7z -Algorithm SHA256).Hash.ToLowerInvariant() -ne $mesaSha256){ throw 'Mesa archive digest mismatch.' }
+          & 7z x mesa.7z -omesa -y | Out-Null
+          if($LASTEXITCODE -ne 0){ throw 'Mesa extraction failed.' }
+          foreach($name in @('opengl32.dll','libgallium_wgl.dll','dxil.dll')){
+            $dll=Get-ChildItem mesa -Recurse -Filter $name | Where-Object {$_.FullName -match '\\x64\\'} | Select-Object -First 1
+            if(-not $dll){ throw "Missing x64 OpenGL dependency: $name" }
+            Copy-Item $dll.FullName $bin -Force
+          }
+          $licenseDir=Join-Path $bin 'licenses\Mesa'
+          New-Item -ItemType Directory -Force $licenseDir | Out-Null
+          Get-ChildItem mesa -Recurse -File | Where-Object {$_.Name -match 'license|copying|copyright'} | Copy-Item -Destination $licenseDir -Force
+          "Mesa 26.2.0; archive SHA256 $mesaSha256; https://github.com/pal1000/mesa-dist-win" | Set-Content (Join-Path $licenseDir 'SOURCE.txt')
+          'GALLIUM_DRIVER=llvmpipe' | Out-File $env:GITHUB_ENV -Append
+      - name: Stage C10.08.1 portable package with CAD and Python MED runtimes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -156,18 +202,24 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw 'Packaged Python MED runtime is not portable.' }
           Copy-Item .\C10.08-Validation .\dist\Validation\C10.08 -Recurse -Force
           @'
-          AsterMax Mechanical C10.08
+          AsterMax Mechanical C10.08.1 portable hotfix
           1. Extract the complete ZIP before starting AsterMax Mechanical.exe.
-          2. The Python MED/VTK postprocessor is included and pre-qualified.
-          3. A genuine Code_Aster installation inside WSL2 is still required for local Solve.
-          4. Use Solution > Runtime/PREFLIGHT; Solve remains blocked if the genuine backend is absent.
-          5. The included Validation/C10.08 evidence comes from a real Code_Aster TETRA4 run; it is not synthetic FEA output.
-          '@ | Set-Content .\dist\LEEME-C10.08.txt -Encoding UTF8
+          2. The native CAD/STEP and NetGen meshing runtime is included and package-tested.
+          3. The Python MED/VTK postprocessor is included and pre-qualified.
+          4. A genuine Code_Aster installation inside WSL2 is still required for local Solve.
+          5. Use Solution > Runtime/PREFLIGHT; Solve remains blocked if the genuine backend is absent.
+          6. The included Validation/C10.08 evidence comes from a real Code_Aster TETRA4 run; it is not synthetic FEA output.
+          '@ | Set-Content .\dist\LEEME-C10.08.1.txt -Encoding UTF8
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          $netgenHash=(Get-FileHash '.\dist\NetGen\NetGenMesher.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.08'
+            release='C10.08.1'
+            base_application_release='C10.08'
             branch='codex/c1004-unified-native-codeaster'
             executable_sha256=$hash
+            netgen_mesher_sha256=$netgenHash
+            cad_runtime_bundled=$true
+            cad_runtime_sha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
             solver_backend='Code_Aster'
             solver_transport='WSL2'
             solver_binary_bundled=$false
@@ -181,9 +233,58 @@ jobs:
             numerical_solve_claimed=$true
             claim_scope='The bundled evidence is a genuine Code_Aster TETRA4 admission case. Local GUI Solve still requires a real WSL2 Code_Aster backend.'
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
-      - name: Upload C10.08 Windows portable build
+      - name: Gate portable CAD payload and real STEP import
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($required in @(
+            '.\dist\AsterMax Mechanical.exe',
+            '.\dist\NetGen\NetGenMesher.exe',
+            '.\dist\NetGen\nglib.dll',
+            '.\dist\NetGen\TKSTEP.dll',
+            '.\dist\NetGen\TKernel.dll'
+          )){
+            if(-not(Test-Path $required)){ throw "Portable CAD payload missing: $required" }
+          }
+          New-Item -ItemType Directory -Force .\runtime-fixture | Out-Null
+          Invoke-WebRequest 'https://raw.githubusercontent.com/Airthium/tanatloc/b1b9b084ab5ff04e908ed27eb7828ce847520316/public/doc/cube.stp' -OutFile .\runtime-fixture\cube-mm.stp
+          if((Get-Item .\runtime-fixture\cube-mm.stp).Length -lt 1000){ throw 'STEP fixture download invalid.' }
+          $report=(Resolve-Path .).Path + '\ASTERMAX_C10081_RUNTIME_STEP.json'
+          $step=(Resolve-Path .\runtime-fixture\cube-mm.stp).Path
+          $exe=(Resolve-Path '.\dist\AsterMax Mechanical.exe').Path
+          $p=Start-Process -FilePath $exe -ArgumentList @($step,'-US','MM_TON_S_C',"--ASTERMAX-SMOKE=$report") -WorkingDirectory (Resolve-Path .\dist).Path -PassThru
+          if(-not $p.WaitForExit(120000)){
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Portable STEP import gate timed out.'
+          }
+          if(-not(Test-Path $report)){ throw "AsterMax produced no STEP telemetry. ExitCode=$($p.ExitCode)" }
+          $data=Get-Content $report -Raw | ConvertFrom-Json
+          if(-not $data.pass){ throw "Portable STEP gate failed: $($data.reason)" }
+          if($data.geometry_parts -lt 1 -or $data.geometry_nodes -lt 1){ throw 'Portable STEP import produced no real geometry.' }
+          if($data.mesh_nodes -lt 1 -or $data.mesh_elements -lt 1){ throw 'Portable NetGen run produced no real volume mesh.' }
+          New-Item -ItemType Directory -Force .\dist\Validation\C10.08.1 | Out-Null
+          Copy-Item $report .\dist\Validation\C10.08.1\ASTERMAX_C10081_RUNTIME_STEP.json -Force
+          foreach($suffix in @('.stages.log','.png','.vtk.png','.vtk.png.txt','.vtk.png.opengl.txt','.vtk.png.base.png')){
+            $candidate="$report$suffix"
+            if(Test-Path $candidate){ Copy-Item $candidate .\dist\Validation\C10.08.1\ -Force }
+          }
+          Copy-Item .\runtime-fixture\cube-mm.stp .\dist\Validation\C10.08.1\Cube-mm.stp -Force
+      - name: Seal and audit final portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $m=Get-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Raw | ConvertFrom-Json
+          $m | Add-Member -NotePropertyName portable_step_import_validated -NotePropertyValue $true -Force
+          $m | Add-Member -NotePropertyName portable_volume_mesh_validated -NotePropertyValue $true -Force
+          $m | ConvertTo-Json -Depth 6 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Get-ChildItem .\dist -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $relative=$_.FullName.Substring((Resolve-Path .\dist).Path.Length+1)
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$relative
+          } | Set-Content .\dist\PACKAGE_SHA256.txt -Encoding UTF8
+          if(-not(Test-Path '.\dist\NetGen\NetGenMesher.exe')){ throw 'Final audit lost NetGenMesher.exe.' }
+      - name: Upload C10.08.1 Windows portable build
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.08-Windows-x64-Real-Tetra
+          name: AsterMax-C10.08.1-Windows-x64-CAD-Hotfix
           path: dist
           if-no-files-found: error
