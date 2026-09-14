@@ -94,7 +94,19 @@ def main():
 
     fixed = [node_id[(0, j, k)] for j in range(args.ny + 1) for k in range(args.nz + 1)]
     loaded = [node_id[(args.nx, j, k)] for j in range(args.ny + 1) for k in range(args.nz + 1)]
-    force_per_node = force / len(loaded)
+
+    # Consistent lumped nodal forces for a uniform traction on the structured
+    # end face. Equal force at every node overweights corners and edges and
+    # creates a non-physical displacement spread at the probe face.
+    load_groups = {"LOAD_CORNERS": [], "LOAD_EDGES": [], "LOAD_INTERIOR": []}
+    load_weights = {"LOAD_CORNERS": 1, "LOAD_EDGES": 2, "LOAD_INTERIOR": 4}
+    for j in range(args.ny + 1):
+        for k in range(args.nz + 1):
+            boundary_count = int(j in (0, args.ny)) + int(k in (0, args.nz))
+            group = "LOAD_CORNERS" if boundary_count == 2 else ("LOAD_EDGES" if boundary_count == 1 else "LOAD_INTERIOR")
+            load_groups[group].append(node_id[(args.nx, j, k)])
+    total_lumped_weight = sum(load_weights[name] * len(ids) for name, ids in load_groups.items())
+    force_per_weight = force / total_lumped_weight
 
     mail = out / f"{args.name}.mail"
     with mail.open("w", encoding="utf-8", newline="\n") as stream:
@@ -107,6 +119,9 @@ def main():
         stream.write("FINSF\n")
         write_group(stream, "FIXED_1", fixed)
         write_group(stream, "CONCENTRATED_FORCE_1", loaded)
+        for group_name, ids in load_groups.items():
+            if ids:
+                write_group(stream, group_name, ids)
         stream.write("FIN\n")
 
     comm = out / f"{args.name}.comm"
@@ -117,7 +132,11 @@ model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(TOUT='OUI',PHENOMENE='MECANIQUE',MODELIS
 steel=DEFI_MATERIAU(ELAS=_F(E={young},NU={poisson}))
 matfield=AFFE_MATERIAU(MAILLAGE=mesh,AFFE=_F(TOUT='OUI',MATER=steel))
 fixed=AFFE_CHAR_MECA(MODELE=model,DDL_IMPO=_F(GROUP_NO='FIXED_1',DX=0.0,DY=0.0,DZ=0.0))
-load=AFFE_CHAR_MECA(MODELE=model,FORCE_NODALE=_F(GROUP_NO='CONCENTRATED_FORCE_1',FX={force_per_node:.15g},FY=0.0,FZ=0.0))
+load=AFFE_CHAR_MECA(MODELE=model,FORCE_NODALE=(
+    _F(GROUP_NO='LOAD_CORNERS',FX={force_per_weight:.15g},FY=0.0,FZ=0.0),
+    _F(GROUP_NO='LOAD_EDGES',FX={2.0 * force_per_weight:.15g},FY=0.0,FZ=0.0),
+    _F(GROUP_NO='LOAD_INTERIOR',FX={4.0 * force_per_weight:.15g},FY=0.0,FZ=0.0),
+))
 result=MECA_STATIQUE(MODELE=model,CHAM_MATER=matfield,EXCIT=(_F(CHARGE=fixed),_F(CHARGE=load)))
 result=CALC_CHAMP(reuse=result,RESULTAT=result,CONTRAINTE=('SIGM_ELNO',),CRITERES=('SIEQ_ELNO',),FORCE=('REAC_NODA',))
 disp=POST_RELEVE_T(ACTION=_F(OPERATION='EXTRACTION',INTITULE='LOAD_FACE_DISPLACEMENT',RESULTAT=result,NOM_CHAM='DEPL',GROUP_NO='CONCENTRATED_FORCE_1',NOM_CMP=('DX','DY','DZ'),TOUT_ORDRE='OUI'))
@@ -165,7 +184,11 @@ F repe /analysis/{args.name}.reactions R 82
         "length_mm": length,
         "area_mm2": height * width,
         "total_force_n": force,
-        "force_per_node_n": force_per_node,
+        "uniform_traction_mpa": force / (height * width),
+        "consistent_nodal_force_per_weight_n": force_per_weight,
+        "load_group_cardinalities": {name: len(ids) for name, ids in load_groups.items()},
+        "load_group_weights": load_weights,
+        "total_lumped_weight": total_lumped_weight,
         "analytical_axial_displacement_mm": force * length / (height * width * young),
         "mesh_volume_mm3": actual_volume,
         "expected_volume_mm3": expected_volume,
@@ -190,8 +213,11 @@ F repe /analysis/{args.name}.reactions R 82
 
     if not math.isclose(actual_volume, expected_volume, rel_tol=0.0, abs_tol=1e-8):
         raise RuntimeError(f"Tetra volume mismatch: {actual_volume} != {expected_volume}")
-    if not math.isclose(force_per_node * len(loaded), force, rel_tol=0.0, abs_tol=1e-10):
-        raise RuntimeError("Nodal force distribution does not conserve the requested load")
+    reconstructed_force = sum(
+        len(load_groups[name]) * load_weights[name] * force_per_weight for name in load_groups
+    )
+    if not math.isclose(reconstructed_force, force, rel_tol=0.0, abs_tol=1e-10):
+        raise RuntimeError("Consistent nodal traction does not conserve the requested load")
     print(json.dumps(metadata, indent=2))
 
 

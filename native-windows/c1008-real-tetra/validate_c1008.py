@@ -83,8 +83,15 @@ def main():
     gate("no_invented_fea_values", bundle.get("integrity", {}).get("fea_values_invented") is False, bundle.get("integrity"))
     vm_max = bundle.get("fields", {}).get("von_mises", {}).get("nodal_max")
     gate("positive_finite_von_mises", isinstance(vm_max, (int, float)) and math.isfinite(vm_max) and vm_max > 0.0, vm_max)
+    table_dx_max = max(dx_values) if dx_values else None
     bridge_dx = bundle.get("fields", {}).get("displacement", {}).get("dx_max")
-    gate("table_and_med_displacement_agree_0p1pct", solver_dx is not None and isinstance(bridge_dx, (int, float)) and abs(bridge_dx - solver_dx) / solver_dx <= 0.001, [solver_dx, bridge_dx])
+    gate(
+        "table_and_med_max_displacement_agree_0p1pct",
+        table_dx_max is not None
+        and isinstance(bridge_dx, (int, float))
+        and abs(bridge_dx - table_dx_max) / table_dx_max <= 0.001,
+        [table_dx_max, bridge_dx],
+    )
 
     vtk_types = []
     if vtu_path.exists():
