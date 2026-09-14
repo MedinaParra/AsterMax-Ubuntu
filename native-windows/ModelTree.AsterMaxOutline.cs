@@ -104,6 +104,7 @@ namespace UserControls
             var expanded = new HashSet<string>();
             AxRememberExpansion(_axOutline.Nodes, expanded);
             string selected = _axOutline.SelectedNode == null ? null : _axOutline.SelectedNode.Name;
+            string topName = _axOutline.TopNode == null ? null : _axOutline.TopNode.Name;
             bool first = _axOutline.Nodes.Count == 0;
             _axRefreshing = true;
             _axOutline.BeginUpdate();
@@ -148,6 +149,9 @@ namespace UserControls
                 project.Expand(); model.Expand();
                 // Keep the imported-body branch discoverable after a previously empty project is filled.
                 if (model.Nodes.Count > 0) model.Nodes[0].Expand();
+                if (first) analysis.Expand();
+                TreeNode[] previousTop = topName == null ? new TreeNode[0] : _axOutline.Nodes.Find(topName, true);
+                _axOutline.TopNode = previousTop.Length > 0 ? previousTop[0] : project;
             }
             finally { _axOutline.EndUpdate(); _axRefreshing = false; }
         }
@@ -159,7 +163,7 @@ namespace UserControls
         private void AxRestoreExpansion(TreeNodeCollection nodes, HashSet<string> expanded, string selected, bool first)
         {
             foreach (TreeNode node in nodes) {
-                if (first || expanded.Contains(node.Name)) node.Expand();
+                if (expanded.Contains(node.Name)) node.Expand();
                 if (node.Name == selected) _axOutline.SelectedNode = node;
                 AxRestoreExpansion(node.Nodes,expanded,selected,first);
             }
