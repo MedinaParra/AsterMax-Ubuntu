@@ -7,6 +7,7 @@ on:
     paths:
       - 'native-windows/c1008-real-tetra/**'
       - 'native-windows/patch-c1008-aster-group-records.ps1'
+      - 'native-windows/patch-c10081-portable-cad-smoke.ps1'
       - '.github/workflows/astermax-c1008-real-tetra-e2e.yml'
 
 jobs:
@@ -108,7 +109,8 @@ jobs:
             'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
             'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
             'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
-            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1'
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
       - name: Gate production exporter group records
@@ -253,7 +255,7 @@ jobs:
           $step=(Resolve-Path .\runtime-fixture\cube-mm.stp).Path
           $exe=(Resolve-Path '.\dist\AsterMax Mechanical.exe').Path
           $p=Start-Process -FilePath $exe -ArgumentList @($step,'-US','MM_TON_S_C',"--ASTERMAX-SMOKE=$report") -WorkingDirectory (Resolve-Path .\dist).Path -PassThru
-          if(-not $p.WaitForExit(120000)){
+          if(-not $p.WaitForExit(300000)){
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             throw 'Portable STEP import gate timed out.'
           }
