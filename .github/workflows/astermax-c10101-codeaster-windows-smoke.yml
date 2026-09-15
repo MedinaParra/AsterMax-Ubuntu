@@ -1,0 +1,119 @@
+name: AsterMax C10.10.1 Code_Aster Windows Smoke
+
+on:
+  push:
+    branches: [ codex/c1004-unified-native-codeaster ]
+    paths:
+      - '.github/workflows/astermax-c10101-codeaster-windows-smoke.yml'
+      - 'native-windows/runtime/CodeAster/**'
+  workflow_dispatch:
+
+concurrency:
+  group: c10101-codeaster-windows-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-codeaster-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout current AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Download genuine Code_Aster 2025 MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed.' }
+          $md5=(Get-FileHash $msi -Algorithm MD5).Hash.ToUpperInvariant()
+          Write-Host "ASTER_MSI=$msi"
+          Write-Host "ASTER_MSI_SIZE=$((Get-Item $msi).Length)"
+          Write-Host "ASTER_MSI_MD5=$md5"
+          if($md5 -ne '95A2171A6EB967874F7D0C98E881C66C'){ throw 'Provider MSI fingerprint mismatch.' }
+
+      - name: Install Code_Aster 2025 as current Windows user
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $log=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+          $args=@('/i',('"'+$msi+'"'),'/qn','/norestart','/l*v',('"'+$log+'"'))
+          $p=Start-Process msiexec.exe -ArgumentList $args -PassThru
+          if(-not $p.WaitForExit(900000)){
+            & taskkill.exe /PID $p.Id /T /F | Out-Null
+            throw 'Code_Aster MSI timed out after 15 minutes.'
+          }
+          Write-Host "MSI_EXIT_CODE=$($p.ExitCode)"
+          if(Test-Path $log){
+            Get-Content $log -Tail 100 | ForEach-Object { Write-Host $_ }
+          }
+          if($p.ExitCode -notin @(0,3010)){ throw "Code_Aster MSI failed: $($p.ExitCode)" }
+
+      - name: Locate native as_run and inventory installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $roots=@(
+            (Join-Path $env:LOCALAPPDATA 'code_aster'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\code_aster'),
+            (Join-Path $env:ProgramFiles 'code_aster'),
+            'C:\code_aster'
+          )
+          if(${env:ProgramFiles(x86)}){ $roots += (Join-Path ${env:ProgramFiles(x86)} 'code_aster') }
+          $roots | ForEach-Object { Write-Host "SEARCH_ROOT=$_ EXISTS=$(Test-Path $_)" }
+          $asrun=$null
+          foreach($root in $roots){
+            if(-not(Test-Path $root)){ continue }
+            $asrun=Get-ChildItem -LiteralPath $root -Recurse -File -Filter as_run.bat -ErrorAction SilentlyContinue | Select-Object -First 1
+            if($asrun){ break }
+          }
+          if(-not $asrun){
+            Write-Host 'Targeted search failed. MSI property clues:'
+            $log=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+            if(Test-Path $log){ Select-String -Path $log -Pattern 'INSTALLDIR|TARGETDIR|LocalAppData|ProgramFiles|code_aster' | Select-Object -Last 120 | ForEach-Object { Write-Host $_.Line } }
+            throw 'as_run.bat was not found after MSI installation.'
+          }
+          Write-Host "ASTER_AS_RUN=$($asrun.FullName)"
+          "ASTERMAX_WINDOWS_CODE_ASTER_COMMAND=$($asrun.FullName)" | Out-File $env:GITHUB_ENV -Append
+          "ASTER_AS_RUN=$($asrun.FullName)" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Run provider forma01a test directly
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'forma01a.log'
+          $cmd='"'+$env:ASTER_AS_RUN+'" --test forma01a'
+          $p=Start-Process $env:ComSpec -ArgumentList @('/d','/v:off','/s','/c',('"'+$cmd+'"')) -WorkingDirectory (Split-Path (Split-Path $env:ASTER_AS_RUN -Parent) -Parent) -RedirectStandardOutput $log -RedirectStandardError (Join-Path $env:RUNNER_TEMP 'forma01a.err.log') -PassThru
+          if(-not $p.WaitForExit(300000)){
+            & taskkill.exe /PID $p.Id /T /F | Out-Null
+            throw 'Provider forma01a test timed out.'
+          }
+          Get-Content $log -Tail 160 | ForEach-Object { Write-Host $_ }
+          Write-Host "FORMA01A_EXIT_CODE=$($p.ExitCode)"
+          if($p.ExitCode -ne 0){ throw 'Provider forma01a test failed.' }
+
+      - name: Run AsterMax native PREFLIGHT probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          $runner=Resolve-Path '.\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1'
+          $output=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner probe 2>&1
+          $code=$LASTEXITCODE
+          $output | ForEach-Object { Write-Host $_ }
+          $output | Set-Content (Join-Path $env:RUNNER_TEMP 'astermax-probe.log') -Encoding UTF8
+          Write-Host "ASTERMAX_PROBE_EXIT_CODE=$code"
+          if($code -ne 0){ exit $code }
+
+      - name: Upload Windows Code_Aster smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: C10.10.1-CodeAster-Windows-Smoke-Diagnostics
+          path: |
+            ${{ runner.temp }}/aster-install.log
+            ${{ runner.temp }}/forma01a.log
+            ${{ runner.temp }}/forma01a.err.log
+            ${{ runner.temp }}/astermax-probe.log
+          if-no-files-found: warn
