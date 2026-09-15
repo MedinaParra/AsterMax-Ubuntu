@@ -20,13 +20,16 @@ if($s.Contains($transportAnchor) -and -not $s.Contains('["code_aster_transport"]
     $s=$s.Replace($transportAnchor,$transportAnchor+[Environment]::NewLine+'                ["code_aster_transport"]="WINDOWS_NATIVE",'+[Environment]::NewLine+'                ["wsl_required"]=false,')
 }
 
-# Make the transaction itself emit a Windows-native .export. The runner keeps its
-# own normalization as a compatibility safety net for older workspaces.
+# Make the transaction itself emit a Windows-native .export. C10.05 already
+# rewrites the historical 15.2 token to stable, so match the export structurally
+# rather than depending on one exact previous release string.
 $s=$s.Replace('["release"]="C10.00"','["release"]="C10.10.1"')
-$legacyExport='P actions make_etude\nP version 15.2\nP mode interactif\nP time_limit 300\nP memory_limit 2048\nP ncpus 1\nP mpi_nbcpu 1\n\n'
+$s=$s.Replace('["release"]="C10.05"','["release"]="C10.10.1"')
+$exportPattern='P actions make_etude\\nP version [^\\]+\\nP mode interactif\\nP time_limit 300\\nP memory_limit 2048\\nP ncpus 1\\nP mpi_nbcpu 1\\n\\n'
 $windowsExport='A tpmax 300\nA memjeveux 256\nP ncpus 1\nP mpi_nbcpu 1\nP mpi_nbnoeud 1\nP version stable\nP actions make_etude\n\n'
-if(-not $s.Contains($legacyExport)){ throw 'C10.10.1 Windows export anchor missing.' }
-$s=$s.Replace($legacyExport,$windowsExport)
+$rewritten=[regex]::Replace($s,$exportPattern,$windowsExport,1)
+if($rewritten -eq $s){ throw 'C10.10.1 Windows export structure was not found.' }
+$s=$rewritten
 $s=$s.Replace('/analysis/','./')
 
 $anchor='        public static JObject RequireRuntimeReady()'
