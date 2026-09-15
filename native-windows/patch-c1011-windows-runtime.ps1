@@ -49,8 +49,9 @@ $s=$s.Replace('MessageBox.Show(this,d.ToString(Formatting.Indented),',@'
 # A new diagnostic obtained after configuring a folder has no runtime_ready field.
 $s=$s.Replace('(bool)d["runtime_ready"]?MessageBoxIcon.Information:MessageBoxIcon.Warning','((bool?)d["code_aster_backend_ready"]==true && (bool?)d["python_ready"]==true)?MessageBoxIcon.Information:MessageBoxIcon.Warning')
 Set-Content $p $s -Encoding UTF8
+# C10.10.1 is retained as the user-facing release while this runtime hotfix is stabilized.
 foreach($name in @('PrePoMax/Forms/AsterMaxNativeUi.cs','PrePoMax/Globals.cs')) {
  $p=Join-Path $Root $name
- Set-Content $p ((Get-Content $p -Raw).Replace('C10.10.1','C10.11')) -Encoding UTF8
+ Set-Content $p ((Get-Content $p -Raw).Replace('C10.11','C10.10.1')) -Encoding UTF8
 }
-Write-Host 'C10.11 native Windows runtime and readable diagnostics applied.'
+Write-Host 'C10.10.1 native Windows runtime and readable diagnostics applied.'
