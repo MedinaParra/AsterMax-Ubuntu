@@ -26,13 +26,13 @@ for family,name,e,nu,rho,source,note in rows:
 (out/'Audit').mkdir(exist_ok=True)
 report='''<!doctype html><html lang="es"><meta charset="utf-8"><title>AsterMax — Materiales</title>
 <style>body{font:16px system-ui;max-width:1150px;margin:35px auto;color:#213043}table{border-collapse:collapse;width:100%}td,th{padding:12px;border:1px solid #cdd6df;text-align:left}th{background:#eaf1fa}.note{background:#fff3c4;padding:16px}</style>
-<h1>Biblioteca de materiales AsterMax C10.10</h1><p>Materiales → Biblioteca → seleccionar material → copiar al modelo → guardar → Asignar sección.</p>
+<h1>Biblioteca de materiales AsterMax C10.10.1</h1><p>Materiales → Biblioteca → seleccionar material → copiar al modelo → guardar → Asignar sección.</p>
 <p class="note">Seis referencias elásticas editables. No incluyen plasticidad, rotura ni fatiga. Los supuestos están identificados en cada descripción. Conservar en el modelo solo el material que se utilizará: el puente actual admite un material por cálculo.</p>
 <p>Propiedades a temperatura ambiente. La biblioteca nativa usa MPa y ton/mm³; la tabla presenta densidad en kg/m³. La copia al modelo utiliza el conversor de unidades nativo. La densidad queda almacenada; el puente estático actual no utiliza masa ni gravedad.</p>
 <table><tr><th>Material</th><th>E (MPa)</th><th>ν</th><th>ρ (kg/m³)</th><th>Referencia / supuesto</th></tr>'''
 for family,name,e,nu,rho,source,note in rows:
     ref=('<a href="'+html.escape(source,quote=True)+'">Ficha del proveedor</a>. ') if source else ''
     report+='<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in (name,e,nu,rho))+'<td>'+ref+html.escape(note)+'</td></tr>'
-report+='</table><p>Compilación: el verificador carga este archivo con el deserializador nativo, prueba la copia desde el diálogo y comprueba propiedades, conversión de unidades y asignación a una pieza en modelos aislados. Evidencia: Validation/C10.10/*.buttons.json.</p></html>'
+report+='</table><p>Compilación: el verificador carga este archivo con el deserializador nativo, prueba la copia desde el diálogo y comprueba propiedades, conversión de unidades y asignación a una pieza en modelos aislados. Evidencia: Validation/C10.10.1/*.buttons.json.</p></html>'
 (out/'Audit'/'MATERIALS.html').write_text(report,encoding='utf-8')
 print(json.dumps({'material_count':len(rows),'file':str(out/'AsterMaxReferenceMaterials.lib'),'native_density_unit':'ton/mm3'}))
