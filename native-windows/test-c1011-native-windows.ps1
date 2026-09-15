@@ -1,7 +1,7 @@
 param([string]$Dist)
 $ErrorActionPreference='Stop'
 
-$root=Join-Path $Dist 'Validation\C10.11-Native-Windows'
+$root=Join-Path $Dist 'Validation\C10.10.1-Native-Windows'
 New-Item -ItemType Directory -Force $root | Out-Null
 $root=(Resolve-Path $root).Path
 $runner=(Resolve-Path (Join-Path $Dist 'AsterMaxRuntime\CodeAster\astermax-codeaster-runner.cmd')).Path
@@ -55,6 +55,7 @@ if($LASTEXITCODE -ne 0){throw 'Native Windows MED handoff failed'}
 if($LASTEXITCODE -ne 0){throw 'Native Windows numerical validation failed'}
 
 @{
+    release='C10.10.1'
     transport='WINDOWS_NATIVE'
     provider_msi_md5='95a2171a6eb967874f7d0c98e881c66c'
     solver_execution='RUN'
