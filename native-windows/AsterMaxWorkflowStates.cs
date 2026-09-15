@@ -221,19 +221,32 @@ namespace PrePoMax
             units.SetConverterUnits();
             int before=_controller.Model.Materials.Count;
             int copied=0;
+            var copiedNames=new JArray();
             using(var dialog=new Forms.FrmMaterialLibrary(_controller)) {
                 dialog.Show(this); Application.DoEvents();
-                var tree=(TreeView)dialog.Controls.Find("cltvLibrary",true)[0];
+                var tree=(CodersLabTreeView)dialog.Controls.Find("cltvLibrary",true)[0];
                 var list=(ListView)dialog.Controls.Find("lvModelMaterials",true)[0];
                 var method=typeof(Forms.FrmMaterialLibrary).GetMethod("btnCopyToModel_Click",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
                 int initial=list.Items.Count;
                 foreach(TreeNode node in AsterMaxLibraryNodes(tree.Nodes).ToArray()) {
                     if(node.Tag is Material && materials.Any(m=>m.Name==((Material)node.Tag).Name)) {
                         tree.SelectedNode=node;
-                        method.Invoke(dialog,new object[]{null,EventArgs.Empty});copied++;
+                        method.Invoke(dialog,new object[]{null,EventArgs.Empty});
+                        var expected=(Material)node.Tag;
+                        var actual=list.Items[list.Items.Count-1].Tag as Material;
+                        if(actual==null||actual.Name!=expected.Name)
+                            throw new InvalidOperationException("Library copied a different material than the selected node: "+expected.Name);
+                        var ee=((Elastic)expected.GetProperty<Elastic>()).YoungsPoissonsTemp[0];
+                        var ae=((Elastic)actual.GetProperty<Elastic>()).YoungsPoissonsTemp[0];
+                        double er=((Density)expected.GetProperty<Density>()).DensityTemp[0][0];
+                        double ar=((Density)actual.GetProperty<Density>()).DensityTemp[0][0];
+                        if(Math.Abs(ae[0]/ee[0]-1)>1e-9||Math.Abs(ae[1]-ee[1])>1e-12||Math.Abs(ar/er-1)>1e-9)
+                            throw new InvalidOperationException("Library copy changed material properties: "+expected.Name);
+                        copiedNames.Add(actual.Name);copied++;
                     }
                 }
-                if(copied!=6||list.Items.Count-initial!=6) throw new InvalidOperationException("Native library copy-to-model buttons did not copy the six materials.");
+                if(copied!=6||list.Items.Count-initial!=6||copiedNames.Select(n=>(string)n).Distinct().Count()!=6)
+                    throw new InvalidOperationException("Native library copy-to-model buttons did not copy six distinct materials.");
                 tree.ExpandAll();
                 using(var bitmap=new System.Drawing.Bitmap(dialog.Width,dialog.Height)) {
                     dialog.DrawToBitmap(bitmap,new System.Drawing.Rectangle(0,0,dialog.Width,dialog.Height));
@@ -243,6 +256,7 @@ namespace PrePoMax
             }
             if(_controller.Model.Materials.Count!=before) throw new InvalidOperationException("Cancel must not commit test materials to the CAD smoke model.");
             return new JObject{["material_count"]=materials.Length,["native_dialog_copied"]=copied,["cancel_preserved_model"]=true,
+                ["native_dialog_material_names"]=copiedNames,
                 ["properties"]=rows,["scope"]="Native .lib loading, copy-to-model dialog, unit conversion, persistence and body assignment fixtures; no solver execution."};
         }
 
