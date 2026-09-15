@@ -12,6 +12,7 @@ Validation modes:
 """
 import json
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -46,11 +47,28 @@ def decode_components(raw, width=16):
     return [raw[i:i + width].strip() for i in range(0, len(raw), width) if raw[i:i + width].strip()]
 
 
+def med_field_path(h, token):
+    # Code_Aster 15 uses an internal eight-hex-digit concept prefix; 17 writes
+    # the result concept name followed by __. Never silently pick among results.
+    names = [name for name in h["CHA"] if name == token or name.endswith("__" + token)
+             or re.fullmatch(r"[0-9a-fA-F]{8}" + re.escape(token), name)]
+    if len(names) != 1:
+        raise RuntimeError(f"{token}: expected one unambiguous MED field, found {names}")
+    root = h["CHA/" + names[0]]
+    mesh = root.attrs.get("MAI", b"")
+    if isinstance(mesh, bytes):
+        mesh = mesh.decode("ascii")
+    if str(mesh) != MESH_ROOT.split("/")[1]:
+        raise RuntimeError(f"{token}: field belongs to a different MED mesh: {mesh}")
+    return "CHA/" + names[0]
+
+
 def nodal_field(h, token):
-    root = h[f"CHA/0000000e{token}"]
+    root_path = med_field_path(h, token)
+    root = h[root_path]
     comps = decode_components(root.attrs["NOM"])
     data = np.asarray(
-        h[f"CHA/0000000e{token}/{STEP}/NOE/MED_NO_PROFILE_INTERNAL/CO"][()], dtype=float
+        h[f"{root_path}/{STEP}/NOE/MED_NO_PROFILE_INTERNAL/CO"][()], dtype=float
     )
     if not comps or len(data) % len(comps):
         raise RuntimeError(f"{token}: component/data size mismatch")
@@ -95,7 +113,7 @@ def discover_mesh_families(h):
 
 
 def discover_element_node_field(h, token, families):
-    root_path = f"CHA/0000000e{token}"
+    root_path = med_field_path(h, token)
     if root_path not in h:
         raise RuntimeError(f"missing MED field: {token}")
     root = h[root_path]
@@ -338,3 +356,4 @@ summary = {
 print(json.dumps(summary, indent=2))
 if not summary["pass"]:
     raise SystemExit("C10.07 results bridge gate failed")
+

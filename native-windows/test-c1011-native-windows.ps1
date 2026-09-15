@@ -25,3 +25,6 @@ if($LASTEXITCODE -ne 0){throw 'Native Windows MED handoff failed'}
 & $python native-windows/c1008-real-tetra/validate_c1008.py --root $root --name astermax-tet4-bar
 if($LASTEXITCODE -ne 0){throw 'Native Windows numerical validation failed'}
 @{transport='WINDOWS_NATIVE';provider_msi_md5='95a2171a6eb967874f7d0c98e881c66c';solver_execution='RUN';synthetic_results_allowed=$false} | ConvertTo-Json | Set-Content (Join-Path $root 'WINDOWS_NATIVE_EVIDENCE.json')
+
+& $python native-windows/test-c1011-med-field-discovery.py native-windows/bridge-c964-med-results.py (Join-Path $root 'astermax-tet4-bar.rmed') (Join-Path $root 'MED_FIELD_REJECTION_TESTS.json')
+if($LASTEXITCODE -ne 0){throw 'MED field ambiguity regression failed'}
