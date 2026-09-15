@@ -23,6 +23,74 @@ namespace UserControls
         public Func<Dictionary<string,AsterMaxSectionState>> AsterMaxSectionStates;
         private ImageList _axSectionIcons;
         private Label _axWorkflowHint;
+        private AxCommandMenu _axAnalysisMenu;
+        private AxCommandMenu _axSolutionMenu;
+
+        // Menus belong to the control, not to a single popup. Closed runs inside
+        // ToolStrip's click dispatch: disposing there invalidates its remaining work.
+        private sealed class AxCommandMenu : ContextMenuStrip
+        {
+            public AxCommandMenu(System.ComponentModel.IContainer owner) : base(owner) { }
+            public void AuditMouseClick()
+            {
+                Rectangle bounds = Items[0].Bounds;
+                int x = bounds.Left + bounds.Width / 2, y = bounds.Top + bounds.Height / 2;
+                OnMouseMove(new MouseEventArgs(MouseButtons.None, 0, x, y, 0));
+                OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, x, y, 0));
+                OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, x, y, 0));
+            }
+        }
+
+        private AxCommandMenu AxCreateCommandMenu(string caption, Action action)
+        {
+            if (components == null) components = new System.ComponentModel.Container();
+            var menu = new AxCommandMenu(components);
+            menu.Items.Add(caption, null, (s,e) => action());
+            return menu;
+        }
+
+        public int AuditAsterMaxContextMenus()
+        {
+            Action solve = AsterMaxSolveRequested, analysis = AsterMaxAnalysisTypeRequested;
+            int calls = 0, checks = 0;
+            Action modal = () => {
+                calls++;
+                using (var dialog = new Form { Text="Context menu lifecycle regression", Width=320, Height=100 })
+                using (var timer = new Timer { Interval=30 }) {
+                    timer.Tick += (s,e) => { timer.Stop(); dialog.Close(); };
+                    dialog.Shown += (s,e) => timer.Start();
+                    dialog.ShowDialog(this);
+                }
+            };
+            AsterMaxSolveRequested = modal;
+            AsterMaxAnalysisTypeRequested = modal;
+            try {
+                foreach (var menu in new[] { _axAnalysisMenu, _axSolutionMenu }) {
+                    for (int repeat=0; repeat<3; repeat++) {
+                        int before = calls;
+                        menu.Show(_axOutline, new Point(20,20));
+                        Application.DoEvents();
+                        menu.AuditMouseClick(); // Full ToolStrip mouse-up path, not PerformClick.
+                        Application.DoEvents();
+                        if (menu.IsDisposed || menu.Visible || calls != before+1)
+                            throw new InvalidOperationException("Context menu click/modal/reopen regression failed.");
+                        checks++;
+                    }
+                    int prior = calls;
+                    menu.Show(_axOutline, new Point(20,20));
+                    menu.Close(ToolStripDropDownCloseReason.Keyboard);
+                    Application.DoEvents();
+                    if (menu.IsDisposed || menu.Visible || calls != prior)
+                        throw new InvalidOperationException("Context menu cancellation regression failed.");
+                    checks++;
+                }
+            }
+            finally {
+                _axAnalysisMenu.Close(); _axSolutionMenu.Close();
+                AsterMaxSolveRequested = solve; AsterMaxAnalysisTypeRequested = analysis;
+            }
+            return checks;
+        }
 
         public void EnableAsterMaxOutline()
         {
@@ -64,19 +132,16 @@ namespace UserControls
                 if (source.Tag != null) tsmiEdit_Click(null, EventArgs.Empty);
                 else if (CanCreate(source)) tsmiCreate_Click(null, EventArgs.Empty);
             };
+            _axAnalysisMenu = AxCreateCommandMenu("Select analysis type / edit study", () => AsterMaxAnalysisTypeRequested?.Invoke());
+            _axSolutionMenu = AxCreateCommandMenu("Solve — Code_Aster", () => AsterMaxSolveRequested?.Invoke());
             _axOutline.NodeMouseClick += (s,e) => {
                 if (e.Button != MouseButtons.Right || _disableMouse) return;
                 _axOutline.SelectedNode = e.Node;
                 if (e.Node.Name == "ax-analysis") {
-                    var menu = new ContextMenuStrip();
-                    menu.Items.Add("Select analysis type / edit study", null, (a,b) => AsterMaxAnalysisTypeRequested?.Invoke());
-                    menu.Closed += (a,b) => menu.Dispose(); menu.Show(_axOutline,e.Location);
+                    _axAnalysisMenu.Show(_axOutline, e.Location);
                 }
                 else if (e.Node.Name == "ax-solution") {
-                    var menu = new ContextMenuStrip();
-                    menu.Items.Add("Solve — Code_Aster", null, (a,b) => AsterMaxSolveRequested?.Invoke());
-                    menu.Closed += (a,b) => menu.Dispose();
-                    menu.Show(_axOutline, e.Location);
+                    _axSolutionMenu.Show(_axOutline, e.Location);
                 }
                 else if (SelectAsterMaxSource(e.Node)) {
                     PrepareToolStripItem(GetActiveTree());
@@ -134,7 +199,7 @@ namespace UserControls
 
         public void RefreshAsterMaxOutline()
         {
-            if (_axOutline == null || _disableMouse || !_screenUpdating || cmsTree.Visible) return;
+            if (_axOutline == null || _disableMouse || !_screenUpdating || cmsTree.Visible || (_axAnalysisMenu != null && _axAnalysisMenu.Visible) || (_axSolutionMenu != null && _axSolutionMenu.Visible)) return;
             var stamp = new StringBuilder();
             foreach (TreeView tree in new TreeView[] { cltvGeometry, cltvModel, cltvResults })
                 foreach (TreeNode node in tree.Nodes) AxStamp(node,stamp);

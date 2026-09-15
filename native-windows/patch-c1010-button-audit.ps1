@@ -30,10 +30,10 @@ $anchor='                            string outlinePart = null;'
 if(-not $u.Contains($anchor)){throw 'Portable smoke audit anchor missing.'}
 $u=$u.Replace($anchor,'                            smokeTimer.Stop();'+[Environment]::NewLine+'                            AuditAsterMaxButtons(reportPath);'+[Environment]::NewLine+$anchor)
 $u=$u.Replace('Height = 118,','Height = 132,').Replace('Height = 62,','Height = 74,')
-$u=$u.Replace('C10.09','C10.10')
+$u=$u.Replace('C10.09','C10.10.1')
 Set-Content $path $u -Encoding UTF8
 $g=Join-Path $Root 'PrePoMax/Globals.cs'
-Set-Content $g ((Get-Content $g -Raw).Replace('AsterMax Mechanical C10.09','AsterMax Mechanical C10.10')) -Encoding UTF8
+Set-Content $g ((Get-Content $g -Raw).Replace('AsterMax Mechanical C10.09','AsterMax Mechanical C10.10.1')) -Encoding UTF8
 
 # The projection uses the original native image lists; no decorative status is invented.
 $tree=Join-Path $Root 'UserControls/ModelTree.AsterMaxOutline.cs'
@@ -165,4 +165,4 @@ $l=$l.Replace($anchor,$anchor+@'
                 if (File.Exists(referenceLibrary)) LoadMaterialLibraryFromFile(referenceLibrary);
 '@)
 Set-Content $libraryForm $l -Encoding UTF8
-Write-Host 'C10.10 native icons, accessible commands and live button audit applied.'
+Write-Host 'C10.10.1 native icons, accessible commands and live button audit applied.'

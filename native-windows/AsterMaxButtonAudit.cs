@@ -142,9 +142,10 @@ namespace PrePoMax
             if (_controller.Model.Sections.Count==0 && workflowStates["assignments"].State!=0)
                 throw new InvalidOperationException("Missing material assignment must never show a completion tick.");
             File.WriteAllText(reportPath + ".buttons.json", new JObject {
-                ["release"] = "C10.10", ["checks_pass"] = true, ["buttons"] = rows,
+                ["release"] = "C10.10.1", ["checks_pass"] = true, ["buttons"] = rows,
                 ["scope"] = "Live ribbon icon and delegate binding; no claim of end-to-end command success.",
                 ["workflow_states"] = JObject.FromObject(workflowStates),
+                ["context_menu_lifecycle_checks"] = _modelTree.AuditAsterMaxContextMenus(),
                 ["configuration_regressions"] = AuditAsterMaxWorkflowStates(),
                 ["material_library"] = AuditAsterMaxMaterialLibrary(reportPath)
             }.ToString(Formatting.Indented));
