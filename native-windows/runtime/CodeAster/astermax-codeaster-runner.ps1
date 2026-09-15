@@ -48,7 +48,6 @@ function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Dir
 function Invoke-WindowsBackend([string]$Backend, [string]$ExportPath, [string]$Directory, [int]$TimeoutMs) {
     # Code_Aster for Windows documents the standalone launcher as:
     #   install\bin\as_run.bat study.export
-    # Keep that native contract instead of forcing the Unix/legacy --run switch.
     $args = Native-Quote $ExportPath
     $ext = [IO.Path]::GetExtension($Backend).ToLowerInvariant()
     if ($ext -eq '.bat' -or $ext -eq '.cmd') {
@@ -138,6 +137,31 @@ function Copy-Workspace([string]$Source, [string]$Destination) {
     }
 }
 
+function Convert-ToWindowsExport([string]$Content) {
+    $culture = [Globalization.CultureInfo]::InvariantCulture
+    $normalized = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($line in ($Content -split "`r?`n")) {
+        if ($line -match '^P\s+version\s+\S+\s*$') {
+            $normalized.Add('P version stable')
+            continue
+        }
+        if ($line -match '^P\s+time_limit\s+([0-9]+(?:\.[0-9]+)?)\s*$') {
+            $seconds = [double]::Parse($Matches[1], $culture)
+            $normalized.Add('A tpmax ' + $seconds.ToString('0.###', $culture))
+            continue
+        }
+        if ($line -match '^P\s+memory_limit\s+([0-9]+(?:\.[0-9]+)?)\s*$') {
+            # Windows standalone as_run uses memjeveux (Mwords). Historical
+            # Code_Aster Windows guidance maps memory_limit 512 -> memjeveux 64.
+            $memoryMb = [double]::Parse($Matches[1], $culture)
+            $normalized.Add('A memjeveux ' + ($memoryMb / 8.0).ToString('0.###', $culture))
+            continue
+        }
+        $normalized.Add($line.Replace('/analysis/', './'))
+    }
+    return ($normalized -join "`r`n")
+}
+
 function Probe-CodeAster([string]$Backend) {
     $stage = New-SafeStageDirectory 'probe'
     try {
@@ -145,16 +169,17 @@ function Probe-CodeAster([string]$Backend) {
         $export = Join-Path $stage 'probe.export'
         $mess = Join-Path $stage 'probe.mess'
         [IO.File]::WriteAllText($comm, "DEBUT()`r`nFIN()`r`n", (New-Object System.Text.UTF8Encoding($false)))
+        # Use the native Windows export syntax documented for standalone as_run.
         $exportText = @(
-            'P actions make_etude',
-            'P version stable',
-            'P mode interactif',
-            'P memory_limit 512',
-            'P time_limit 60',
+            'A tpmax 60.0',
+            'A memjeveux 64.0',
             'P ncpus 1',
             'P mpi_nbcpu 1',
+            'P mpi_nbnoeud 1',
             'F comm ./probe.comm D 1',
-            'F mess ./probe.mess R 6'
+            'F mess ./probe.mess R 6',
+            'P version stable',
+            'P actions make_etude'
         ) -join "`r`n"
         [IO.File]::WriteAllText($export, $exportText + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
         $run = Invoke-WindowsBackend $Backend $export $stage 120000
@@ -184,7 +209,7 @@ if ($ExportFile -eq 'probe') {
     if ($native -and -not $nativeError) { $probe = Probe-CodeAster $native }
     $ready = ($native -ne $null) -and ($nativeError -eq $null) -and ($probe -ne $null) -and $probe.Ready
     [ordered]@{
-        schema = 'astermax-codeaster-runner-probe/v3'
+        schema = 'astermax-codeaster-runner-probe/v4'
         ready = $ready
         transport = 'WINDOWS_NATIVE'
         backend = $(if ($native) { $native } else { 'missing' })
@@ -215,13 +240,8 @@ $stage = New-SafeStageDirectory 'solve'
 try {
     Copy-Workspace $resolvedWorkspace $stage
     $portableExport = Join-Path $stage 'astermax-windows.export'
-    $content = Get-Content -LiteralPath $resolvedExport -Raw
-    $content = $content.Replace('/analysis/', './')
-    # AsterMax export files are transport-neutral. The native Windows package may
-    # expose different Code_Aster releases than the Linux admission fixture, so
-    # resolve the installed stable version instead of pinning an unavailable one.
-    $content = [regex]::Replace($content, '(?m)^P version\s+\S+\s*$', 'P version stable')
-    [IO.File]::WriteAllText($portableExport, $content, (New-Object System.Text.UTF8Encoding($false)))
+    $content = Convert-ToWindowsExport (Get-Content -LiteralPath $resolvedExport -Raw)
+    [IO.File]::WriteAllText($portableExport, $content + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
     Write-Output ("ASTERMAX_CODE_ASTER_BACKEND=" + $native)
