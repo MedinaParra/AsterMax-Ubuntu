@@ -215,6 +215,10 @@ try {
     $portableExport = Join-Path $stage 'astermax-windows.export'
     $content = Get-Content -LiteralPath $resolvedExport -Raw
     $content = $content.Replace('/analysis/', './')
+    # AsterMax export files are transport-neutral. The native Windows package may
+    # expose different Code_Aster releases than the Linux admission fixture, so
+    # resolve the installed stable version instead of pinning an unavailable one.
+    $content = [regex]::Replace($content, '(?m)^P version\s+\S+\s*$', 'P version stable')
     [IO.File]::WriteAllText($portableExport, $content, (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
