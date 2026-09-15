@@ -255,6 +255,7 @@ jobs:
             claim_scope='The bundled evidence is a genuine Code_Aster TETRA4 admission case. Local GUI Solve requires an installed genuine Code_Aster backend; native Windows is preferred. See Validation/C10.11-Native-Windows for the native solver case.'
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
       - name: Validate genuine native Windows Code_Aster
+        timeout-minutes: 10
         shell: pwsh
         run: .\native-windows\test-c1011-native-windows.ps1 -Dist .\dist
       - name: Gate portable CAD payload and real STEP import

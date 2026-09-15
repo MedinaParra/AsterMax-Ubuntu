@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory() as td:
             else:h['CHA'][name].attrs['MAI']=b'OTHER_MESH'
         output=root/(case+'.json');vtu=root/(case+'.vtu')
         env=dict(os.environ,ASTERMAX_MED_BRIDGE_MODE='production')
-        result=subprocess.run([sys.executable,str(bridge),str(med),str(output),str(vtu)],env=env,capture_output=True,text=True)
+        result=subprocess.run([sys.executable,str(bridge),str(med),str(output),str(vtu)],env=env,capture_output=True,text=True,timeout=30)
         assert result.returncode!=0 and not output.exists() and not vtu.exists(),case
         assert ('unambiguous' if case!='wrong_mesh' else 'different MED mesh') in result.stderr, result.stderr
         checks.append({'case':case,'rejected':True,'fea_values_generated':False})
