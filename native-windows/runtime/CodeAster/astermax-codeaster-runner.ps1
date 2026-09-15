@@ -46,8 +46,10 @@ function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Dir
 }
 
 function Invoke-WindowsBackend([string]$Backend, [string]$ExportPath, [string]$Directory, [int]$TimeoutMs) {
+    # Code_Aster for Windows documents the standalone launcher as:
+    #   install\bin\as_run.bat study.export
+    # Keep that native contract instead of forcing the Unix/legacy --run switch.
     $args = Native-Quote $ExportPath
-    if ([IO.Path]::GetFileName($Backend) -like 'as_run*') { $args = '--run ' + $args }
     $ext = [IO.Path]::GetExtension($Backend).ToLowerInvariant()
     if ($ext -eq '.bat' -or $ext -eq '.cmd') {
         if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { $env:ComSpec = "$env:SystemRoot\System32\cmd.exe" }
