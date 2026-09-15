@@ -92,6 +92,8 @@ function Find-WindowsBackend {
     Add-Root $roots 'C:\code_aster'
 
     $relativeCandidates = @(
+        'install\bin\run_aster.bat','install\bin\run_aster.cmd','install\bin\run_aster.exe',
+        'install\bin\as_run.bat','install\bin\as_run.cmd','install\bin\as_run.exe',
         'bin\run_aster.bat','bin\run_aster.cmd','bin\run_aster.exe',
         'run_aster.bat','run_aster.cmd','run_aster.exe',
         'bin\as_run.bat','bin\as_run.cmd','bin\as_run.exe',
