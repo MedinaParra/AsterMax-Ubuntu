@@ -33,7 +33,8 @@ namespace PrePoMax
             if (icon == null) throw new InvalidOperationException("Native icon missing: " + key);
             button.Name = "axCommand_" + group + "_" + caption.Replace(" ", "_");
             button.Text = caption;
-            button.Image = icon;
+            button.Image = CreateAsterMaxCommandIcon(icon,caption,group);
+            button.Disposed += (s,e) => button.Image.Dispose();
             button.ImageAlign = ContentAlignment.TopCenter;
             button.TextAlign = ContentAlignment.BottomCenter;
             button.TextImageRelation = TextImageRelation.ImageAboveText;
@@ -50,6 +51,32 @@ namespace PrePoMax
             else if (caption == "Asignar seccion") tip += "\nAsigna el material a una región de la malla.";
             else if (caption == "Supports" || caption == "Loads") tip += "\nRequiere un paso de análisis y una región válida.";
             _axCommandTips.SetToolTip(button, tip);
+        }
+
+        private static Image CreateAsterMaxCommandIcon(Image source,string caption,string group)
+        {
+            Color accent=Color.FromArgb(32,116,190);
+            if(group.Contains("CAD")||group.Contains("MESH")) accent=Color.FromArgb(210,117,18);
+            if(group.Contains("MODEL")||caption.Contains("material")||caption=="Biblioteca") accent=Color.FromArgb(142,68,173);
+            if(caption=="Open") accent=Color.FromArgb(192,135,0);
+            if(caption=="New"||caption=="Solve"||caption=="Generate Mesh") accent=Color.FromArgb(32,145,84);
+            if(caption=="Loads"||caption=="Supports") accent=Color.FromArgb(211,72,58);
+            if(caption=="Runtime"||caption=="Auditoria") accent=Color.FromArgb(27,143,157);
+            if(group.Contains("RESULT")||caption=="Contours"||caption=="Deformed") accent=Color.FromArgb(180,64,121);
+            var bitmap=new Bitmap(32,32);
+            using(var graphics=Graphics.FromImage(bitmap)) {
+                graphics.SmoothingMode=System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                graphics.InterpolationMode=System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                using(var brush=new SolidBrush(Color.FromArgb(35,accent))) graphics.FillEllipse(brush,0,0,31,31);
+                using(var attributes=new System.Drawing.Imaging.ImageAttributes()) {
+                    var matrix=new System.Drawing.Imaging.ColorMatrix();
+                    matrix.Matrix00=matrix.Matrix11=matrix.Matrix22=0.5f;
+                    matrix.Matrix40=accent.R/510f;matrix.Matrix41=accent.G/510f;matrix.Matrix42=accent.B/510f;
+                    attributes.SetColorMatrix(matrix);
+                    graphics.DrawImage(source,new Rectangle(6,6,20,20),0,0,source.Width,source.Height,GraphicsUnit.Pixel,attributes);
+                }
+            }
+            return bitmap;
         }
 
         private void InvokeAsterMaxCommand(string caption, Action action)
@@ -81,6 +108,7 @@ namespace PrePoMax
         {
             var ribbon = Controls["asterMaxRibbon"] as TabControl;
             if (ribbon == null) throw new InvalidOperationException("Command ribbon missing.");
+            _modelTree.RefreshAsterMaxOutline();
             var rows = new JArray();
             TabPage previous = ribbon.SelectedTab;
             try {
@@ -116,7 +144,9 @@ namespace PrePoMax
             File.WriteAllText(reportPath + ".buttons.json", new JObject {
                 ["release"] = "C10.10", ["checks_pass"] = true, ["buttons"] = rows,
                 ["scope"] = "Live ribbon icon and delegate binding; no claim of end-to-end command success.",
-                ["workflow_states"] = JObject.FromObject(workflowStates)
+                ["workflow_states"] = JObject.FromObject(workflowStates),
+                ["configuration_regressions"] = AuditAsterMaxWorkflowStates(),
+                ["material_library"] = AuditAsterMaxMaterialLibrary(reportPath)
             }.ToString(Formatting.Indented));
         }
     }

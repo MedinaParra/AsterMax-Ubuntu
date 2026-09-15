@@ -14,6 +14,7 @@ on:
       - 'native-windows/AsterMaxWorkflowStates.cs'
       - 'native-windows/patch-c1010-button-audit.ps1'
       - 'native-windows/audit-c1010-buttons.py'
+      - 'native-windows/build-c1010-materials.py'
       - '.github/workflows/astermax-c1008-real-tetra-e2e.yml'
 
 jobs:
@@ -214,6 +215,8 @@ jobs:
           Copy-Item .\C10.08-Validation .\dist\Validation\C10.08 -Recurse -Force
           Copy-Item .\native-windows\AUDIT-C10.09.md .\dist\AUDIT-C10.09.md -Force
           Copy-Item .\button-audit .\dist\Audit -Recurse -Force
+          python .\native-windows\build-c1010-materials.py --out .\dist
+          if($LASTEXITCODE -ne 0){ throw 'Reference material library generation failed.' }
           @'
           AsterMax Mechanical C10.10 portable hotfix
           1. Extract the complete ZIP before starting AsterMax Mechanical.exe.

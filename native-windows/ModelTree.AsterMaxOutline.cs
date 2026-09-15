@@ -22,6 +22,7 @@ namespace UserControls
         public event Action AsterMaxAnalysisTypeRequested;
         public Func<Dictionary<string,AsterMaxSectionState>> AsterMaxSectionStates;
         private ImageList _axSectionIcons;
+        private Label _axWorkflowHint;
 
         public void EnableAsterMaxOutline()
         {
@@ -34,6 +35,12 @@ namespace UserControls
             tcGeometryModelResults.Visible = false;
             Controls.Add(_axOutline);
             _axOutline.BringToFront();
+            _axWorkflowHint = new Label { Name="asterMaxWorkflowHint", Dock=DockStyle.Bottom, Height=88,
+                Padding=new Padding(8), BackColor=Color.FromArgb(239,246,252),
+                Text="? Pendiente   i Revisar   ✓ Completo\n\nSeleccione una sección para ver qué falta completar.",
+                Font=new Font("Segoe UI",9), AutoEllipsis=true };
+            Controls.Add(_axWorkflowHint);
+            _axWorkflowHint.SendToBack();
             _axOutline.ShowNodeToolTips = true;
             _axSectionIcons = new ImageList { ImageSize=new Size(16,16), ColorDepth=ColorDepth.Depth32Bit };
             _axSectionIcons.Images.Add("pending", AxStatusIcon("?", Color.FromArgb(198,139,0)));
@@ -41,7 +48,15 @@ namespace UserControls
             _axSectionIcons.Images.Add("done", AxStatusIcon("", Color.FromArgb(30,145,70)));
             _axOutline.StateImageList = _axSectionIcons;
             Disposed += (s,e) => _axSectionIcons.Dispose();
-            _axOutline.AfterSelect += (s,e) => SelectAsterMaxSource(e.Node);
+            _axOutline.AfterSelect += (s,e) => {
+                TreeNode info=e.Node;
+                while(info!=null && String.IsNullOrEmpty(info.ToolTipText)) info=info.Parent;
+                if(info!=null) {
+                    _axWorkflowHint.Text=info.ToolTipText;
+                    _axWorkflowHint.BackColor=info.BackColor.IsEmpty?Color.FromArgb(239,246,252):info.BackColor;
+                }
+                SelectAsterMaxSource(e.Node);
+            };
             _axOutline.NodeMouseDoubleClick += (s,e) => {
                 if (e.Node.Name == "ax-analysis") { AsterMaxAnalysisTypeRequested?.Invoke(); return; }
                 if (!SelectAsterMaxSource(e.Node)) return;
@@ -220,7 +235,7 @@ namespace UserControls
                 node.ToolTipText=state.Message;
                 bool optional=key=="ax-coordinates"||key=="ax-connections"||key=="ax-selections";
                 if(state.State!=2&&!optional) node.BackColor=Color.FromArgb(255,244,184);
-                if(state.State!=2&&!optional) node.Nodes.Add(new TreeNode("i — "+state.Message) {
+                if(state.State!=2&&!optional) node.Nodes.Add(new TreeNode("Revisar campos") {
                     Name="ax-info-"+key, StateImageKey="info", BackColor=Color.FromArgb(255,244,184),ToolTipText=state.Message });
             }
             foreach(TreeNode child in node.Nodes) if(!child.Name.StartsWith("ax-info-")) AxApplySectionStatesSingle(child,states);
