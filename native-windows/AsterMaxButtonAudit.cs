@@ -46,7 +46,7 @@ namespace PrePoMax
                 Disposed += (s,e) => _axCommandTips.Dispose();
             }
             string tip = group + " — " + caption;
-            if (caption == "Solve") tip += "\nCode_Aster en WSL2; requiere material, sección, malla, apoyo y carga.";
+            if (caption == "Solve") tip += "\nCode_Aster nativo de Windows; requiere material, sección, malla, apoyo, carga y Runtime/PREFLIGHT válido.";
             else if (caption == "Generate Mesh") tip += "\nSeleccione una pieza de Geometry; utiliza NetGen incluido.";
             else if (caption == "Asignar seccion") tip += "\nAsigna el material a una región de la malla.";
             else if (caption == "Supports" || caption == "Loads") tip += "\nRequiere un paso de análisis y una región válida.";
