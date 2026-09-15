@@ -1,0 +1,143 @@
+name: AsterMax C10.11 Native Windows Code_Aster Bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ codex/c1011-native-windows-codeaster ]
+    paths:
+      - 'native-windows/runtime/CodeAster/**'
+      - 'native-windows/patch-c1011-native-windows-codeaster.ps1'
+      - '.github/workflows/astermax-c1011-native-windows-codeaster.yml'
+
+jobs:
+  windows-native-bridge:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax
+        uses: actions/checkout@v5
+
+      - name: Reject WSL dependencies from production runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=Get-Content .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 -Raw
+          foreach($bad in @('wsl.exe','ASTERMAX_WSL_CODE_ASTER_COMMAND','Get-WslExe','Get-WslPath','WSL2')){
+            if($runner.Contains($bad)){ throw "Forbidden WSL dependency remains in C10.11 runner: $bad" }
+          }
+          foreach($required in @('WINDOWS_NATIVE','run_aster.bat','ASTERMAX_CODE_ASTER_HOME','ASTERMAX_WINDOWS_CODE_ASTER_COMMAND','AsterMaxJobs','synthetic_results_allowed')){
+            if(-not $runner.Contains($required)){ throw "Native Windows runner token missing: $required" }
+          }
+
+      - name: Validate native probe contract without pretending a solver exists
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=(Resolve-Path .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1).Path
+          $lines=& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $runner probe 2>&1
+          $exit=$LASTEXITCODE
+          $jsonLine=$lines | Where-Object { $_.ToString().TrimStart().StartsWith('{') } | Select-Object -Last 1
+          if(-not $jsonLine){ throw "Runner probe produced no JSON. Output: $($lines -join [Environment]::NewLine)" }
+          $j=$jsonLine.ToString() | ConvertFrom-Json
+          if($j.transport -ne 'WINDOWS_NATIVE'){ throw 'Probe transport is not WINDOWS_NATIVE.' }
+          if($j.wsl_required -ne $false){ throw 'Probe incorrectly requires WSL.' }
+          if($j.synthetic_results_allowed -ne $false){ throw 'Synthetic results must remain disabled.' }
+          if($j.ready){
+            Write-Host "A native Code_Aster launcher happened to be available on the runner: $($j.backend)"
+            if($exit -ne 0){ throw 'Ready probe returned nonzero exit code.' }
+          } else {
+            if($exit -ne 21){ throw "Missing-solver probe must fail closed with exit 21; got $exit" }
+            Write-Host 'No Windows Code_Aster is installed on the hosted runner; fail-closed behavior verified.'
+          }
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply integrated AsterMax chain through C10.11
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-native-windows-codeaster.ps1'
+          )
+          foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
+
+      - name: Gate generated C10.11 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          foreach($required in @('ASTERMAX_C1011_WINDOWS_NATIVE_CODE_ASTER_V1','code_aster_transport','WINDOWS_NATIVE','wsl_required','WaitForExit(120000)')){
+            if(-not $solve.Contains($required)){ throw "C10.11 solve token missing: $required" }
+          }
+          if($ui.Contains('WSL verified solve')){ throw 'Legacy WSL UI label remains.' }
+          if(-not $ui.Contains('Windows native solve')){ throw 'Native Windows solver UI label missing.' }
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Stage C10.11 bridge hotfix artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing after C10.11 build.' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          @'
+          AsterMax Mechanical C10.11 native Windows Code_Aster bridge hotfix
+          - WSL is not used by the production solver runner.
+          - AsterMax first looks for a Windows run_aster/as_run launcher under AsterMaxRuntime\CodeAster.
+          - ASTERMAX_CODE_ASTER_HOME or ASTERMAX_WINDOWS_CODE_ASTER_COMMAND may point to an existing Windows Code_Aster installation.
+          - Runtime/PREFLIGHT executes a real minimal Code_Aster smoke solve and remains BLOCKED if it cannot prove the backend.
+          - No synthetic FEA results are enabled.
+          - This CI artifact validates compilation and the bridge contract; a real local Windows Code_Aster solve is not claimed by GitHub-hosted CI.
+          '@ | Set-Content .\dist\LEEME-C10.11.txt -Encoding UTF8
+          [ordered]@{
+            release='C10.11-bridge-hotfix'
+            branch='codex/c1011-native-windows-codeaster'
+            solver_backend='Code_Aster'
+            solver_transport='WINDOWS_NATIVE'
+            solver_binary_bundled=$false
+            wsl_required=$false
+            gui_initiated_local_solve_validated=$false
+            synthetic_results_allowed=$false
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Upload C10.11 Windows bridge hotfix
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.11-Windows-Native-CodeAster-Bridge
+          path: dist
+          if-no-files-found: error
