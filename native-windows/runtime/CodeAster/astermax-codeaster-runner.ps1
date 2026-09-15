@@ -10,53 +10,159 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
-function ShellQuote([string]$Value) {
-    if ($null -eq $Value) { return "''" }
-    $sq = [string][char]39
-    $dq = [string][char]34
-    $embeddedQuote = $sq + $dq + $sq + $dq + $sq
-    return $sq + $Value.Replace($sq, $embeddedQuote) + $sq
+function To-AsterPath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    return ([System.IO.Path]::GetFullPath($Path)).Replace('\','/')
 }
 
-function Get-WslExe {
-    $cmd = Get-Command wsl.exe -ErrorAction SilentlyContinue
-    if ($null -eq $cmd) { return $null }
-    return $cmd.Source
-}
-
-function Get-CodeAsterBackend([string]$WslExe) {
-    $configured = $env:ASTERMAX_WSL_CODE_ASTER_COMMAND
-    if (-not [string]::IsNullOrWhiteSpace($configured)) {
-        $q = ShellQuote $configured
-        $script = "if command -v $q >/dev/null 2>&1 || [ -x $q ]; then printf '%s' $q; exit 0; fi; exit 127"
-        $out = & $WslExe sh -lc $script 2>$null
-        if ($LASTEXITCODE -eq 0 -and $out) { return (($out | Select-Object -Last 1).ToString()).Trim() }
-        return $null
+function New-SafeStageDirectory([string]$Prefix) {
+    $base = $env:PUBLIC
+    if ([string]::IsNullOrWhiteSpace($base) -or -not (Test-Path -LiteralPath $base -PathType Container)) {
+        $base = [System.IO.Path]::GetTempPath()
     }
+    $root = Join-Path $base 'AsterMaxJobs'
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $leaf = $Prefix + '-' + [Guid]::NewGuid().ToString('N')
+    $dir = Join-Path $root $leaf
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    return $dir
+}
 
-    $script = "if command -v as_run >/dev/null 2>&1; then command -v as_run; exit 0; fi; exit 127"
-    $out = & $WslExe sh -lc $script 2>$null
-    if ($LASTEXITCODE -eq 0 -and $out) { return (($out | Select-Object -Last 1).ToString()).Trim() }
+function Resolve-LauncherCandidate([string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return $null }
+    try {
+        if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $Candidate).Path
+        }
+    } catch { }
     return $null
 }
 
-function Get-WslPath([string]$WslExe, [string]$WindowsPath) {
-    $out = & $WslExe wslpath -a -u $WindowsPath 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
-    return (($out | Select-Object -Last 1).ToString()).Trim()
+function Get-CodeAsterLauncher {
+    $configured = Resolve-LauncherCandidate $env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND
+    if ($configured) {
+        return [pscustomobject]@{ Path=$configured; Source='environment-command'; Kind=$(if ([IO.Path]::GetFileName($configured) -match '^run_aster') {'run_aster'} else {'as_run'}) }
+    }
+
+    $roots = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($env:ASTERMAX_CODE_ASTER_HOME)) { $roots.Add($env:ASTERMAX_CODE_ASTER_HOME) }
+    $roots.Add($PSScriptRoot)
+
+    $relativeCandidates = @(
+        'bin\run_aster.bat','bin\run_aster.cmd','bin\run_aster.exe',
+        'run_aster.bat','run_aster.cmd','run_aster.exe',
+        'bin\as_run.bat','bin\as_run.cmd','bin\as_run.exe',
+        'as_run.bat','as_run.cmd','as_run.exe'
+    )
+
+    foreach ($root in $roots) {
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($relative in $relativeCandidates) {
+            $found = Resolve-LauncherCandidate (Join-Path $root $relative)
+            if ($found) {
+                return [pscustomobject]@{ Path=$found; Source=$(if ($root -eq $PSScriptRoot) {'packaged'} else {'environment-home'}); Kind=$(if ([IO.Path]::GetFileName($found) -match '^run_aster') {'run_aster'} else {'as_run'}) }
+            }
+        }
+    }
+
+    # Last chance inside the packaged CodeAster tree. This allows a vendor bundle whose
+    # exact directory layout changes between Windows releases without hard-coding it here.
+    if (Test-Path -LiteralPath $PSScriptRoot -PathType Container) {
+        $preferredNames = @('run_aster.bat','run_aster.cmd','run_aster.exe','as_run.bat','as_run.cmd','as_run.exe')
+        foreach ($name in $preferredNames) {
+            $found = Get-ChildItem -LiteralPath $PSScriptRoot -Recurse -File -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                return [pscustomobject]@{ Path=$found.FullName; Source='packaged-recursive'; Kind=$(if ($name -match '^run_aster') {'run_aster'} else {'as_run'}) }
+            }
+        }
+    }
+    return $null
 }
 
-$wsl = Get-WslExe
+function Invoke-CodeAster([string]$Launcher,[string]$Export,[string]$WorkingDirectory,[int]$TimeoutSeconds) {
+    $stdoutFile = [IO.Path]::GetTempFileName()
+    $stderrFile = [IO.Path]::GetTempFileName()
+    try {
+        $ext = [IO.Path]::GetExtension($Launcher).ToLowerInvariant()
+        if ($ext -eq '.bat' -or $ext -eq '.cmd') {
+            $hostExe = $env:COMSPEC
+            if ([string]::IsNullOrWhiteSpace($hostExe)) { $hostExe = 'cmd.exe' }
+            $argLine = '/d /s /c ""' + $Launcher + '" "' + $Export + '""'
+            $p = Start-Process -FilePath $hostExe -ArgumentList $argLine -WorkingDirectory $WorkingDirectory -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        }
+        else {
+            $p = Start-Process -FilePath $Launcher -ArgumentList ('"' + $Export + '"') -WorkingDirectory $WorkingDirectory -NoNewWindow -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+        }
+
+        if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $p.Kill() } catch { }
+            return [pscustomobject]@{ ExitCode=124; Stdout=(Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue); Stderr=('Timed out after ' + $TimeoutSeconds + ' seconds.') }
+        }
+        return [pscustomobject]@{
+            ExitCode=$p.ExitCode
+            Stdout=(Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue)
+            Stderr=(Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue)
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Probe-CodeAster([object]$LauncherInfo) {
+    $probeRoot = New-SafeStageDirectory 'probe'
+    try {
+        $comm = Join-Path $probeRoot 'probe.comm'
+        $export = Join-Path $probeRoot 'probe.export'
+        $mess = Join-Path $probeRoot 'probe.mess'
+        [IO.File]::WriteAllText($comm, "DEBUT()`nFIN()`n", (New-Object System.Text.UTF8Encoding($false)))
+        $commAster = To-AsterPath $comm
+        $messAster = To-AsterPath $mess
+        $exportText = @(
+            'P actions make_etude',
+            'P version stable',
+            'P mode interactif',
+            'P memory_limit 512',
+            'P time_limit 60',
+            'P ncpus 1',
+            'P mpi_nbcpu 1',
+            ('F comm ' + $commAster + ' D 1'),
+            ('F mess ' + $messAster + ' R 6')
+        ) -join "`n"
+        [IO.File]::WriteAllText($export, $exportText + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $result = Invoke-CodeAster $LauncherInfo.Path $export $probeRoot 90
+        $messReady = (Test-Path -LiteralPath $mess -PathType Leaf) -and ((Get-Item -LiteralPath $mess).Length -gt 0)
+        return [pscustomobject]@{
+            Ready=($result.ExitCode -eq 0 -and $messReady)
+            ExitCode=$result.ExitCode
+            Stdout=$result.Stdout
+            Stderr=$result.Stderr
+            MessReady=$messReady
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+$launcher = Get-CodeAsterLauncher
 if ($ExportFile -eq 'probe') {
-    $backend = $null
-    if ($wsl) { $backend = Get-CodeAsterBackend $wsl }
-    $ready = (-not [string]::IsNullOrWhiteSpace($wsl)) -and (-not [string]::IsNullOrWhiteSpace($backend))
+    $probe = $null
+    if ($launcher) { $probe = Probe-CodeAster $launcher }
+    $ready = ($launcher -ne $null) -and ($probe -ne $null) -and $probe.Ready
     [ordered]@{
-        schema = 'astermax-codeaster-runner-probe/v1'
+        schema = 'astermax-codeaster-runner-probe/v2'
         ready = $ready
-        transport = $(if ($wsl) { 'WSL2' } else { 'missing' })
-        backend = $(if ($backend) { $backend } else { 'missing' })
-        configured_backend = $env:ASTERMAX_WSL_CODE_ASTER_COMMAND
+        transport = 'WINDOWS_NATIVE'
+        backend = $(if ($launcher) { $launcher.Path } else { 'missing' })
+        backend_kind = $(if ($launcher) { $launcher.Kind } else { 'missing' })
+        backend_source = $(if ($launcher) { $launcher.Source } else { 'missing' })
+        configured_backend = $env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND
+        configured_home = $env:ASTERMAX_CODE_ASTER_HOME
+        solver_probe_exit_code = $(if ($probe) { $probe.ExitCode } else { $null })
+        solver_probe_mess_ready = $(if ($probe) { $probe.MessReady } else { $false })
+        solver_probe_stderr = $(if ($probe -and $probe.Stderr) { $probe.Stderr.Trim() } else { '' })
+        wsl_required = $false
         synthetic_results_allowed = $false
     } | ConvertTo-Json -Compress | Write-Output
     if ($ready) { exit 0 } else { exit 21 }
@@ -66,45 +172,53 @@ if ([string]::IsNullOrWhiteSpace($ExportFile)) { Fail 'Missing .export file argu
 if ([string]::IsNullOrWhiteSpace($Workspace)) { Fail 'Missing solve workspace argument.' 2 }
 if (-not (Test-Path -LiteralPath $ExportFile -PathType Leaf)) { Fail "Export file not found: $ExportFile" 3 }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { Fail "Workspace not found: $Workspace" 3 }
-if (-not $wsl) { Fail 'wsl.exe is not available. Install/enable WSL2 and a Linux Code_Aster runtime.' 20 }
-
-$backend = Get-CodeAsterBackend $wsl
-if ([string]::IsNullOrWhiteSpace($backend)) {
-    Fail 'No Code_Aster as_run executable is available in the default WSL distribution. Install Code_Aster or set ASTERMAX_WSL_CODE_ASTER_COMMAND to its as_run executable/path.' 21
+if (-not $launcher) {
+    Fail 'No native Windows Code_Aster launcher was found. Package run_aster.bat under AsterMaxRuntime\CodeAster, or set ASTERMAX_CODE_ASTER_HOME / ASTERMAX_WINDOWS_CODE_ASTER_COMMAND.' 21
 }
 
 $resolvedWorkspace = (Resolve-Path -LiteralPath $Workspace).Path
 $resolvedExport = (Resolve-Path -LiteralPath $ExportFile).Path
-$wslWorkspace = Get-WslPath $wsl $resolvedWorkspace
-if ([string]::IsNullOrWhiteSpace($wslWorkspace)) { Fail 'Could not translate the solve workspace to a WSL path.' 22 }
+$stage = New-SafeStageDirectory 'solve'
 
-# AsterMax C10.00 intentionally emits a transport-neutral /analysis/ root.
-# Materialize a disposable export profile whose paths point to this exact transaction workspace.
-$portableExport = Join-Path $resolvedWorkspace 'astermax-wsl.export'
-$text = Get-Content -LiteralPath $resolvedExport -Raw
-$text = $text.Replace('/analysis/', ($wslWorkspace.TrimEnd('/') + '/'))
-Set-Content -LiteralPath $portableExport -Value $text -Encoding UTF8
+try {
+    # Stage away from user/profile paths (which may contain spaces or non-ASCII characters).
+    # Code_Aster sees only this short Windows-native transaction directory.
+    Copy-Item -LiteralPath (Join-Path $resolvedWorkspace '*') -Destination $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $resolvedWorkspace -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse -Force
+    }
 
-$wslExport = Get-WslPath $wsl $portableExport
-if ([string]::IsNullOrWhiteSpace($wslExport)) { Fail 'Could not translate the adapted export profile to a WSL path.' 22 }
+    $stageRoot = (To-AsterPath $stage).TrimEnd('/') + '/'
+    $portableExport = Join-Path $stage 'astermax-windows.export'
+    $text = Get-Content -LiteralPath $resolvedExport -Raw
+    $text = $text.Replace('/analysis/', $stageRoot)
+    [IO.File]::WriteAllText($portableExport, $text, (New-Object System.Text.UTF8Encoding($false)))
 
-$workQ = ShellQuote $wslWorkspace
-$backendQ = ShellQuote $backend
-$exportQ = ShellQuote $wslExport
-$command = "cd $workQ && $backendQ --run $exportQ"
+    Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
+    Write-Output ("ASTERMAX_CODE_ASTER_BACKEND=" + $launcher.Path)
+    Write-Output ("ASTERMAX_CODE_ASTER_BACKEND_KIND=" + $launcher.Kind)
+    Write-Output ("ASTERMAX_CODE_ASTER_EXPORT=" + $portableExport)
+    Write-Output ("ASTERMAX_CODE_ASTER_STAGE=" + $stage)
 
-Write-Output "ASTERMAX_CODE_ASTER_TRANSPORT=WSL2"
-Write-Output "ASTERMAX_CODE_ASTER_BACKEND=$backend"
-Write-Output "ASTERMAX_CODE_ASTER_EXPORT=$wslExport"
+    $run = Invoke-CodeAster $launcher.Path $portableExport $stage 7200
+    if ($run.Stdout) { Write-Output $run.Stdout.TrimEnd() }
+    if ($run.Stderr) { [Console]::Error.WriteLine($run.Stderr.TrimEnd()) }
 
-& $wsl sh -lc $command
-$solverExit = $LASTEXITCODE
-if ($solverExit -ne 0) { Fail "Code_Aster as_run returned exit code $solverExit." $solverExit }
+    # Always return the transaction evidence to the original AsterMax workspace.
+    Get-ChildItem -LiteralPath $stage -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $resolvedWorkspace -Recurse -Force
+    }
 
-$mess = Get-ChildItem -LiteralPath $resolvedWorkspace -Filter '*.mess' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-$rmed = Get-ChildItem -LiteralPath $resolvedWorkspace -Filter '*.rmed' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($null -eq $mess -or $mess.Length -le 0) { Fail 'Solver returned success but no non-empty .mess file was produced.' 30 }
-if ($null -eq $rmed -or $rmed.Length -le 0) { Fail 'Solver returned success but no non-empty .rmed file was produced.' 31 }
+    if ($run.ExitCode -ne 0) { Fail "Native Windows Code_Aster returned exit code $($run.ExitCode)." $run.ExitCode }
 
-Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
-exit 0
+    $mess = Get-ChildItem -LiteralPath $stage -Filter '*.mess' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    $rmed = Get-ChildItem -LiteralPath $stage -Filter '*.rmed' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $mess -or $mess.Length -le 0) { Fail 'Solver returned success but no non-empty .mess file was produced.' 30 }
+    if ($null -eq $rmed -or $rmed.Length -le 0) { Fail 'Solver returned success but no non-empty .rmed file was produced.' 31 }
+
+    Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
+    exit 0
+}
+finally {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+}
