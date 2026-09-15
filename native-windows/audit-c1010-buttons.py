@@ -4,17 +4,20 @@ from pathlib import Path
 
 p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--out',required=True);a=p.parse_args()
 root=Path(a.root);out=Path(a.out);out.mkdir(parents=True,exist_ok=True)
-files={str(f.relative_to(root)):f.read_text(encoding='utf-8-sig',errors='replace') for f in root.rglob('*.cs') if not any(x in f.parts for x in ('bin','obj','packages'))}
+files={f.relative_to(root).as_posix():f.read_text(encoding='utf-8-sig',errors='replace') for f in root.rglob('*.cs') if not any(x in f.parts for x in ('bin','obj','packages'))}
 all_code='\n'.join(files.values())
 rows=[]
 for path,code in files.items():
     if not path.endswith('.Designer.cs'): continue
+    companion=files.get(path.replace('.Designer.cs','.cs'),'')
     for name,kind in re.findall(r'this\.(\w+)\s*=\s*new\s+[\w.]*\.(Button|ToolStripButton|ToolStripMenuItem|ToolStripDropDownButton)\s*\(',code):
         caption=re.search(r'this\.'+re.escape(name)+r'\.Text\s*=\s*"([^"\n]*)"',code)
-        binding=re.search(r'this\.'+re.escape(name)+r'\.Click\s*\+=\s*new\s+[\w.]+\(this\.(\w+)\)',code)
+        binding=re.search(r'this\.'+re.escape(name)+r'\.(Click|MouseUp|MouseDown|DoubleClick)\s*\+=\s*new\s+[\w.]+\(this\.(\w+)\)',code)
         container=bool(re.search(r'this\.'+re.escape(name)+r'\.DropDownItems\.AddRange',code))
-        handler=binding.group(1) if binding else ''
-        state='CONTENEDOR' if container and not handler else 'ENLACE ESTATICO' if handler else 'REVISAR ENLACE DINAMICO/HEREDADO'
+        dynamic_container=bool(re.search(r'\b'+re.escape(name)+r'\.DropDownItems\.Add\(',companion))
+        dialog=re.search(r'this\.'+re.escape(name)+r'\.DialogResult\s*=\s*[\w.]*DialogResult\.(\w+)',code)
+        handler=(binding.group(1)+': '+binding.group(2)) if binding else ('DialogResult.'+dialog.group(1)) if dialog else ''
+        state='ENLACE ESTATICO' if binding else 'CIERRE DE DIALOGO' if dialog else 'CONTENEDOR' if container else 'CONTENEDOR DINAMICO' if dynamic_container else 'REVISAR ENLACE DINAMICO/HEREDADO'
         rows.append(dict(area=path,control=name,label=caption.group(1) if caption else '',type=kind,handler=handler,status=state,execution='NO EJECUTADO'))
 ui=files['PrePoMax/Forms/AsterMaxNativeUi.cs']; tab='';ribbon=[]
 for line in ui.splitlines():
