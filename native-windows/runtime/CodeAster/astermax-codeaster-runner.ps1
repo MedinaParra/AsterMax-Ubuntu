@@ -36,8 +36,8 @@ function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Dir
         }
         return [pscustomobject]@{
             ExitCode = $p.ExitCode
-            Stdout = $stdoutTask.Result.Replace([char]0, '')
-            Stderr = $stderrTask.Result.Replace([char]0, '')
+            Stdout = ($stdoutTask.Result -replace "`0", '')
+            Stderr = ($stderrTask.Result -replace "`0", '')
         }
     }
     finally {
