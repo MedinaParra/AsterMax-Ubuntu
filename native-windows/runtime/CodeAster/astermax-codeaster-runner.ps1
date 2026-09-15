@@ -10,158 +10,187 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
-function ShellQuote([string]$Value) {
-    if ($null -eq $Value) { return "''" }
-    $sq = [string][char]39
-    $dq = [string][char]34
-    $embeddedQuote = $sq + $dq + $sq + $dq + $sq
-    return $sq + $Value.Replace($sq, $embeddedQuote) + $sq
+function Native-Quote([string]$Value) {
+    if ($null -eq $Value) { return '""' }
+    if ($Value -match '["%!\r\n]') { throw 'Unsupported quote, percent or exclamation in native command path.' }
+    return '"' + $Value + '"'
 }
 
-function Get-WslExe {
-    $cmd = Get-Command wsl.exe -ErrorAction SilentlyContinue
-    if ($null -eq $cmd) { return $null }
-    return $cmd.Source
-}
-
-function Get-CodeAsterBackend([string]$WslExe) {
-    $configured = $env:ASTERMAX_WSL_CODE_ASTER_COMMAND
-    if (-not [string]::IsNullOrWhiteSpace($configured)) {
-        $q = ShellQuote $configured
-        $script = "if command -v $q >/dev/null 2>&1 || [ -x $q ]; then printf '%s' $q; exit 0; fi; exit 127"
-        $out = & $WslExe sh -lc $script 2>$null
-        if ($LASTEXITCODE -eq 0 -and $out) { return (($out | Select-Object -Last 1).ToString()).Trim() }
-        return $null
-    }
-
-    $script = "if command -v as_run >/dev/null 2>&1; then command -v as_run; exit 0; fi; exit 127"
-    $out = & $WslExe sh -lc $script 2>$null
-    if ($LASTEXITCODE -eq 0 -and $out) { return (($out | Select-Object -Last 1).ToString()).Trim() }
-    return $null
-}
-
-function Get-WslPath([string]$WslExe, [string]$WindowsPath) {
-    $out = & $WslExe wslpath -a -u $WindowsPath 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
-    return (($out | Select-Object -Last 1).ToString()).Trim()
-}
-
-# Windows-native adapter for the SimulEase Code_Aster distributions.
-# The vendor's run_aster.bat activates its own Python and profile.bat.
-function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Directory, [int]$Timeout=12000) {
+function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Directory, [int]$TimeoutMs = 120000) {
     $p = New-Object System.Diagnostics.Process
     $p.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $p.StartInfo.FileName=$Program; $p.StartInfo.Arguments=$Arguments
-    $p.StartInfo.WorkingDirectory=$Directory; $p.StartInfo.UseShellExecute=$false
-    $p.StartInfo.CreateNoWindow=$true
-    $p.StartInfo.RedirectStandardOutput=$true; $p.StartInfo.RedirectStandardError=$true
-    $p.StartInfo.StandardOutputEncoding=New-Object System.Text.UTF8Encoding($false)
-    $p.StartInfo.StandardErrorEncoding=New-Object System.Text.UTF8Encoding($false)
+    $p.StartInfo.FileName = $Program
+    $p.StartInfo.Arguments = $Arguments
+    $p.StartInfo.WorkingDirectory = $Directory
+    $p.StartInfo.UseShellExecute = $false
+    $p.StartInfo.CreateNoWindow = $true
+    $p.StartInfo.RedirectStandardOutput = $true
+    $p.StartInfo.RedirectStandardError = $true
     try {
-        if (-not $p.Start()) { throw 'Could not start native runner.' }
-        $stdout=$p.StandardOutput.ReadToEndAsync(); $stderr=$p.StandardError.ReadToEndAsync()
-        if (-not $p.WaitForExit($Timeout)) {
-            & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F 2>&1 | Out-Null
-            throw 'Native Code_Aster command timed out.'
+        if (-not $p.Start()) { throw 'Could not start native Code_Aster process.' }
+        $stdoutTask = $p.StandardOutput.ReadToEndAsync()
+        $stderrTask = $p.StandardError.ReadToEndAsync()
+        if (-not $p.WaitForExit($TimeoutMs)) {
+            try { & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F 2>&1 | Out-Null } catch { }
+            throw "Native Code_Aster command timed out after $TimeoutMs ms."
         }
-        return @{ExitCode=$p.ExitCode; Stdout=$stdout.Result; Stderr=$stderr.Result}
-    } finally { $p.Dispose() }
+        return [pscustomobject]@{
+            ExitCode = $p.ExitCode
+            Stdout = $stdoutTask.Result.Replace([char]0, '')
+            Stderr = $stderrTask.Result.Replace([char]0, '')
+        }
+    }
+    finally {
+        $p.Dispose()
+    }
 }
-function Native-Quote([string]$Value) {
-    if ($Value -match '["%!\r\n]') { throw 'Unsupported quote, percent or exclamation in native command path.' }
-    return '"'+$Value+'"'
+
+function Invoke-WindowsBackend([string]$Backend, [string]$ExportPath, [string]$Directory, [int]$TimeoutMs) {
+    $args = Native-Quote $ExportPath
+    if ([IO.Path]::GetFileName($Backend) -like 'as_run*') { $args = '--run ' + $args }
+    $ext = [IO.Path]::GetExtension($Backend).ToLowerInvariant()
+    if ($ext -eq '.bat' -or $ext -eq '.cmd') {
+        if ([string]::IsNullOrWhiteSpace($env:ComSpec)) { $env:ComSpec = "$env:SystemRoot\System32\cmd.exe" }
+        return Invoke-NativeProcess $env:ComSpec ('/d /v:off /s /c "' + (Native-Quote $Backend) + ' ' + $args + '"') $Directory $TimeoutMs
+    }
+    if ($ext -eq '.exe') {
+        return Invoke-NativeProcess $Backend $args $Directory $TimeoutMs
+    }
+    throw 'Configure a native Windows Code_Aster run_aster.bat, as_run.bat or executable.'
 }
+
+function Add-Root([System.Collections.Generic.List[string]]$Roots, [string]$Candidate) {
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return }
+    try {
+        $full = [IO.Path]::GetFullPath($Candidate)
+        if (-not $Roots.Contains($full)) { $Roots.Add($full) }
+    } catch { }
+}
+
 function Find-WindowsBackend {
-    $explicit=$env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND
-    if ($explicit) {
+    $explicit = $env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND
+    if (-not [string]::IsNullOrWhiteSpace($explicit)) {
         if (-not (Test-Path -LiteralPath $explicit -PathType Leaf)) { throw "Configured Windows launcher not found: $explicit" }
         return (Get-Item -LiteralPath $explicit).FullName
     }
-    $roots=@()
-    if ($env:ASTERMAX_CODE_ASTER_HOME) { $roots+= $env:ASTERMAX_CODE_ASTER_HOME }
-    $config=Join-Path $env:LOCALAPPDATA 'AsterMax\code-aster-windows.json'
-    if (Test-Path -LiteralPath $config) {
-        $root=(Get-Content -LiteralPath $config -Raw | ConvertFrom-Json).installation
-        if ($root) { $roots+=$root }
+
+    $roots = New-Object 'System.Collections.Generic.List[string]'
+    Add-Root $roots $env:ASTERMAX_CODE_ASTER_HOME
+
+    $config = Join-Path $env:LOCALAPPDATA 'AsterMax\code-aster-windows.json'
+    if (Test-Path -LiteralPath $config -PathType Leaf) {
+        try {
+            $configuredRoot = (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json).installation
+            Add-Root $roots $configuredRoot
+        } catch { }
     }
-    $roots+=@((Join-Path $env:LOCALAPPDATA 'code_aster'),(Join-Path $env:ProgramFiles 'code_aster'),'C:\code_aster')
+
+    Add-Root $roots (Join-Path $env:LOCALAPPDATA 'code_aster')
+    Add-Root $roots (Join-Path $env:LOCALAPPDATA 'Programs\code_aster')
+    Add-Root $roots (Join-Path $env:ProgramFiles 'code_aster')
+    if (${env:ProgramFiles(x86)}) { Add-Root $roots (Join-Path ${env:ProgramFiles(x86)} 'code_aster') }
+    Add-Root $roots 'C:\code_aster'
+
+    $relativeCandidates = @(
+        'bin\run_aster.bat','bin\run_aster.cmd','bin\run_aster.exe',
+        'run_aster.bat','run_aster.cmd','run_aster.exe',
+        'bin\as_run.bat','bin\as_run.cmd','bin\as_run.exe',
+        'as_run.bat','as_run.cmd','as_run.exe'
+    )
     foreach ($root in $roots) {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
-        # Bounded search: root, install/bin, version/bin, release/version/bin.
-        $found=@()
-        foreach ($pattern in @('bin\run_aster.bat','*\bin\run_aster.bat','*\*\bin\run_aster.bat','install\bin\as_run.bat','bin\as_run.bat')) {
-            $found+=@(Get-ChildItem -Path (Join-Path $root $pattern) -File -ErrorAction SilentlyContinue)
+        foreach ($relative in $relativeCandidates) {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return (Get-Item -LiteralPath $candidate).FullName }
         }
-        if ($found.Count) { return ($found | Sort-Object FullName -Descending | Select-Object -First 1).FullName }
+        foreach ($name in @('run_aster.bat','run_aster.cmd','run_aster.exe','as_run.bat','as_run.cmd','as_run.exe')) {
+            $found = Get-ChildItem -LiteralPath $root -Recurse -File -Filter $name -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { return $found.FullName }
+        }
     }
-    foreach ($name in @('run_aster.bat','as_run.bat')) {
-        $command=Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
+
+    foreach ($name in @('run_aster.bat','run_aster.cmd','run_aster.exe','as_run.bat','as_run.cmd','as_run.exe')) {
+        $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
         if ($command) { return $command.Source }
     }
     return $null
 }
-function Invoke-WindowsBackend([string]$Backend,[string]$Arguments,[string]$Directory,[int]$Timeout=12000) {
-    $ext=[IO.Path]::GetExtension($Backend).ToLowerInvariant()
-    if ($ext -eq '.bat' -or $ext -eq '.cmd') {
-        return Invoke-NativeProcess $env:ComSpec ('/d /v:off /s /c "'+(Native-Quote $Backend)+' '+$Arguments+'"') $Directory $Timeout
+
+function New-SafeStageDirectory([string]$Prefix) {
+    $base = $env:PUBLIC
+    if ([string]::IsNullOrWhiteSpace($base) -or -not (Test-Path -LiteralPath $base -PathType Container)) {
+        $base = [IO.Path]::GetTempPath()
     }
-    if ($ext -eq '.exe') { return Invoke-NativeProcess $Backend $Arguments $Directory $Timeout }
-    throw 'Configure a Code_Aster run_aster.bat, as_run.bat or native executable.'
+    $root = Join-Path $base 'AsterMaxJobs'
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    $dir = Join-Path $root ($Prefix + '-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    return $dir
 }
 
-$native=$null; $nativeError=$null
-try { $native=Find-WindowsBackend } catch { $nativeError=$_.Exception.Message }
-if ($native -or $nativeError) {
-    if ($ExportFile -eq 'probe') {
-        $ready=$false; $version=''
-        if ($native) {
-            try {
-                $p=Invoke-WindowsBackend $native '--version' ([IO.Path]::GetDirectoryName($native))
-                $version=($p.Stdout -replace '\x00','').Trim()
-                $ready=($p.ExitCode -eq 0 -and $version -match '\d+\.\d+')
-                if (-not $ready) { $nativeError=($p.Stderr -replace '\x00','').Trim(); if (-not $nativeError) {$nativeError=$version} }
-            } catch { $nativeError=$_.Exception.Message }
+function Copy-Workspace([string]$Source, [string]$Destination) {
+    Get-ChildItem -LiteralPath $Source -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+    }
+}
+
+function Probe-CodeAster([string]$Backend) {
+    $stage = New-SafeStageDirectory 'probe'
+    try {
+        $comm = Join-Path $stage 'probe.comm'
+        $export = Join-Path $stage 'probe.export'
+        $mess = Join-Path $stage 'probe.mess'
+        [IO.File]::WriteAllText($comm, "DEBUT()`r`nFIN()`r`n", (New-Object System.Text.UTF8Encoding($false)))
+        $exportText = @(
+            'P actions make_etude',
+            'P version stable',
+            'P mode interactif',
+            'P memory_limit 512',
+            'P time_limit 60',
+            'P ncpus 1',
+            'P mpi_nbcpu 1',
+            'F comm ./probe.comm D 1',
+            'F mess ./probe.mess R 6'
+        ) -join "`r`n"
+        [IO.File]::WriteAllText($export, $exportText + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+        $run = Invoke-WindowsBackend $Backend $export $stage 120000
+        $messReady = (Test-Path -LiteralPath $mess -PathType Leaf) -and ((Get-Item -LiteralPath $mess).Length -gt 0)
+        return [pscustomobject]@{
+            Ready = ($run.ExitCode -eq 0 -and $messReady)
+            ExitCode = $run.ExitCode
+            Stdout = $run.Stdout
+            Stderr = $run.Stderr
+            MessReady = $messReady
         }
-        [ordered]@{schema='astermax-codeaster-runner-probe/v2';ready=$ready;transport='WINDOWS_NATIVE';backend=$native;version=$version;message=$nativeError;synthetic_results_allowed=$false} | ConvertTo-Json -Compress
-        if($ready){exit 0}else{exit 21}
     }
-    if ($nativeError) { Fail $nativeError 21 }
-    if (-not (Test-Path -LiteralPath $ExportFile -PathType Leaf)) { Fail 'Missing export file.' 3 }
-    if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { Fail 'Missing solve workspace.' 3 }
-    $work=(Resolve-Path -LiteralPath $Workspace).Path
-    $profile=Join-Path $work 'astermax-windows.export'
-    # Relative file records are resolved by run_aster from the transaction directory.
-    # This avoids introducing spaces into the .export record tokenizer.
-    $content=(Get-Content -LiteralPath $ExportFile -Raw).Replace('/analysis/','./')
-    [IO.File]::WriteAllText($profile,$content,(New-Object System.Text.UTF8Encoding($false)))
-    $args=Native-Quote $profile
-    if ([IO.Path]::GetFileName($native) -like 'as_run*') {$args='--run '+$args}
-    Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
-    Write-Output "ASTERMAX_CODE_ASTER_BACKEND=$native"
-    $started=[DateTime]::UtcNow
-    $result=Invoke-WindowsBackend $native $args $work 3600000
-    Write-Output $result.Stdout
-    if($result.Stderr){[Console]::Error.WriteLine($result.Stderr)}
-    if($result.ExitCode -ne 0){Fail "Native Code_Aster returned exit code $($result.ExitCode)." $result.ExitCode}
-    foreach($extension in @('mess','rmed')) {
-        $output=Get-ChildItem -LiteralPath $work -Filter "*.$extension" -File | Where-Object {$_.Length -gt 0 -and $_.LastWriteTimeUtc -ge $started.AddSeconds(-1)} | Select-Object -First 1
-        if (-not $output) {Fail "Native solver did not produce a fresh non-empty .$extension file." 30}
+    catch {
+        return [pscustomobject]@{ Ready=$false; ExitCode=124; Stdout=''; Stderr=$_.Exception.Message; MessReady=$false }
     }
-    Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
-    exit 0
+    finally {
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
-$wsl = Get-WslExe
+$native = $null
+$nativeError = $null
+try { $native = Find-WindowsBackend } catch { $nativeError = $_.Exception.Message }
+
 if ($ExportFile -eq 'probe') {
-    $backend = $null
-    if ($wsl) { $backend = Get-CodeAsterBackend $wsl }
-    $ready = (-not [string]::IsNullOrWhiteSpace($wsl)) -and (-not [string]::IsNullOrWhiteSpace($backend))
+    $probe = $null
+    if ($native -and -not $nativeError) { $probe = Probe-CodeAster $native }
+    $ready = ($native -ne $null) -and ($nativeError -eq $null) -and ($probe -ne $null) -and $probe.Ready
     [ordered]@{
-        schema = 'astermax-codeaster-runner-probe/v1'
+        schema = 'astermax-codeaster-runner-probe/v3'
         ready = $ready
-        transport = $(if ($wsl) { 'WSL2' } else { 'missing' })
-        backend = $(if ($backend) { $backend } else { 'missing' })
-        configured_backend = $env:ASTERMAX_WSL_CODE_ASTER_COMMAND
+        transport = 'WINDOWS_NATIVE'
+        backend = $(if ($native) { $native } else { 'missing' })
+        backend_kind = $(if ($native) { [IO.Path]::GetFileName($native) } else { 'missing' })
+        configured_backend = $env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND
+        configured_home = $env:ASTERMAX_CODE_ASTER_HOME
+        solver_probe_exit_code = $(if ($probe) { $probe.ExitCode } else { $null })
+        solver_probe_mess_ready = $(if ($probe) { $probe.MessReady } else { $false })
+        message = $(if ($nativeError) { $nativeError } elseif ($probe -and $probe.Stderr) { $probe.Stderr.Trim() } elseif (-not $native) { 'No native Windows Code_Aster launcher found.' } else { '' })
+        wsl_required = $false
         synthetic_results_allowed = $false
     } | ConvertTo-Json -Compress | Write-Output
     if ($ready) { exit 0 } else { exit 21 }
@@ -171,46 +200,44 @@ if ([string]::IsNullOrWhiteSpace($ExportFile)) { Fail 'Missing .export file argu
 if ([string]::IsNullOrWhiteSpace($Workspace)) { Fail 'Missing solve workspace argument.' 2 }
 if (-not (Test-Path -LiteralPath $ExportFile -PathType Leaf)) { Fail "Export file not found: $ExportFile" 3 }
 if (-not (Test-Path -LiteralPath $Workspace -PathType Container)) { Fail "Workspace not found: $Workspace" 3 }
-if (-not $wsl) { Fail 'wsl.exe is not available. Install/enable WSL2 and a Linux Code_Aster runtime.' 20 }
-
-$backend = Get-CodeAsterBackend $wsl
-if ([string]::IsNullOrWhiteSpace($backend)) {
-    Fail 'No Code_Aster as_run executable is available in the default WSL distribution. Install Code_Aster or set ASTERMAX_WSL_CODE_ASTER_COMMAND to its as_run executable/path.' 21
+if ($nativeError) { Fail $nativeError 21 }
+if (-not $native) {
+    Fail 'No native Windows Code_Aster launcher was found. Install Code_Aster for Windows or select its installation folder from Runtime/PREFLIGHT.' 21
 }
 
 $resolvedWorkspace = (Resolve-Path -LiteralPath $Workspace).Path
 $resolvedExport = (Resolve-Path -LiteralPath $ExportFile).Path
-$wslWorkspace = Get-WslPath $wsl $resolvedWorkspace
-if ([string]::IsNullOrWhiteSpace($wslWorkspace)) { Fail 'Could not translate the solve workspace to a WSL path.' 22 }
+$stage = New-SafeStageDirectory 'solve'
+try {
+    Copy-Workspace $resolvedWorkspace $stage
+    $portableExport = Join-Path $stage 'astermax-windows.export'
+    $content = Get-Content -LiteralPath $resolvedExport -Raw
+    $content = $content.Replace('/analysis/', './')
+    [IO.File]::WriteAllText($portableExport, $content, (New-Object System.Text.UTF8Encoding($false)))
 
-# AsterMax C10.00 intentionally emits a transport-neutral /analysis/ root.
-# Materialize a disposable export profile whose paths point to this exact transaction workspace.
-$portableExport = Join-Path $resolvedWorkspace 'astermax-wsl.export'
-$text = Get-Content -LiteralPath $resolvedExport -Raw
-$text = $text.Replace('/analysis/', ($wslWorkspace.TrimEnd('/') + '/'))
-Set-Content -LiteralPath $portableExport -Value $text -Encoding UTF8
+    Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
+    Write-Output ("ASTERMAX_CODE_ASTER_BACKEND=" + $native)
+    Write-Output ("ASTERMAX_CODE_ASTER_EXPORT=" + $portableExport)
+    Write-Output ("ASTERMAX_CODE_ASTER_STAGE=" + $stage)
 
-$wslExport = Get-WslPath $wsl $portableExport
-if ([string]::IsNullOrWhiteSpace($wslExport)) { Fail 'Could not translate the adapted export profile to a WSL path.' 22 }
+    $started = [DateTime]::UtcNow
+    $result = Invoke-WindowsBackend $native $portableExport $stage 3600000
+    if ($result.Stdout) { Write-Output $result.Stdout.TrimEnd() }
+    if ($result.Stderr) { [Console]::Error.WriteLine($result.Stderr.TrimEnd()) }
 
-$workQ = ShellQuote $wslWorkspace
-$backendQ = ShellQuote $backend
-$exportQ = ShellQuote $wslExport
-$command = "cd $workQ && $backendQ --run $exportQ"
+    Copy-Workspace $stage $resolvedWorkspace
 
-Write-Output "ASTERMAX_CODE_ASTER_TRANSPORT=WSL2"
-Write-Output "ASTERMAX_CODE_ASTER_BACKEND=$backend"
-Write-Output "ASTERMAX_CODE_ASTER_EXPORT=$wslExport"
+    if ($result.ExitCode -ne 0) { Fail "Native Windows Code_Aster returned exit code $($result.ExitCode)." $result.ExitCode }
+    foreach ($extension in @('mess','rmed')) {
+        $output = Get-ChildItem -LiteralPath $stage -Filter "*.$extension" -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -gt 0 -and $_.LastWriteTimeUtc -ge $started.AddSeconds(-2) } |
+            Select-Object -First 1
+        if (-not $output) { Fail "Native solver did not produce a fresh non-empty .$extension file." 30 }
+    }
 
-& $wsl sh -lc $command
-$solverExit = $LASTEXITCODE
-if ($solverExit -ne 0) { Fail "Code_Aster as_run returned exit code $solverExit." $solverExit }
-
-$mess = Get-ChildItem -LiteralPath $resolvedWorkspace -Filter '*.mess' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-$rmed = Get-ChildItem -LiteralPath $resolvedWorkspace -Filter '*.rmed' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($null -eq $mess -or $mess.Length -le 0) { Fail 'Solver returned success but no non-empty .mess file was produced.' 30 }
-if ($null -eq $rmed -or $rmed.Length -le 0) { Fail 'Solver returned success but no non-empty .rmed file was produced.' 31 }
-
-Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
-exit 0
-
+    Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
+    exit 0
+}
+finally {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+}
