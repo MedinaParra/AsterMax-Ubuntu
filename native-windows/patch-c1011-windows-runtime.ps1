@@ -20,6 +20,15 @@ if($s.Contains($transportAnchor) -and -not $s.Contains('["code_aster_transport"]
     $s=$s.Replace($transportAnchor,$transportAnchor+[Environment]::NewLine+'                ["code_aster_transport"]="WINDOWS_NATIVE",'+[Environment]::NewLine+'                ["wsl_required"]=false,')
 }
 
+# Make the transaction itself emit a Windows-native .export. The runner keeps its
+# own normalization as a compatibility safety net for older workspaces.
+$s=$s.Replace('["release"]="C10.00"','["release"]="C10.10.1"')
+$legacyExport='P actions make_etude\nP version 15.2\nP mode interactif\nP time_limit 300\nP memory_limit 2048\nP ncpus 1\nP mpi_nbcpu 1\n\n'
+$windowsExport='A tpmax 300\nA memjeveux 256\nP ncpus 1\nP mpi_nbcpu 1\nP mpi_nbnoeud 1\nP version stable\nP actions make_etude\n\n'
+if(-not $s.Contains($legacyExport)){ throw 'C10.10.1 Windows export anchor missing.' }
+$s=$s.Replace($legacyExport,$windowsExport)
+$s=$s.Replace('/analysis/','./')
+
 $anchor='        public static JObject RequireRuntimeReady()'
 $helper=@'
         public static string RuntimeSummary(JObject d)
@@ -48,7 +57,7 @@ $s=$s.Replace('MessageBox.Show(this,d.ToString(Formatting.Indented),',@'
                 if ((bool?)d["code_aster_backend_ready"]!=true && MessageBox.Show(this,
                     AsterMaxNativeSolveTransaction.RuntimeSummary(d)+"\n\n¿Seleccionar carpeta de Code_Aster para Windows?",
                     "Configurar Code_Aster",MessageBoxButtons.YesNo,MessageBoxIcon.Question)==DialogResult.Yes) {
-                    using(var folder=new FolderBrowserDialog { Description="Seleccione code_aster, su versión, o la carpeta que contiene bin\\run_aster.bat" }) {
+                    using(var folder=new FolderBrowserDialog { Description="Seleccione code_aster, su versión, o la carpeta que contiene install\\bin\\as_run.bat" }) {
                         if(folder.ShowDialog(this)==DialogResult.OK) {
                             string configDir=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AsterMax");
                             Directory.CreateDirectory(configDir);
@@ -74,4 +83,4 @@ Set-Content $uiPath $u -Encoding UTF8
 $globals=Join-Path $Root 'PrePoMax/Globals.cs'
 Set-Content $globals ((Get-Content $globals -Raw).Replace('C10.11','C10.10.1')) -Encoding UTF8
 
-Write-Host 'C10.10.1 native Windows runtime, 120 s real probe and readable diagnostics applied.'
+Write-Host 'C10.10.1 native Windows runtime, Windows export contract, 120 s real probe and readable diagnostics applied.'
