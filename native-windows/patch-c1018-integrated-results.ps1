@@ -21,7 +21,7 @@ Set-Content $path $s -Encoding UTF8
 $path=Join-Path $Root 'PrePoMax/Forms/AsterMaxButtonAudit.cs'
 $s=Get-Content $path -Raw
 $s=Replace-Required $s '            try { action(); }' '            try { if (!RouteAsterMaxIntegratedCommand(caption)) action(); RefreshAsterMaxResultAvailability(); }'
-$s=Replace-Required $s '                tsslState.Text = "Command failed: " + caption;' ('                if(!String.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASTERMAX_C1018_UI_AUDIT"))) throw;'+[Environment]::NewLine+'                tsslState.Text = "Command failed: " + caption;')
+$s=Replace-Required $s '                tsslState.Text = "Command failed: " + caption;' ('                if(_asterMaxUiAuditMode) throw;'+[Environment]::NewLine+'                tsslState.Text = "Command failed: " + caption;')
 Set-Content $path $s -Encoding UTF8
 
 $path=Join-Path $Root 'PrePoMax/Forms/AsterMaxVtkResultsBinding.cs'
@@ -44,9 +44,22 @@ $renderStart=@'
 $s=Replace-Required $s $renderStart @'
         private void RenderScene()
         {
-            if(_axRendering || !IsHandleCreated || !Visible) return;
+            if(_axRendering) {
+                LastRenderError=null;
+                LastRenderSkipped=true;
+                LastRenderSkipReason="render already in progress";
+                return;
+            }
+            if(!IsHandleCreated || !Visible) {
+                LastRenderError=null;
+                LastRenderSkipped=true;
+                LastRenderSkipReason=!IsHandleCreated?"window handle is not created":"viewport is not visible";
+                return;
+            }
             _axRendering=true;
             LastRenderError=null;
+            LastRenderSkipped=false;
+            LastRenderSkipReason=null;
             try
             {
                 ValidateModel?.Invoke();
@@ -73,8 +86,8 @@ $s=Replace-Required $s $old @'
 '@
 $s=Replace-Required $s '                _view.AdjustCameraDistanceAndClipping();' '                if(firstRender) _view.AdjustCameraDistanceAndClipping();'
 $s=Replace-Required $s '                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ' ('                RenderRevision++;'+[Environment]::NewLine+'                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ')
-$s=Replace-Required $s '                _status.Text="Render blocked: "+ex.GetType().Name;' ('                LastRenderError=ex.Message;'+[Environment]::NewLine+'                _status.Text="Render blocked: "+ex.GetType().Name;')
-$s=Replace-Required $s '                MessageBox.Show(this,"AsterMax results renderer blocked safely.' ('                if(!String.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASTERMAX_C1018_UI_AUDIT"))) throw;'+[Environment]::NewLine+'                MessageBox.Show(this,"AsterMax results renderer blocked safely.')
+$s=Replace-Required $s '                _status.Text="Render blocked: "+ex.GetType().Name;' ('                LastRenderError=ex.Message;'+[Environment]::NewLine+'                LastRenderSkipped=false;'+[Environment]::NewLine+'                LastRenderSkipReason=null;'+[Environment]::NewLine+'                _status.Text="Render blocked: "+ex.GetType().Name;')
+$s=Replace-Required $s '                MessageBox.Show(this,"AsterMax results renderer blocked safely.' ('                if(AuditMode) throw;'+[Environment]::NewLine+'                MessageBox.Show(this,"AsterMax results renderer blocked safely.')
 $anchor=@'
                     "AsterMax Results",MessageBoxButtons.OK,MessageBoxIcon.Error);
             }
@@ -94,7 +107,7 @@ $solve=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
 $s=Get-Content $solve -Raw
 $s=Replace-Required $s $modal 'ShowAsterMaxIntegratedResult(null);'
 if($s.Contains('                tsslState.Text="AsterMax Solve: BLOCKED / FAILED";')) {
-    $s=$s.Replace('                tsslState.Text="AsterMax Solve: BLOCKED / FAILED";', '                if(!String.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASTERMAX_C1018_UI_AUDIT"))) throw;'+[Environment]::NewLine+'                tsslState.Text="AsterMax Solve: BLOCKED / FAILED";')
+    $s=$s.Replace('                tsslState.Text="AsterMax Solve: BLOCKED / FAILED";', '                if(_asterMaxUiAuditMode) throw;'+[Environment]::NewLine+'                tsslState.Text="AsterMax Solve: BLOCKED / FAILED";')
 }
 Set-Content $solve $s -Encoding UTF8
 
