@@ -48,9 +48,8 @@ class PublicationTests(unittest.TestCase):
             fixture.build_fixture(med, {'TE4': [[1, 2, 3, 4]]})
             if existing_bundle:
                 bundle.write_text('previous bundle', encoding='utf-8')
-            # A directory at the final VTU path makes os.replace(temp_file, vtu) fail after the
-            # temporary JSON and VTU were both fully written and validated. This exercises the
-            # publication boundary rather than the preflight numerical gate.
+            # A directory occupying the VTU destination makes publication fail after both
+            # temporary artifacts have been written and validated, before any JSON is published.
             vtu.mkdir()
             result = subprocess.run(
                 [sys.executable, str(HERE / 'bridge-c964-med-results.py'), str(med), str(bundle), str(vtu)],
@@ -63,6 +62,27 @@ class PublicationTests(unittest.TestCase):
                 self.assertFalse(bundle.exists(), result.stderr)
             self.assertEqual(list(root.glob('.bundle.json.*.tmp')), [], 'bundle temporary was not cleaned')
             self.assertEqual(list(root.glob('.result.vtu.*.tmp')), [], 'VTU temporary was not cleaned')
+
+    def test_second_promotion_failure_restores_previous_vtu(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            med = root / 'input.rmed'
+            bundle = root / 'bundle.json'
+            vtu = root / 'result.vtu'
+            fixture.build_fixture(med, {'TE4': [[1, 2, 3, 4]]})
+            vtu.write_text('previous vtu', encoding='utf-8')
+            # Occupying the JSON destination with a directory lets the VTU promotion occur first,
+            # then forces the second os.replace to fail. The old VTU must be restored by rollback.
+            bundle.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(HERE / 'bridge-c964-med-results.py'), str(med), str(bundle), str(vtu)],
+                env=dict(os.environ, ASTERMAX_MED_BRIDGE_MODE='production'), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(bundle.is_dir())
+            self.assertEqual(vtu.read_text(encoding='utf-8'), 'previous vtu')
+            self.assertEqual(list(root.glob('.bundle.json.*.tmp')), [], 'bundle temporary was not cleaned')
+            self.assertEqual(list(root.glob('.result.vtu.*.tmp')), [], 'VTU temporary was not cleaned')
+            self.assertEqual(list(root.glob('.result.vtu.previous.*.tmp')), [], 'rollback link was not cleaned')
 
     def test_nonfinite_coordinates(self):
         self.run_rejected(f'{fixture.ROOT}/NOE/COO', float('nan'))
