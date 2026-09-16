@@ -20,6 +20,30 @@ namespace UserControls
         private bool _axRefreshing;
         public event Action AsterMaxSolveRequested;
         public event Action AsterMaxAnalysisTypeRequested;
+        public event Action<string> AsterMaxResultRequested;
+        public event Action AsterMaxModelViewRequested;
+        public event Action AsterMaxModelTreeChanged;
+        private string[] _axResultFields = new string[0];
+        private string _axResultStatus = "Not solved";
+        private bool _axResultsCurrent;
+        private string _axSourceStamp;
+
+        public void SetAsterMaxResultFields(string[] fields, string status, bool current)
+        {
+            fields = fields ?? new string[0];
+            if (String.Join("|", fields) == String.Join("|", _axResultFields) && status == _axResultStatus && current == _axResultsCurrent) return;
+            _axResultFields = (string[])fields.Clone(); _axResultStatus = status; _axResultsCurrent = current;
+            _axOutlineStamp = null;
+        }
+
+        public void SelectAsterMaxResultField(string field)
+        {
+            RefreshAsterMaxOutline();
+            TreeNode[] found = _axOutline.Nodes.Find("ax-result/" + field, true);
+            if (found.Length == 0) throw new InvalidOperationException("Result missing from Outline: " + field);
+            if (_axOutline.SelectedNode != found[0]) _axOutline.SelectedNode = found[0];
+            found[0].EnsureVisible();
+        }
         public Func<Dictionary<string,AsterMaxSectionState>> AsterMaxSectionStates;
         private ImageList _axSectionIcons;
         private Label _axWorkflowHint;
@@ -117,12 +141,19 @@ namespace UserControls
             _axOutline.StateImageList = _axSectionIcons;
             Disposed += (s,e) => _axSectionIcons.Dispose();
             _axOutline.AfterSelect += (s,e) => {
+                if (_axRefreshing) return;
                 TreeNode info=e.Node;
                 while(info!=null && String.IsNullOrEmpty(info.ToolTipText)) info=info.Parent;
                 if(info!=null) {
                     _axWorkflowHint.Text=info.ToolTipText;
                     _axWorkflowHint.BackColor=info.BackColor.IsEmpty?Color.FromArgb(239,246,252):info.BackColor;
                 }
+                if (e.Node.Name.StartsWith("ax-result/")) {
+                    AsterMaxResultRequested?.Invoke(e.Node.Name.Substring("ax-result/".Length));
+                    return;
+                }
+                if (e.Node.Name == "ax-solution-info") { AsterMaxResultRequested?.Invoke("__information__"); return; }
+                AsterMaxModelViewRequested?.Invoke();
                 SelectAsterMaxSource(e.Node);
             };
             _axOutline.NodeMouseDoubleClick += (s,e) => {
@@ -203,6 +234,9 @@ namespace UserControls
             var stamp = new StringBuilder();
             foreach (TreeView tree in new TreeView[] { cltvGeometry, cltvModel, cltvResults })
                 foreach (TreeNode node in tree.Nodes) AxStamp(node,stamp);
+            string sourceStamp = stamp.ToString();
+            if (_axSourceStamp != sourceStamp) { _axSourceStamp=sourceStamp; AsterMaxModelTreeChanged?.Invoke(); }
+            stamp.Append(_axResultStatus).Append(_axResultsCurrent).Append(String.Join("|",_axResultFields));
             if (_axOutlineStamp == stamp.ToString()) return;
             _axOutlineStamp = stamp.ToString();
             var expanded = new HashSet<string>();
@@ -244,12 +278,20 @@ namespace UserControls
                 analysis.Nodes.Add(AxCopy(_initialConditions));
                 analysis.Nodes.Add(AxCopy(_amplitudes));
                 var solution = new TreeNode("Solution") { Name = "ax-solution" };
+                solution.Nodes.Add(new TreeNode("Solution Information") { Name="ax-solution-info", ToolTipText=_axResultStatus });
+                foreach (string field in _axResultFields) solution.Nodes.Add(new TreeNode(field) {
+                    Name="ax-result/"+field, StateImageKey=_axResultsCurrent?"done":"pending",
+                    ForeColor=_axResultsCurrent?Color.FromArgb(34,42,53):Color.Firebrick,
+                    ToolTipText=_axResultsCurrent?"Select to display this field in the graphics window.":"Results are out of date. Solve the current model again." });
                 solution.Nodes.Add(AxCopy(_analyses, "Solution Jobs"));
                 foreach (TreeNode node in cltvResults.Nodes) solution.Nodes.Add(AxCopy(node));
                 analysis.Nodes.Add(solution);
                 model.Nodes.Add(analysis);
                 _axOutline.Nodes.Add(project);
                 if (AsterMaxSectionStates != null) AxApplySectionStates(_axOutline.Nodes, AsterMaxSectionStates());
+                solution.StateImageKey=_axResultsCurrent?"done":_axResultFields.Length>0?"pending":"info";
+                solution.ToolTipText=_axResultStatus;
+                if (_axResultFields.Length>0) { analysis.Expand(); solution.Expand(); }
                 AxRestoreExpansion(_axOutline.Nodes, expanded, selected, first);
                 project.Expand(); model.Expand();
                 // Keep the imported-body branch discoverable after a previously empty project is filled.
