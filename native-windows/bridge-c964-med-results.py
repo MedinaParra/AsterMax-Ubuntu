@@ -11,6 +11,7 @@ Validation modes:
 - production: validates actual MED dimensions and supported element families dynamically.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -30,8 +31,10 @@ validation_mode = os.environ.get("ASTERMAX_MED_BRIDGE_MODE", "regression").strip
 if validation_mode not in {"regression", "production"}:
     raise SystemExit("ASTERMAX_MED_BRIDGE_MODE must be regression or production")
 
-MESH_ROOT = "ENS_MAA/00000001/-0000000000000000001-0000000000000000001"
-STEP = "0000000000000000000100000000000000000001"
+# C9.62 reference: GitHub Actions ubuntu-latest, Docker image scimulate/code_aster:15.2.
+# Use a relative tolerance because solver/BLAS/CPU floating-point details can change the last bits.
+C962_DX_MAX_REFERENCE_MM = 0.0471697826890255
+C962_DX_REL_TOL = 1e-9
 
 # MED geometry code -> (nodes/cell, AsterMax semantic name, VTK cell type)
 SUPPORTED_FAMILIES = {
@@ -47,7 +50,32 @@ def decode_components(raw, width=16):
     return [raw[i:i + width].strip() for i in range(0, len(raw), width) if raw[i:i + width].strip()]
 
 
-def med_field_path(h, token):
+def discover_mesh(h):
+    if "ENS_MAA" not in h:
+        raise RuntimeError("MED file has no ENS_MAA mesh collection")
+    mesh_names = sorted(
+        name for name, obj in h["ENS_MAA"].items() if isinstance(obj, h5py.Group)
+    )
+    if len(mesh_names) != 1:
+        raise RuntimeError(
+            "MED must contain exactly one mesh under ENS_MAA; found: "
+            + (", ".join(mesh_names) if mesh_names else "<none>")
+        )
+    mesh_name = mesh_names[0]
+    mesh_group = h[f"ENS_MAA/{mesh_name}"]
+    state_names = []
+    for name, obj in mesh_group.items():
+        if isinstance(obj, h5py.Group) and "NOE" in obj and "MAI" in obj:
+            state_names.append(name)
+    if len(state_names) != 1:
+        raise RuntimeError(
+            f"MED mesh {mesh_name} must have exactly one topology state containing NOE and MAI; found: "
+            + (", ".join(sorted(state_names)) if state_names else "<none>")
+        )
+    return mesh_name, f"ENS_MAA/{mesh_name}/{state_names[0]}"
+
+
+def med_field_path(h, token, mesh_name):
     # Code_Aster 15 uses an internal eight-hex-digit concept prefix; 17 writes
     # the result concept name followed by __. Never silently pick among results.
     names = [name for name in h["CHA"] if name == token or name.endswith("__" + token)
@@ -58,25 +86,44 @@ def med_field_path(h, token):
     mesh = root.attrs.get("MAI", b"")
     if isinstance(mesh, bytes):
         mesh = mesh.decode("ascii")
-    if str(mesh) != MESH_ROOT.split("/")[1]:
+    if str(mesh) != mesh_name:
         raise RuntimeError(f"{token}: field belongs to a different MED mesh: {mesh}")
     return "CHA/" + names[0]
 
 
-def nodal_field(h, token):
-    root_path = med_field_path(h, token)
+def select_single_field_step(h, root_path, token):
+    root = h[root_path]
+    steps = []
+    for name, obj in root.items():
+        if not isinstance(obj, h5py.Group):
+            continue
+        locations = list(obj.keys())
+        if any(location == "NOE" or location.startswith("NOE.") for location in locations):
+            steps.append(name)
+    steps = sorted(steps)
+    if not steps:
+        raise RuntimeError(f"{token}: no MED result steps found")
+    if len(steps) > 1:
+        raise RuntimeError(
+            f"{token}: multiple MED result steps found: {steps}; explicit step selection is required"
+        )
+    return steps[0]
+
+
+def nodal_field(h, token, root_path, step):
     root = h[root_path]
     comps = decode_components(root.attrs["NOM"])
-    data = np.asarray(
-        h[f"{root_path}/{STEP}/NOE/MED_NO_PROFILE_INTERNAL/CO"][()], dtype=float
-    )
+    data_path = f"{root_path}/{step}/NOE/MED_NO_PROFILE_INTERNAL/CO"
+    if data_path not in h:
+        raise RuntimeError(f"{token}: nodal data is missing for MED step {step}")
+    data = np.asarray(h[data_path][()], dtype=float)
     if not comps or len(data) % len(comps):
         raise RuntimeError(f"{token}: component/data size mismatch")
     return comps, data.reshape(len(comps), -1)
 
 
-def discover_mesh_families(h):
-    mai_path = f"{MESH_ROOT}/MAI"
+def discover_mesh_families(h, mesh_root):
+    mai_path = f"{mesh_root}/MAI"
     if mai_path not in h:
         raise RuntimeError("MED mesh has no MAI element section")
     families = {}
@@ -112,17 +159,16 @@ def discover_mesh_families(h):
     return families
 
 
-def discover_element_node_field(h, token, families):
-    root_path = med_field_path(h, token)
+def discover_element_node_field(h, token, root_path, step, families):
     if root_path not in h:
         raise RuntimeError(f"missing MED field: {token}")
     root = h[root_path]
     comps = decode_components(root.attrs["NOM"])
     if not comps:
         raise RuntimeError(f"{token}: no components")
-    step_path = f"{root_path}/{STEP}"
+    step_path = f"{root_path}/{step}"
     if step_path not in h:
-        raise RuntimeError(f"{token}: expected MED step is missing")
+        raise RuntimeError(f"{token}: selected MED step {step} is missing")
     blocks = {}
     for location in h[step_path].keys():
         if not location.startswith("NOE."):
@@ -348,17 +394,48 @@ def _temporary_path(final_path):
     return path
 
 
+def _backup_link(final_path):
+    if not os.path.exists(final_path):
+        return None
+    backup = _temporary_path(final_path + ".previous")
+    os.remove(backup)
+    try:
+        os.link(final_path, backup)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot create same-filesystem rollback link for {final_path}; publication aborted"
+        ) from exc
+    return backup
+
+
 with h5py.File(med_path, "r") as h:
-    coords_raw = np.asarray(h[f"{MESH_ROOT}/NOE/COO"][()], dtype=float)
-    n_nodes = int(h[f"{MESH_ROOT}/NOE/COO"].attrs["NBR"])
+    mesh_name, mesh_root = discover_mesh(h)
+    coords_raw = np.asarray(h[f"{mesh_root}/NOE/COO"][()], dtype=float)
+    n_nodes = int(h[f"{mesh_root}/NOE/COO"].attrs["NBR"])
     if coords_raw.size != n_nodes * 3:
         raise RuntimeError("MED coordinate array does not match declared node count")
     coords = coords_raw.reshape(3, n_nodes).T
 
-    families = discover_mesh_families(h)
+    families = discover_mesh_families(h, mesh_root)
     n_elem = sum(x["n_elem"] for x in families.values())
 
-    dcomp, displacement_blocks = nodal_field(h, "DEPL")
+    field_paths = {
+        token: med_field_path(h, token, mesh_name)
+        for token in ("DEPL", "SIGM_ELNO", "SIEQ_ELNO")
+    }
+    field_steps = {
+        token: select_single_field_step(h, path, token)
+        for token, path in field_paths.items()
+    }
+    distinct_steps = sorted(set(field_steps.values()))
+    if len(distinct_steps) != 1:
+        raise RuntimeError(
+            "MED result fields do not refer to one common step: "
+            + ", ".join(f"{token}={step}" for token, step in sorted(field_steps.items()))
+        )
+    result_step = distinct_steps[0]
+
+    dcomp, displacement_blocks = nodal_field(h, "DEPL", field_paths["DEPL"], result_step)
     if dcomp[:3] != ["DX", "DY", "DZ"]:
         raise RuntimeError(f"unexpected DEPL components: {dcomp}")
     if displacement_blocks.shape[1] != n_nodes:
@@ -366,8 +443,12 @@ with h5py.File(med_path, "r") as h:
     displacement = displacement_blocks[:3].T
     total = np.linalg.norm(displacement, axis=1)
 
-    scomp, stress_by_family = discover_element_node_field(h, "SIGM_ELNO", families)
-    qcomp, equiv_by_family = discover_element_node_field(h, "SIEQ_ELNO", families)
+    scomp, stress_by_family = discover_element_node_field(
+        h, "SIGM_ELNO", field_paths["SIGM_ELNO"], result_step, families
+    )
+    qcomp, equiv_by_family = discover_element_node_field(
+        h, "SIEQ_ELNO", field_paths["SIEQ_ELNO"], result_step, families
+    )
     if "VMIS" not in qcomp:
         raise RuntimeError("SIEQ_ELNO has no VMIS component")
 
@@ -390,9 +471,11 @@ bundle = {
         "kind": "REAL_CODE_ASTER_MED",
         "file": os.path.basename(med_path),
         "size_bytes": os.path.getsize(med_path),
+        "med_result_step": result_step,
     },
     "units": {"length": "mm", "force": "N", "stress": "MPa"},
     "mesh": {
+        "med_name": mesh_name,
         "node_count": int(n_nodes),
         "element_count": int(n_elem),
         "element_type": mesh_element_type,
@@ -455,7 +538,12 @@ if validation_mode == "regression":
         "mesh_44_nodes_10_hex": bool(
             len(families) == 1 and he8 is not None and n_nodes == 44 and he8["n_elem"] == 10
         ),
-        "c962_dx_reproduced": bool(abs(float(displacement[:, 0].max()) - 0.0471697826890255) < 1e-12),
+        "c962_dx_reproduced": bool(math.isclose(
+            float(displacement[:, 0].max()),
+            C962_DX_MAX_REFERENCE_MM,
+            rel_tol=C962_DX_REL_TOL,
+            abs_tol=0.0,
+        )),
     })
 else:
     checks = production_checks
@@ -468,6 +556,8 @@ if not all(checks.values()):
 
 bundle_tmp = None
 vtu_tmp = None
+vtu_backup = None
+vtu_existed = os.path.exists(vtu_path)
 try:
     bundle_tmp = _temporary_path(bundle_path)
     write_bundle_streaming(
@@ -483,14 +573,27 @@ try:
         failed = [name for name, passed in checks.items() if not passed]
         raise SystemExit("C10.17 results bridge gate failed before publication: " + ", ".join(failed))
 
-    # Publish the VTU first and the JSON entry point last. Each promotion is an atomic rename on the
-    # destination filesystem; no final artifact is touched until every validation check has passed.
+    # All validation is complete before finals are touched. Preserve the previous VTU through a
+    # same-filesystem hard link so a JSON promotion failure can roll the first rename back without
+    # copying a production-size result file into Python memory.
+    vtu_backup = _backup_link(vtu_path)
     os.replace(vtu_tmp, vtu_path)
     vtu_tmp = None
-    os.replace(bundle_tmp, bundle_path)
-    bundle_tmp = None
+    try:
+        os.replace(bundle_tmp, bundle_path)
+        bundle_tmp = None
+    except BaseException:
+        if vtu_backup and os.path.exists(vtu_backup):
+            os.replace(vtu_backup, vtu_path)
+            vtu_backup = None
+        elif not vtu_existed and os.path.isfile(vtu_path):
+            os.remove(vtu_path)
+        raise
+    if vtu_backup and os.path.exists(vtu_backup):
+        os.remove(vtu_backup)
+        vtu_backup = None
 finally:
-    for temporary in (bundle_tmp, vtu_tmp):
+    for temporary in (bundle_tmp, vtu_tmp, vtu_backup):
         if temporary and os.path.exists(temporary):
             try:
                 os.remove(temporary)
@@ -504,6 +607,8 @@ summary = {
     "checks_passed": int(sum(checks.values())),
     "checks_total": len(checks),
     "pass": bool(all(checks.values())),
+    "med_mesh_name": mesh_name,
+    "med_result_step": result_step,
     "node_count": int(n_nodes),
     "element_count": int(n_elem),
     "element_types": semantic_types,
