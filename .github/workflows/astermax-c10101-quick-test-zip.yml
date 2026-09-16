@@ -5,6 +5,7 @@ on:
     branches: [ codex/c1004-unified-native-codeaster ]
     paths:
       - '.github/workflows/astermax-c10101-quick-test-zip.yml'
+      - 'native-windows/patch-c1012-tetra-results-connectivity.ps1'
   workflow_dispatch:
 
 jobs:
@@ -50,6 +51,12 @@ jobs:
             if(-not $rw.Contains($t)){ throw "Tetra result hotfix token missing: $t" }
           }
           if($rw.Contains('PMV currently validates the proven HEXA8 result route only')) { throw 'Legacy C9.74 HEXA8-only gate remains.' }
+          $vtk=Get-Content .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Raw
+          foreach($t in @('BuildExteriorSurface','VtkQuadraticTriangle = 22','SurfaceMesh surface=BuildExteriorSurface(bundle)','exterior surface rendered')) {
+            if(-not $vtk.Contains($t)){ throw "TETRA10 viewport hotfix token missing: $t" }
+          }
+          if($vtk.Contains('data.Geometry.Cells.Types = bundle.CellTypes.ToArray();')) { throw 'Raw 3D volume cells are still sent to vtkMaxActor poly renderer.' }
+          Write-Host 'ASTERMAX_TETRA10_VIEWPORT_SOURCE_GATE=PASS'
 
       - name: Setup Python MED runtime
         uses: actions/setup-python@v6
@@ -108,26 +115,31 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw 'Material library generation failed.' }
 
           @'
-          AsterMax Mechanical C10.10.1 - QUICK USER TEST BUILD
-          Build contains the C9.74 provenance hotfix for TETRA4/TETRA10/HEXA8/MIXED result bundles,
-          dynamic TETRA4/TETRA10/HEXA8 connectivity, packaged Python MED runtime and NetGen CAD runtime.
+          AsterMax Mechanical C10.10.1 - TETRA10 RESULTS VIEWPORT HOTFIX
+          This build fixes the WinForms/VTK NotSupportedException raised by vtkMaxActor.AddCellDataToPoly
+          when a real Code_Aster TETRA10 volume result was passed directly to the poly renderer.
+          TETRA4/TETRA10/HEXA8 result volumes are converted to their exterior surface faces before rendering.
+          Real nodal Code_Aster scalar values are preserved. Internal volume faces are removed.
+          Renderer exceptions are caught inside the results viewport and no longer escape to the JIT dialog.
           Code_Aster itself is NOT bundled. Use your installed Code_Aster for Windows and Runtime/PREFLIGHT.
-          This quick package is compiled for local user testing; the separate native-Windows CI solver qualification may still be running.
           No synthetic FEA results are included or generated.
           '@ | Set-Content .\dist\LEEME-QUICK-TEST.txt -Encoding UTF8
 
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
             release='C10.10.1'
-            build_kind='QUICK_USER_TEST'
+            build_kind='TETRA10_RESULTS_VIEWPORT_HOTFIX'
             commit='${{ github.sha }}'
             executable_sha256=$hash
             c974_tetra_provenance_hotfix=$true
             result_element_types=@('TETRA4','TETRA10','HEXA8','MIXED')
+            result_volume_to_exterior_surface=$true
+            vtk_surface_types=@('TRIANGLE','QUADRATIC_TRIANGLE','QUAD')
+            raw_volume_cells_sent_to_poly_renderer=$false
+            renderer_exception_boundary=$true
             python_med_runtime_bundled=$true
             cad_netgen_runtime_bundled=$true
             code_aster_bundled=$false
-            native_windows_solver_ci_qualification='SEPARATE_WORKFLOW'
             fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
@@ -139,6 +151,6 @@ jobs:
       - name: Upload quick C10.10.1 test ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.10.1-Tetra-Hotfix-Quick-Test
+          name: AsterMax-C10.10.1-TETRA10-Viewport-Hotfix
           path: dist
           if-no-files-found: error
