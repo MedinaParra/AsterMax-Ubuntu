@@ -204,3 +204,9 @@ $globals=Join-Path $Root 'PrePoMax/Globals.cs'
 Set-Content $globals ((Get-Content $globals -Raw).Replace('C10.11','C10.10.1')) -Encoding UTF8
 
 Write-Host 'C10.10.1 native Windows runtime, robust solver evidence, Windows export contract, 120 s real probe and readable diagnostics applied.'
+
+# Final C10.10.1 result-handoff hotfix: execute the dynamic tetra/hex connectivity patch
+# after all historical result and runtime patches have been materialized.
+$tetraResultsHotfix=Join-Path $PSScriptRoot 'patch-c1012-tetra-results-connectivity.ps1'
+if(!(Test-Path $tetraResultsHotfix)){ throw 'C10.10.1 tetra results connectivity hotfix is missing.' }
+& $tetraResultsHotfix -Root $Root
