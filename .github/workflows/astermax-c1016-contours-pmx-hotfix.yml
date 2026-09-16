@@ -1,0 +1,127 @@
+name: AsterMax C10.16 Contours + PMX Compatibility
+
+on:
+  push:
+    branches: [ codex/c1004-unified-native-codeaster ]
+    paths:
+      - '.github/workflows/astermax-c1016-contours-pmx-hotfix.yml'
+      - 'native-windows/patch-c1015-vtk-real-scalar-contours.ps1'
+      - 'native-windows/patch-c1016-pmx-compatibility.ps1'
+  workflow_dispatch:
+
+jobs:
+  build-c1016:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply integrated AsterMax chain through C10.16
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1'
+          )
+          foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
+          $vtk=Get-Content .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Raw
+          foreach($token in @('data.Geometry.ExtremeNodes.Ids','data.Geometry.ExtremeNodes.Values','scalar contours ')) { if(-not $vtk.Contains($token)){ throw "C10.16 contour gate missing: $token" } }
+          $tools=Get-Content .\upstream\CaeGlobals\Tools.cs -Raw
+          foreach($token in @('AsterMaxCompatibleSerializationBinder','formatter.Binder = new AsterMaxCompatibleSerializationBinder()','AppDomain.CurrentDomain.GetAssemblies()')) { if(-not $tools.Contains($token)){ throw "C10.16 PMX gate missing: $token" } }
+          Write-Host 'ASTERMAX_C1016_SOURCE_GATE=PASS'
+
+      - name: Setup Python MED runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install MED dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check numpy h5py
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Assemble portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          $pythonRoot=Split-Path (Get-Command python).Source -Parent
+          Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
+          & .\dist\AsterMaxRuntime\Python\python.exe -c "import numpy,h5py; print('ASTERMAX_PACKAGED_PYTHON_MED_OK')"
+          if($LASTEXITCODE -ne 0){ throw 'Packaged Python MED runtime failed.' }
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){ throw 'Pinned CAD runtime digest mismatch.' }
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing from pinned runtime.' }
+          Copy-Item $ng.Directory.FullName .\dist\NetGen -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\Temp | Out-Null
+          foreach($project in @('CaeGlobals','CaeJob','CaeMesh','CaeModel','CaeResults','UserControls','vtkControl')) {
+            $dir=Join-Path $PWD "upstream\$project\bin\x64\Release"
+            if(Test-Path $dir){ New-Item -ItemType Directory -Force .\dist\lib | Out-Null; Get-ChildItem $dir -Filter *.dll | Copy-Item -Destination .\dist\lib -Force }
+          }
+          python .\native-windows\build-c1010-materials.py --out .\dist
+          @'
+          AsterMax Mechanical C10.10.1 / C10.16
+          - Real Code_Aster contour colors: actor MinNode/MaxNode metadata bound to actual nodal scalars.
+          - Legend and model surface now use the same real field/range.
+          - PMX loader accepts compatible serialized types across PrePoMax/AsterMax assembly identity changes.
+          - Future BinaryFormatter project saves use simple assembly metadata to reduce build coupling.
+          - C10.14 refined-mesh diagnostics retained.
+          - No synthetic FEA values.
+          '@ | Set-Content .\dist\LEEME-C1016.txt -Encoding UTF8
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{release='C10.10.1';hotfix='C10.16_CONTOURS_PMX';commit='${{ github.sha }}';executable_sha256=$hash;real_scalar_extremes_bound=$true;pmx_compatibility_binder=$true;fea_values_invented=$false} | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Upload C10.16 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.10.1-C10.16-Contours-PMX-Hotfix
+          path: dist
+          if-no-files-found: error
