@@ -23,6 +23,16 @@ namespace PrePoMax
             {"Contours","Color_contours"},{"Deformed","Deformed"},{"Front","Front"},{"Top","Top"},{"Right","Right"},
             {"Auditoria","Query"}
         };
+        private static readonly Dictionary<string,string[]> AxExpectedCommandsByTab = new Dictionary<string,string[]> {
+            {"Home",new[]{"New","Open","Import Geometry","Save","Fit","Isometric"}},
+            {"Geometry",new[]{"Import STEP","Analyze Geometry","Fit","Edges"}},
+            {"Model",new[]{"Model Properties","Materials"}},
+            {"Mesh",new[]{"Mesh Controls","Generate Mesh"}},
+            {"Environment",new[]{"Analysis Step","Supports","Loads"}},
+            {"Solution",new[]{"Export Solver Contract","Export Code_Aster Deck","Runtime","Solve"}},
+            {"Results",new[]{"Results Explorer","FEA Viewport","Contours","Deformed"}},
+            {"View",new[]{"Fit","Front","Top","Right","Isometric","Edges","Auditoria"}}
+        };
 
         private void ConfigureAsterMaxButton(Button button, string caption, string group, Action action)
         {
@@ -33,8 +43,9 @@ namespace PrePoMax
             if (icon == null) throw new InvalidOperationException("Native icon missing: " + key);
             button.Name = "axCommand_" + group + "_" + caption.Replace(" ", "_");
             button.Text = caption;
-            button.Image = CreateAsterMaxCommandIcon(icon,caption,group);
-            button.Disposed += (s,e) => button.Image.Dispose();
+            Image assignedImage = CreateAsterMaxCommandIcon(icon,caption,group);
+            button.Image = assignedImage;
+            button.Disposed += (s,e) => assignedImage.Dispose();
             button.ImageAlign = ContentAlignment.TopCenter;
             button.TextAlign = ContentAlignment.BottomCenter;
             button.TextImageRelation = TextImageRelation.ImageAboveText;
@@ -82,7 +93,9 @@ namespace PrePoMax
         private void InvokeAsterMaxCommand(string caption, Action action)
         {
             try { action(); }
-            catch (Exception ex) {
+            catch (Exception ex) when (
+                ex is InvalidOperationException || ex is NotSupportedException || ex is ArgumentException ||
+                ex is IOException || ex is UnauthorizedAccessException || ex is System.ComponentModel.Win32Exception) {
                 tsslState.Text = "Command failed: " + caption;
                 CaeGlobals.MessageBoxes.ShowError(caption + ": " + ex.Message);
             }
@@ -110,23 +123,42 @@ namespace PrePoMax
             if (ribbon == null) throw new InvalidOperationException("Command ribbon missing.");
             _modelTree.RefreshAsterMaxOutline();
             var rows = new JArray();
+            var validations = new JArray();
+            var missingCommands = new List<string>();
+            bool checksPass = true;
+            Action<string,bool,string> check = (name,pass,evidence) => {
+                validations.Add(new JObject { ["check"]=name,["pass"]=pass,["evidence"]=evidence });
+                checksPass &= pass;
+            };
+            bool canCapture = WindowState != FormWindowState.Minimized && Width > 0 && Height > 0;
+            check("screenshot_dimensions_positive",canCapture,
+                "WindowState="+WindowState+" Width="+Width+" Height="+Height);
             TabPage previous = ribbon.SelectedTab;
             try {
                 foreach (TabPage page in ribbon.TabPages) {
                     ribbon.SelectedTab = page;
                     ribbon.PerformLayout(); page.PerformLayout();
-                    int count = 0;
+                    var actualCommands = new HashSet<string>(StringComparer.Ordinal);
                     foreach (Button button in AxButtons(page)) {
-                        count++;
                         bool bound = button.Tag is Action;
                         bool icon = button.Image != null;
-                        if (!bound || !icon || String.IsNullOrEmpty(button.AccessibleName))
-                            throw new InvalidOperationException("Unbound/iconless command: " + page.Text + "/" + button.Text);
+                        bool accessible = !String.IsNullOrEmpty(button.AccessibleName);
+                        actualCommands.Add(button.Text);
+                        check("button_wiring:"+page.Text+"/"+button.Text,bound&&icon&&accessible,
+                            "action_bound="+bound+" icon_present="+icon+" accessible_name="+accessible);
                         rows.Add(new JObject { ["tab"] = page.Text, ["button"] = button.Text,
-                            ["action_bound"] = bound, ["icon_present"] = icon,
+                            ["action_bound"] = bound, ["icon_present"] = icon, ["accessible_name"] = accessible,
                             ["execution"] = "NOT_INVOKED", ["reason"] = "This gate checks UI wiring; it does not execute editing commands." });
                     }
-                    if (count > 0) {
+                    string[] expected;
+                    if (AxExpectedCommandsByTab.TryGetValue(page.Text,out expected)) {
+                        foreach (string command in expected) {
+                            bool present=actualCommands.Contains(command);
+                            check("expected_command:"+page.Text+"/"+command,present,present?"present":"missing");
+                            if(!present) missingCommands.Add(page.Text+"/"+command);
+                        }
+                    }
+                    if (actualCommands.Count > 0 && canCapture) {
                         using (var bitmap = new Bitmap(Width, Height)) {
                             DrawToBitmap(bitmap, new Rectangle(0,0,Width,Height));
                             bitmap.Save(reportPath + ".buttons-" + page.Text.Replace(" ","_") + ".png");
@@ -135,20 +167,31 @@ namespace PrePoMax
                 }
             }
             finally { ribbon.SelectedTab = previous; }
-            if (rows.Count < 30) throw new InvalidOperationException("Command inventory unexpectedly incomplete.");
             var workflowStates=BuildAsterMaxSectionStates();
-            if (_controller.Model.Materials.Count==0 && workflowStates["materials"].State!=0)
-                throw new InvalidOperationException("Missing material must never show a completion tick.");
-            if (_controller.Model.Sections.Count==0 && workflowStates["assignments"].State!=0)
-                throw new InvalidOperationException("Missing material assignment must never show a completion tick.");
+            check("missing_material_not_complete",
+                !(_controller.Model.Materials.Count==0 && workflowStates["materials"].State!=0),
+                "materials="+_controller.Model.Materials.Count+" state="+workflowStates["materials"].State);
+            check("missing_assignment_not_complete",
+                !(_controller.Model.Sections.Count==0 && workflowStates["assignments"].State!=0),
+                "sections="+_controller.Model.Sections.Count+" state="+workflowStates["assignments"].State);
+            var contextMenuChecks=_modelTree.AuditAsterMaxContextMenus();
+            var configurationRegressions=AuditAsterMaxWorkflowStates();
+            var materialLibrary=AuditAsterMaxMaterialLibrary(reportPath);
             File.WriteAllText(reportPath + ".buttons.json", new JObject {
-                ["release"] = "C10.10.1", ["checks_pass"] = true, ["buttons"] = rows,
+                ["release"] = "C10.10.1", ["checks_pass"] = checksPass, ["buttons"] = rows,
+                ["validations"] = validations,
+                ["expected_commands_by_tab"] = JObject.FromObject(AxExpectedCommandsByTab),
+                ["missing_commands"] = JArray.FromObject(missingCommands),
                 ["scope"] = "Live ribbon icon and delegate binding; no claim of end-to-end command success.",
                 ["workflow_states"] = JObject.FromObject(workflowStates),
-                ["context_menu_lifecycle_checks"] = _modelTree.AuditAsterMaxContextMenus(),
-                ["configuration_regressions"] = AuditAsterMaxWorkflowStates(),
-                ["material_library"] = AuditAsterMaxMaterialLibrary(reportPath)
+                ["context_menu_lifecycle_checks"] = contextMenuChecks,
+                ["configuration_regressions"] = configurationRegressions,
+                ["material_library"] = materialLibrary
             }.ToString(Formatting.Indented));
+            if(!checksPass) {
+                string missing=missingCommands.Count==0?"none":String.Join(", ",missingCommands);
+                throw new InvalidOperationException("Button audit failed. Missing commands: "+missing+". See validations in the audit artifact.");
+            }
         }
     }
 }
