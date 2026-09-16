@@ -11,7 +11,10 @@ namespace PrePoMax
         public event Action<string> ResultFieldChanged;
         public Action ValidateModel;
         private bool _axRendering;
+        public bool AuditMode { get; set; }
         public string LastRenderError { get; private set; }
+        public bool LastRenderSkipped { get; private set; }
+        public string LastRenderSkipReason { get; private set; }
         public int RenderRevision { get; private set; }
         public string SelectedResultField { get { return (string)_field.SelectedItem; } }
         public bool ContoursVisible { get { return _showContours.Checked; } }
@@ -91,7 +94,7 @@ namespace PrePoMax
                     _asterMaxLoadedResults.RequireCurrentModel(_controller == null ? null : _controller.Model);
                     _modelTree.SetAsterMaxResultFields(_asterMaxLoadedResults.AvailableFields(), "Current", true);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is InvalidDataException || ex is InvalidOperationException)
                 {
                     ShowAsterMaxModelWorkspace();
                     _modelTree.SetAsterMaxResultFields(_asterMaxLoadedResults.AvailableFields(), "Stale - solve again", false);
@@ -126,7 +129,7 @@ namespace PrePoMax
                     _axEmbeddedBundle = bundle;
                     _axEmbeddedResults = new AsterMaxResultsViewportForm(bundle) {
                         Name="asterMaxIntegratedResults", TopLevel=false, FormBorderStyle=FormBorderStyle.None,
-                        ShowInTaskbar=false, Dock=DockStyle.Fill };
+                        ShowInTaskbar=false, Dock=DockStyle.Fill, AuditMode=_asterMaxUiAuditMode };
                     _axEmbeddedResults.ValidateModel = () => bundle.RequireCurrentModel(_controller == null ? null : _controller.Model);
                     _axEmbeddedResults.ResultFieldChanged += selected => {
                         if (!_axSelectingResult) _modelTree.SelectAsterMaxResultField(selected);
@@ -145,6 +148,8 @@ namespace PrePoMax
                 _axEmbeddedResults.BringToFront();
                 _axResultDetailsHost.Show();
                 _axEmbeddedResults.SelectResultField(String.IsNullOrEmpty(field) ? _axEmbeddedResults.SelectedResultField : field);
+                if (_axEmbeddedResults.LastRenderSkipped)
+                    throw new InvalidOperationException("Results render did not run: " + _axEmbeddedResults.LastRenderSkipReason);
                 if (_axEmbeddedResults.LastRenderError != null) throw new InvalidOperationException(_axEmbeddedResults.LastRenderError);
                 RefreshAsterMaxResultAvailability();
                 _modelTree.RefreshAsterMaxOutline();
