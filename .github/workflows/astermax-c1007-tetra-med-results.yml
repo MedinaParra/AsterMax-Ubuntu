@@ -1,0 +1,125 @@
+name: AsterMax C10.07 Tetra MED Results
+
+on:
+  push:
+    branches: [ codex/c1004-unified-native-codeaster ]
+    paths:
+      - 'native-windows/bridge-c964-med-results.py'
+      - 'native-windows/test-c1007-med-bridge.py'
+      - '.github/workflows/astermax-c1007-tetra-med-results.yml'
+  workflow_dispatch:
+
+jobs:
+  med-family-harness:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install MED bridge Python dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check numpy h5py
+      - name: Run TET4 TET10 mixed and HEXA8 bridge harness
+        shell: pwsh
+        run: python .\native-windows\test-c1007-med-bridge.py
+      - name: Source contract gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bridge=Get-Content .\native-windows\bridge-c964-med-results.py -Raw
+          foreach($t in @(
+            '"TE4": (4, "TETRA4", 10)',
+            '"T10": (10, "TETRA10", 24)',
+            '"HE8": (8, "HEXA8", 12)',
+            'discover_mesh_families',
+            'discover_element_node_field',
+            'average_element_node_component',
+            'mesh_nonempty_supported',
+            'supported_element_families_only',
+            '"fea_values_invented": False'
+          )){
+            if(-not $bridge.Contains($t)){ throw "C10.07 bridge token missing: $t" }
+          }
+          if($bridge.Contains('MAI/HE8/NOD')){ throw 'Legacy hard-coded HE8 mesh path remains.' }
+          if($bridge.Contains('NOE.HE8')){ throw 'Legacy hard-coded HE8 field path remains.' }
+          Write-Host 'C1007_MED_BRIDGE_SOURCE_GATE=PASS'
+
+  windows-x64-package:
+    needs: med-family-harness
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax integration branch
+        uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Apply integrated chain through C10.06
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1'
+          )
+          foreach($p in $patches){ & ".\native-windows\$p" -Root "$PWD\upstream" }
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+      - name: Stage C10.07 portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.07'
+            branch='codex/c1004-unified-native-codeaster'
+            executable_sha256=$hash
+            solver_backend='Code_Aster'
+            solver_transport='WSL2'
+            native_element_types=@('TETRA4','TETRA10','HEXA8')
+            med_result_element_types=@('TETRA4','TETRA10','HEXA8','MIXED_SUPPORTED')
+            python_med_capability_probe=$true
+            automatic_results_handoff=$true
+            materials_ribbon=$true
+            unit_contract='MM_N_S_MPA'
+            fea_values_invented=$false
+            numerical_solve_claimed=$false
+            limitation='Tetra/HEXA MED parser is regression-tested with synthetic-format fixtures only. Genuine numerical admission still requires a real Code_Aster solve artifact.'
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.07-Windows-x64-Tetra-MED-Results
+          path: dist
+          if-no-files-found: error
