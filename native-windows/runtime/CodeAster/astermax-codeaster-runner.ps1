@@ -162,6 +162,29 @@ function Convert-ToWindowsExport([string]$Content) {
     return ($normalized -join "`r`n")
 }
 
+function Get-ExpectedOutputs([string]$Content, [string]$Stage) {
+    $outputs = @{}
+    $prefix = [IO.Path]::GetFullPath($Stage).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($line in ($Content -split "`r?`n")) {
+        if ($line -match '^\s*F\s+(mess|rmed)\s+(\S+)\s+R\s+\d+\s*$') {
+            $kind = $Matches[1]
+            $relative = $Matches[2]
+            if ($outputs.ContainsKey($kind)) { throw "Duplicate $kind output in export." }
+            if ([IO.Path]::IsPathRooted($relative)) { throw "Output must be relative to the solve stage: $relative" }
+            $path = [IO.Path]::GetFullPath((Join-Path $Stage $relative))
+            if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Output escapes the solve stage: $relative"
+            }
+            $outputs[$kind] = $path
+        }
+    }
+    foreach ($kind in @('mess','rmed')) {
+        if (-not $outputs.ContainsKey($kind)) { throw "Export has no unambiguous $kind output." }
+    }
+    if ($outputs.mess -eq $outputs.rmed) { throw 'MESS and RMED outputs must be different files.' }
+    return $outputs
+}
+
 function Probe-CodeAster([string]$Backend) {
     $stage = New-SafeStageDirectory 'probe'
     try {
@@ -237,10 +260,17 @@ if (-not $native) {
 $resolvedWorkspace = (Resolve-Path -LiteralPath $Workspace).Path
 $resolvedExport = (Resolve-Path -LiteralPath $ExportFile).Path
 $stage = New-SafeStageDirectory 'solve'
+$completed = $false
 try {
     Copy-Workspace $resolvedWorkspace $stage
     $portableExport = Join-Path $stage 'astermax-windows.export'
     $content = Convert-ToWindowsExport (Get-Content -LiteralPath $resolvedExport -Raw)
+    $expectedOutputs = Get-ExpectedOutputs $content $stage
+    # A rerun may copy recent outputs into the stage. Remove the exact declared
+    # outputs before launch; timestamps alone cannot prove that this run wrote them.
+    foreach ($path in $expectedOutputs.Values) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
     [IO.File]::WriteAllText($portableExport, $content + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
@@ -248,24 +278,36 @@ try {
     Write-Output ("ASTERMAX_CODE_ASTER_EXPORT=" + $portableExport)
     Write-Output ("ASTERMAX_CODE_ASTER_STAGE=" + $stage)
 
-    $started = [DateTime]::UtcNow
     $result = Invoke-WindowsBackend $native $portableExport $stage 3600000
     if ($result.Stdout) { Write-Output $result.Stdout.TrimEnd() }
     if ($result.Stderr) { [Console]::Error.WriteLine($result.Stderr.TrimEnd()) }
 
-    Copy-Workspace $stage $resolvedWorkspace
-
     if ($result.ExitCode -ne 0) { Fail "Native Windows Code_Aster returned exit code $($result.ExitCode)." $result.ExitCode }
-    foreach ($extension in @('mess','rmed')) {
-        $output = Get-ChildItem -LiteralPath $stage -Filter "*.$extension" -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Length -gt 0 -and $_.LastWriteTimeUtc -ge $started.AddSeconds(-2) } |
-            Select-Object -First 1
-        if (-not $output) { Fail "Native solver did not produce a fresh non-empty .$extension file." 30 }
+    foreach ($kind in @('mess','rmed')) {
+        $path = $expectedOutputs[$kind]
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
+            Fail "Native solver did not produce the declared non-empty $kind output: $path" 30
+        }
     }
 
+    Copy-Workspace $stage $resolvedWorkspace
+    $completed = $true
     Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
     exit 0
 }
 finally {
-    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    if ($completed) {
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        # Preserve the complete stage on process failure, timeout or copy error.
+        # Copy diagnostics into a separate directory, never promote failed outputs.
+        $diagnostics = Join-Path $resolvedWorkspace ('failed-' + (Split-Path $stage -Leaf))
+        try {
+            New-Item -ItemType Directory -Path $diagnostics -Force | Out-Null
+            Copy-Workspace $stage $diagnostics
+        } catch {
+            [Console]::Error.WriteLine("Could not copy diagnostics: " + $_.Exception.Message)
+        }
+        [Console]::Error.WriteLine("ASTERMAX_CODE_ASTER_FAILED_STAGE=" + $stage)
+    }
 }
