@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/astermax-c10101-quick-test-zip.yml'
       - 'native-windows/patch-c1012-tetra-results-connectivity.ps1'
+      - 'native-windows/patch-c1013-results-contours-options.ps1'
   workflow_dispatch:
 
 jobs:
@@ -52,11 +53,12 @@ jobs:
           }
           if($rw.Contains('PMV currently validates the proven HEXA8 result route only')) { throw 'Legacy C9.74 HEXA8-only gate remains.' }
           $vtk=Get-Content .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Raw
-          foreach($t in @('BuildExteriorSurface','VtkQuadraticTriangle = 22','SurfaceMesh surface=BuildExteriorSurface(bundle)','exterior surface rendered')) {
-            if(-not $vtk.Contains($t)){ throw "TETRA10 viewport hotfix token missing: $t" }
+          foreach($t in @('BuildExteriorSurface','VtkQuadraticTriangle = 22','SurfaceMesh surface=BuildExteriorSurface(bundle)','_view.UpdateScalarsAndCameraAndRedraw();','data.ColorContours=_showContours.Checked;','_showEdges.Checked','_showDeformed.Checked','_autoRange.Checked','CreateDisplaySpectrum','SetDisplayRange')) {
+            if(-not $vtk.Contains($t)){ throw "Results viewport/contour hotfix token missing: $t" }
           }
           if($vtk.Contains('data.Geometry.Cells.Types = bundle.CellTypes.ToArray();')) { throw 'Raw 3D volume cells are still sent to vtkMaxActor poly renderer.' }
-          Write-Host 'ASTERMAX_TETRA10_VIEWPORT_SOURCE_GATE=PASS'
+          if($vtk.Contains('g.DrawString("VTK scalar bar"')) { throw 'Grey scalar-bar placeholder remains.' }
+          Write-Host 'ASTERMAX_TETRA10_CONTOUR_OPTIONS_SOURCE_GATE=PASS'
 
       - name: Setup Python MED runtime
         uses: actions/setup-python@v6
@@ -115,12 +117,12 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw 'Material library generation failed.' }
 
           @'
-          AsterMax Mechanical C10.10.1 - TETRA10 RESULTS VIEWPORT HOTFIX
-          This build fixes the WinForms/VTK NotSupportedException raised by vtkMaxActor.AddCellDataToPoly
-          when a real Code_Aster TETRA10 volume result was passed directly to the poly renderer.
-          TETRA4/TETRA10/HEXA8 result volumes are converted to their exterior surface faces before rendering.
-          Real nodal Code_Aster scalar values are preserved. Internal volume faces are removed.
-          Renderer exceptions are caught inside the results viewport and no longer escape to the JIT dialog.
+          AsterMax Mechanical C10.10.1 - RESULTS CONTOUR / OPTIONS HOTFIX
+          Fixes uniform-color TETRA10 results: the vtk actor now receives scalar formatting AFTER AddCells.
+          Real Code_Aster nodal values drive the contour colors.
+          Added post-processing controls: Contours on/off, Mesh edges on/off, Deformed on/off,
+          deformation scale, Auto range, manual Min/Max range, result field selector and a visible color legend.
+          TETRA4/TETRA10/HEXA8 result volumes continue to render through exterior surface extraction.
           Code_Aster itself is NOT bundled. Use your installed Code_Aster for Windows and Runtime/PREFLIGHT.
           No synthetic FEA results are included or generated.
           '@ | Set-Content .\dist\LEEME-QUICK-TEST.txt -Encoding UTF8
@@ -128,15 +130,16 @@ jobs:
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
             release='C10.10.1'
-            build_kind='TETRA10_RESULTS_VIEWPORT_HOTFIX'
+            build_kind='RESULTS_CONTOUR_OPTIONS_HOTFIX'
             commit='${{ github.sha }}'
             executable_sha256=$hash
             c974_tetra_provenance_hotfix=$true
             result_element_types=@('TETRA4','TETRA10','HEXA8','MIXED')
             result_volume_to_exterior_surface=$true
             vtk_surface_types=@('TRIANGLE','QUADRATIC_TRIANGLE','QUAD')
-            raw_volume_cells_sent_to_poly_renderer=$false
-            renderer_exception_boundary=$true
+            real_nodal_scalar_contours=$true
+            scalar_refresh_after_actor_creation=$true
+            postprocess_options=@('field','deformed','deformation_scale','contours','mesh_edges','auto_range','manual_min','manual_max','nodal_probe')
             python_med_runtime_bundled=$true
             cad_netgen_runtime_bundled=$true
             code_aster_bundled=$false
@@ -151,6 +154,6 @@ jobs:
       - name: Upload quick C10.10.1 test ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.10.1-TETRA10-Viewport-Hotfix
+          name: AsterMax-C10.10.1-Results-Contours-Options-Hotfix
           path: dist
           if-no-files-found: error
