@@ -10,10 +10,23 @@ namespace PrePoMax
 {
     public partial class FrmMain
     {
+        // Test-only exception mode. It is enabled only by the explicit command-line audit switch;
+        // normal distributed-binary exception handling never changes because an environment variable exists.
+        private bool _asterMaxUiAuditMode;
+
+        private static string AsterMaxIntegratedAuditDirectoryFromCommandLine()
+        {
+            const string prefix="--astermax-c1018-ui-audit=";
+            string argument=Environment.GetCommandLineArgs()
+                .FirstOrDefault(x=>x.StartsWith(prefix,StringComparison.OrdinalIgnoreCase));
+            return argument==null?null:argument.Substring(prefix.Length).Trim('"');
+        }
+
         private void StartAsterMaxIntegratedAudit()
         {
-            string directory=Environment.GetEnvironmentVariable("ASTERMAX_C1018_UI_AUDIT");
+            string directory=AsterMaxIntegratedAuditDirectoryFromCommandLine();
             if(String.IsNullOrWhiteSpace(directory)) return;
+            _asterMaxUiAuditMode=true;
             var timer=new Timer { Interval=1500 };
             timer.Tick+=(s,e)=> {
                 timer.Stop(); timer.Dispose();
@@ -48,19 +61,23 @@ namespace PrePoMax
                         int before=_axEmbeddedResults.RenderRevision;
                         string previous=_axEmbeddedResults.SelectedResultField;
                         _modelTree.SelectAsterMaxResultField(field); Application.DoEvents();
-                        check("tree_select_"+field,_axEmbeddedResults.SelectedResultField==field && _axEmbeddedResults.LastRenderError==null && (field==previous || _axEmbeddedResults.RenderRevision>before));
+                        check("tree_select_"+field,_axEmbeddedResults.SelectedResultField==field &&
+                            _axEmbeddedResults.LastRenderError==null && !_axEmbeddedResults.LastRenderSkipped &&
+                            (field==previous || _axEmbeddedResults.RenderRevision>before));
                     }
                     foreach(string caption in new[]{"Contours","Deformed","Edges"}) {
                         bool before=caption=="Contours"?_axEmbeddedResults.ContoursVisible:caption=="Deformed"?_axEmbeddedResults.DeformationVisible:_axEmbeddedResults.MeshEdgesVisible;
                         int revision=_axEmbeddedResults.RenderRevision;
                         click(caption);
                         bool after=caption=="Contours"?_axEmbeddedResults.ContoursVisible:caption=="Deformed"?_axEmbeddedResults.DeformationVisible:_axEmbeddedResults.MeshEdgesVisible;
-                        check("button_toggle_"+caption,before!=after && _axEmbeddedResults.RenderRevision>revision && _axEmbeddedResults.LastRenderError==null);
+                        check("button_toggle_"+caption,before!=after && _axEmbeddedResults.RenderRevision>revision &&
+                            _axEmbeddedResults.LastRenderError==null && !_axEmbeddedResults.LastRenderSkipped);
                         click(caption);
                     }
                     foreach(string caption in new[]{"Front","Top","Right","Isometric","Fit"}) {
                         click(caption);
-                        check("camera_button_invoked_"+caption,_axEmbeddedResults.Visible && _axEmbeddedResults.LastRenderError==null);
+                        check("camera_button_invoked_"+caption,_axEmbeddedResults.Visible &&
+                            _axEmbeddedResults.LastRenderError==null && !_axEmbeddedResults.LastRenderSkipped);
                     }
                     _modelTree.SelectAsterMaxResultField("Equivalent Stress");
                     _axEmbeddedResults.CaptureNativeFramebuffer(Path.Combine(directory,"integrated-vtk-framebuffer.png"));
@@ -86,6 +103,7 @@ namespace PrePoMax
                     check("reset_clears_result_ownership",_axEmbeddedResults==null && _asterMaxLoadedResults==null && view.IsDisposed);
                     File.WriteAllText(Path.Combine(directory,"UI_AUDIT.json"),new JObject {
                         ["pass"]=true,["checks"]=checks,["solver"]="real native Windows Code_Aster",
+                        ["audit_mode"]="explicit command-line switch",
                         ["scope"]="Integrated results, result buttons, camera invocation, tree, lifecycle and stale rejection; editing buttons inventoried separately, not all executed."
                     }.ToString());
                     Environment.Exit(0);
