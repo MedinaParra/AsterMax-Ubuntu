@@ -2,7 +2,7 @@ name: AsterMax C10.18 Integrated Mechanical Workspace
 
 on:
   push:
-    branches: [ codex/c1018-integrated-mechanical-workspace ]
+    branches: [ codex/c1018-integrated-mechanical-workspace, codex/c1019-external-audit-fixes ]
   workflow_dispatch:
 
 jobs:
@@ -41,6 +41,7 @@ jobs:
             'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
             'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
             'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
             'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
             'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1'
           )

@@ -5,6 +5,8 @@ on:
     branches: [ codex/c1004-unified-native-codeaster ]
     paths:
       - '.github/workflows/astermax-c1015-real-contours-hotfix.yml'
+      - 'native-windows/patch-c1012-tetra-results-connectivity.ps1'
+      - 'native-windows/patch-c1013-results-contours-options.ps1'
       - 'native-windows/patch-c1015-vtk-real-scalar-contours.ps1'
   workflow_dispatch:
 
@@ -44,6 +46,7 @@ jobs:
             'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
             'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
             'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
             'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }

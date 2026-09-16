@@ -209,8 +209,4 @@ foreach($token in @('VtkQuadraticTriangle = 22','BuildExteriorSurface','SurfaceM
 Set-Content $vtkPath $vtk -Encoding UTF8
 Write-Host 'C10.10.1 TETRA results viewport hotfix: exterior surface extraction + safe renderer boundary applied.' -ForegroundColor Green
 
-# Final post-processing hotfix: after the actor/surface route is stable, bind the actual nodal
-# scalar LUT and expose contour/deformed/edges/range controls.
-$postResultsHotfix=Join-Path $PSScriptRoot 'patch-c1013-results-contours-options.ps1'
-if(!(Test-Path $postResultsHotfix)){throw 'C10.13 results contour/options hotfix is missing.'}
-& $postResultsHotfix -Root $Root
+# C10.13 is an explicit workflow dependency and is intentionally not invoked from this patch.
