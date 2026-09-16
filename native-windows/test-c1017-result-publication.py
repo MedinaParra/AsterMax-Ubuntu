@@ -39,6 +39,31 @@ class PublicationTests(unittest.TestCase):
                 self.assertFalse(bundle.exists(), result.stderr)
                 self.assertFalse(vtu.exists(), result.stderr)
 
+    def run_vtu_promotion_failure(self, existing_bundle=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            med = root / 'input.rmed'
+            bundle = root / 'bundle.json'
+            vtu = root / 'result.vtu'
+            fixture.build_fixture(med, {'TE4': [[1, 2, 3, 4]]})
+            if existing_bundle:
+                bundle.write_text('previous bundle', encoding='utf-8')
+            # A directory at the final VTU path makes os.replace(temp_file, vtu) fail after the
+            # temporary JSON and VTU were both fully written and validated. This exercises the
+            # publication boundary rather than the preflight numerical gate.
+            vtu.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(HERE / 'bridge-c964-med-results.py'), str(med), str(bundle), str(vtu)],
+                env=dict(os.environ, ASTERMAX_MED_BRIDGE_MODE='production'), capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertTrue(vtu.is_dir())
+            if existing_bundle:
+                self.assertEqual(bundle.read_text(encoding='utf-8'), 'previous bundle')
+            else:
+                self.assertFalse(bundle.exists(), result.stderr)
+            self.assertEqual(list(root.glob('.bundle.json.*.tmp')), [], 'bundle temporary was not cleaned')
+            self.assertEqual(list(root.glob('.result.vtu.*.tmp')), [], 'VTU temporary was not cleaned')
+
     def test_nonfinite_coordinates(self):
         self.run_rejected(f'{fixture.ROOT}/NOE/COO', float('nan'))
 
@@ -59,6 +84,12 @@ class PublicationTests(unittest.TestCase):
 
     def test_rejection_preserves_existing_artifacts(self):
         self.run_rejected(f'{fixture.ROOT}/NOE/COO', float('nan'), existing=True)
+
+    def test_vtu_promotion_failure_does_not_publish_new_bundle(self):
+        self.run_vtu_promotion_failure(existing_bundle=False)
+
+    def test_vtu_promotion_failure_preserves_existing_bundle(self):
+        self.run_vtu_promotion_failure(existing_bundle=True)
 
 
 if __name__ == '__main__':
