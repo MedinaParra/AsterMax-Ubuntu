@@ -2,10 +2,11 @@ name: AsterMax C10.10.1 Code_Aster Windows Smoke
 
 on:
   push:
-    branches: [ codex/c1004-unified-native-codeaster, codex/c1019-external-audit-fixes ]
+    branches: [ codex/c1004-unified-native-codeaster, codex/c1019-external-audit-fixes, codex/c1020-workflow-conformance ]
     paths:
       - '.github/workflows/astermax-c10101-codeaster-windows-smoke.yml'
       - 'native-windows/runtime/CodeAster/**'
+      - 'native-windows/CODE-ASTER-WINDOWS-MSI-SHA256.md'
   workflow_dispatch:
 
 concurrency:
@@ -20,20 +21,22 @@ jobs:
       - name: Checkout current AsterMax branch
         uses: actions/checkout@v5
 
-      - name: Download genuine Code_Aster 2025 MSI
+      - name: Download and verify genuine Code_Aster 2025 MSI
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $expectedSha256='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
+          $expectedSize=398012592
           & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
           if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed.' }
-          $md5=(Get-FileHash $msi -Algorithm MD5).Hash.ToUpperInvariant()
           $sha256=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+          $size=(Get-Item $msi).Length
           Write-Host "ASTER_MSI=$msi"
-          Write-Host "ASTER_MSI_SIZE=$((Get-Item $msi).Length)"
-          Write-Host "ASTER_MSI_MD5=$md5"
+          Write-Host "ASTER_MSI_SIZE=$size"
           Write-Host "ASTER_MSI_SHA256=$sha256"
-          if($md5 -ne '95A2171A6EB967874F7D0C98E881C66C'){ throw 'Provider MSI fingerprint mismatch.' }
+          if($size -ne $expectedSize){ throw "Provider MSI size mismatch: expected $expectedSize, got $size." }
+          if($sha256 -ne $expectedSha256){ throw "Provider MSI SHA-256 mismatch: expected $expectedSha256, got $sha256." }
 
       - name: Install Code_Aster 2025 as current Windows user
         shell: pwsh

@@ -5,6 +5,8 @@ $root=Join-Path $Dist 'Validation\C10.10.1-Native-Windows'
 New-Item -ItemType Directory -Force $root | Out-Null
 $root=(Resolve-Path $root).Path
 $runner=(Resolve-Path (Join-Path $Dist 'AsterMaxRuntime\CodeAster\astermax-codeaster-runner.cmd')).Path
+$providerMsiSha256='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
+$providerMsiSize=398012592
 
 function Test-NativeProbe {
     Write-Host 'NATIVE_STAGE: probe native runner'
@@ -23,7 +25,12 @@ if(-not $nativeReady) {
     if(Test-Path $msi){ Remove-Item $msi -Force }
     & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
     if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed' }
-    if ((Get-FileHash $msi -Algorithm MD5).Hash -ne '95A2171A6EB967874F7D0C98E881C66C') {throw 'Provider MSI fingerprint mismatch'}
+    $actualSize=(Get-Item $msi).Length
+    $actualSha256=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+    Write-Host "ASTER_MSI_SIZE=$actualSize"
+    Write-Host "ASTER_MSI_SHA256=$actualSha256"
+    if($actualSize -ne $providerMsiSize){ throw "Provider MSI size mismatch: expected $providerMsiSize, got $actualSize" }
+    if($actualSha256 -ne $providerMsiSha256){ throw "Provider MSI SHA-256 mismatch: expected $providerMsiSha256, got $actualSha256" }
 
     Write-Host 'NATIVE_STAGE: install provider MSI'
     $installLog=Join-Path $env:RUNNER_TEMP 'aster-install.log'
@@ -57,7 +64,10 @@ if($LASTEXITCODE -ne 0){throw 'Native Windows numerical validation failed'}
 @{
     release='C10.10.1'
     transport='WINDOWS_NATIVE'
-    provider_msi_md5='95a2171a6eb967874f7d0c98e881c66c'
+    provider_msi_sha256=$providerMsiSha256.ToLowerInvariant()
+    provider_msi_size=$providerMsiSize
+    provider_msi_origin='https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+    provider_msi_observed_date='2026-09-16'
     solver_execution='RUN'
     synthetic_results_allowed=$false
     wsl_required=$false
