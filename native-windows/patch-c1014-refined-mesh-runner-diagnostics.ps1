@@ -51,7 +51,13 @@ $helper=@'
                 string[] messFiles=Directory.Exists(workspace)?Directory.GetFiles(workspace,"*.mess"):new string[0];
                 if(messFiles.Length>0)
                 {
-                    string latest=messFiles.OrderByDescending(File.GetLastWriteTimeUtc).First();
+                    string latest=messFiles[0];
+                    DateTime latestTime=File.GetLastWriteTimeUtc(latest);
+                    for(int mi=1;mi<messFiles.Length;mi++)
+                    {
+                        DateTime t=File.GetLastWriteTimeUtc(messFiles[mi]);
+                        if(t>latestTime){latest=messFiles[mi];latestTime=t;}
+                    }
                     string mess=File.ReadAllText(latest);
                     string fatal=GetCodeAsterFailure(mess);
                     b.AppendLine("Code_Aster .mess: "+Path.GetFileName(latest));
