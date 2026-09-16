@@ -1,0 +1,14 @@
+name: AsterMax solver isolation regressions
+on:
+  push:
+    branches: [codex/c10101-debug-solver-isolation]
+  workflow_dispatch:
+jobs:
+  runner-regressions:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test real filesystem and process lifecycle (no FEA solve)
+        shell: powershell
+        run: ./native-windows/test-c10101-runner-isolation.ps1

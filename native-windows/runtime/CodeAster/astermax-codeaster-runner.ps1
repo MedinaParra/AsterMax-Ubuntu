@@ -17,6 +17,8 @@ function Native-Quote([string]$Value) {
 }
 
 function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Directory, [int]$TimeoutMs = 120000) {
+    $stdoutTask = $null
+    $stderrTask = $null
     $p = New-Object System.Diagnostics.Process
     $p.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
     $p.StartInfo.FileName = $Program
@@ -32,6 +34,7 @@ function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Dir
         $stderrTask = $p.StandardError.ReadToEndAsync()
         if (-not $p.WaitForExit($TimeoutMs)) {
             try { & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F 2>&1 | Out-Null } catch { }
+            try { $p.WaitForExit(5000) | Out-Null } catch { }
             throw "Native Code_Aster command timed out after $TimeoutMs ms."
         }
         return [pscustomobject]@{
@@ -41,6 +44,12 @@ function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Dir
         }
     }
     finally {
+        foreach ($stream in @(@('STDOUT', $stdoutTask), @('STDERR', $stderrTask))) {
+            if ($null -ne $stream[1] -and $stream[1].IsCompleted -and -not $stream[1].IsFaulted) {
+                [IO.File]::WriteAllText((Join-Path $Directory ("NATIVE_" + $stream[0] + ".log")),
+                    ($stream[1].Result -replace "`0", ''))
+            }
+        }
         $p.Dispose()
     }
 }
@@ -131,9 +140,58 @@ function New-SafeStageDirectory([string]$Prefix) {
     return $dir
 }
 
-function Copy-Workspace([string]$Source, [string]$Destination) {
-    Get-ChildItem -LiteralPath $Source -Force -ErrorAction SilentlyContinue | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+function Get-ExportFiles([string]$Content) {
+    $records = @()
+    $seen = @{}
+    foreach ($line in ($Content -split "`r?`n")) {
+        if ($line -notmatch '^\s*[FR]\s+') { continue }
+        if ($line -notmatch '^\s*F\s+(\S+)\s+(\S+)\s+([DR])\s+(\d+)\s*$') {
+            throw "Unsupported file record in native export: $line"
+        }
+        $kind, $relative, $mode = $Matches[1], $Matches[2], $Matches[3]
+        # Native AsterMax exports portable paths. Reject aliases and escapes
+        # before copying so input and output records cannot reference one file.
+        $relative = $relative -replace '^\./', ''
+        if ($relative -match '[:\\"%!]' -or $relative.StartsWith('/') -or
+            @($relative.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -gt 0) {
+            throw "Export path must be a portable relative path: $relative"
+        }
+        if ($seen.ContainsKey($relative)) { throw "Duplicate export file: $relative" }
+        $seen[$relative] = $true
+        $records += [pscustomobject]@{ Kind=$kind; Relative=$relative; Mode=$mode }
+    }
+    foreach ($kind in @('mess', 'rmed')) {
+        if (@($records | Where-Object { $_.Mode -eq 'R' -and $_.Kind -eq $kind }).Count -ne 1) {
+            throw "Export must declare exactly one $kind output."
+        }
+    }
+    return $records
+}
+
+function Initialize-ExportStage($Records, [string]$Source, [string]$Stage) {
+    foreach ($record in $Records) {
+        $target = Join-Path $Stage $record.Relative
+        New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+        if ($record.Mode -eq 'D') {
+            $inputFile = Join-Path $Source $record.Relative
+            if (-not (Test-Path -LiteralPath $inputFile -PathType Leaf)) {
+                throw "Export input missing: $($record.Relative)"
+            }
+            Copy-Item -LiteralPath $inputFile -Destination $target -Force
+        }
+        elseif (Test-Path -LiteralPath $target) {
+            throw "Output already exists in new solve stage: $($record.Relative)"
+        }
+    }
+}
+
+function Confirm-ExportOutputs($Records, [string]$Stage) {
+    foreach ($record in $Records | Where-Object { $_.Mode -eq 'R' }) {
+        $output = Join-Path $Stage $record.Relative
+        if (-not (Test-Path -LiteralPath $output -PathType Leaf) -or
+            (Get-Item -LiteralPath $output).Length -eq 0) {
+            throw "Native solver did not produce declared output: $($record.Relative)"
+        }
     }
 }
 
@@ -237,10 +295,12 @@ if (-not $native) {
 $resolvedWorkspace = (Resolve-Path -LiteralPath $Workspace).Path
 $resolvedExport = (Resolve-Path -LiteralPath $ExportFile).Path
 $stage = New-SafeStageDirectory 'solve'
+$completed = $false
 try {
-    Copy-Workspace $resolvedWorkspace $stage
     $portableExport = Join-Path $stage 'astermax-windows.export'
     $content = Convert-ToWindowsExport (Get-Content -LiteralPath $resolvedExport -Raw)
+    $records = @(Get-ExportFiles $content)
+    Initialize-ExportStage $records $resolvedWorkspace $stage
     [IO.File]::WriteAllText($portableExport, $content + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Output 'ASTERMAX_CODE_ASTER_TRANSPORT=WINDOWS_NATIVE'
@@ -248,24 +308,27 @@ try {
     Write-Output ("ASTERMAX_CODE_ASTER_EXPORT=" + $portableExport)
     Write-Output ("ASTERMAX_CODE_ASTER_STAGE=" + $stage)
 
-    $started = [DateTime]::UtcNow
     $result = Invoke-WindowsBackend $native $portableExport $stage 3600000
     if ($result.Stdout) { Write-Output $result.Stdout.TrimEnd() }
     if ($result.Stderr) { [Console]::Error.WriteLine($result.Stderr.TrimEnd()) }
-
-    Copy-Workspace $stage $resolvedWorkspace
-
-    if ($result.ExitCode -ne 0) { Fail "Native Windows Code_Aster returned exit code $($result.ExitCode)." $result.ExitCode }
-    foreach ($extension in @('mess','rmed')) {
-        $output = Get-ChildItem -LiteralPath $stage -Filter "*.$extension" -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Length -gt 0 -and $_.LastWriteTimeUtc -ge $started.AddSeconds(-2) } |
-            Select-Object -First 1
-        if (-not $output) { Fail "Native solver did not produce a fresh non-empty .$extension file." 30 }
+    if ($result.ExitCode -ne 0) { throw "Native Windows Code_Aster returned exit code $($result.ExitCode)." }
+    Confirm-ExportOutputs $records $stage
+    # Publish only the declared outputs after ALL of them pass validation.
+    foreach ($record in $records | Where-Object { $_.Mode -eq 'R' }) {
+        $target = Join-Path $resolvedWorkspace $record.Relative
+        New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $stage $record.Relative) -Destination $target -Force
     }
-
+    $completed = $true
     Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
-    exit 0
+}
+catch {
+    # Preserve inputs, partial .mess and process logs on timeout or any error.
+    # They must never be promoted to the project's successful result files.
+    [IO.File]::WriteAllText((Join-Path $stage 'ASTERMAX_FAILURE.txt'), $_.Exception.ToString())
+    [Console]::Error.WriteLine("ASTERMAX_CODE_ASTER_RUNNER: $($_.Exception.Message)`nDiagnostics retained: $stage")
 }
 finally {
-    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    if ($completed) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
 }
+if ($completed) { exit 0 } else { exit 30 }

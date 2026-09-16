@@ -3,7 +3,7 @@ name: AsterMax C10.10.1 Real Tetra + Native Windows Runtime
 on:
   workflow_dispatch:
   push:
-    branches: [ codex/c1004-unified-native-codeaster ]
+    branches: [ codex/c1004-unified-native-codeaster, codex/c10101-debug-solver-isolation ]
     paths:
       - 'native-windows/c1008-real-tetra/**'
       - 'native-windows/patch-c1008-aster-group-records.ps1'
@@ -15,6 +15,7 @@ on:
       - 'native-windows/patch-c1010-button-audit.ps1'
       - 'native-windows/patch-c1011-windows-runtime.ps1'
       - 'native-windows/test-c1011-native-windows.ps1'
+      - 'native-windows/test-c10101-runner-isolation.ps1'
       - 'native-windows/test-c1011-med-field-discovery.py'
       - 'native-windows/bridge-c964-med-results.py'
       - 'native-windows/runtime/CodeAster/**'
@@ -85,6 +86,9 @@ jobs:
     steps:
       - name: Checkout AsterMax integration branch
         uses: actions/checkout@v5
+      - name: Regress native runner isolation and timeout diagnostics
+        shell: powershell
+        run: ./native-windows/test-c10101-runner-isolation.ps1
       - name: Download admitted genuine solver evidence
         uses: actions/download-artifact@v5
         with:
