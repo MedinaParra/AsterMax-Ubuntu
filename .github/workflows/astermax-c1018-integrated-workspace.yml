@@ -133,7 +133,7 @@ jobs:
           if($p.ExitCode -ne 0 -or -not(Test-Path $report)) { throw 'UI audit failed' }
           $result=Get-Content $report -Raw | ConvertFrom-Json
           if(-not $result.pass) { throw 'UI audit did not pass' }
-          python native-windows/audit-c1010-buttons.py --help
+          python native-windows/audit-c1010-buttons.py --root upstream --out dist/Audit
 
       - name: Upload audit evidence and generated source
         if: always()
