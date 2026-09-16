@@ -1,4 +1,8 @@
-"""Reject ambiguous/missing field identity using copies of genuine solver output."""
+"""Reject ambiguous/missing field identity using copies of genuine solver output.
+
+C10.10.1 rebuild marker: rerun the complete Windows package after enabling validated
+TETRA4/TETRA10/HEXA8 result provenance in the C9.74 compatibility gate.
+"""
 import os, sys, tempfile, shutil, subprocess, json
 from pathlib import Path
 import h5py
