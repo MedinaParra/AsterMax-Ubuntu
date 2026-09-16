@@ -6,7 +6,16 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate-patch-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+      - name: Validate patch dependencies and C# symbols
+        run: python3 native-windows/validate-patch-chain.py
+
   build-c1018:
+    needs: validate-patch-chain
     runs-on: windows-latest
     timeout-minutes: 40
     steps:

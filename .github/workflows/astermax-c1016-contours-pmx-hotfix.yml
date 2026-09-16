@@ -5,6 +5,8 @@ on:
     branches: [ codex/c1004-unified-native-codeaster ]
     paths:
       - '.github/workflows/astermax-c1016-contours-pmx-hotfix.yml'
+      - 'native-windows/patch-chain.json'
+      - 'native-windows/validate-patch-chain.py'
       - 'native-windows/patch-c1012-tetra-results-connectivity.ps1'
       - 'native-windows/patch-c1013-results-contours-options.ps1'
       - 'native-windows/patch-c1015-vtk-real-scalar-contours.ps1'
@@ -12,7 +14,16 @@ on:
   workflow_dispatch:
 
 jobs:
+  validate-patch-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+      - name: Validate patch dependencies and C# symbols
+        run: python3 native-windows/validate-patch-chain.py
+
   build-c1016:
+    needs: validate-patch-chain
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
