@@ -53,12 +53,15 @@ def build_fixture(path, case_families):
 
         droot = h.require_group("CHA/0000000eDEPL")
         droot.attrs["NOM"] = nom("DX", "DY", "DZ")
+        droot.attrs["MAI"] = b"00000001"
         add_flat_dataset(h, f"CHA/0000000eDEPL/{STEP}/NOE/MED_NO_PROFILE_INTERNAL/CO", displacement.T.reshape(-1))
 
         sroot = h.require_group("CHA/0000000eSIGM_ELNO")
         sroot.attrs["NOM"] = nom(*s_names)
+        sroot.attrs["MAI"] = b"00000001"
         qroot = h.require_group("CHA/0000000eSIEQ_ELNO")
         qroot.attrs["NOM"] = nom("VMIS")
+        qroot.attrs["MAI"] = b"00000001"
 
         for family_index, (code, conns) in enumerate(sorted(case_families.items())):
             conn = np.asarray(conns, dtype=int)
@@ -140,3 +143,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

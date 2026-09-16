@@ -292,8 +292,40 @@ bundle = {
         "supported_med_families": ["TE4", "T10", "HE8"],
     },
 }
+
+production_checks = {
+    "real_med_source": bool(bundle["source"]["size_bytes"] > 1000),
+    "mesh_nonempty_supported": bool(n_nodes > 0 and n_elem > 0 and len(connectivity_json) == n_elem),
+    "supported_element_families_only": bool(all(c in SUPPORTED_FAMILIES for c in family_codes)),
+    "coordinates_present_finite": bool(coords.shape == (n_nodes, 3) and np.isfinite(coords).all()),
+    "displacement_present_finite": bool(displacement.shape == (n_nodes, 3) and np.isfinite(displacement).all()),
+    "total_deformation_present_finite": bool(total.shape == (n_nodes,) and np.isfinite(total).all()),
+    "stress_present_finite": bool(
+        len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
+    ),
+    "von_mises_present_finite": bool(len(von_mises) == n_nodes and np.isfinite(von_mises).all()),
+    "no_invented_results": bool(bundle["integrity"]["fea_values_invented"] is False),
+}
+if validation_mode == "regression":
+    he8 = families.get("HE8")
+    checks = dict(production_checks)
+    checks.update({
+        "mesh_44_nodes_10_hex": bool(
+            len(families) == 1 and he8 is not None and n_nodes == 44 and he8["n_elem"] == 10
+        ),
+        "c962_dx_reproduced": bool(abs(float(displacement[:, 0].max()) - 0.0471697826890255) < 1e-12),
+    })
+else:
+    checks = production_checks
+
+# Validate before publishing either artifact. Failed data must never become a
+# loadable result bundle, even when a caller overlooks the process exit status.
+if not all(checks.values()):
+    failed = [name for name, passed in checks.items() if not passed]
+    raise SystemExit("C10.17 results bridge gate failed before publication: " + ", ".join(failed))
+
 with open(bundle_path, "w", encoding="utf-8") as f:
-    json.dump(bundle, f, indent=2)
+    json.dump(bundle, f, indent=2, allow_nan=False)
 
 vtk = ET.Element("VTKFile", {"type": "UnstructuredGrid", "version": "0.1", "byte_order": "LittleEndian"})
 ug = ET.SubElement(vtk, "UnstructuredGrid")
@@ -312,30 +344,7 @@ for name, arr in nodal_stress.items():
     write_data_array(pd, f"Stress {name}", arr)
 ET.ElementTree(vtk).write(vtu_path, encoding="utf-8", xml_declaration=True)
 
-production_checks = {
-    "real_med_source": bool(bundle["source"]["size_bytes"] > 1000),
-    "mesh_nonempty_supported": bool(n_nodes > 0 and n_elem > 0 and len(connectivity_json) == n_elem),
-    "supported_element_families_only": bool(all(c in SUPPORTED_FAMILIES for c in family_codes)),
-    "coordinates_present_finite": bool(coords.shape == (n_nodes, 3) and np.isfinite(coords).all()),
-    "displacement_present_finite": bool(displacement.shape == (n_nodes, 3) and np.isfinite(displacement).all()),
-    "stress_present_finite": bool(
-        len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
-    ),
-    "von_mises_present_finite": bool(len(von_mises) == n_nodes and np.isfinite(von_mises).all()),
-    "no_invented_results": bool(bundle["integrity"]["fea_values_invented"] is False),
-    "vtu_written": bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path) > 1000),
-}
-if validation_mode == "regression":
-    he8 = families.get("HE8")
-    checks = dict(production_checks)
-    checks.update({
-        "mesh_44_nodes_10_hex": bool(
-            len(families) == 1 and he8 is not None and n_nodes == 44 and he8["n_elem"] == 10
-        ),
-        "c962_dx_reproduced": bool(abs(float(displacement[:, 0].max()) - 0.0471697826890255) < 1e-12),
-    })
-else:
-    checks = production_checks
+checks["vtu_written"] = bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path) > 1000)
 
 summary = {
     "release": "C10.07",

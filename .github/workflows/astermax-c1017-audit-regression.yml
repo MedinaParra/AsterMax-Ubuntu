@@ -1,0 +1,29 @@
+name: AsterMax C10.17 result integrity regressions
+on:
+  push:
+    branches: [codex/c1017-result-integrity-audit]
+  pull_request:
+    paths:
+      - native-windows/bridge-c964-med-results.py
+      - native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1
+      - native-windows/test-c1017-*.py
+      - native-windows/test-c1017-*.ps1
+      - .github/workflows/astermax-c1017-audit-regression.yml
+  workflow_dispatch:
+jobs:
+  regression:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy h5py
+      - name: MED family parser fixtures (not solver evidence)
+        run: python native-windows/test-c1007-med-bridge.py
+      - name: Reject invalid MED before publishing results
+        run: python native-windows/test-c1017-result-publication.py
+      - name: Windows runner isolation and failure diagnostics (command stubs)
+        shell: pwsh
+        run: ./native-windows/test-c1017-runner.ps1
