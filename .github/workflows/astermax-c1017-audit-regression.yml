@@ -25,6 +25,8 @@ jobs:
         run: python native-windows/test-c1007-med-bridge.py
       - name: Vectorized element-node averages equal legacy fixture results
         run: python native-windows/test-c1019-vectorized-average.py
+      - name: Dynamic MED mesh and step selection
+        run: python native-windows/test-c1019-med-selection.py
       - name: Reject invalid MED and failed VTU publication atomically
         run: python native-windows/test-c1017-result-publication.py
       - name: Windows runner isolation and failure diagnostics (command stubs)
