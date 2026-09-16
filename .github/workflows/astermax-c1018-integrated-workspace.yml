@@ -133,12 +133,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $env:ASTERMAX_C1018_UI_AUDIT="$PWD/dist/Audit/C10.18"
+          $auditDir="$PWD/dist/Audit/C10.18"
           $env:ASTERMAX_PYTHON="$PWD/dist/AsterMaxRuntime/Python/python.exe"
           $env:ASTERMAX_CODE_ASTER_RUNNER="$PWD/dist/AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd"
-          $p=Start-Process -FilePath "$PWD/dist/AsterMax Mechanical.exe" -WorkingDirectory "$PWD/dist" -PassThru
+          $p=Start-Process -FilePath "$PWD/dist/AsterMax Mechanical.exe" -WorkingDirectory "$PWD/dist" -ArgumentList @("--astermax-c1018-ui-audit=$auditDir") -PassThru
           if(-not $p.WaitForExit(300000)) { Stop-Process -Id $p.Id -Force; throw 'UI audit timed out' }
-          $report=Join-Path $env:ASTERMAX_C1018_UI_AUDIT 'UI_AUDIT.json'
+          $report=Join-Path $auditDir 'UI_AUDIT.json'
           if(Test-Path $report) { Get-Content $report }
           if($p.ExitCode -ne 0 -or -not(Test-Path $report)) { throw 'UI audit failed' }
           $result=Get-Content $report -Raw | ConvertFrom-Json
