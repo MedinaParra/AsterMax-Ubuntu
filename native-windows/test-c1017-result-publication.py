@@ -48,6 +48,9 @@ class PublicationTests(unittest.TestCase):
     def test_nonfinite_stress(self):
         self.run_rejected(f'CHA/0000000eSIGM_ELNO/{fixture.STEP}/NOE.TE4/MED_NO_PROFILE_INTERNAL/CO', float('nan'))
 
+    def test_total_deformation_overflow(self):
+        self.run_rejected(f'CHA/0000000eDEPL/{fixture.STEP}/NOE/MED_NO_PROFILE_INTERNAL/CO', 1e308)
+
     def test_nonfinite_von_mises(self):
         self.run_rejected(f'CHA/0000000eSIEQ_ELNO/{fixture.STEP}/NOE.TE4/MED_NO_PROFILE_INTERNAL/CO', float('inf'))
 

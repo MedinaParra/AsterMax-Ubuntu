@@ -299,6 +299,7 @@ production_checks = {
     "supported_element_families_only": bool(all(c in SUPPORTED_FAMILIES for c in family_codes)),
     "coordinates_present_finite": bool(coords.shape == (n_nodes, 3) and np.isfinite(coords).all()),
     "displacement_present_finite": bool(displacement.shape == (n_nodes, 3) and np.isfinite(displacement).all()),
+    "total_deformation_present_finite": bool(total.shape == (n_nodes,) and np.isfinite(total).all()),
     "stress_present_finite": bool(
         len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
     ),
@@ -343,7 +344,7 @@ for name, arr in nodal_stress.items():
     write_data_array(pd, f"Stress {name}", arr)
 ET.ElementTree(vtk).write(vtu_path, encoding="utf-8", xml_declaration=True)
 
-checks["vtu_written"] = bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path) > 0)
+checks["vtu_written"] = bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path) > 1000)
 
 summary = {
     "release": "C10.07",
@@ -364,5 +365,4 @@ summary = {
 print(json.dumps(summary, indent=2))
 if not summary["pass"]:
     raise SystemExit("C10.07 results bridge gate failed")
-
 
