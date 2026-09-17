@@ -70,6 +70,10 @@ $containsNew=@'
 '@
 $a=Replace-Required $a $containsOld $containsNew
 
+# PrePoMax NamedClass identifiers may not contain spaces. Keep the user-facing stage label
+# "Static Structural", but use a legal internal Step name in the reconstructed B01 fixture.
+$a=Replace-Required $a '            var step = new StaticStep("Static Structural");' '            var step = new StaticStep("Static_Structural");'
+
 # Persist the rows already exercised after every stage. If a later unmanaged WinForms callback
 # terminates the process, completed stages remain auditable instead of being reconstructed as
 # NOT_EXERCISED solely because the final session write was never reached.
@@ -87,6 +91,48 @@ $checkpoint=@'
                 }.ToString(Formatting.Indented));
 '@
 $a=Replace-Required $a $stageThrow ($checkpoint+$stageThrow)
+
+# Do not destroy the checkpoint if a later stage throws. Add the terminal error to the
+# existing JSON so the report generator can retain already-exercised PASS/FAIL rows.
+$catchOld=@'
+                catch (Exception ex)
+                {
+                    File.WriteAllText(Path.Combine(directory, "workflow-conformance-session.json"),
+                        new JObject {
+                            ["release"] = "C10.20",
+                            ["pass"] = false,
+                            ["error"] = ex.ToString(),
+                            ["historical_pending_closed"] = false
+                        }.ToString(Formatting.Indented));
+                    Environment.Exit(1);
+                }
+'@
+$catchNew=@'
+                catch (Exception ex)
+                {
+                    string sessionPath = Path.Combine(directory, "workflow-conformance-session.json");
+                    JObject failure = null;
+                    if (File.Exists(sessionPath))
+                    {
+                        try { failure = JObject.Parse(File.ReadAllText(sessionPath)); }
+                        catch { failure = null; }
+                    }
+                    if (failure == null)
+                    {
+                        failure = new JObject {
+                            ["release"] = "C10.20",
+                            ["partial"] = true,
+                            ["rows"] = new JArray()
+                        };
+                    }
+                    failure["pass"] = false;
+                    failure["error"] = ex.ToString();
+                    failure["historical_pending_closed"] = false;
+                    File.WriteAllText(sessionPath, failure.ToString(Formatting.Indented));
+                    Environment.Exit(1);
+                }
+'@
+$a=Replace-Required $a $catchOld $catchNew
 Set-Content $destination $a -Encoding UTF8
 
 $project=Join-Path $Root 'PrePoMax/PrePoMax.csproj'
