@@ -118,9 +118,23 @@ jobs:
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{release='C10.10.1';hotfix='C10.18_INTEGRATED_WORKSPACE';commit='${{ github.sha }}';executable_sha256=$hash;real_scalar_extremes_bound=$true;pmx_compatibility_binder=$true;fea_values_invented=$false} | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
+      - name: Restore verified provider installer cache
+        id: provider-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/code-aster-v2025.msi
+          key: code-aster-v2025-msi-95a2171a6eb967874f7d0c98e881c66c
+
       - name: Install and validate native Windows Code_Aster
         shell: pwsh
         run: ./native-windows/test-c1011-native-windows.ps1 -Dist "$PWD/dist"
+
+      - name: Cache verified provider installer
+        if: steps.provider-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/code-aster-v2025.msi
+          key: code-aster-v2025-msi-95a2171a6eb967874f7d0c98e881c66c
 
       - name: Execute integrated tree and result buttons with a real solve
         shell: pwsh

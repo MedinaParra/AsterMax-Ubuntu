@@ -19,10 +19,18 @@ function Test-NativeProbe {
 $nativeReady=Test-NativeProbe
 if(-not $nativeReady) {
     $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
-    Write-Host 'NATIVE_STAGE: download provider MSI'
-    if(Test-Path $msi){ Remove-Item $msi -Force }
-    & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
-    if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed' }
+    $validMsi=(Test-Path $msi) -and ((Get-FileHash $msi -Algorithm MD5).Hash -eq '95A2171A6EB967874F7D0C98E881C66C')
+    if(-not $validMsi) {
+        Write-Host 'NATIVE_STAGE: download provider MSI with resumable retries'
+        if(Test-Path $msi){ Remove-Item $msi -Force }
+        for($attempt=1;$attempt -le 3;$attempt++) {
+            & curl.exe -L --fail --silent --show-error --continue-at - --connect-timeout 30 --max-time 900 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+            if($LASTEXITCODE -eq 0 -and (Test-Path $msi)){ break }
+            if($LASTEXITCODE -eq 33 -and (Test-Path $msi)){ Remove-Item $msi -Force }
+            if($attempt -eq 3){ throw 'Provider MSI download failed after three attempts' }
+            Write-Host "NATIVE_STAGE: retry MSI download, attempt $($attempt+1)"
+        }
+    } else { Write-Host 'NATIVE_STAGE: reuse verified provider MSI' }
     if ((Get-FileHash $msi -Algorithm MD5).Hash -ne '95A2171A6EB967874F7D0C98E881C66C') {throw 'Provider MSI fingerprint mismatch'}
 
     Write-Host 'NATIVE_STAGE: install provider MSI'

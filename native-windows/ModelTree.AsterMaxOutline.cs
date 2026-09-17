@@ -44,6 +44,10 @@ namespace UserControls
             if (_axOutline.SelectedNode != found[0]) _axOutline.SelectedNode = found[0];
             found[0].EnsureVisible();
         }
+        public void SetAsterMaxResultDetailsVisible(bool visible)
+        {
+            if (_axWorkflowHint != null) _axWorkflowHint.Visible = !visible;
+        }
         public Func<Dictionary<string,AsterMaxSectionState>> AsterMaxSectionStates;
         private ImageList _axSectionIcons;
         private Label _axWorkflowHint;

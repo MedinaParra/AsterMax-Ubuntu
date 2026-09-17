@@ -145,6 +145,7 @@ namespace PrePoMax
                 _axEmbeddedResults.Show();
                 _axEmbeddedResults.BringToFront();
                 _axResultDetailsHost.Show();
+                _modelTree.SetAsterMaxResultDetailsVisible(true);
                 _axEmbeddedResults.SelectResultField(String.IsNullOrEmpty(field) ? _axEmbeddedResults.SelectedResultField : field);
                 if (_axEmbeddedResults.LastRenderError != null) throw new InvalidOperationException(_axEmbeddedResults.LastRenderError);
                 RefreshAsterMaxResultAvailability();
@@ -190,6 +191,7 @@ namespace PrePoMax
 
         private void ShowAsterMaxModelWorkspace()
         {
+            if (_modelTree != null && !_modelTree.IsDisposed) _modelTree.SetAsterMaxResultDetailsVisible(false);
             if (_axEmbeddedResults != null && !_axEmbeddedResults.IsDisposed) _axEmbeddedResults.Hide();
             if (_axResultDetailsHost != null) _axResultDetailsHost.Hide();
             if (_axSolutionInformation != null) _axSolutionInformation.Hide();
