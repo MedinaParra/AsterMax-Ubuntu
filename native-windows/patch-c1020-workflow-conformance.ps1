@@ -70,9 +70,11 @@ $containsNew=@'
 '@
 $a=Replace-Required $a $containsOld $containsNew
 
-# PrePoMax NamedClass identifiers may not contain spaces. Keep the user-facing stage label
-# "Static Structural", but use a legal internal Step name in the reconstructed B01 fixture.
+# PrePoMax NamedClass identifiers may not contain spaces. Keep human-facing workflow labels
+# unchanged, but use legal internal names for the reconstructed B01 analysis objects.
 $a=Replace-Required $a '            var step = new StaticStep("Static Structural");' '            var step = new StaticStep("Static_Structural");'
+$a=Replace-Required $a '            step.AddBoundaryCondition(new FixedBC("Fixed Support", "FIXED", RegionTypeEnum.NodeSetName, false));' '            step.AddBoundaryCondition(new FixedBC("Fixed_Support", "FIXED", RegionTypeEnum.NodeSetName, false));'
+$a=Replace-Required $a '            step.AddLoad(new CLoad("Axial Force", "LOAD", RegionTypeEnum.NodeSetName, 10000, 0, 0, false, false, 0));' '            step.AddLoad(new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 10000, 0, 0, false, false, 0));'
 
 # Persist the rows already exercised after every stage. If a later unmanaged WinForms callback
 # terminates the process, completed stages remain auditable instead of being reconstructed as
