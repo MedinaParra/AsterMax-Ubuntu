@@ -68,8 +68,9 @@ $s=Replace-Required $s $old @'
                     _host.Controls.Add(_view);
                 } else {
                     _view.OnMouseLeftButtonUpSelection-=OnNativeVtkSelection;
-                    _view.Clear();
                 }
+                // Clear also initializes the native scalar/animation bookkeeping on first use.
+                _view.Clear();
 '@
 $s=Replace-Required $s '                _view.AdjustCameraDistanceAndClipping();' '                if(firstRender) _view.AdjustCameraDistanceAndClipping();'
 $s=Replace-Required $s '                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ' ('                RenderRevision++;'+[Environment]::NewLine+'                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ')

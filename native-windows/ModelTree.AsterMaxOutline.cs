@@ -291,6 +291,10 @@ namespace UserControls
                 if (AsterMaxSectionStates != null) AxApplySectionStates(_axOutline.Nodes, AsterMaxSectionStates());
                 solution.StateImageKey=_axResultsCurrent?"done":_axResultFields.Length>0?"pending":"info";
                 solution.ToolTipText=_axResultStatus;
+                if (_axResultsCurrent) {
+                    solution.BackColor=Color.Empty;
+                    solution.Nodes.RemoveByKey("ax-info-ax-solution");
+                }
                 if (_axResultFields.Length>0) { analysis.Expand(); solution.Expand(); }
                 AxRestoreExpansion(_axOutline.Nodes, expanded, selected, first);
                 project.Expand(); model.Expand();
