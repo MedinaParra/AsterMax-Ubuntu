@@ -74,7 +74,9 @@ namespace PrePoMax
                     check("reopen_reuses_view",Object.ReferenceEquals(view,_axEmbeddedResults) && view.Visible);
                     ShowAsterMaxIntegratedResult("__information__");
                     check("solution_information_embedded",_axSolutionInformation.Visible && _axSolutionInformation.Text.Contains("SolutionCurrent"));
-                    model.Mesh.Nodes[1].X+=0.1;
+                    var changedNode=model.Mesh.Nodes[1];
+                    changedNode.X+=0.1;
+                    model.Mesh.Nodes[1]=changedNode;
                     RefreshAsterMaxResultAvailability();
                     check("model_edit_hides_stale_results",!view.Visible);
                     bool rejected=false;
