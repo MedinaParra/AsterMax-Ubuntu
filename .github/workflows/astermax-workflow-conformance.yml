@@ -1,0 +1,181 @@
+name: AsterMax C10.20 Windows Workflow Conformance
+
+on:
+  push:
+    branches: [ codex/c1020-workflow-conformance ]
+    paths:
+      - '.github/workflows/astermax-workflow-conformance.yml'
+      - 'native-windows/**'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-c1020-workflow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-patch-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v5
+      - name: Validate patch dependencies before build
+        run: python3 native-windows/validate-patch-chain.py
+      - name: Require immutable PrePoMax pins
+        run: python3 native-windows/validate-workflow-pins.py
+
+  windows-workflow-conformance:
+    needs: validate-patch-chain
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate patch chain immediately before patch/build
+        shell: pwsh
+        run: python native-windows/validate-patch-chain.py
+
+      - name: Apply AsterMax chain through C10.20
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1'
+          )
+          foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
+
+      - name: Setup Python runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install MED and B01 reconstruction dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check numpy h5py gmsh
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Assemble C10.20 test distribution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.20 | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          $pythonRoot=Split-Path (Get-Command python).Source -Parent
+          Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
+          & .\dist\AsterMaxRuntime\Python\python.exe -c "import numpy,h5py; print('ASTERMAX_PACKAGED_PYTHON_MED_OK')"
+          if($LASTEXITCODE -ne 0){ throw 'Packaged Python MED runtime failed.' }
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){ throw 'Pinned CAD runtime digest mismatch.' }
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing from pinned runtime.' }
+          Copy-Item $ng.Directory.FullName .\dist\NetGen -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\Temp | Out-Null
+          foreach($project in @('CaeGlobals','CaeJob','CaeMesh','CaeModel','CaeResults','UserControls','vtkControl')) {
+            $dir=Join-Path $PWD "upstream\$project\bin\x64\Release"
+            if(Test-Path $dir){ New-Item -ItemType Directory -Force .\dist\lib | Out-Null; Get-ChildItem $dir -Filter *.dll | Copy-Item -Destination .\dist\lib -Force }
+          }
+          python .\native-windows\build-c1010-materials.py --out .\dist
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.20';commit='${{ github.sha }}';executable_sha256=$hash;
+            workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Install and exercise native Windows Code_Aster
+        shell: pwsh
+        run: ./native-windows/test-c1011-native-windows.ps1 -Dist "$PWD/dist"
+
+      - name: Reconstruct B01 STEP from declared dimensions
+        shell: pwsh
+        run: python native-windows/workflow-conformance/generate-b01-step.py --out "$PWD/dist/Audit/C10.20/B01-100x10x10.step"
+
+      - name: Execute native GUI workflow conformance
+        shell: pwsh
+        run: |
+          $env:ASTERMAX_PYTHON="$PWD/dist/AsterMaxRuntime/Python/python.exe"
+          $env:ASTERMAX_CODE_ASTER_RUNNER="$PWD/dist/AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd"
+          ./native-windows/workflow-conformance/run-e2e.ps1 `
+            -Exe "$PWD/dist/AsterMax Mechanical.exe" `
+            -Step "$PWD/dist/Audit/C10.20/B01-100x10x10.step" `
+            -OutDir "$PWD/dist/Audit/C10.20" `
+            -TimeoutSeconds 600
+
+      - name: Enforce mandatory FAIL gate
+        if: always()
+        shell: pwsh
+        run: |
+          $report='.\dist\Audit\C10.20\workflow-conformance-report.json'
+          if(-not(Test-Path $report)){ throw 'Workflow conformance report was not produced.' }
+          $r=Get-Content $report -Raw | ConvertFrom-Json
+          Write-Host "MANDATORY_PASS=$($r.summary.mandatory_pass)"
+          Write-Host "MANDATORY_FAIL=$($r.summary.mandatory_failures)"
+          Write-Host "MANDATORY_NOT_EXERCISED=$($r.summary.mandatory_not_exercised)"
+          Write-Host "CLOSURE_CANDIDATE=$($r.summary.closure_candidate)"
+          if([int]$r.summary.mandatory_failures -gt 0){ throw 'At least one mandatory workflow stage is FAIL.' }
+
+      - name: Upload C10.20 conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.20-Workflow-Conformance
+          path: |
+            dist/Audit/C10.20
+            dist/Validation
+            upstream/PrePoMax/Forms/AsterMaxWorkflowConformance*.cs
+          if-no-files-found: warn
+
+      - name: Upload C10.20 executable test distribution
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.20-Windows-Test-Distribution
+          path: dist
+          if-no-files-found: error
