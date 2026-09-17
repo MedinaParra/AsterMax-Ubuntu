@@ -104,6 +104,10 @@ Set-Content $p $s -Encoding UTF8
 $runner=Join-Path $PSScriptRoot 'runtime\CodeAster\astermax-codeaster-runner.ps1'
 if(!(Test-Path $runner)){throw 'C10.14 packaged Code_Aster runner missing.'}
 $r=Get-Content $runner -Raw
+if($r.Contains('function Get-ExpectedOutputs')) {
+    Write-Host 'C10.14 C# diagnostics applied; retaining C10.17 exact-output runner validation.'
+    return
+}
 $copyAnchor='    Copy-Workspace $resolvedWorkspace $stage'
 $copyNew=@'
     Copy-Workspace $resolvedWorkspace $stage
