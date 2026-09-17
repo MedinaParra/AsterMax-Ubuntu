@@ -41,6 +41,35 @@ foreach($name in @('ax-model','ax-coordinates','ax-connections','ax-mesh','ax-se
     $a=$a.Replace('            C1020SelectOutlineNode("'+$name+'");','            C1020RevealOutlineNode("'+$name+'");')
 }
 
+# The visible coordinate-system node is captioned "Global Cartesian (X, Y, Z)". Presence checks
+# are semantic/substring checks; keep exact matching for commands that really select a node.
+$containsOld=@'
+        private bool C1020OutlineContainsText(string text)
+        {
+            TreeView tree = C1020FindControl<TreeView>(this, x => x.Name == "asterMaxOutline");
+            return tree != null && C1020FindNodeByText(tree.Nodes, text) != null;
+        }
+'@
+$containsNew=@'
+        private static TreeNode C1020FindNodeContainingText(TreeNodeCollection nodes, string text)
+        {
+            foreach (TreeNode node in nodes)
+            {
+                if ((node.Text ?? "").IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0) return node;
+                TreeNode nested = C1020FindNodeContainingText(node.Nodes, text);
+                if (nested != null) return nested;
+            }
+            return null;
+        }
+
+        private bool C1020OutlineContainsText(string text)
+        {
+            TreeView tree = C1020FindControl<TreeView>(this, x => x.Name == "asterMaxOutline");
+            return tree != null && C1020FindNodeContainingText(tree.Nodes, text) != null;
+        }
+'@
+$a=Replace-Required $a $containsOld $containsNew
+
 # Persist the rows already exercised after every stage. If a later unmanaged WinForms callback
 # terminates the process, completed stages remain auditable instead of being reconstructed as
 # NOT_EXERCISED solely because the final session write was never reached.
