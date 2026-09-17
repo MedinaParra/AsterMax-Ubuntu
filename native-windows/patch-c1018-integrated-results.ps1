@@ -44,6 +44,7 @@ $renderStart=@'
 $s=Replace-Required $s $renderStart @'
         private void RenderScene()
         {
+            string renderStage="preflight";
             if(_axRendering) {
                 LastRenderError=null;
                 LastRenderSkipped=true;
@@ -62,7 +63,9 @@ $s=Replace-Required $s $renderStart @'
             LastRenderSkipReason=null;
             try
             {
+                renderStage="validate-model";
                 ValidateModel?.Invoke();
+                renderStage="refresh-metadata";
                 RefreshMetadata();
 '@
 $old=@'
@@ -77,17 +80,36 @@ $old=@'
 $s=Replace-Required $s $old @'
                 bool firstRender=_view==null;
                 if(firstRender) {
+                    renderStage="vtk-create";
+                    bool vtkLoadCompleted=false;
                     _view=new vtkControl.vtkControl { Dock=DockStyle.Fill };
+                    _view.Load+=delegate { vtkLoadCompleted=true; };
                     _host.Controls.Add(_view);
+                    renderStage="vtk-load";
+                    _view.Show();
+                    _view.CreateControl();
+                    Application.DoEvents();
+                    if(!_view.IsHandleCreated || !vtkLoadCompleted)
+                        throw new InvalidOperationException("vtkControl did not complete its WinForms Load lifecycle before renderer access.");
                 } else {
+                    renderStage="vtk-clear";
                     _view.OnMouseLeftButtonUpSelection-=OnNativeVtkSelection;
                     _view.Clear();
                 }
 '@
-$s=Replace-Required $s '                _view.AdjustCameraDistanceAndClipping();' '                if(firstRender) _view.AdjustCameraDistanceAndClipping();'
-$s=Replace-Required $s '                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ' ('                RenderRevision++;'+[Environment]::NewLine+'                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ')
-$s=Replace-Required $s '                _status.Text="Render blocked: "+ex.GetType().Name;' ('                LastRenderError=ex.Message;'+[Environment]::NewLine+'                LastRenderSkipped=false;'+[Environment]::NewLine+'                LastRenderSkipReason=null;'+[Environment]::NewLine+'                _status.Text="Render blocked: "+ex.GetType().Name;')
-$s=Replace-Required $s '                MessageBox.Show(this,"AsterMax results renderer blocked safely.' ('                if(AuditMode) throw;'+[Environment]::NewLine+'                MessageBox.Show(this,"AsterMax results renderer blocked safely.')
+$s=Replace-Required $s '                var data=AsterMaxVtkResultsBinding.BuildActorData(_bundle,_scene);' ('                renderStage="build-actor-data";'+[Environment]::NewLine+'                var data=AsterMaxVtkResultsBinding.BuildActorData(_bundle,_scene);')
+$s=Replace-Required $s '                _view.SetScalarBarColorSpectrum(CreateDisplaySpectrum(colorContract));' ('                renderStage="scalar-spectrum";'+[Environment]::NewLine+'                _view.SetScalarBarColorSpectrum(CreateDisplaySpectrum(colorContract));')
+$s=Replace-Required $s '                _view.SetScalarBarText(colorContract.Field,"",colorContract.Unit,"","");' ('                renderStage="scalar-bar-text";'+[Environment]::NewLine+'                _view.SetScalarBarText(colorContract.Field,"",colorContract.Unit,"","");')
+$s=Replace-Required $s '                _view.Controller_GetAnnotationText=NativeProbeAnnotation;' ('                renderStage="annotation-bind";'+[Environment]::NewLine+'                _view.Controller_GetAnnotationText=NativeProbeAnnotation;')
+$s=Replace-Required $s '                _view.AddCells(data);' ('                renderStage="add-cells";'+[Environment]::NewLine+'                _view.AddCells(data);')
+$s=Replace-Required $s '                _view.EdgesVisibility=_showEdges.Checked ? vtkControl.vtkEdgesVisibility.ElementEdges : vtkControl.vtkEdgesVisibility.NoEdges;' ('                renderStage="edge-visibility";'+[Environment]::NewLine+'                _view.EdgesVisibility=_showEdges.Checked ? vtkControl.vtkEdgesVisibility.ElementEdges : vtkControl.vtkEdgesVisibility.NoEdges;')
+$s=Replace-Required $s '                _view.UpdateScalarsAndCameraAndRedraw();' ('                renderStage="scalar-format-redraw";'+[Environment]::NewLine+'                _view.UpdateScalarsAndCameraAndRedraw();')
+$s=Replace-Required $s '                _view.SetSelectBy(CaeGlobals.vtkSelectBy.Node);' ('                renderStage="selection-mode";'+[Environment]::NewLine+'                _view.SetSelectBy(CaeGlobals.vtkSelectBy.Node);')
+$s=Replace-Required $s '                _view.OnMouseLeftButtonUpSelection+=OnNativeVtkSelection;' ('                renderStage="selection-event";'+[Environment]::NewLine+'                _view.OnMouseLeftButtonUpSelection+=OnNativeVtkSelection;')
+$s=Replace-Required $s '                _view.AdjustCameraDistanceAndClipping();' ('                renderStage="camera-fit";'+[Environment]::NewLine+'                if(firstRender) _view.AdjustCameraDistanceAndClipping();')
+$s=Replace-Required $s '                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ' ('                renderStage="complete";'+[Environment]::NewLine+'                RenderRevision++;'+[Environment]::NewLine+'                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ')
+$s=Replace-Required $s '                _status.Text="Render blocked: "+ex.GetType().Name;' ('                LastRenderError="stage="+renderStage+"; "+ex.ToString();'+[Environment]::NewLine+'                LastRenderSkipped=false;'+[Environment]::NewLine+'                LastRenderSkipReason=null;'+[Environment]::NewLine+'                try { System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(),"AsterMax-render-error.log"),LastRenderError); } catch {}'+[Environment]::NewLine+'                _status.Text="Render blocked @ "+renderStage+": "+ex.GetType().Name;')
+$s=Replace-Required $s '                MessageBox.Show(this,"AsterMax results renderer blocked safely.\n\n"+ex.GetType().Name+": "+ex.Message,' ('                if(AuditMode) throw;'+[Environment]::NewLine+'                MessageBox.Show(this,"AsterMax results renderer blocked safely.\n\nStage: "+renderStage+"\n"+ex.GetType().Name+": "+ex.Message,')
 $anchor=@'
                     "AsterMax Results",MessageBoxButtons.OK,MessageBoxIcon.Error);
             }
@@ -121,4 +143,4 @@ $anchor=@'
 '@
 $s=Replace-Required $s $anchor ($anchor+[Environment]::NewLine+'                ResetAsterMaxIntegratedResults();')
 Set-Content $main $s -Encoding UTF8
-Write-Host 'C10.18 integrated Outline / graphics / result details applied.'
+Write-Host 'C10.18 integrated Outline / graphics / result details applied with VTK lifecycle hardening and staged renderer diagnostics.'
