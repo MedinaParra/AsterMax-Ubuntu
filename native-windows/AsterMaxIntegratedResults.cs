@@ -23,7 +23,8 @@ namespace PrePoMax
             var details = _legend.Parent;
             Controls.Remove(details);
             _legend.Visible = false; // The native VTK scalar bar remains the color authority.
-            details.Dock = DockStyle.Fill;
+            details.Dock = DockStyle.Top;
+            details.Height = 430;
             return details;
         }
 
@@ -133,7 +134,7 @@ namespace PrePoMax
                     };
                     splitContainer2.Panel1.Controls.Add(_axEmbeddedResults);
                     _axResultDetails = _axEmbeddedResults.DetachResultDetails();
-                    _axResultDetailsHost = new Panel { Name="asterMaxResultDetails", Dock=DockStyle.Bottom, Height=250, BackColor=Color.White };
+                    _axResultDetailsHost = new Panel { Name="asterMaxResultDetails", Dock=DockStyle.Bottom, Height=280, AutoScroll=true, BackColor=Color.White };
                     _axResultDetailsHost.Controls.Add(_axResultDetails);
                     splitContainer1.Panel1.Controls.Add(_axResultDetailsHost);
                     _axResultDetailsHost.SendToBack();
