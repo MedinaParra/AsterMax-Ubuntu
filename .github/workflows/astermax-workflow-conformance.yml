@@ -1,8 +1,8 @@
-name: AsterMax C10.20.6 Windows Workflow Conformance
+name: AsterMax C10.20.7 Windows Workflow Conformance
 
 on:
   push:
-    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence ]
+    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity ]
     paths:
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
@@ -36,6 +36,8 @@ jobs:
         run: python3 native-windows/test-c10205-close-safe-solve.py
       - name: Guard Solve state coherence and atomic evidence
         run: python3 native-windows/test-c10206-solve-state-coherence.py
+      - name: Guard model-session result publication
+        run: python3 native-windows/test-c10207-model-session-identity.py
 
   windows-workflow-conformance:
     needs: validate-patch-chain
@@ -83,7 +85,7 @@ jobs:
             'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
             'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
             'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
-            'patch-c10206-solve-state-coherence.ps1'
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
 
@@ -142,7 +144,7 @@ jobs:
           python .\native-windows\build-c1010-materials.py --out .\dist
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.20.6';commit='${{ github.sha }}';executable_sha256=$hash;
+            release='C10.20.7';commit='${{ github.sha }}';executable_sha256=$hash;
             workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
@@ -183,7 +185,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.20.6-Workflow-Conformance
+          name: AsterMax-C10.20.7-Workflow-Conformance
           path: |
             dist/Audit/C10.20
             dist/Validation
@@ -194,6 +196,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.20.6-Windows-Test-Distribution
+          name: AsterMax-C10.20.7-Windows-Test-Distribution
           path: dist
           if-no-files-found: error
