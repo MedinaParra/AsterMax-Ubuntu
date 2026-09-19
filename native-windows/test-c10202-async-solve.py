@@ -15,6 +15,8 @@ required=[
     "_asterMaxSolveUiHeartbeatCount",
     "SetAsterMaxSolveUiBusy(true)",
     "SetAsterMaxSolveUiBusy(false)",
+    "bool uiBusySet=false;",
+    "if(uiBusySet && !IsDisposed && !Disposing)",
     "C1020WaitForSolveCompletion(600)",
     'add("async_solve_ui"',
     'DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff"',
