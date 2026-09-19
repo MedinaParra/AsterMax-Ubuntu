@@ -20,14 +20,15 @@ required=[
     '["execution"]="REAL_NATIVE_CREATE_MESH_COMMAND"',
     'command-execution-smoke.json',
     'add("command_execution_smoke"',
-    '$a=$a.Replace('["release"] = "C10.20.2"','["release"] = "C10.20.8"')',
+    'C10.20.2',
+    'C10.20.8',
 ]
 for token in required:
     assert token in patch, token
 
-marker="$meshNew=@'\\n"
+marker="$meshNew=@'\n"
 assert marker in patch, "meshNew block missing"
-mesh_new=patch.split(marker,1)[1].split("\\n'@",1)[0]
+mesh_new=patch.split(marker,1)[1].split("\n'@",1)[0]
 assert mesh_new.index("C10208ExerciseRealGenerateMesh(model)") < mesh_new.index("C1020PopulateB01Mesh(model);")
 assert "commands.Count>=11" in patch
 
