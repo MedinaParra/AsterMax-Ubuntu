@@ -141,6 +141,35 @@ $currentOld=[regex]::Replace($currentOld,"\r\n?","\n")
 $currentNew=[regex]::Replace($currentNew,"\r\n?","\n")
 $s=Replace-Required $s $currentOld $currentNew
 
+$failOld=@'
+        private void Fail(string message)
+        {
+            State=AsterMaxSolveState.Failed; Message=message; WriteFinalState(); throw new InvalidOperationException(message);
+        }
+'@
+$failNew=@'
+        private void Fail(string message)
+        {
+            lock(_stateTransitionSync)
+            {
+                if(_cancelRequested)
+                {
+                    State=AsterMaxSolveState.Cancelled;
+                    Message="CANCELLED: native Solve was cancelled by the user.";
+                    WriteFinalState();
+                    throw new OperationCanceledException(Message);
+                }
+                State=AsterMaxSolveState.Failed;
+                Message=message;
+                WriteFinalState();
+            }
+            throw new InvalidOperationException(message);
+        }
+'@
+$failOld=[regex]::Replace($failOld,"\r\n?","\n")
+$failNew=[regex]::Replace($failNew,"\r\n?","\n")
+$s=Replace-Required $s $failOld $failNew
+
 $writePattern='(?s)        private void WriteFinalState\(\)\s*\{(.*?)\n        \}\n\n        private static void WriteExport'
 $m=[regex]::Match($s,$writePattern)
 if(-not $m.Success){ throw 'C10.20.6 WriteFinalState structural anchor missing.' }
