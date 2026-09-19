@@ -122,6 +122,7 @@ $new=@'
 $old=$old.Replace("`r`n","`n"); $new=$new.Replace("`r`n","`n")
 if(-not $c.Contains($old)){throw 'PMX transactional load anchor missing'}
 $c=$c.Replace($old,$new)
+$c=$c.Replace("                New();`n                return;`n            }`n            if (data == null) data = TryReadUncompressedPmx","                throw new IOException(`"Unsupported PMX version; the current model was preserved.`");`n            }`n            if (data == null) data = TryReadUncompressedPmx")
 $c=$c.Replace('data = TryReadUncompressedPmx(fileName, out _model, out _allResults);','data = TryReadUncompressedPmx(fileName, out loadedModel, out loadedResults);')
 $old="            // Get controller`n            tmp = (Controller)data[0];"
 $new=@'
