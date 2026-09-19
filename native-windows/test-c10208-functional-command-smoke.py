@@ -2,6 +2,7 @@
 """Static guard for C10.20.8 functional command smoke. No FEA values are synthesized."""
 from pathlib import Path
 import json
+import re
 
 ROOT=Path(__file__).resolve().parent
 patch=(ROOT/"patch-c10208-functional-command-smoke.ps1").read_text(encoding="utf-8-sig")
@@ -24,6 +25,12 @@ required=[
 ]
 for token in required:
     assert token in patch, token
+
+m=re.search(r"\\$meshNew=@'\\n(.*?)\\n'@",patch,re.S)
+assert m, "meshNew block missing"
+mesh_new=m.group(1)
+assert mesh_new.index("C10208ExerciseRealGenerateMesh(model)") < mesh_new.index("C1020PopulateB01Mesh(model);")
+assert "commands.Count>=11" in patch
 
 assert "command_execution_smoke" in contract["cross_cutting_checks"]
 assert contract["release"]=="C10.20.8"
