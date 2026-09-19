@@ -74,7 +74,7 @@ closure_candidate = (
 
 report = {
     "schema": "astermax-workflow-conformance-report/v1",
-    "release": "C10.20.2",
+    "release": "C10.20.3",
     "reference_fixture": session.get("reference_fixture", contract.get("reference", {}).get("fixture_used_when_preferred_absent")),
     "contract": str(contract_path.name),
     "session": str(session_path.name),
