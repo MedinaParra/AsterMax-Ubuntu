@@ -1,52 +1,428 @@
 {
   "schema": "astermax-patch-chain/v1",
   "patches": [
-    {"id":"patch-astermax","file":"patch-astermax.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-branding","file":"patch-branding.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-lifecycle","file":"patch-lifecycle.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-runtime-smoke","file":"patch-runtime-smoke.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-x64-runtime","file":"patch-x64-runtime.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c960-compile-fixes","file":"patch-c960-compile-fixes.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c960-native-bridge","file":"patch-c960-native-bridge.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c960-smoke-hook","file":"patch-c960-smoke-hook.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c960-solution-anchor","file":"patch-c960-solution-anchor.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c961-native-codeaster-export","file":"patch-c961-native-codeaster-export.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c965-results-workspace","file":"patch-c965-results-workspace.ps1","depends":[],"declares":["AsterMaxResultsBundle","AsterMaxResultsWorkspace"],"consumes":[]},
-    {"id":"patch-c966-results-scene","file":"patch-c966-results-scene.ps1","depends":["patch-c965-results-workspace"],"declares":["AsterMaxResultsScene"],"consumes":["AsterMaxResultsBundle"]},
-    {"id":"patch-c967-vtk-results-binding","file":"patch-c967-vtk-results-binding.ps1","depends":["patch-c965-results-workspace","patch-c966-results-scene"],"declares":["AsterMaxVtkResultsBinding","AsterMaxResultsViewportForm","RenderScene"],"consumes":["AsterMaxResultsBundle","AsterMaxResultsScene"]},
-    {"id":"patch-c968-professional-results-hud","file":"patch-c968-professional-results-hud.ps1","depends":["patch-c967-vtk-results-binding"],"declares":["AsterMaxResultsColorContract"],"consumes":["AsterMaxResultsViewportForm"]},
-    {"id":"patch-c969-renderer-synchronized-results","file":"patch-c969-renderer-synchronized-results.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c970-native-3d-probe","file":"patch-c970-native-3d-probe.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c971-native-probe-callout","file":"patch-c971-native-probe-callout.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c972-native-framebuffer-evidence","file":"patch-c972-native-framebuffer-evidence.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c974-solver-provenance","file":"patch-c974-solver-provenance.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c975-analysis-provenance-manifest","file":"patch-c975-analysis-provenance-manifest.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c976-automatic-model-fingerprint","file":"patch-c976-automatic-model-fingerprint.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c977-pre-solve-readiness","file":"patch-c977-pre-solve-readiness.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c978-assignment-hexa8-quality","file":"patch-c978-assignment-hexa8-quality.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c985-model-fidelity-gate","file":"patch-c985-model-fidelity-gate.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c991-startup-hardening","file":"patch-c991-startup-hardening.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c992-startup-viewport","file":"patch-c992-startup-viewport.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c998-current-model-results-gate","file":"patch-c998-current-model-results-gate.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c999-portable-workspace-step","file":"patch-c999-portable-workspace-step.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1000-native-solve-transaction","file":"patch-c1000-native-solve-transaction.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1001-automatic-results-handoff","file":"patch-c1001-automatic-results-handoff.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1002-runtime-discovery","file":"patch-c1002-runtime-discovery.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1003-runtime-readiness","file":"patch-c1003-runtime-readiness.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1004-tetra-native-solve","file":"patch-c1004-tetra-native-solve.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1005-codeaster-runner-probe","file":"patch-c1005-codeaster-runner-probe.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1006-python-med-runtime-probe","file":"patch-c1006-python-med-runtime-probe.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1008-aster-group-records","file":"patch-c1008-aster-group-records.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c10081-portable-cad-smoke","file":"patch-c10081-portable-cad-smoke.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1009-functional-outline","file":"patch-c1009-functional-outline.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1010-button-audit","file":"patch-c1010-button-audit.ps1","depends":[],"declares":["AuditAsterMaxButtons","InvokeAsterMaxCommand"],"consumes":[]},
-    {"id":"patch-c1011-windows-runtime","file":"patch-c1011-windows-runtime.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1012-tetra-results-connectivity","file":"patch-c1012-tetra-results-connectivity.ps1","depends":["patch-c965-results-workspace","patch-c967-vtk-results-binding","patch-c968-professional-results-hud"],"declares":["CellTypes","VtkQuadraticTriangle","BuildExteriorSurface"],"consumes":["AsterMaxResultsBundle","AsterMaxResultsViewportForm","AsterMaxResultsColorContract"]},
-    {"id":"patch-c1013-results-contours-options","file":"patch-c1013-results-contours-options.ps1","depends":["patch-c1012-tetra-results-connectivity"],"declares":["_showContours","_showDeformed","_showEdges","_autoRange","_rangeMin","_rangeMax","CreateDisplaySpectrum","SetDisplayRange","UpdateScalarsAndCameraAndRedraw"],"consumes":["AsterMaxResultsViewportForm","RenderScene"]},
-    {"id":"patch-c1014-refined-mesh-runner-diagnostics","file":"patch-c1014-refined-mesh-runner-diagnostics.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1015-vtk-real-scalar-contours","file":"patch-c1015-vtk-real-scalar-contours.ps1","depends":["patch-c1013-results-contours-options"],"declares":[],"consumes":["_showContours","_showDeformed","_showEdges","UpdateScalarsAndCameraAndRedraw"]},
-    {"id":"patch-c1016-pmx-compatibility","file":"patch-c1016-pmx-compatibility.ps1","depends":[],"declares":[],"consumes":[]},
-    {"id":"patch-c1018-integrated-results","file":"patch-c1018-integrated-results.ps1","depends":["patch-c1010-button-audit","patch-c1013-results-contours-options","patch-c1016-pmx-compatibility"],"declares":["AsterMaxIntegratedResults"],"consumes":["AuditAsterMaxButtons","InvokeAsterMaxCommand","_showContours","_showDeformed","_showEdges","_autoRange","_rangeMin","_rangeMax","RenderScene"]},
-    {"id":"patch-c1020-workflow-conformance","file":"patch-c1020-workflow-conformance.ps1","depends":["patch-c1018-integrated-results"],"declares":["AsterMaxWorkflowConformanceAudit"],"consumes":["AsterMaxIntegratedResults","AuditAsterMaxButtons"]}
+    {
+      "id": "patch-astermax",
+      "file": "patch-astermax.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-branding",
+      "file": "patch-branding.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-lifecycle",
+      "file": "patch-lifecycle.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-runtime-smoke",
+      "file": "patch-runtime-smoke.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-x64-runtime",
+      "file": "patch-x64-runtime.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c960-compile-fixes",
+      "file": "patch-c960-compile-fixes.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c960-native-bridge",
+      "file": "patch-c960-native-bridge.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c960-smoke-hook",
+      "file": "patch-c960-smoke-hook.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c960-solution-anchor",
+      "file": "patch-c960-solution-anchor.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c961-native-codeaster-export",
+      "file": "patch-c961-native-codeaster-export.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c965-results-workspace",
+      "file": "patch-c965-results-workspace.ps1",
+      "depends": [],
+      "declares": [
+        "AsterMaxResultsBundle",
+        "AsterMaxResultsWorkspace"
+      ],
+      "consumes": []
+    },
+    {
+      "id": "patch-c966-results-scene",
+      "file": "patch-c966-results-scene.ps1",
+      "depends": [
+        "patch-c965-results-workspace"
+      ],
+      "declares": [
+        "AsterMaxResultsScene"
+      ],
+      "consumes": [
+        "AsterMaxResultsBundle"
+      ]
+    },
+    {
+      "id": "patch-c967-vtk-results-binding",
+      "file": "patch-c967-vtk-results-binding.ps1",
+      "depends": [
+        "patch-c965-results-workspace",
+        "patch-c966-results-scene"
+      ],
+      "declares": [
+        "AsterMaxVtkResultsBinding",
+        "AsterMaxResultsViewportForm",
+        "RenderScene"
+      ],
+      "consumes": [
+        "AsterMaxResultsBundle",
+        "AsterMaxResultsScene"
+      ]
+    },
+    {
+      "id": "patch-c968-professional-results-hud",
+      "file": "patch-c968-professional-results-hud.ps1",
+      "depends": [
+        "patch-c967-vtk-results-binding"
+      ],
+      "declares": [
+        "AsterMaxResultsColorContract"
+      ],
+      "consumes": [
+        "AsterMaxResultsViewportForm"
+      ]
+    },
+    {
+      "id": "patch-c969-renderer-synchronized-results",
+      "file": "patch-c969-renderer-synchronized-results.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c970-native-3d-probe",
+      "file": "patch-c970-native-3d-probe.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c971-native-probe-callout",
+      "file": "patch-c971-native-probe-callout.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c972-native-framebuffer-evidence",
+      "file": "patch-c972-native-framebuffer-evidence.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c974-solver-provenance",
+      "file": "patch-c974-solver-provenance.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c975-analysis-provenance-manifest",
+      "file": "patch-c975-analysis-provenance-manifest.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c976-automatic-model-fingerprint",
+      "file": "patch-c976-automatic-model-fingerprint.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c977-pre-solve-readiness",
+      "file": "patch-c977-pre-solve-readiness.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c978-assignment-hexa8-quality",
+      "file": "patch-c978-assignment-hexa8-quality.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c985-model-fidelity-gate",
+      "file": "patch-c985-model-fidelity-gate.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c991-startup-hardening",
+      "file": "patch-c991-startup-hardening.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c992-startup-viewport",
+      "file": "patch-c992-startup-viewport.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c998-current-model-results-gate",
+      "file": "patch-c998-current-model-results-gate.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c999-portable-workspace-step",
+      "file": "patch-c999-portable-workspace-step.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1000-native-solve-transaction",
+      "file": "patch-c1000-native-solve-transaction.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1001-automatic-results-handoff",
+      "file": "patch-c1001-automatic-results-handoff.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1002-runtime-discovery",
+      "file": "patch-c1002-runtime-discovery.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1003-runtime-readiness",
+      "file": "patch-c1003-runtime-readiness.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1004-tetra-native-solve",
+      "file": "patch-c1004-tetra-native-solve.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1005-codeaster-runner-probe",
+      "file": "patch-c1005-codeaster-runner-probe.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1006-python-med-runtime-probe",
+      "file": "patch-c1006-python-med-runtime-probe.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1008-aster-group-records",
+      "file": "patch-c1008-aster-group-records.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c10081-portable-cad-smoke",
+      "file": "patch-c10081-portable-cad-smoke.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1009-functional-outline",
+      "file": "patch-c1009-functional-outline.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1010-button-audit",
+      "file": "patch-c1010-button-audit.ps1",
+      "depends": [],
+      "declares": [
+        "AuditAsterMaxButtons",
+        "InvokeAsterMaxCommand"
+      ],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1011-windows-runtime",
+      "file": "patch-c1011-windows-runtime.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1012-tetra-results-connectivity",
+      "file": "patch-c1012-tetra-results-connectivity.ps1",
+      "depends": [
+        "patch-c965-results-workspace",
+        "patch-c967-vtk-results-binding",
+        "patch-c968-professional-results-hud"
+      ],
+      "declares": [
+        "CellTypes",
+        "VtkQuadraticTriangle",
+        "BuildExteriorSurface"
+      ],
+      "consumes": [
+        "AsterMaxResultsBundle",
+        "AsterMaxResultsViewportForm",
+        "AsterMaxResultsColorContract"
+      ]
+    },
+    {
+      "id": "patch-c1013-results-contours-options",
+      "file": "patch-c1013-results-contours-options.ps1",
+      "depends": [
+        "patch-c1012-tetra-results-connectivity"
+      ],
+      "declares": [
+        "_showContours",
+        "_showDeformed",
+        "_showEdges",
+        "_autoRange",
+        "_rangeMin",
+        "_rangeMax",
+        "CreateDisplaySpectrum",
+        "SetDisplayRange",
+        "UpdateScalarsAndCameraAndRedraw"
+      ],
+      "consumes": [
+        "AsterMaxResultsViewportForm",
+        "RenderScene"
+      ]
+    },
+    {
+      "id": "patch-c1014-refined-mesh-runner-diagnostics",
+      "file": "patch-c1014-refined-mesh-runner-diagnostics.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1015-vtk-real-scalar-contours",
+      "file": "patch-c1015-vtk-real-scalar-contours.ps1",
+      "depends": [
+        "patch-c1013-results-contours-options"
+      ],
+      "declares": [],
+      "consumes": [
+        "_showContours",
+        "_showDeformed",
+        "_showEdges",
+        "UpdateScalarsAndCameraAndRedraw"
+      ]
+    },
+    {
+      "id": "patch-c1016-pmx-compatibility",
+      "file": "patch-c1016-pmx-compatibility.ps1",
+      "depends": [],
+      "declares": [],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1018-integrated-results",
+      "file": "patch-c1018-integrated-results.ps1",
+      "depends": [
+        "patch-c1010-button-audit",
+        "patch-c1013-results-contours-options",
+        "patch-c1016-pmx-compatibility"
+      ],
+      "declares": [
+        "AsterMaxIntegratedResults"
+      ],
+      "consumes": [
+        "AuditAsterMaxButtons",
+        "InvokeAsterMaxCommand",
+        "_showContours",
+        "_showDeformed",
+        "_showEdges",
+        "_autoRange",
+        "_rangeMin",
+        "_rangeMax",
+        "RenderScene"
+      ]
+    },
+    {
+      "id": "patch-c1020-workflow-conformance",
+      "file": "patch-c1020-workflow-conformance.ps1",
+      "depends": [
+        "patch-c1018-integrated-results"
+      ],
+      "declares": [
+        "AsterMaxWorkflowConformanceAudit"
+      ],
+      "consumes": [
+        "AsterMaxIntegratedResults",
+        "AuditAsterMaxButtons"
+      ]
+    },
+    {
+      "id": "patch-c10201-cload-semantics",
+      "file": "patch-c10201-cload-semantics.ps1",
+      "depends": [
+        "patch-c1020-workflow-conformance"
+      ],
+      "declares": [],
+      "consumes": []
+    }
   ]
 }
