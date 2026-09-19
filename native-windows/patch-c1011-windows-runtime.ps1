@@ -190,6 +190,28 @@ $s=$s.Replace('MessageBox.Show(this,d.ToString(Formatting.Indented),',@'
 '@)
 # A new diagnostic obtained after configuring a folder has no runtime_ready field.
 $s=$s.Replace('(bool)d["runtime_ready"]?MessageBoxIcon.Information:MessageBoxIcon.Warning','((bool?)d["code_aster_backend_ready"]==true && (bool?)d["python_ready"]==true)?MessageBoxIcon.Information:MessageBoxIcon.Warning')
+# Show the actual runner failure (including the retained diagnostic folder)
+# instead of hiding it behind a generic non-zero exit-code message.
+$oldFailure='Message="Code_Aster runner returned non-zero exit code: "+RunnerExitCode;'
+$newFailure=@'
+Message="Code_Aster runner returned non-zero exit code: "+RunnerExitCode;
+                string stderrLog=Path.Combine(Workspace,"CODE_ASTER_RUNNER_STDERR.log");
+                if(File.Exists(stderrLog)) Message+="\n\n"+BuildCodeAsterDiagnostic(File.ReadAllText(stderrLog));
+'@
+if(-not $s.Contains($oldFailure)){ throw 'Runner failure diagnostic anchor missing.' }
+$s=$s.Replace($oldFailure,$newFailure)
+
+# Isolate rapid consecutive solves; second-resolution names can reuse stale files.
+$oldTx='DateTime.UtcNow.ToString("yyyyMMdd-HHmmss",CultureInfo.InvariantCulture)'
+if(-not $s.Contains($oldTx)){ throw 'Solve workspace identity anchor missing.' }
+$s=$s.Replace($oldTx,$oldTx+'+"-"+Guid.NewGuid().ToString("N")')
+
+# C10.09 already drains process pipes concurrently. Keep a fail-closed guard
+# against accidentally losing that patch when changing the integration chain.
+if($s.Contains('string stdout=p.StandardOutput.ReadToEnd();')) {
+    throw 'Sequential subprocess pipe read remains after C10.09.'
+}
+
 Set-Content $p $s -Encoding UTF8
 
 # C10.10.1 is retained as the user-facing release while the runtime hotfix is stabilized.
