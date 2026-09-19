@@ -11,6 +11,7 @@ contract=json.loads((ROOT/"workflow-conformance"/"workflow-contract.json").read_
 required=[
     "AsterMaxSolveState.Cancelled",
     "public void RequestCancel()",
+    "Task.Run(() => TryTerminateProcessTree(active))",
     "TryTerminateProcessTree",
     'Arguments="/PID "+process.Id.ToString(CultureInfo.InvariantCulture)+" /T /F"',
     "RunTrackedProcess",
