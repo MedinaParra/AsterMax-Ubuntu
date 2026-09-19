@@ -416,6 +416,14 @@ namespace PrePoMax
                 {
                     save.Invoke(_controller, new object[] { path });
                     if (!File.Exists(path)) throw new IOException("PMX file was not written.");
+                    // Cycle 2 also checks recovery of the branded header written by older releases.
+                    if (i == 2)
+                    {
+                        byte[] header = new byte[32];
+                        System.Text.Encoding.ASCII.GetBytes("AsterMax Mechanical C10.10.1").CopyTo(header, 0);
+                        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write))
+                            stream.Write(header, 0, header.Length);
+                    }
                     object result = open.Invoke(_controller, new object[] { path });
                     Task task = result as Task;
                     if (task != null) task.GetAwaiter().GetResult();
@@ -435,7 +443,17 @@ namespace PrePoMax
                     });
                     if (!survived) return new JObject { ["pass"] = false, ["reason"] = "Model changed after PMX reopen.", ["cycles"] = evidence };
                 }
-                return new JObject { ["pass"] = true, ["reason"] = "Three real PMX save/reopen cycles preserved the B01 model.", ["cycles"] = evidence };
+                FeModel originalModel = _controller.Model;
+                string corrupt = Path.Combine(Path.GetDirectoryName(path), "invalid.pmx");
+                File.WriteAllBytes(corrupt, new byte[] { 1, 2, 3, 4 });
+                bool rejected = false;
+                try { open.Invoke(_controller, new object[] { corrupt }); }
+                catch (TargetInvocationException) { rejected = true; }
+                bool preserved = rejected && Object.ReferenceEquals(originalModel, _controller.Model) &&
+                                 _controller.Model.Mesh.Nodes.Count == 44;
+                if (!preserved) throw new InvalidOperationException("Invalid PMX replaced the active model.");
+                return new JObject { ["pass"] = true, ["reason"] = "Three PMX cycles, legacy header recovery and invalid-file model preservation passed.",
+                    ["invalid_file_preserved_model"] = preserved, ["legacy_header_reopened"] = true, ["cycles"] = evidence };
             }
             catch (TargetInvocationException ex)
             {

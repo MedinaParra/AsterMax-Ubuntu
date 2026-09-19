@@ -159,6 +159,7 @@ jobs:
           Write-Host "MANDATORY_FAIL=$($r.summary.mandatory_failures)"
           Write-Host "MANDATORY_NOT_EXERCISED=$($r.summary.mandatory_not_exercised)"
           Write-Host "CLOSURE_CANDIDATE=$($r.summary.closure_candidate)"
+          if(-not $r.summary.release_gate_pass){ throw 'Workflow session failed or mandatory evidence is incomplete.' }
           if([int]$r.summary.mandatory_failures -gt 0){ throw 'At least one mandatory workflow stage is FAIL.' }
 
       - name: Upload C10.20 conformance evidence

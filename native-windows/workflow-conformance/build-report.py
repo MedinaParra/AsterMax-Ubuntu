@@ -36,7 +36,7 @@ for stage in contract.get("stages", []):
     raw_status = raw.get("status", "NOT_EXERCISED")
     if raw_status not in STATUS:
         raw_status = "FAIL"
-    status = raw_status if all_present else "NOT_EXERCISED"
+    status = "FAIL" if raw_status == "FAIL" else (raw_status if all_present else "NOT_EXERCISED")
     rows.append({
         "id": sid,
         "label": stage.get("label", sid),
@@ -60,7 +60,14 @@ cross = session.get("cross_cutting") or {}
 cross_checks = cross.get("checks") or []
 cross_failures = sum(1 for item in cross_checks if item.get("status") == "FAIL")
 cross_not_exercised = sum(1 for item in cross_checks if item.get("status") == "NOT_EXERCISED")
+required_cross = set(contract.get("cross_cutting_checks", []))
+missing_cross = sorted(required_cross - {item.get("id") for item in cross_checks})
+session_failed = (session.get("pass") is not True or bool(session.get("partial")) or
+                  bool(session.get("error")) or session.get("process_exit_code", 0) != 0)
+release_gate_pass = (not session_failed and mandatory_failures == 0 and
+                     mandatory_not_exercised == 0 and cross_failures == 0 and not missing_cross and bool(rows))
 closure_candidate = (
+    release_gate_pass and not missing_cross and
     mandatory_failures == 0 and mandatory_not_exercised == 0 and
     cross_failures == 0 and cross_not_exercised == 0 and len(rows) == len(contract.get("stages", []))
 )
@@ -74,7 +81,12 @@ report = {
     "evidence_rule": contract.get("evidence_rule"),
     "rows": rows,
     "cross_cutting": cross,
+    "session_error": session.get("error"),
+    "process_exit_code": session.get("process_exit_code"),
     "summary": {
+        "session_failed": session_failed,
+        "release_gate_pass": release_gate_pass,
+        "missing_cross_checks": missing_cross,
         "mandatory_pass": mandatory_pass,
         "mandatory_failures": mandatory_failures,
         "mandatory_not_exercised": mandatory_not_exercised,
@@ -140,6 +152,7 @@ code{{background:#f4f4f4;padding:2px 4px}} .notice{{padding:12px;border:1px soli
 <div class="notice">PASS requires all four stage evidence files. Missing evidence is <strong>NOT_EXERCISED</strong>, never PASS. This report does not assert ANSYS equivalence or historical-finding closure.</div>
 <p><strong>Reference fixture:</strong> {html.escape(str(report['reference_fixture']))}</p>
 <p><strong>Mandatory:</strong> PASS {mandatory_pass}, FAIL {mandatory_failures}, NOT_EXERCISED {mandatory_not_exercised}. <strong>Closure candidate:</strong> {str(closure_candidate).lower()}.</p>
+<p><strong>Release gate:</strong> {str(release_gate_pass).lower()}. <strong>Session error:</strong> {html.escape(str(session.get("error") or "none"))}</p>
 <h2>Mandatory workflow stages</h2>
 <table><thead><tr><th>Stage</th><th>Mandatory</th><th>Status</th><th>Workflow state</th><th>Transition</th><th>Evidence</th></tr></thead>
 <tbody>{''.join(stage_html)}</tbody></table>

@@ -82,3 +82,59 @@ if(-not $e.Contains('FormatterAssemblyStyle.Simple')){$e=$e.Replace($saveFormatt
 Set-Content $ext $e -Encoding UTF8
 
 Write-Host 'C10.16 PMX compatibility binder + simple assembly serialization applied.' -ForegroundColor Green
+
+
+# The serialized mesh layout belongs to pinned PrePoMax 1.4.0, not to the UI release.
+# Old AsterMax files wrote the UI title and were parsed as version 10/20 instead.
+$controller=Join-Path $Root 'PrePoMax/Controller.cs'
+$c=(Get-Content $controller -Raw).Replace("`r`n","`n")
+$old='byte[] version = Encoding.ASCII.GetBytes(Globals.ProgramName);'
+if(-not $c.Contains($old)){throw 'PMX header writer anchor missing'}
+$c=$c.Replace($old,'byte[] version = Encoding.ASCII.GetBytes("PrePoMax v1.4.0");')
+$anchor='                        string[] versions = fileVersion.Split('
+if(-not $c.Contains($anchor)){throw 'PMX header reader anchor missing'}
+$c=$c.Replace($anchor,@'
+                        // All branded files produced on this pinned serialization schema use 1.4.0.
+                        if (fileVersion.StartsWith("AsterMax Mechanical C", StringComparison.Ordinal))
+                            fileVersion = "PrePoMax v1.4.0";
+                        string[] versions = fileVersion.Split(
+'@.TrimEnd())
+# Validate into temporary objects before clearing a user's current project.
+$old=@'
+            Clear();
+            //
+            OpenedFileName = fileName;
+            //
+            Controller tmp = null;
+            object[] data = null;
+            string fileVersion;
+            //
+            data = TryReadCompressedPmx(fileName, out _model, out _allResults, out fileVersion);
+'@
+$new=@'
+            Controller tmp = null;
+            object[] data = null;
+            string fileVersion;
+            FeModel loadedModel;
+            ResultsCollection loadedResults;
+            data = TryReadCompressedPmx(fileName, out loadedModel, out loadedResults, out fileVersion);
+'@
+$old=$old.Replace("`r`n","`n"); $new=$new.Replace("`r`n","`n")
+if(-not $c.Contains($old)){throw 'PMX transactional load anchor missing'}
+$c=$c.Replace($old,$new)
+$c=$c.Replace('data = TryReadUncompressedPmx(fileName, out _model, out _allResults);','data = TryReadUncompressedPmx(fileName, out loadedModel, out loadedResults);')
+$old="            // Get controller`n            tmp = (Controller)data[0];"
+$new=@'
+            // The file is readable; only now replace the active model.
+            Clear();
+            OpenedFileName = fileName;
+            _model = loadedModel;
+            _allResults = loadedResults;
+            // Get controller
+            tmp = (Controller)data[0];
+'@
+$new=$new.Replace("`r`n","`n")
+if(-not $c.Contains($old)){throw 'PMX commit anchor missing'}
+$c=$c.Replace($old,$new)
+Set-Content $controller $c -Encoding UTF8
+Write-Host 'PMX 1.4.0 schema header and transactional read repair applied.'

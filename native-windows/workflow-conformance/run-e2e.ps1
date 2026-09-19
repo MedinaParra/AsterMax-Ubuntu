@@ -21,6 +21,10 @@ if(-not $p.WaitForExit($TimeoutSeconds*1000)) {
 }
 if(-not(Test-Path $session)) { throw "C10.20 executable exited without workflow-conformance-session.json. ExitCode=$($p.ExitCode)" }
 
+$sessionData=Get-Content $session -Raw | ConvertFrom-Json
+$sessionData | Add-Member -NotePropertyName process_exit_code -NotePropertyValue $p.ExitCode -Force
+$sessionData | ConvertTo-Json -Depth 60 | Set-Content $session -Encoding UTF8
+
 $builder=Join-Path $PSScriptRoot 'build-report.py'
 $contract=Join-Path $PSScriptRoot 'workflow-contract.json'
 & python $builder --contract $contract --session $session --outdir $outPath
@@ -28,6 +32,7 @@ if($LASTEXITCODE -ne 0 -or -not(Test-Path $report)) { throw 'C10.20 report gener
 $data=Get-Content $report -Raw | ConvertFrom-Json
 $data | ConvertTo-Json -Depth 30 | Write-Host
 $mandatoryFailures=[int]$data.summary.mandatory_failures
+if(-not $data.summary.release_gate_pass){ throw 'Workflow incomplete or failed; see session and mandatory-stage evidence.' }
 if($mandatoryFailures -gt 0) { throw "C10.20 has $mandatoryFailures mandatory stage FAIL result(s)." }
 if($p.ExitCode -ne 0) { throw "C10.20 native audit process failed before a clean completion. ExitCode=$($p.ExitCode)" }
 Write-Host "ASTERMAX_C1020_MANDATORY_PASS=$($data.summary.mandatory_pass)"
