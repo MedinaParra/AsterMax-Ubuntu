@@ -59,6 +59,7 @@ $replacement=@'
             }
 
             System.Windows.Forms.Timer heartbeat=null;
+            bool uiBusySet=false;
             AsterMaxNativeSolveTransaction transaction=null;
             CaeModel.FeModel solveModel=null;
             try
@@ -76,6 +77,7 @@ $replacement=@'
                 _asterMaxSolveUiHeartbeatCount=0;
                 _asterMaxSolveInProgress=true;
                 SetAsterMaxSolveUiBusy(true);
+                uiBusySet=true;
 
                 heartbeat=new System.Windows.Forms.Timer { Interval=25 };
                 heartbeat.Tick += (sender,args) => {
@@ -114,7 +116,7 @@ $replacement=@'
                     heartbeat.Dispose();
                 }
                 _asterMaxSolveInProgress=false;
-                if(!IsDisposed && !Disposing) SetAsterMaxSolveUiBusy(false);
+                if(uiBusySet && !IsDisposed && !Disposing) SetAsterMaxSolveUiBusy(false);
             }
         }
     }
