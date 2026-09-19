@@ -129,7 +129,7 @@ jobs:
           python .\native-windows\build-c1010-materials.py --out .\dist
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.20';commit='${{ github.sha }}';executable_sha256=$hash;
+            release='C10.20.1';commit='${{ github.sha }}';executable_sha256=$hash;
             workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
