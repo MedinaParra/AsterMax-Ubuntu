@@ -22,9 +22,9 @@ required=[
 for token in required:
     assert token in patch, token
 
-marker="$publishNew=@'\\n"
+marker="$publishNew=@'\n"
 assert marker in patch, "publishNew block missing"
-publish_new=patch.split(marker,1)[1].split("\\n'@",1)[0]
+publish_new=patch.split(marker,1)[1].split("\n'@",1)[0]
 assert publish_new.index("_asterMaxSolveModelSessionPreserved=true;") < publish_new.index("_asterMaxLoadedResults=completedBundle;")
 assert "Object.ReferenceEquals(_controller.Model,solveModel)" in publish_new
 assert "_asterMaxModelSessionRevision!=_asterMaxSolveFrozenSessionRevision" in publish_new
