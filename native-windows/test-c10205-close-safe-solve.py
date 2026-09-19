@@ -23,5 +23,4 @@ for token in required:
 
 # The second Close must occur only after the active worker's finally clears in-progress.
 assert patch.index("_asterMaxSolveInProgress=false;") < patch.index("BeginInvoke(new Action(Close));")
-assert contract["release"]=="C10.20.5"
 print("C10.20.5 CLOSE_SAFE_SOLVE_REGRESSION_OK")

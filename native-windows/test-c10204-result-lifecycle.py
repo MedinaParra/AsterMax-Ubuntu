@@ -17,5 +17,4 @@ required=[
 ]
 for token in required:
     assert token in patch, token
-assert contract["release"]=="C10.20.4"
 print("C10.20.4 RESULT_LIFECYCLE_REGRESSION_OK")

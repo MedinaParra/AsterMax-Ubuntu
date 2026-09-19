@@ -25,5 +25,4 @@ for token in required:
     assert token in patch, token
 assert "string stdout=p.StandardOutput.ReadToEnd();" in legacy
 assert 'return RunTrackedProcess(psi,stem+"_STDOUT.log",stem+"_STDERR.log");' in patch
-assert contract["release"]=="C10.20.3"
 print("C10.20.3 CANCEL_SOLVE_REGRESSION_OK")

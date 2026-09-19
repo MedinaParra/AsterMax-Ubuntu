@@ -54,6 +54,7 @@
     {"id":"patch-c10204-result-lifecycle","file":"patch-c10204-result-lifecycle.ps1","depends":["patch-c10203-cancel-solve"],"declares":[],"consumes":[]},
     {"id":"patch-c10205-close-safe-solve","file":"patch-c10205-close-safe-solve.ps1","depends":["patch-c10204-result-lifecycle"],"declares":[],"consumes":[]},
     {"id":"patch-c10206-solve-state-coherence","file":"patch-c10206-solve-state-coherence.ps1","depends":["patch-c10205-close-safe-solve"],"declares":[],"consumes":[]},
-    {"id":"patch-c10207-model-session-identity","file":"patch-c10207-model-session-identity.ps1","depends":["patch-c10206-solve-state-coherence"],"declares":[],"consumes":[]}
+    {"id":"patch-c10207-model-session-identity","file":"patch-c10207-model-session-identity.ps1","depends":["patch-c10206-solve-state-coherence"],"declares":[],"consumes":[]},
+    {"id":"patch-c10208-functional-command-smoke","file":"patch-c10208-functional-command-smoke.ps1","depends":["patch-c10207-model-session-identity"],"declares":[],"consumes":[]}
   ]
 }
