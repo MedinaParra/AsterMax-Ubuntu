@@ -30,7 +30,7 @@ $cancelHelpers=@'
             _cancelRequested=true;
             Process active=null;
             lock(_activeProcessSync) active=_activeProcess;
-            if(active!=null) TryTerminateProcessTree(active);
+            if(active!=null) Task.Run(() => TryTerminateProcessTree(active));
         }
 
         private void ThrowIfCancellationRequested()
