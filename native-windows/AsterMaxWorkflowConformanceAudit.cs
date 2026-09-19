@@ -123,7 +123,7 @@ namespace PrePoMax
             C1020CaptureStage(directory, rows, previousStates, 7, "static-structural", "Static Structural", "ax-analysis",
                 () => C1020State("ax-analysis") == 2 && C1020State("supports") == 2 &&
                       C1020State("loads") == 2 && C1020State("ax-model") == 2,
-                "One active linear static study with fixed support and 10000 N axial load; model state == 2.");
+                "One active linear static study with fixed support and 10000 N total axial load (4 x 2500 N CLoad per node); model state == 2.");
 
             string pmxPath = Path.Combine(directory, "B01-C10.20.pmx");
             JObject pmxCycles = C1020ExercisePmxCycles(pmxPath, 3);
