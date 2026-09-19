@@ -69,6 +69,7 @@ Set-Content $exporterPath $e -Encoding UTF8
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
 $a=(Get-Content $auditPath -Raw).Replace("`r`n","`n")
 $a=Replace-Required $a 'new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 10000, 0, 0, false, false, 0)' 'new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 2500, 0, 0, false, false, 0)'
+$a=$a.Replace('["release"] = "C10.20"','["release"] = "C10.20.1"')
 Set-Content $auditPath $a -Encoding UTF8
 
 Write-Host 'C10.20.1 CLoad semantics hotfix applied: native per-node force preserved; legacy total contracts remain readable.' -ForegroundColor Green
