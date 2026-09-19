@@ -47,6 +47,7 @@
     {"id":"patch-c1015-vtk-real-scalar-contours","file":"patch-c1015-vtk-real-scalar-contours.ps1","depends":["patch-c1013-results-contours-options"],"declares":[],"consumes":["_showContours","_showDeformed","_showEdges","UpdateScalarsAndCameraAndRedraw"]},
     {"id":"patch-c1016-pmx-compatibility","file":"patch-c1016-pmx-compatibility.ps1","depends":[],"declares":[],"consumes":[]},
     {"id":"patch-c1018-integrated-results","file":"patch-c1018-integrated-results.ps1","depends":["patch-c1010-button-audit","patch-c1013-results-contours-options","patch-c1016-pmx-compatibility"],"declares":["AsterMaxIntegratedResults"],"consumes":["AuditAsterMaxButtons","InvokeAsterMaxCommand","_showContours","_showDeformed","_showEdges","_autoRange","_rangeMin","_rangeMax","RenderScene"]},
-    {"id":"patch-c1020-workflow-conformance","file":"patch-c1020-workflow-conformance.ps1","depends":["patch-c1018-integrated-results"],"declares":["AsterMaxWorkflowConformanceAudit"],"consumes":["AsterMaxIntegratedResults","AuditAsterMaxButtons"]}
+    {"id":"patch-c1020-workflow-conformance","file":"patch-c1020-workflow-conformance.ps1","depends":["patch-c1018-integrated-results"],"declares":["AsterMaxWorkflowConformanceAudit"],"consumes":["AsterMaxIntegratedResults","AuditAsterMaxButtons"]},
+    {"id":"patch-c10201-cload-semantics","file":"patch-c10201-cload-semantics.ps1","depends":["patch-c1020-workflow-conformance"],"declares":[],"consumes":[]}
   ]
 }
