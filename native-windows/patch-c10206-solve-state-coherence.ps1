@@ -109,6 +109,48 @@ $runningNew='            TransitionOrCancel(AsterMaxSolveState.Running,"RUNNING:
 $runningOld=[regex]::Replace($runningOld,"\r\n?","\n")
 $s=Replace-Required $s $runningOld $runningNew
 
+$missingRunnerOld=@'
+            if(String.IsNullOrWhiteSpace(RunnerExecutable) || !File.Exists(RunnerExecutable))
+            {
+                State=AsterMaxSolveState.Failed;
+                Message="Code_Aster runner is not configured. Set ASTERMAX_CODE_ASTER_RUNNER to a validated runner executable/script.";
+                WriteFinalState();
+                throw new FileNotFoundException(Message,RunnerExecutable);
+            }
+'@
+$missingRunnerNew=@'
+            if(String.IsNullOrWhiteSpace(RunnerExecutable) || !File.Exists(RunnerExecutable))
+            {
+                Fail("Code_Aster runner is not configured. Set ASTERMAX_CODE_ASTER_RUNNER to a validated runner executable/script.");
+            }
+'@
+$missingRunnerOld=[regex]::Replace($missingRunnerOld,"\r\n?","\n")
+$missingRunnerNew=[regex]::Replace($missingRunnerNew,"\r\n?","\n")
+$s=Replace-Required $s $missingRunnerOld $missingRunnerNew
+
+$runnerExitOld=@'
+            if(RunnerExitCode!=0)
+            {
+                State=AsterMaxSolveState.Failed;
+                string details=BuildRunnerFailureDiagnostic(Workspace,RunnerExitCode.Value);
+                Message="Code_Aster solve failed (runner exit "+RunnerExitCode+")."+
+                    (String.IsNullOrWhiteSpace(details)?"":"\n\n"+details);
+                WriteFinalState();
+                throw new InvalidOperationException(Message);
+            }
+'@
+$runnerExitNew=@'
+            if(RunnerExitCode!=0)
+            {
+                string details=BuildRunnerFailureDiagnostic(Workspace,RunnerExitCode.Value);
+                Fail("Code_Aster solve failed (runner exit "+RunnerExitCode+")."+
+                    (String.IsNullOrWhiteSpace(details)?"":"\n\n"+details));
+            }
+'@
+$runnerExitOld=[regex]::Replace($runnerExitOld,"\r\n?","\n")
+$runnerExitNew=[regex]::Replace($runnerExitNew,"\r\n?","\n")
+$s=Replace-Required $s $runnerExitOld $runnerExitNew
+
 $postOld=@'
             RequireUnchangedModel(liveModel);
             State=AsterMaxSolveState.Postprocessing;
