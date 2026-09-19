@@ -16,7 +16,7 @@ assert '"nodal_force_per_node"' in hotfix
 assert 'PER_NODE_CLOAD' in hotfix
 assert 'LEGACY_TOTAL_DISTRIBUTED' in hotfix
 assert 'perNodeLoad ? GetDouble(load,"fx_per_node_n")' in hotfix
-assert 'new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 2500' in audit
+assert 'new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 2500' in hotfix
 b01 = contract["reference"]["b01"]
 assert b01["total_force_n"] == [10000.0, 0.0, 0.0]
 assert b01["cload_per_node_n"] == [2500.0, 0.0, 0.0]
