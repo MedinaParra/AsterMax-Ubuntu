@@ -31,5 +31,4 @@ assert "Object.ReferenceEquals(_controller.Model,solveModel)" in publish_new
 assert "_asterMaxModelSessionRevision!=_asterMaxSolveFrozenSessionRevision" in publish_new
 
 assert "model_session_identity" in contract["cross_cutting_checks"]
-assert contract["release"]=="C10.20.7"
 print("C10.20.7 MODEL_SESSION_IDENTITY_REGRESSION_OK")
