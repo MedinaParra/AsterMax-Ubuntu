@@ -41,3 +41,15 @@ foreach($token in @('data.Geometry.ExtremeNodes.Ids','data.Geometry.ExtremeNodes
 }
 Set-Content $vtkPath $s -Encoding UTF8
 Write-Host 'C10.15 real nodal scalar contours: vtk actor extreme-node metadata bound.' -ForegroundColor Green
+
+# A static result view has no animation frame data. Scalar formatting must still
+# assign its lookup table; the upstream animation cache optimization assumed it existed.
+$control=Join-Path $Root 'vtkControl/vtkControl.cs'
+$v=Get-Content $control -Raw
+$old='&& !_animationFrameData.InitializedActorNames.Contains(entry.Value.Name)) // animation speedup'
+$new='&& (_animationFrameData == null || !_animationFrameData.InitializedActorNames.Contains(entry.Value.Name))) // animation speedup'
+if(-not $v.Contains($old)){throw 'Static scalar formatting animation-cache anchor missing'}
+$v=$v.Replace($old,$new)
+Set-Content $control $v -Encoding UTF8
+Write-Host 'Static scalar contours support a missing animation cache.'
+
