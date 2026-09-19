@@ -64,4 +64,11 @@ $oldManifest=$oldManifest.Replace("`r`n","`n"); $newManifest=$newManifest.Replac
 $e=Replace-Required $e $oldManifest $newManifest
 Set-Content $exporterPath $e -Encoding UTF8
 
+# The conformance fixture declares 10 kN TOTAL across four nodes. Because CLoad is per-node,
+# store 2.5 kN in each selected node after C10.20 has normalized the internal object names.
+$auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
+$a=(Get-Content $auditPath -Raw).Replace("`r`n","`n")
+$a=Replace-Required $a 'new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 10000, 0, 0, false, false, 0)' 'new CLoad("Axial_Force", "LOAD", RegionTypeEnum.NodeSetName, 2500, 0, 0, false, false, 0)'
+Set-Content $auditPath $a -Encoding UTF8
+
 Write-Host 'C10.20.1 CLoad semantics hotfix applied: native per-node force preserved; legacy total contracts remain readable.' -ForegroundColor Green
