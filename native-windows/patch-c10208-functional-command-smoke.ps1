@@ -6,6 +6,13 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
     return $Text.Replace($Old,$New)
 }
 
+$mainPath=Join-Path $Root 'PrePoMax/Forms/FrmMain.cs'
+$m=[regex]::Replace((Get-Content $mainPath -Raw),"\\r\\n?","\\n")
+$meshingPopup='                    MessageBoxes.ShowError("Errors occurred during meshing. Please check the output window.");'
+$meshingAudit='                    if(!_asterMaxUiAuditMode) MessageBoxes.ShowError("Errors occurred during meshing. Please check the output window.");'
+$m=Replace-Required $m $meshingPopup $meshingAudit
+Set-Content $mainPath $m -Encoding UTF8
+
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
 $a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","\n")
 
