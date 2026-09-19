@@ -260,7 +260,7 @@ $crossNew=@'
                     bool generateMesh=commands!=null && commands.Any(x =>
                         String.Equals((string)x["command"],"Generate Mesh",StringComparison.Ordinal) &&
                         (bool?)x["pass"]==true && (int?)x["elements_after"]>(int?)x["elements_before"]);
-                    bool pass=(bool?)evidence["pass"]==true && commands!=null && commands.Count>=10 && generateMesh;
+                    bool pass=(bool?)evidence["pass"]==true && commands!=null && commands.Count>=11 && generateMesh;
                     add("command_execution_smoke",pass?"PASS":"FAIL",
                         pass ? "Workflow executed native editor, meshing and integrated-result ribbon commands." :
                                "One or more required functional ribbon commands were not executed successfully.",
