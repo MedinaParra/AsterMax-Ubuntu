@@ -24,6 +24,9 @@ required=[
     "Interlocked.Increment(ref _stateRevision)",
     "private void Fail(string message)",
     "throw new OperationCanceledException(Message)",
+    'Fail("Code_Aster runner is not configured.',
+    'Fail("Code_Aster solve failed (runner exit "',
+
 ]
 for token in required:
     assert token in patch, token
