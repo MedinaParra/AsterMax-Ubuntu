@@ -22,6 +22,7 @@ required=[
     'add("command_execution_smoke"',
     'C10.20.2',
     'C10.20.8',
+    'if(!_asterMaxUiAuditMode) MessageBoxes.ShowError("Errors occurred during meshing.',
 ]
 for token in required:
     assert token in patch, token
