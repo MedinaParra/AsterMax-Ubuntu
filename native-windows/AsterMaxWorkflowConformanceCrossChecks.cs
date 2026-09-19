@@ -53,6 +53,44 @@ namespace PrePoMax
 
             try
             {
+                string solveWorkspace = _asterMaxSolveTransaction == null ? null : _asterMaxSolveTransaction.Workspace;
+                string txPath = String.IsNullOrWhiteSpace(solveWorkspace) ? null :
+                    Path.Combine(solveWorkspace, "ASTERMAX_SOLVE_TRANSACTION.json");
+                if (String.IsNullOrWhiteSpace(txPath) || !File.Exists(txPath))
+                {
+                    add("cload_semantics", "NOT_EXERCISED",
+                        "Solve transaction manifest is unavailable; nodal-load semantics could not be verified.", null);
+                }
+                else
+                {
+                    JObject tx = JObject.Parse(File.ReadAllText(txPath));
+                    JObject manifest = tx["native_exporter_manifest"] as JObject;
+                    string semantics = manifest == null ? null : (string)manifest["load_semantics"];
+                    int loadNodes = manifest == null ? 0 : ((int?)manifest["load_nodes"] ?? 0);
+                    double fxPerNode = manifest == null ? Double.NaN : ((double?)manifest["fx_per_node_n"] ?? Double.NaN);
+                    double fxTotal = manifest == null ? Double.NaN : ((double?)manifest["fx_total_n"] ?? Double.NaN);
+                    bool pass = String.Equals(semantics, "PER_NODE_CLOAD", StringComparison.Ordinal) &&
+                                loadNodes == 4 && Math.Abs(fxPerNode - 2500.0) < 1e-9 &&
+                                Math.Abs(fxTotal - 10000.0) < 1e-9;
+                    add("cload_semantics", pass ? "PASS" : "FAIL",
+                        pass ? "Native CLoad semantics preserved: 2500 N per node across 4 LOAD nodes = 10000 N total." :
+                        "Unexpected Code_Aster load semantics or B01 force provenance.",
+                        new JObject {
+                            ["transaction_manifest"] = Path.GetFileName(txPath),
+                            ["load_semantics"] = semantics,
+                            ["load_nodes"] = loadNodes,
+                            ["fx_per_node_n"] = fxPerNode,
+                            ["fx_total_n"] = fxTotal
+                        });
+                }
+            }
+            catch (Exception ex)
+            {
+                add("cload_semantics", "FAIL", ex.Message, null);
+            }
+
+            try
+            {
                 string prefix = Path.Combine(directory, "cross-ribbon");
                 AuditAsterMaxButtons(prefix);
                 var ribbon = Controls["asterMaxRibbon"] as TabControl;
