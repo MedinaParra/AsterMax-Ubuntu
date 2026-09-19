@@ -6,16 +6,33 @@
     "fixture_preference": "PrimerAnalisisBarra.pmx",
     "fixture_used_when_preferred_absent": "B01_PARAMETRIC_STEP",
     "b01": {
-      "geometry_mm": [100.0, 10.0, 10.0],
+      "geometry_mm": [
+        100,
+        10,
+        10
+      ],
       "material": "linear elastic steel",
-      "young_modulus_mpa": 210000.0,
+      "young_modulus_mpa": 210000,
       "poisson": 0.3,
       "fixed_face": "x=0 mm",
       "load_face": "x=100 mm",
-      "total_force_n": [10000.0, 0.0, 0.0]
+      "total_force_n": [
+        10000,
+        0,
+        0
+      ],
+      "cload_per_node_n": [
+        2500,
+        0,
+        0
+      ]
     }
   },
-  "status_values": ["PASS", "FAIL", "NOT_EXERCISED"],
+  "status_values": [
+    "PASS",
+    "FAIL",
+    "NOT_EXERCISED"
+  ],
   "evidence_rule": "PASS requires screenshot, serialized ModelTree, workflow-state snapshot, and expected-vs-observed transition. Missing evidence is NOT_EXERCISED, never PASS.",
   "stages": [
     {
@@ -23,90 +40,188 @@
       "label": "Geometry",
       "mandatory": true,
       "workflow_state_key": "geometry",
-      "preconditions": ["native window shown", "B01 STEP supplied to native import path"],
+      "preconditions": [
+        "native window shown",
+        "B01 STEP supplied to native import path"
+      ],
       "action": "import B01 STEP through the native startup/import path",
-      "postconditions": ["geometry state >= 2", "at least one geometry part visible in Outline"],
-      "evidence": ["stage-01-geometry.png", "stage-01-geometry-tree.json", "stage-01-geometry-state.json", "stage-01-geometry-transition.json"]
+      "postconditions": [
+        "geometry state >= 2",
+        "at least one geometry part visible in Outline"
+      ],
+      "evidence": [
+        "stage-01-geometry.png",
+        "stage-01-geometry-tree.json",
+        "stage-01-geometry-state.json",
+        "stage-01-geometry-transition.json"
+      ]
     },
     {
       "id": "materials",
       "label": "Materials",
       "mandatory": true,
       "workflow_state_key": "materials",
-      "preconditions": ["geometry stage PASS"],
+      "preconditions": [
+        "geometry stage PASS"
+      ],
       "action": "define one active valid linear-elastic steel material in the native model",
-      "postconditions": ["materials state == 2", "material appears in Outline"],
-      "evidence": ["stage-02-materials.png", "stage-02-materials-tree.json", "stage-02-materials-state.json", "stage-02-materials-transition.json"]
+      "postconditions": [
+        "materials state == 2",
+        "material appears in Outline"
+      ],
+      "evidence": [
+        "stage-02-materials.png",
+        "stage-02-materials-tree.json",
+        "stage-02-materials-state.json",
+        "stage-02-materials-transition.json"
+      ]
     },
     {
       "id": "coordinate-systems",
       "label": "Coordinate Systems",
       "mandatory": true,
       "workflow_state_key": "ax-coordinates",
-      "preconditions": ["materials stage PASS"],
+      "preconditions": [
+        "materials stage PASS"
+      ],
       "action": "visit the Coordinate Systems branch and retain the native Global Cartesian system",
-      "postconditions": ["ax-coordinates state >= 1", "Global Cartesian node observable"],
-      "evidence": ["stage-03-coordinate-systems.png", "stage-03-coordinate-systems-tree.json", "stage-03-coordinate-systems-state.json", "stage-03-coordinate-systems-transition.json"]
+      "postconditions": [
+        "ax-coordinates state >= 1",
+        "Global Cartesian node observable"
+      ],
+      "evidence": [
+        "stage-03-coordinate-systems.png",
+        "stage-03-coordinate-systems-tree.json",
+        "stage-03-coordinate-systems-state.json",
+        "stage-03-coordinate-systems-transition.json"
+      ]
     },
     {
       "id": "connections",
       "label": "Connections",
       "mandatory": true,
       "workflow_state_key": "ax-connections",
-      "preconditions": ["coordinate-systems stage PASS"],
+      "preconditions": [
+        "coordinate-systems stage PASS"
+      ],
       "action": "visit Connections for the continuous single-body B01 model; no contact is created",
-      "postconditions": ["ax-connections state >= 1", "Connections branch observable"],
-      "evidence": ["stage-04-connections.png", "stage-04-connections-tree.json", "stage-04-connections-state.json", "stage-04-connections-transition.json"]
+      "postconditions": [
+        "ax-connections state >= 1",
+        "Connections branch observable"
+      ],
+      "evidence": [
+        "stage-04-connections.png",
+        "stage-04-connections-tree.json",
+        "stage-04-connections-state.json",
+        "stage-04-connections-transition.json"
+      ]
     },
     {
       "id": "mesh",
       "label": "Mesh",
       "mandatory": true,
       "workflow_state_key": "ax-mesh",
-      "preconditions": ["connections stage PASS", "material exists"],
+      "preconditions": [
+        "connections stage PASS",
+        "material exists"
+      ],
       "action": "create the B01 conformance mesh and assign the steel section using native FeModel objects",
-      "postconditions": ["ax-mesh state == 2", "assignments state == 2", "mesh body observable in Outline"],
-      "evidence": ["stage-05-mesh.png", "stage-05-mesh-tree.json", "stage-05-mesh-state.json", "stage-05-mesh-transition.json"]
+      "postconditions": [
+        "ax-mesh state == 2",
+        "assignments state == 2",
+        "mesh body observable in Outline"
+      ],
+      "evidence": [
+        "stage-05-mesh.png",
+        "stage-05-mesh-tree.json",
+        "stage-05-mesh-state.json",
+        "stage-05-mesh-transition.json"
+      ]
     },
     {
       "id": "named-selections",
       "label": "Named Selections",
       "mandatory": true,
       "workflow_state_key": "ax-selections",
-      "preconditions": ["mesh stage PASS"],
+      "preconditions": [
+        "mesh stage PASS"
+      ],
       "action": "create FIXED and LOAD node sets on x=0 and x=100 faces",
-      "postconditions": ["ax-selections state >= 1", "FIXED and LOAD observable in Outline"],
-      "evidence": ["stage-06-named-selections.png", "stage-06-named-selections-tree.json", "stage-06-named-selections-state.json", "stage-06-named-selections-transition.json"]
+      "postconditions": [
+        "ax-selections state >= 1",
+        "FIXED and LOAD observable in Outline"
+      ],
+      "evidence": [
+        "stage-06-named-selections.png",
+        "stage-06-named-selections-tree.json",
+        "stage-06-named-selections-state.json",
+        "stage-06-named-selections-transition.json"
+      ]
     },
     {
       "id": "static-structural",
       "label": "Static Structural",
       "mandatory": true,
       "workflow_state_key": "ax-analysis",
-      "preconditions": ["named-selections stage PASS"],
+      "preconditions": [
+        "named-selections stage PASS"
+      ],
       "action": "create one active linear static step, fixed support and 10000 N total axial load",
-      "postconditions": ["ax-analysis state == 2", "supports state == 2", "loads state == 2", "ax-model state == 2"],
-      "evidence": ["stage-07-static-structural.png", "stage-07-static-structural-tree.json", "stage-07-static-structural-state.json", "stage-07-static-structural-transition.json"]
+      "postconditions": [
+        "ax-analysis state == 2",
+        "supports state == 2",
+        "loads state == 2",
+        "ax-model state == 2"
+      ],
+      "evidence": [
+        "stage-07-static-structural.png",
+        "stage-07-static-structural-tree.json",
+        "stage-07-static-structural-state.json",
+        "stage-07-static-structural-transition.json"
+      ]
     },
     {
       "id": "solution",
       "label": "Solution",
       "mandatory": true,
       "workflow_state_key": "ax-solution",
-      "preconditions": ["static-structural stage PASS", "native Code_Aster preflight ready"],
+      "preconditions": [
+        "static-structural stage PASS",
+        "native Code_Aster preflight ready"
+      ],
       "action": "invoke the native Solve command and wait for the solve transaction",
-      "postconditions": ["solve transaction is SolutionCurrent", "real results bundle loaded", "solver evidence reports no synthetic FEA values"],
-      "evidence": ["stage-08-solution.png", "stage-08-solution-tree.json", "stage-08-solution-state.json", "stage-08-solution-transition.json"]
+      "postconditions": [
+        "solve transaction is SolutionCurrent",
+        "real results bundle loaded",
+        "solver evidence reports no synthetic FEA values"
+      ],
+      "evidence": [
+        "stage-08-solution.png",
+        "stage-08-solution-tree.json",
+        "stage-08-solution-state.json",
+        "stage-08-solution-transition.json"
+      ]
     },
     {
       "id": "results",
       "label": "Results",
       "mandatory": true,
       "workflow_state_key": "results",
-      "preconditions": ["solution stage PASS"],
+      "preconditions": [
+        "solution stage PASS"
+      ],
       "action": "display Equivalent Stress in the integrated native results viewport",
-      "postconditions": ["results state == 2", "integrated viewport visible", "current field rendered without stale/skipped render state"],
-      "evidence": ["stage-09-results.png", "stage-09-results-tree.json", "stage-09-results-state.json", "stage-09-results-transition.json"]
+      "postconditions": [
+        "results state == 2",
+        "integrated viewport visible",
+        "current field rendered without stale/skipped render state"
+      ],
+      "evidence": [
+        "stage-09-results.png",
+        "stage-09-results-tree.json",
+        "stage-09-results-state.json",
+        "stage-09-results-transition.json"
+      ]
     }
   ],
   "cross_cutting_checks": [
@@ -115,6 +230,7 @@
     "ribbon_command_walk",
     "menu_command_walk",
     "tree_multiselection",
-    "dpi_change"
+    "dpi_change",
+    "cload_semantics"
   ]
 }
