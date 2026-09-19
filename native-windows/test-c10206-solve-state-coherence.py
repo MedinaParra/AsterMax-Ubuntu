@@ -22,6 +22,8 @@ required=[
     "File.Replace(tempPath,finalPath,null)",
     "File.Move(tempPath,finalPath)",
     "Interlocked.Increment(ref _stateRevision)",
+    "private void Fail(string message)",
+    "throw new OperationCanceledException(Message)",
 ]
 for token in required:
     assert token in patch, token
