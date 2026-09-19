@@ -22,9 +22,26 @@ $nativeReady=Test-NativeProbe
 if(-not $nativeReady) {
     $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
     Write-Host 'NATIVE_STAGE: download provider MSI'
-    if(Test-Path $msi){ Remove-Item $msi -Force }
-    & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
-    if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed' }
+    # Resume interrupted transfers. A partial response (curl 18) is not covered by
+    # curl's default retry list, so retry explicitly with the current file offset.
+    $downloadComplete=$false
+    for($attempt=1; $attempt -le 5; $attempt++) {
+        if((Test-Path $msi) -and (Get-Item $msi).Length -eq $providerMsiSize) {
+            if((Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant() -eq $providerMsiSha256) {
+                $downloadComplete=$true; break
+            }
+            Remove-Item $msi -Force
+        }
+        if((Test-Path $msi) -and (Get-Item $msi).Length -gt $providerMsiSize){Remove-Item $msi -Force}
+        Write-Host "Provider download/resume attempt $attempt of 5"
+        & curl.exe -L --fail --silent --show-error --continue-at - --connect-timeout 30 --max-time 600 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+        $transferExit=$LASTEXITCODE
+        if($transferExit -eq 0){$downloadComplete=$true;break}
+        # A server that refuses Range needs a clean transfer next time.
+        if($transferExit -eq 33 -and (Test-Path $msi)){Remove-Item $msi -Force}
+        Write-Host "Provider transfer interrupted ($transferExit); preserving partial bytes for resume."
+    }
+    if(-not $downloadComplete -or -not(Test-Path $msi)){ throw 'Provider MSI download failed after resumable attempts' }
     $actualSize=(Get-Item $msi).Length
     $actualSha256=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
     Write-Host "ASTER_MSI_SIZE=$actualSize"
@@ -76,3 +93,4 @@ if($LASTEXITCODE -ne 0){throw 'Native Windows numerical validation failed'}
 Write-Host 'NATIVE_STAGE: reject invalid MED fields'
 & $python native-windows/test-c1011-med-field-discovery.py native-windows/bridge-c964-med-results.py (Join-Path $root 'astermax-tet4-bar.rmed') (Join-Path $root 'MED_FIELD_REJECTION_TESTS.json')
 if($LASTEXITCODE -ne 0){throw 'MED field ambiguity regression failed'}
+
