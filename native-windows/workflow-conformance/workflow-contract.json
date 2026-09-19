@@ -1,6 +1,6 @@
 {
   "schema": "astermax-workflow-conformance/v1",
-  "release": "C10.20.1",
+  "release": "C10.20.2",
   "reference": {
     "outline_order": "ANSYS Mechanical workflow order as declared by AsterMax AUDIT-C10.09; this contract does not claim product equivalence",
     "fixture_preference": "PrimerAnalisisBarra.pmx",
@@ -117,6 +117,7 @@
     "menu_command_walk",
     "tree_multiselection",
     "dpi_change",
-    "cload_semantics"
+    "cload_semantics",
+    "async_solve_ui"
   ]
 }
