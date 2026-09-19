@@ -51,6 +51,7 @@
     {"id":"patch-c10201-cload-semantics","file":"patch-c10201-cload-semantics.ps1","depends":["patch-c1020-workflow-conformance"],"declares":[],"consumes":[]},
     {"id":"patch-c10202-async-solve-ui","file":"patch-c10202-async-solve-ui.ps1","depends":["patch-c10201-cload-semantics"],"declares":[],"consumes":[]},
     {"id":"patch-c10203-cancel-solve","file":"patch-c10203-cancel-solve.ps1","depends":["patch-c10202-async-solve-ui"],"declares":[],"consumes":[]},
-    {"id":"patch-c10204-result-lifecycle","file":"patch-c10204-result-lifecycle.ps1","depends":["patch-c10203-cancel-solve"],"declares":[],"consumes":[]}
+    {"id":"patch-c10204-result-lifecycle","file":"patch-c10204-result-lifecycle.ps1","depends":["patch-c10203-cancel-solve"],"declares":[],"consumes":[]},
+    {"id":"patch-c10205-close-safe-solve","file":"patch-c10205-close-safe-solve.ps1","depends":["patch-c10204-result-lifecycle"],"declares":[],"consumes":[]}
   ]
 }
