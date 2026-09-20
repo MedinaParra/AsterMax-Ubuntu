@@ -1,44 +1,41 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import os, shutil, math
+import numpy as np
 
 HERE = Path(__file__).resolve().parent
 CASE = HERE / "case"
 tutorials = Path(os.environ["FOAM_TUTORIALS"])
-template = tutorials / "heatTransfer" / "buoyantBoussinesqPimpleFoam" / "hotRoom"
+template = tutorials / "heatTransfer" / "buoyantPimpleFoam" / "hotRoom"
 
 if CASE.exists():
     shutil.rmtree(CASE)
 shutil.copytree(template, CASE)
 
-# Some OpenFOAM tutorials keep initial fields in 0.orig.
 if (CASE / "0.orig").exists():
     if (CASE / "0").exists():
         shutil.rmtree(CASE / "0")
     shutil.copytree(CASE / "0.orig", CASE / "0")
 
-# Keep only fields required by the laminar buoyantBoussinesq baseline.
-# The hotRoom tutorial also carries turbulence fields (alphat/k/epsilon/nut);
-# leaving them behind makes post-processing and patch validation fail after
-# snappyHexMesh adds the skin/cambucho patches.
+# Keep only fields used by the laminar compressible setup.
 for p in (CASE / "0").iterdir():
-    if p.is_file() and p.name not in {"U", "T", "p_rgh", "alphat"}:
+    if p.is_file() and p.name not in {"U", "T", "p", "p_rgh", "alphat"}:
         p.unlink()
 
 tri = CASE / "constant" / "triSurface"
 tri.mkdir(parents=True, exist_ok=True)
 
-# Baseline geometry: full 360-degree conical newspaper shell.
-# These are assumptions until the real cambucho is measured.
+# -----------------------------
+# Geometry assumptions
+# -----------------------------
 L = 0.50
-r_small = 0.020       # Dmin = 40 mm at skin
-r_large = 0.125       # Dmax = 250 mm
-th = 0.008            # numerical wall thickness for robust meshing; NOT physical paper thickness
-z0 = 0.002            # 2 mm above plane to avoid geometric degeneracy in first run
-nseg = 96
+r_small = 0.020
+r_large = 0.125
+th = 0.008          # numerical shell thickness; shell extends OUTWARD
+z0 = 0.002          # leakage gap to skin; parametric assumption
+nseg = 128
 
 def facet(f, a, b, c):
-    import numpy as np
     a=np.array(a,float); b=np.array(b,float); c=np.array(c,float)
     n=np.cross(b-a,c-a)
     nn=np.linalg.norm(n)
@@ -49,33 +46,33 @@ def facet(f, a, b, c):
         f.write(f"    vertex {p[0]:.8e} {p[1]:.8e} {p[2]:.8e}\n")
     f.write("  endloop\nendfacet\n")
 
-import numpy as np
 with (tri/"cambucho.stl").open("w") as f:
     f.write("solid cambucho\n")
-    ri = r_small-th
-    Ri = r_large-th
-    for k in range(nseg):
-        a1=2*math.pi*k/nseg
-        a2=2*math.pi*(k+1)/nseg
-        ob1=(r_small*math.cos(a1), r_small*math.sin(a1), z0)
-        ob2=(r_small*math.cos(a2), r_small*math.sin(a2), z0)
-        ot1=(r_large*math.cos(a1), r_large*math.sin(a1), z0+L)
-        ot2=(r_large*math.cos(a2), r_large*math.sin(a2), z0+L)
-        ib1=(ri*math.cos(a1), ri*math.sin(a1), z0)
-        ib2=(ri*math.cos(a2), ri*math.sin(a2), z0)
-        it1=(Ri*math.cos(a1), Ri*math.sin(a1), z0+L)
-        it2=(Ri*math.cos(a2), Ri*math.sin(a2), z0+L)
-        # outer and inner conical faces
-        facet(f,ob1,ob2,ot2); facet(f,ob1,ot2,ot1)
+    ro_small = r_small + th
+    ro_large = r_large + th
+    for kseg in range(nseg):
+        a1=2*math.pi*kseg/nseg
+        a2=2*math.pi*(kseg+1)/nseg
+        # inner physical cone surface
+        ib1=(r_small*math.cos(a1), r_small*math.sin(a1), z0)
+        ib2=(r_small*math.cos(a2), r_small*math.sin(a2), z0)
+        it1=(r_large*math.cos(a1), r_large*math.sin(a1), z0+L)
+        it2=(r_large*math.cos(a2), r_large*math.sin(a2), z0+L)
+        # outer numerical shell surface
+        ob1=(ro_small*math.cos(a1), ro_small*math.sin(a1), z0)
+        ob2=(ro_small*math.cos(a2), ro_small*math.sin(a2), z0)
+        ot1=(ro_large*math.cos(a1), ro_large*math.sin(a1), z0+L)
+        ot2=(ro_large*math.cos(a2), ro_large*math.sin(a2), z0+L)
+        # inner, outer, and thin annular rims
         facet(f,it1,it2,ib2); facet(f,it1,ib2,ib1)
-        # annular rims; central openings remain open
+        facet(f,ob1,ob2,ot2); facet(f,ob1,ot2,ot1)
         facet(f,ot1,ot2,it2); facet(f,ot1,it2,it1)
         facet(f,ib1,ib2,ob2); facet(f,ib1,ob2,ob1)
     f.write("endsolid cambucho\n")
 
-header = """/*--------------------------------*- C++ -*----------------------------------*\\
-| =========                 | OpenFOAM v2312 - Cambucho baseline             |
-\\*---------------------------------------------------------------------------*/
+header = r"""/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 | OpenFOAM v2312 - Cambucho physical-v2           |
+\*---------------------------------------------------------------------------*/
 """
 
 def w(rel, txt):
@@ -83,19 +80,20 @@ def w(rel, txt):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(header + txt, encoding="utf-8")
 
+# Large external domain to reduce boundary influence.
 w("system/blockMeshDict", r"""
 FoamFile { version 2.0; format ascii; class dictionary; object blockMeshDict; }
 convertToMeters 1;
 vertices
 (
-    (-0.30 -0.30 0.00) (0.30 -0.30 0.00)
-    (0.30 0.30 0.00) (-0.30 0.30 0.00)
-    (-0.30 -0.30 1.00) (0.30 -0.30 1.00)
-    (0.30 0.30 1.00) (-0.30 0.30 1.00)
+    (-0.60 -0.60 0.00) (0.60 -0.60 0.00)
+    (0.60 0.60 0.00) (-0.60 0.60 0.00)
+    (-0.60 -0.60 1.60) (0.60 -0.60 1.60)
+    (0.60 0.60 1.60) (-0.60 0.60 1.60)
 );
 blocks
 (
-    hex (0 1 2 3 4 5 6 7) (12 12 20) simpleGrading (1 1 1)
+    hex (0 1 2 3 4 5 6 7) (20 20 28) simpleGrading (1 1 1)
 );
 edges ();
 boundary
@@ -126,14 +124,13 @@ FoamFile { version 2.0; format ascii; class dictionary; object surfaceFeatureExt
 cambucho.stl
 {
     extractionMethod extractFromSurface;
-    extractFromSurfaceCoeffs { includedAngle 150; }
+    extractFromSurfaceCoeffs { includedAngle 160; }
     writeObj yes;
 }
 """)
 
 w("system/snappyHexMeshDict", r"""
 FoamFile { version 2.0; format ascii; class dictionary; object snappyHexMeshDict; }
-
 castellatedMesh true;
 snap true;
 addLayers false;
@@ -145,66 +142,63 @@ geometry
         type triSurfaceMesh;
         name cambucho;
     }
-
     nearCone
     {
         type searchableCylinder;
         point1 (0 0 0.00);
         point2 (0 0 0.62);
-        radius 0.19;
+        radius 0.20;
     }
-
     throat
     {
         type searchableCylinder;
         point1 (0 0 0.00);
-        point2 (0 0 0.10);
-        radius 0.07;
+        point2 (0 0 0.06);
+        radius 0.055;
     }
-
     plume
     {
         type searchableCylinder;
-        point1 (0 0 0.43);
-        point2 (0 0 0.90);
-        radius 0.18;
+        point1 (0 0 0.42);
+        point2 (0 0 1.30);
+        radius 0.24;
     }
 }
 
 castellatedMeshControls
 {
-    maxLocalCells 250000;
-    maxGlobalCells 400000;
+    maxLocalCells 700000;
+    maxGlobalCells 900000;
     minRefinementCells 0;
-    nCellsBetweenLevels 2;
+    nCellsBetweenLevels 3;
 
     features
     (
-        { file "cambucho.eMesh"; level 2; }
+        { file "cambucho.eMesh"; level 3; }
     );
 
     refinementSurfaces
     {
         cambucho
         {
-            level (1 2);
+            level (3 4);
             patchInfo { type wall; }
         }
     }
 
-    resolveFeatureAngle 35;
+    resolveFeatureAngle 45;
 
     refinementRegions
     {
         nearCone
         {
             mode distance;
-            levels ((0.04 2) (0.12 1));
+            levels ((0.035 3) (0.10 2));
         }
         throat
         {
             mode inside;
-            levels ((1e15 2));
+            levels ((1e15 5));
         }
         plume
         {
@@ -213,19 +207,19 @@ castellatedMeshControls
         }
     }
 
-    locationInMesh (0.24 0 0.20);
+    locationInMesh (0.40 0 0.30);
     allowFreeStandingZoneFaces true;
 }
 
 snapControls
 {
-    nSmoothPatch 3;
-    tolerance 2.0;
-    nSolveIter 40;
-    nRelaxIter 6;
-    nFeatureSnapIter 8;
-    implicitFeatureSnap false;
-    explicitFeatureSnap true;
+    nSmoothPatch 8;
+    tolerance 1.5;
+    nSolveIter 80;
+    nRelaxIter 10;
+    nFeatureSnapIter 15;
+    implicitFeatureSnap true;
+    explicitFeatureSnap false;
     multiRegionFeatureSnap false;
 }
 
@@ -238,38 +232,41 @@ addLayersControls
     minThickness 0.1;
     nGrow 0;
     featureAngle 60;
-    nRelaxIter 3;
-    nSmoothSurfaceNormals 1;
-    nSmoothNormals 3;
-    nSmoothThickness 10;
+    nRelaxIter 5;
+    nSmoothSurfaceNormals 3;
+    nSmoothNormals 5;
+    nSmoothThickness 15;
     maxFaceThicknessRatio 0.5;
     maxThicknessToMedialRatio 0.3;
     minMedianAxisAngle 90;
     nBufferCellsNoExtrude 0;
-    nLayerIter 20;
+    nLayerIter 30;
 }
 
 meshQualityControls
 {
-    maxNonOrtho 70;
-    maxBoundarySkewness 20;
-    maxInternalSkewness 4;
+    maxNonOrtho 65;
+    maxBoundarySkewness 15;
+    maxInternalSkewness 3.5;
     maxConcave 80;
-    minVol 1e-13;
-    minTetQuality 1e-30;
+    minVol 1e-14;
+    minTetQuality 1e-20;
     minArea -1;
     minTwist 0.02;
     minDeterminant 0.001;
     minFaceWeight 0.02;
     minVolRatio 0.01;
     minTriangleTwist -1;
-    nSmoothScale 4;
-    errorReduction 0.75;
+    nSmoothScale 6;
+    errorReduction 0.7;
 }
 debug 0;
 mergeTolerance 1e-6;
 """)
 
+# -----------------------------
+# Compressible initial/boundary fields
+# -----------------------------
 w("0/U", r"""
 FoamFile { version 2.0; format ascii; class volVectorField; object U; }
 dimensions [0 1 -1 0 0 0 0];
@@ -281,14 +278,8 @@ boundaryField
         type pressureInletOutletVelocity;
         value uniform (0 0 0);
     }
-    skin
-    {
-        type noSlip;
-    }
-    cambucho
-    {
-        type noSlip;
-    }
+    skin { type noSlip; }
+    cambucho { type noSlip; }
 }
 """)
 
@@ -311,28 +302,32 @@ boundaryField
     }
     cambucho
     {
-        // FIRE-EQUIVALENT THERMAL BAND:
-        // This is not reactive combustion. A spatially localized hot band near
-        // the upper rim represents the thermal effect of the burning newspaper.
-        // The rest of the paper is warm; the hot band ramps in over 0.08 s.
+        // Stage 1 (0-3 s): paper starts at ambient temperature.
+        // Stage 2 (>=3 s): a localized equivalent burning front ramps over 0.5 s
+        // and descends. This is NOT reactive chemistry and the geometry does not burn away.
         type codedFixedValue;
-        value uniform 333.15;
-        name upperFireBand;
+        value uniform 295.15;
+        name movingFireFront;
         code
         #{
             const vectorField& Cf = patch().Cf();
-            scalarField Tw(Cf.size(), 333.15);
-
+            scalarField Tw(Cf.size(), 295.15);
             const scalar t = this->db().time().value();
-            const scalar ramp = min(t/0.08, scalar(1));
-            const scalar zFire = 0.485;
-            const scalar sigma = 0.025;
-            const scalar dTmax = 140.0; // peak wall ~473.15 K
 
-            forAll(Cf, faceI)
+            if (t > 3.0)
             {
-                const scalar dz = Cf[faceI].z() - zFire;
-                Tw[faceI] = 333.15 + ramp*dTmax*exp(-sqr(dz/sigma));
+                const scalar tau = t - 3.0;
+                const scalar ramp = min(tau/0.5, scalar(1));
+                const scalar zFire = max(0.15, 0.49 - 0.060*tau);
+                const scalar sigma = 0.018;
+                const scalar Tpeak = 750.0;
+
+                forAll(Cf, faceI)
+                {
+                    const scalar dz = Cf[faceI].z() - zFire;
+                    const scalar band = exp(-sqr(dz/sigma));
+                    Tw[faceI] = 295.15 + ramp*(Tpeak - 295.15)*band;
+                }
             }
             operator==(Tw);
         #};
@@ -340,72 +335,64 @@ boundaryField
 }
 """)
 
-w("0/p_rgh", r"""
-FoamFile { version 2.0; format ascii; class volScalarField; object p_rgh; }
-dimensions [0 2 -2 0 0 0 0];
-internalField uniform 0;
+w("0/p", r"""
+FoamFile { version 2.0; format ascii; class volScalarField; object p; }
+dimensions [1 -1 -2 0 0 0 0];
+internalField uniform 101325;
 boundaryField
 {
     atmosphere
     {
-        type fixedValue;
-        value uniform 0;
+        type totalPressure;
+        p0 uniform 101325;
+        gamma 1.4;
+        value uniform 101325;
+    }
+    skin { type zeroGradient; }
+    cambucho { type zeroGradient; }
+}
+""")
+
+w("0/p_rgh", r"""
+FoamFile { version 2.0; format ascii; class volScalarField; object p_rgh; }
+dimensions [1 -1 -2 0 0 0 0];
+internalField uniform 101325;
+boundaryField
+{
+    atmosphere
+    {
+        type prghTotalPressure;
+        p0 uniform 101325;
+        value uniform 101325;
     }
     skin
     {
         type fixedFluxPressure;
-        rho rhok;
-        value uniform 0;
+        value uniform 101325;
     }
     cambucho
     {
         type fixedFluxPressure;
-        rho rhok;
-        value uniform 0;
+        value uniform 101325;
     }
 }
 """)
 
 w("0/alphat", r"""
 FoamFile { version 2.0; format ascii; class volScalarField; object alphat; }
-dimensions [0 2 -1 0 0 0 0];
+dimensions [1 -1 -1 0 0 0 0];
 internalField uniform 0;
 boundaryField
 {
-    atmosphere
-    {
-        type calculated;
-        value uniform 0;
-    }
-    skin
-    {
-        type alphatJayatillekeWallFunction;
-        Prt 0.85;
-        value uniform 0;
-    }
-    cambucho
-    {
-        type alphatJayatillekeWallFunction;
-        Prt 0.85;
-        value uniform 0;
-    }
+    atmosphere { type calculated; value uniform 0; }
+    skin { type calculated; value uniform 0; }
+    cambucho { type calculated; value uniform 0; }
 }
 """)
 
-# Force laminar for a stable verification run.
 w("constant/turbulenceProperties", r"""
 FoamFile { version 2.0; format ascii; class dictionary; object turbulenceProperties; }
 simulationType laminar;
-""")
-
-w("constant/transportProperties", r"""
-FoamFile { version 2.0; format ascii; class dictionary; object transportProperties; }
-transportModel Newtonian;
-nu      [0 2 -1 0 0 0 0] 1.55e-05;
-beta    [0 0 0 -1 0 0 0] 3.38e-03;
-TRef    [0 0 0 1 0 0 0] 295.15;
-Pr      [0 0 0 0 0 0 0] 0.71;
-Prt     [0 0 0 0 0 0 0] 0.85;
 """)
 
 w("constant/g", r"""
@@ -414,16 +401,19 @@ dimensions [0 1 -2 0 0 0 0];
 value (0 0 -9.81);
 """)
 
+# Control uses a 3 s no-fire preconditioning stage in the same transient,
+# followed by a 5 s fire stage. The state at ignition is therefore not the
+# artificial all-zero velocity / hot-wall state used previously.
 w("system/controlDict", r"""
 FoamFile { version 2.0; format ascii; class dictionary; object controlDict; }
-application buoyantBoussinesqPimpleFoam;
+application buoyantPimpleFoam;
 startFrom startTime;
 startTime 0;
 stopAt endTime;
-endTime 0.80;
+endTime 8.0;
 deltaT 0.002;
 writeControl adjustableRunTime;
-writeInterval 0.08;
+writeInterval 0.25;
 purgeWrite 0;
 writeFormat binary;
 writePrecision 8;
@@ -432,7 +422,7 @@ timeFormat general;
 timePrecision 6;
 runTimeModifiable true;
 adjustTimeStep yes;
-maxCo 0.5;
+maxCo 0.35;
 maxDeltaT 0.02;
 
 functions
@@ -442,45 +432,56 @@ functions
         type fieldMinMax;
         libs (fieldFunctionObjects);
         mode magnitude;
-        fields (T U p_rgh);
+        fields (T U p p_rgh);
         writeControl writeTime;
     }
 
-    plumeProbes
+    probes
     {
         type probes;
         libs (sampling);
-        fields (T U p_rgh);
+        fields (T U p p_rgh);
         writeControl writeTime;
         probeLocations
         (
-            (0 0 0.52)
-            (0 0 0.60)
-            (0 0 0.70)
-            (0 0 0.85)
+            (0 0 0.003)
+            (0 0 0.020)
+            (0 0 0.050)
+            (0 0 0.250)
+            (0 0 0.480)
+            (0 0 0.550)
+            (0 0 0.750)
+            (0 0 1.000)
         );
     }
 }
 """)
 
-(CASE/"CASE_ASSUMPTIONS.txt").write_text(
-f"""OPENFOAM CAMBUCHO BASELINE
-Solver: buoyantBoussinesqPimpleFoam
-Geometry: 3-D, full 360 degree air domain inside and outside cone
-L = {L} m
-Dmin = {2*r_small} m
-Dmax = {2*r_large} m
-Numerical shell thickness = {th} m (not physical paper thickness; chosen for mesh robustness)
-Bottom clearance used in verification mesh = {z0} m
-Ambient = 295.15 K
-Skin wall = 307.15 K
-Cambucho wall = 333.15 K baseline + Gaussian hot band near z=0.485 m
-Peak hot-band wall temperature = 473.15 K after 0.08 s ramp
-Fire representation = imposed thermal band, NOT reactive combustion
-End time = 0.80 s (fire-plume thermal run)
+(CASE/"CASE_ASSUMPTIONS.txt").write_text(f"""CAMBUCHO PHYSICAL V2
+Solver: buoyantPimpleFoam (compressible)
+Geometry: full 3-D, 360 degree fluid domain, internal + external air
+Domain: 1.2 m x 1.2 m x 1.6 m
+Cone length = {L} m
+Inner Dmin = {2*r_small} m
+Inner Dmax = {2*r_large} m
+Numerical shell thickness = {th} m outward from physical inner cone
+Leakage gap to skin = {z0} m (assumption; requires experiment)
+Ambient initial T = 295.15 K
+Skin T = 307.15 K
+Paper initial T = 295.15 K
+Preconditioning = 0 to 3 s with NO fire
+Ignition = 3 s
+Fire ramp = 0.5 s
+Equivalent peak fire-band wall T = 750 K
+Fire-front descent = 0.060 m/s, limited to z >= 0.15 m
+End time = 8 s
 
-This first run validates the OpenFOAM mesh/solver pipeline.
-It is NOT yet the final burning-paper model.
+IMPORTANT LIMITATIONS
+- Fire is an equivalent moving thermal boundary, not reactive combustion.
+- Burned paper geometry is not removed dynamically.
+- Radiation is not yet solved in-domain.
+- 2 mm leakage gap is assumed, not measured.
+- Results are exploratory until mesh quality and experimental validation pass.
 """, encoding="utf-8")
 
 print(CASE)
