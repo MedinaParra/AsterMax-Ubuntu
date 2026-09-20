@@ -5,6 +5,7 @@ on:
     branches:
       - experiment/cambucho-openfoam
       - experiment/cambucho-fire-plume
+      - experiment/cambucho-coupled-bioheat
   workflow_dispatch:
 
 jobs:
@@ -95,6 +96,14 @@ jobs:
         run: |
           set -o pipefail
           buoyantBoussinesqPimpleFoam 2>&1 | tee log.buoyantBoussinesqPimpleFoam
+
+      - name: Compute wall heat flux
+        if: always()
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          postProcess -func wallHeatFlux -latestTime 2>&1 | tee log.wallHeatFlux || true
 
       - name: Convert fields to VTK
         if: always()
