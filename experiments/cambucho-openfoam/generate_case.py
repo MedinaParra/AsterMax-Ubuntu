@@ -403,14 +403,6 @@ maxDeltaT 0.02;
 
 functions
 {
-    residuals
-    {
-        type residuals;
-        libs (utilityFunctionObjects);
-        fields (U p_rgh T);
-        writeControl timeStep;
-        writeInterval 1;
-    }
     extrema
     {
         type fieldMinMax;
