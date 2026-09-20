@@ -32,6 +32,11 @@ jobs:
           command -v buoyantBoussinesqPimpleFoam
           blockMesh -help | head -n 5
 
+      - name: Install Python helper dependency
+        shell: bash
+        run: |
+          python3 -m pip install --user numpy
+
       - name: Generate 3-D cambucho case
         shell: bash
         run: |
@@ -100,7 +105,7 @@ jobs:
             echo "=== Mesh summary ==="
             grep -E "cells:|faces:|points:|Mesh OK|Failed" log.checkMesh || true
             echo "=== Solver tail ==="
-            tail -n 80 log.buoyantBoussinesqPimpleFoam 2>/dev/null || true
+            tail -n 100 log.buoyantBoussinesqPimpleFoam 2>/dev/null || true
           } | tee RUN_SUMMARY.txt
 
       - name: Upload OpenFOAM results
