@@ -334,7 +334,7 @@ boundaryField
 
 w("0/alphat", r"""
 FoamFile { version 2.0; format ascii; class volScalarField; object alphat; }
-dimensions [1 -1 -1 0 0 0 0];
+dimensions [0 2 -1 0 0 0 0];
 internalField uniform 0;
 boundaryField
 {
