@@ -54,12 +54,11 @@ jobs:
           set -o pipefail
           blockMesh 2>&1 | tee log.blockMesh
 
-      - name: Mesh - extract surface features
+      - name: Mesh - open-baffle feature handling
         shell: bash
         working-directory: experiments/cambucho-openfoam/case
         run: |
-          set -o pipefail
-          surfaceFeatureExtract 2>&1 | tee log.surfaceFeatureExtract
+          echo "Open conical baffle: using implicit feature snapping; surfaceFeatureExtract intentionally skipped." | tee log.surfaceFeatureExtract
 
       - name: Mesh - snappyHexMesh
         shell: bash
