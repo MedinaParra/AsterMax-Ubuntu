@@ -72,12 +72,21 @@ jobs:
           set -o pipefail
           checkMesh -allGeometry -allTopology 2>&1 | tee log.checkMesh
 
-      - name: Solver dry-run
+      - name: Validate required initial fields
         shell: bash
         working-directory: experiments/cambucho-openfoam/case
         run: |
-          set -o pipefail
-          buoyantBoussinesqPimpleFoam -dry-run-write 2>&1 | tee log.dryRun
+          set -euxo pipefail
+          test -f 0/U
+          test -f 0/T
+          test -f 0/p_rgh
+          test ! -f 0/alphat
+          grep -q "skin" 0/U
+          grep -q "cambucho" 0/U
+          grep -q "skin" 0/T
+          grep -q "cambucho" 0/T
+          grep -q "skin" 0/p_rgh
+          grep -q "cambucho" 0/p_rgh
 
       - name: Run transient CFD
         shell: bash
