@@ -7,10 +7,10 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
 }
 
 $resultsPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxIntegratedResults.cs'
-$r=[regex]::Replace((Get-Content $resultsPath -Raw),"\r\n?","\n")
+$r=[regex]::Replace((Get-Content $resultsPath -Raw),"\r\n?","`n")
 
 $fieldAnchor='        private bool _axRefreshingResults;'
-$r=Replace-Required $r $fieldAnchor ($fieldAnchor+"\n"+'        private bool _asterMaxPreviousResultsRetained;')
+$r=Replace-Required $r $fieldAnchor ($fieldAnchor+"`n"+'        private bool _asterMaxPreviousResultsRetained;')
 
 $noResultsOld=@'
                 if (_asterMaxLoadedResults == null)
@@ -27,8 +27,8 @@ $noResultsNew=@'
                     return;
                 }
 '@
-$noResultsOld=[regex]::Replace($noResultsOld,"\r\n?","\n")
-$noResultsNew=[regex]::Replace($noResultsNew,"\r\n?","\n")
+$noResultsOld=[regex]::Replace($noResultsOld,"\r\n?","`n")
+$noResultsNew=[regex]::Replace($noResultsNew,"\r\n?","`n")
 $r=Replace-Required $r $noResultsOld $noResultsNew
 
 $currentOld='                    _modelTree.SetAsterMaxResultFields(_asterMaxLoadedResults.AvailableFields(), "Current", true);'
@@ -37,11 +37,11 @@ $currentNew=@'
                         (_asterMaxPreviousResultsRetained ? "Previous successful solution retained" : "Current");
                     _modelTree.SetAsterMaxResultFields(_asterMaxLoadedResults.AvailableFields(),currentLabel,!_asterMaxSolveInProgress);
 '@
-$currentNew=[regex]::Replace($currentNew,"\r\n?","\n").TrimEnd()
+$currentNew=[regex]::Replace($currentNew,"\r\n?","`n").TrimEnd()
 $r=Replace-Required $r $currentOld $currentNew
 
 $manualOld='                        _asterMaxLoadedResults = candidate;'
-$manualNew=$manualOld+"\n"+'                        _asterMaxPreviousResultsRetained = false;'
+$manualNew=$manualOld+"`n"+'                        _asterMaxPreviousResultsRetained = false;'
 $r=Replace-Required $r $manualOld $manualNew
 
 $infoOld='            if (_asterMaxLoadedResults != null) text += "\r\nBundle: " + _asterMaxLoadedResults.SourceFile;'
@@ -55,19 +55,19 @@ Bundle: " + _asterMaxLoadedResults.SourceFile;
 Status: previous successful result retained after a later Solve did not complete successfully.";
             }
 '@
-$infoNew=[regex]::Replace($infoNew,"\r\n?","\n").TrimEnd()
+$infoNew=[regex]::Replace($infoNew,"\r\n?","`n").TrimEnd()
 $r=Replace-Required $r $infoOld $infoNew
 
 $resetOld='            _asterMaxLoadedResults=null;'
-$resetNew=$resetOld+"\n"+'            _asterMaxPreviousResultsRetained=false;'
+$resetNew=$resetOld+"`n"+'            _asterMaxPreviousResultsRetained=false;'
 $r=Replace-Required $r $resetOld $resetNew
 Set-Content $resultsPath $r -Encoding UTF8
 
 $solvePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
-$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","\n")
+$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","`n")
 
 $localAnchor='            CaeModel.FeModel solveModel=null;'
-$s=Replace-Required $s $localAnchor ($localAnchor+"\n"+'            AsterMaxResultsBundle previousResults=_asterMaxLoadedResults;')
+$s=Replace-Required $s $localAnchor ($localAnchor+"`n"+'            AsterMaxResultsBundle previousResults=_asterMaxLoadedResults;')
 
 $busyAnchor=@'
                 SetAsterMaxSolveUiBusy(true);
@@ -84,12 +84,12 @@ $busyNew=@'
 
                 heartbeat=
 '@
-$busyAnchor=[regex]::Replace($busyAnchor,"\r\n?","\n")
-$busyNew=[regex]::Replace($busyNew,"\r\n?","\n")
+$busyAnchor=[regex]::Replace($busyAnchor,"\r\n?","`n")
+$busyNew=[regex]::Replace($busyNew,"\r\n?","`n")
 $s=Replace-Required $s $busyAnchor $busyNew
 
 $successAnchor='                _asterMaxLoadedResults=completedBundle;'
-$successNew='                _asterMaxLoadedResults=completedBundle;'+"\n"+'                _asterMaxPreviousResultsRetained=false;'
+$successNew='                _asterMaxLoadedResults=completedBundle;'+"`n"+'                _asterMaxPreviousResultsRetained=false;'
 $s=Replace-Required $s $successAnchor $successNew
 
 $finallyAnchor=@'
@@ -101,8 +101,8 @@ $finallyNew=@'
                 if(uiBusySet && !IsDisposed && !Disposing) SetAsterMaxSolveUiBusy(false);
                 if(!IsDisposed && !Disposing) RefreshAsterMaxResultAvailability();
 '@
-$finallyAnchor=[regex]::Replace($finallyAnchor,"\r\n?","\n")
-$finallyNew=[regex]::Replace($finallyNew,"\r\n?","\n")
+$finallyAnchor=[regex]::Replace($finallyAnchor,"\r\n?","`n")
+$finallyNew=[regex]::Replace($finallyNew,"\r\n?","`n")
 $s=Replace-Required $s $finallyAnchor $finallyNew
 Set-Content $solvePath $s -Encoding UTF8
 

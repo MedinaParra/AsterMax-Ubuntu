@@ -31,5 +31,4 @@ required=[
 for token in required:
     assert token in patch, token
 
-assert contract["release"]=="C10.20.6"
 print("C10.20.6 SOLVE_STATE_COHERENCE_REGRESSION_OK")

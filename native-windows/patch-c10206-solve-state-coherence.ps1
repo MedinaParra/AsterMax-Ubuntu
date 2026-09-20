@@ -7,7 +7,7 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
 }
 
 $solvePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
-$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","\n")
+$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","`n")
 
 $fieldAnchor='        private readonly object _activeProcessSync=new object();'
 $fieldNew=@'
@@ -48,8 +48,8 @@ $requestNew=@'
             if(active!=null) Task.Run(() => TryTerminateProcessTree(active));
         }
 '@
-$requestOld=[regex]::Replace($requestOld,"\r\n?","\n")
-$requestNew=[regex]::Replace($requestNew,"\r\n?","\n")
+$requestOld=[regex]::Replace($requestOld,"\r\n?","`n")
+$requestNew=[regex]::Replace($requestNew,"\r\n?","`n")
 $s=Replace-Required $s $requestOld $requestNew
 
 $throwOld=@'
@@ -94,19 +94,19 @@ $throwNew=@'
             }
         }
 '@
-$throwOld=[regex]::Replace($throwOld,"\r\n?","\n")
-$throwNew=[regex]::Replace($throwNew,"\r\n?","\n")
+$throwOld=[regex]::Replace($throwOld,"\r\n?","`n")
+$throwNew=[regex]::Replace($throwNew,"\r\n?","`n")
 $s=Replace-Required $s $throwOld $throwNew
 
 $executeGuard='            if(State!=AsterMaxSolveState.ReadyToRun) throw new InvalidOperationException("Solve transaction is not ready to run.");'
-$s=Replace-Required $s $executeGuard ($executeGuard+"\n"+'            ThrowIfCancellationRequested();')
+$s=Replace-Required $s $executeGuard ($executeGuard+"`n"+'            ThrowIfCancellationRequested();')
 
 $runningOld=@'
             State=AsterMaxSolveState.Running;
             WriteFinalState();
 '@
 $runningNew='            TransitionOrCancel(AsterMaxSolveState.Running,"RUNNING: native Code_Aster runner started.");'
-$runningOld=[regex]::Replace($runningOld,"\r\n?","\n")
+$runningOld=[regex]::Replace($runningOld,"\r\n?","`n")
 $s=Replace-Required $s $runningOld $runningNew
 
 $missingRunnerOld=@'
@@ -124,8 +124,8 @@ $missingRunnerNew=@'
                 Fail("Code_Aster runner is not configured. Set ASTERMAX_CODE_ASTER_RUNNER to a validated runner executable/script.");
             }
 '@
-$missingRunnerOld=[regex]::Replace($missingRunnerOld,"\r\n?","\n")
-$missingRunnerNew=[regex]::Replace($missingRunnerNew,"\r\n?","\n")
+$missingRunnerOld=[regex]::Replace($missingRunnerOld,"\r\n?","`n")
+$missingRunnerNew=[regex]::Replace($missingRunnerNew,"\r\n?","`n")
 $s=Replace-Required $s $missingRunnerOld $missingRunnerNew
 
 $runnerExitOld=@'
@@ -147,8 +147,8 @@ $runnerExitNew=@'
                     (String.IsNullOrWhiteSpace(details)?"":"\n\n"+details));
             }
 '@
-$runnerExitOld=[regex]::Replace($runnerExitOld,"\r\n?","\n")
-$runnerExitNew=[regex]::Replace($runnerExitNew,"\r\n?","\n")
+$runnerExitOld=[regex]::Replace($runnerExitOld,"\r\n?","`n")
+$runnerExitNew=[regex]::Replace($runnerExitNew,"\r\n?","`n")
 $s=Replace-Required $s $runnerExitOld $runnerExitNew
 
 $postOld=@'
@@ -163,8 +163,8 @@ $postNew=@'
             TransitionOrCancel(AsterMaxSolveState.Postprocessing,
                 "Code_Aster evidence accepted; waiting for verified MED postprocess handoff.");
 '@
-$postOld=[regex]::Replace($postOld,"\r\n?","\n")
-$postNew=[regex]::Replace($postNew,"\r\n?","\n")
+$postOld=[regex]::Replace($postOld,"\r\n?","`n")
+$postNew=[regex]::Replace($postNew,"\r\n?","`n")
 $s=Replace-Required $s $postOld $postNew
 
 $currentOld=@'
@@ -179,8 +179,8 @@ $currentNew=@'
                 "SOLUTION_CURRENT: solver, MED bridge, fingerprint binding and VTK-ready result bundle all verified.");
             return bundle;
 '@
-$currentOld=[regex]::Replace($currentOld,"\r\n?","\n")
-$currentNew=[regex]::Replace($currentNew,"\r\n?","\n")
+$currentOld=[regex]::Replace($currentOld,"\r\n?","`n")
+$currentNew=[regex]::Replace($currentNew,"\r\n?","`n")
 $s=Replace-Required $s $currentOld $currentNew
 
 $failOld=@'
@@ -208,8 +208,8 @@ $failNew=@'
             throw new InvalidOperationException(message);
         }
 '@
-$failOld=[regex]::Replace($failOld,"\r\n?","\n")
-$failNew=[regex]::Replace($failNew,"\r\n?","\n")
+$failOld=[regex]::Replace($failOld,"\r\n?","`n")
+$failNew=[regex]::Replace($failNew,"\r\n?","`n")
 $s=Replace-Required $s $failOld $failNew
 
 $writePattern='(?s)        private void WriteFinalState\(\)\s*\{(.*?)\n        \}\n\n        private static void WriteExport'
@@ -224,8 +224,8 @@ if(-not $body.Contains($writeOld)){ throw 'C10.20.6 state-file write anchor miss
 $feaAnchor='                ["fea_values_invented"]=false'
 if(-not $body.Contains($feaAnchor)){ throw 'C10.20.6 FEA provenance anchor missing in state JSON.' }
 $body=$body.Replace($feaAnchor,
-'                ["cancel_requested"]=_cancelRequested,'+"\n"+
-'                ["state_revision"]=revision,'+"\n"+
+'                ["cancel_requested"]=_cancelRequested,'+"`n"+
+'                ["state_revision"]=revision,'+"`n"+
 $feaAnchor)
 
 $writeNew=@'
@@ -242,7 +242,7 @@ $writeNew=@'
                 if(File.Exists(tempPath)) File.Delete(tempPath);
             }
 '@
-$writeNew=[regex]::Replace($writeNew,"\r\n?","\n").TrimEnd()
+$writeNew=[regex]::Replace($writeNew,"\r\n?","`n").TrimEnd()
 $body=$body.Replace($writeOld,$writeNew)
 
 $newWrite=@'
@@ -260,7 +260,7 @@ __BODY__
 $trimmed=$body.Trim([char[]]@(10,13))
 $indented=(($trimmed -split '\n') | ForEach-Object { '    '+$_ }) -join [Environment]::NewLine
 $newWrite=$newWrite.Replace('__BODY__',$indented)
-$newWrite=[regex]::Replace($newWrite,"\r\n?","\n")
+$newWrite=[regex]::Replace($newWrite,"\r\n?","`n")
 $s=[regex]::Replace($s,$writePattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($x) $newWrite },1)
 
 Set-Content $solvePath $s -Encoding UTF8

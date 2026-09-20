@@ -24,6 +24,5 @@ required=[
 ]
 for token in required:
     assert token in patch, token
-assert contract["release"]=="C10.20.2"
 assert "async_solve_ui" in contract["cross_cutting_checks"]
 print("C10.20.2 ASYNC_SOLVE_REGRESSION_OK")

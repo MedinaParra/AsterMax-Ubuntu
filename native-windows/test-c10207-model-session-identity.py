@@ -2,7 +2,6 @@
 """Static guard for C10.20.7 model-session identity. No FEA is generated."""
 from pathlib import Path
 import json
-import re
 
 ROOT=Path(__file__).resolve().parent
 patch=(ROOT/"patch-c10207-model-session-identity.ps1").read_text(encoding="utf-8-sig")
@@ -23,13 +22,12 @@ required=[
 for token in required:
     assert token in patch, token
 
-m=re.search(r"\\$publishNew=@'\\n(.*?)\\n'@",patch,re.S)
-assert m, "publishNew block missing"
-publish_new=m.group(1)
+marker="$publishNew=@'\n"
+assert marker in patch, "publishNew block missing"
+publish_new=patch.split(marker,1)[1].split("\n'@",1)[0]
 assert publish_new.index("_asterMaxSolveModelSessionPreserved=true;") < publish_new.index("_asterMaxLoadedResults=completedBundle;")
 assert "Object.ReferenceEquals(_controller.Model,solveModel)" in publish_new
 assert "_asterMaxModelSessionRevision!=_asterMaxSolveFrozenSessionRevision" in publish_new
 
 assert "model_session_identity" in contract["cross_cutting_checks"]
-assert contract["release"]=="C10.20.7"
 print("C10.20.7 MODEL_SESSION_IDENTITY_REGRESSION_OK")

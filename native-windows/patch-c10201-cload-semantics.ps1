@@ -45,13 +45,11 @@ $old=$old.Replace("`r`n","`n"); $new=$new.Replace("`r`n","`n")
 $e=Replace-Required $e $old $new
 
 $oldManifest=@'
-                ["load_nodes"]=loadNodes.Count,
                 ["fx_per_node_n"]=fx,
                 ["fy_per_node_n"]=fy,
                 ["fz_per_node_n"]=fz,
 '@
 $newManifest=@'
-                ["load_nodes"]=loadNodes.Count,
                 ["load_semantics"]=loadSemantics,
                 ["fx_per_node_n"]=fx,
                 ["fy_per_node_n"]=fy,

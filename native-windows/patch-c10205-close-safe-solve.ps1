@@ -7,10 +7,10 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
 }
 
 $resultsPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxIntegratedResults.cs'
-$r=[regex]::Replace((Get-Content $resultsPath -Raw),"\r\n?","\n")
+$r=[regex]::Replace((Get-Content $resultsPath -Raw),"\r\n?","`n")
 
 $fieldAnchor='        private bool _asterMaxPreviousResultsRetained;'
-$r=Replace-Required $r $fieldAnchor ($fieldAnchor+"\n"+'        private bool _asterMaxCloseAfterSolveCancel;')
+$r=Replace-Required $r $fieldAnchor ($fieldAnchor+"`n"+'        private bool _asterMaxCloseAfterSolveCancel;')
 
 $initOld=@'
             _modelTree.AsterMaxModelTreeChanged += RefreshAsterMaxResultAvailability;
@@ -21,8 +21,8 @@ $initNew=@'
             FormClosing += AsterMaxFormClosingDuringSolve;
             Disposed += (s,e) => ResetAsterMaxIntegratedResults();
 '@
-$initOld=[regex]::Replace($initOld,"\r\n?","\n")
-$initNew=[regex]::Replace($initNew,"\r\n?","\n")
+$initOld=[regex]::Replace($initOld,"\r\n?","`n")
+$initNew=[regex]::Replace($initNew,"\r\n?","`n")
 $r=Replace-Required $r $initOld $initNew
 
 $methodAnchor='        private void RefreshAsterMaxResultAvailability()'
@@ -51,13 +51,13 @@ $resetNew=@'
             _asterMaxCloseAfterSolveCancel=false;
             _asterMaxSolveTransaction=null;
 '@
-$resetOld=[regex]::Replace($resetOld,"\r\n?","\n")
-$resetNew=[regex]::Replace($resetNew,"\r\n?","\n")
+$resetOld=[regex]::Replace($resetOld,"\r\n?","`n")
+$resetNew=[regex]::Replace($resetNew,"\r\n?","`n")
 $r=Replace-Required $r $resetOld $resetNew
 Set-Content $resultsPath $r -Encoding UTF8
 
 $solvePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
-$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","\n")
+$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","`n")
 
 $finallyOld=@'
                 _asterMaxSolveInProgress=false;
@@ -73,8 +73,8 @@ $finallyNew=@'
                 if(closeAfterSolveCancel && !IsDisposed && !Disposing)
                     BeginInvoke(new Action(Close));
 '@
-$finallyOld=[regex]::Replace($finallyOld,"\r\n?","\n")
-$finallyNew=[regex]::Replace($finallyNew,"\r\n?","\n")
+$finallyOld=[regex]::Replace($finallyOld,"\r\n?","`n")
+$finallyNew=[regex]::Replace($finallyNew,"\r\n?","`n")
 $s=Replace-Required $s $finallyOld $finallyNew
 
 Set-Content $solvePath $s -Encoding UTF8
