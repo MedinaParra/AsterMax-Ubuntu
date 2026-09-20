@@ -90,12 +90,12 @@ vertices
 (
     (-0.30 -0.30 0.00) (0.30 -0.30 0.00)
     (0.30 0.30 0.00) (-0.30 0.30 0.00)
-    (-0.30 -0.30 0.70) (0.30 -0.30 0.70)
-    (0.30 0.30 0.70) (-0.30 0.30 0.70)
+    (-0.30 -0.30 1.00) (0.30 -0.30 1.00)
+    (0.30 0.30 1.00) (-0.30 0.30 1.00)
 );
 blocks
 (
-    hex (0 1 2 3 4 5 6 7) (12 12 14) simpleGrading (1 1 1)
+    hex (0 1 2 3 4 5 6 7) (12 12 20) simpleGrading (1 1 1)
 );
 edges ();
 boundary
@@ -150,7 +150,7 @@ geometry
     {
         type searchableCylinder;
         point1 (0 0 0.00);
-        point2 (0 0 0.56);
+        point2 (0 0 0.62);
         radius 0.19;
     }
 
@@ -160,6 +160,14 @@ geometry
         point1 (0 0 0.00);
         point2 (0 0 0.10);
         radius 0.07;
+    }
+
+    plume
+    {
+        type searchableCylinder;
+        point1 (0 0 0.43);
+        point2 (0 0 0.90);
+        radius 0.18;
     }
 }
 
@@ -194,6 +202,11 @@ castellatedMeshControls
             levels ((0.04 2) (0.12 1));
         }
         throat
+        {
+            mode inside;
+            levels ((1e15 2));
+        }
+        plume
         {
             mode inside;
             levels ((1e15 2));
@@ -298,10 +311,31 @@ boundaryField
     }
     cambucho
     {
-        // Baseline validation case: uniform hot wall.
-        // Moving burn front will be introduced only after this solver/matrix is verified.
-        type fixedValue;
-        value uniform 373.15;
+        // FIRE-EQUIVALENT THERMAL BAND:
+        // This is not reactive combustion. A spatially localized hot band near
+        // the upper rim represents the thermal effect of the burning newspaper.
+        // The rest of the paper is warm; the hot band ramps in over 0.08 s.
+        type codedFixedValue;
+        value uniform 333.15;
+        name upperFireBand;
+        code
+        #{
+            const vectorField& Cf = patch().Cf();
+            scalarField Tw(Cf.size(), 333.15);
+
+            const scalar t = this->db().time().value();
+            const scalar ramp = min(t/0.08, scalar(1));
+            const scalar zFire = 0.485;
+            const scalar sigma = 0.025;
+            const scalar dTmax = 140.0; // peak wall ~473.15 K
+
+            forAll(Cf, faceI)
+            {
+                const scalar dz = Cf[faceI].z() - zFire;
+                Tw[faceI] = 333.15 + ramp*dTmax*exp(-sqr(dz/sigma));
+            }
+            operator==(Tw);
+        #};
     }
 }
 """)
@@ -386,10 +420,10 @@ application buoyantBoussinesqPimpleFoam;
 startFrom startTime;
 startTime 0;
 stopAt endTime;
-endTime 0.10;
+endTime 0.80;
 deltaT 0.002;
 writeControl adjustableRunTime;
-writeInterval 0.02;
+writeInterval 0.08;
 purgeWrite 0;
 writeFormat binary;
 writePrecision 8;
@@ -411,6 +445,21 @@ functions
         fields (T U p_rgh);
         writeControl writeTime;
     }
+
+    plumeProbes
+    {
+        type probes;
+        libs (sampling);
+        fields (T U p_rgh);
+        writeControl writeTime;
+        probeLocations
+        (
+            (0 0 0.52)
+            (0 0 0.60)
+            (0 0 0.70)
+            (0 0 0.85)
+        );
+    }
 }
 """)
 
@@ -425,8 +474,10 @@ Numerical shell thickness = {th} m (not physical paper thickness; chosen for mes
 Bottom clearance used in verification mesh = {z0} m
 Ambient = 295.15 K
 Skin wall = 307.15 K
-Cambucho wall = 373.15 K (uniform validation stage)
-End time = 0.10 s (pipeline verification run)
+Cambucho wall = 333.15 K baseline + Gaussian hot band near z=0.485 m
+Peak hot-band wall temperature = 473.15 K after 0.08 s ramp
+Fire representation = imposed thermal band, NOT reactive combustion
+End time = 0.80 s (fire-plume thermal run)
 
 This first run validates the OpenFOAM mesh/solver pipeline.
 It is NOT yet the final burning-paper model.
