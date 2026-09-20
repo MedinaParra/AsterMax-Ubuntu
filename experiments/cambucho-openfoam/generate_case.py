@@ -22,7 +22,7 @@ if (CASE / "0.orig").exists():
 # leaving them behind makes post-processing and patch validation fail after
 # snappyHexMesh adds the skin/cambucho patches.
 for p in (CASE / "0").iterdir():
-    if p.is_file() and p.name not in {"U", "T", "p_rgh"}:
+    if p.is_file() and p.name not in {"U", "T", "p_rgh", "alphat"}:
         p.unlink()
 
 tri = CASE / "constant" / "triSurface"
@@ -327,6 +327,32 @@ boundaryField
     {
         type fixedFluxPressure;
         rho rhok;
+        value uniform 0;
+    }
+}
+""")
+
+w("0/alphat", r"""
+FoamFile { version 2.0; format ascii; class volScalarField; object alphat; }
+dimensions [1 -1 -1 0 0 0 0];
+internalField uniform 0;
+boundaryField
+{
+    atmosphere
+    {
+        type calculated;
+        value uniform 0;
+    }
+    skin
+    {
+        type compressible::alphatWallFunction;
+        Prt 0.85;
+        value uniform 0;
+    }
+    cambucho
+    {
+        type compressible::alphatWallFunction;
+        Prt 0.85;
         value uniform 0;
     }
 }
