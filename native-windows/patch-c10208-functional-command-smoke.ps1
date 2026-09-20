@@ -14,7 +14,7 @@ $m=Replace-Required $m $meshingPopup $meshingAudit
 Set-Content $mainPath $m -Encoding UTF8
 
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
-$a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","\n")
+$a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 
 # C10.20.3-C10.20.7 changed behavior without updating the session's embedded release.
 $a=$a.Replace('["release"] = "C10.20.2"','["release"] = "C10.20.8"')
@@ -29,8 +29,8 @@ $rowsNew=@'
             var commandSmoke = new JArray();
             var previousStates = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 '@
-$rowsAnchor=[regex]::Replace($rowsAnchor,"\r\n?","\n")
-$rowsNew=[regex]::Replace($rowsNew,"\r\n?","\n")
+$rowsAnchor=[regex]::Replace($rowsAnchor,"\r\n?","`n")
+$rowsNew=[regex]::Replace($rowsNew,"\r\n?","`n")
 $a=Replace-Required $a $rowsAnchor $rowsNew
 
 $materialAnchor=@'
@@ -43,8 +43,8 @@ $materialNew=@'
                 C10208SmokeEditorCommand("Model", "Materials", _frmMaterial, () => model.Materials.Count));
             if (model.Materials.Count == 0)
 '@
-$materialAnchor=[regex]::Replace($materialAnchor,"\r\n?","\n")
-$materialNew=[regex]::Replace($materialNew,"\r\n?","\n")
+$materialAnchor=[regex]::Replace($materialAnchor,"\r\n?","`n")
+$materialNew=[regex]::Replace($materialNew,"\r\n?","`n")
 $a=Replace-Required $a $materialAnchor $materialNew
 
 $meshAnchor='            C1020PopulateB01Mesh(model);'
@@ -60,7 +60,7 @@ $meshNew=@'
             // non-deterministic tetra mesh with the controlled HE8 B01 solver fixture.
             C1020PopulateB01Mesh(model);
 '@
-$meshNew=[regex]::Replace($meshNew,"\r\n?","\n").TrimEnd()
+$meshNew=[regex]::Replace($meshNew,"\r\n?","`n").TrimEnd()
 $a=Replace-Required $a $meshAnchor $meshNew
 
 $stepAnchor='            C1020PopulateB01StaticStructural(model);'
@@ -70,7 +70,7 @@ $stepNew=@'
                     () => model.StepCollection.StepsList.Count));
             C1020PopulateB01StaticStructural(model);
 '@
-$stepNew=[regex]::Replace($stepNew,"\r\n?","\n").TrimEnd()
+$stepNew=[regex]::Replace($stepNew,"\r\n?","`n").TrimEnd()
 $a=Replace-Required $a $stepAnchor $stepNew
 
 $structuralAnchor=@'
@@ -89,8 +89,8 @@ $structuralNew=@'
                     () => model.StepCollection.StepsList.Sum(s => s.Loads.Count)));
             C1020SelectOutlineNode("ax-analysis");
 '@
-$structuralAnchor=[regex]::Replace($structuralAnchor,"\r\n?","\n")
-$structuralNew=[regex]::Replace($structuralNew,"\r\n?","\n")
+$structuralAnchor=[regex]::Replace($structuralAnchor,"\r\n?","`n")
+$structuralNew=[regex]::Replace($structuralNew,"\r\n?","`n")
 $a=Replace-Required $a $structuralAnchor $structuralNew
 
 $resultAnchor=@'
@@ -107,8 +107,8 @@ $resultNew=@'
                 C10208RecordCommandSmoke(directory, commandSmoke, C10208SmokeResultCommand("View", command));
             C1020CaptureStage(directory, rows, previousStates, 9, "results", "Results", "results",
 '@
-$resultAnchor=[regex]::Replace($resultAnchor,"\r\n?","\n")
-$resultNew=[regex]::Replace($resultNew,"\r\n?","\n")
+$resultAnchor=[regex]::Replace($resultAnchor,"\r\n?","`n")
+$resultNew=[regex]::Replace($resultNew,"\r\n?","`n")
 $a=Replace-Required $a $resultAnchor $resultNew
 
 $sessionAnchor='                    ["fea_values_invented"] = false,'
@@ -116,7 +116,7 @@ $sessionNew=@'
                     ["fea_values_invented"] = false,
                     ["command_execution_smoke"] = commandSmoke,
 '@
-$sessionNew=[regex]::Replace($sessionNew,"\r\n?","\n").TrimEnd()
+$sessionNew=[regex]::Replace($sessionNew,"\r\n?","`n").TrimEnd()
 $a=Replace-Required $a $sessionAnchor $sessionNew
 
 $helperAnchor='        private void C1020ClickRibbonButton(string caption)'
@@ -240,12 +240,12 @@ $helpers=@'
         }
 
 '@
-$helpers=[regex]::Replace($helpers,"\r\n?","\n")
+$helpers=[regex]::Replace($helpers,"\r\n?","`n")
 $a=Replace-Required $a $helperAnchor ($helpers+$helperAnchor)
 Set-Content $auditPath $a -Encoding UTF8
 
 $crossPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceCrossChecks.cs'
-$c=[regex]::Replace((Get-Content $crossPath -Raw),"\r\n?","\n")
+$c=[regex]::Replace((Get-Content $crossPath -Raw),"\r\n?","`n")
 $crossAnchor=@'
             try
             {
@@ -284,8 +284,8 @@ $crossNew=@'
             {
                 bool sameInstance=_asterMaxSolveFrozenModelInstance!=null && _controller!=null &&
 '@
-$crossAnchor=[regex]::Replace($crossAnchor,"\r\n?","\n")
-$crossNew=[regex]::Replace($crossNew,"\r\n?","\n")
+$crossAnchor=[regex]::Replace($crossAnchor,"\r\n?","`n")
+$crossNew=[regex]::Replace($crossNew,"\r\n?","`n")
 $c=Replace-Required $c $crossAnchor $crossNew
 Set-Content $crossPath $c -Encoding UTF8
 

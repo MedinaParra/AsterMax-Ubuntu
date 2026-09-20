@@ -7,10 +7,10 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
 }
 
 $resultsPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxIntegratedResults.cs'
-$r=[regex]::Replace((Get-Content $resultsPath -Raw),"\r\n?","\n")
+$r=[regex]::Replace((Get-Content $resultsPath -Raw),"\r\n?","`n")
 
 $fieldAnchor='        private bool _asterMaxCloseAfterSolveCancel;'
-$r=Replace-Required $r $fieldAnchor ($fieldAnchor+"\n"+'        private long _asterMaxModelSessionRevision;')
+$r=Replace-Required $r $fieldAnchor ($fieldAnchor+"`n"+'        private long _asterMaxModelSessionRevision;')
 
 $resetAnchor=@'
         private void ResetAsterMaxIntegratedResults()
@@ -23,13 +23,13 @@ $resetNew=@'
             System.Threading.Interlocked.Increment(ref _asterMaxModelSessionRevision);
             ShowAsterMaxModelWorkspace();
 '@
-$resetAnchor=[regex]::Replace($resetAnchor,"\r\n?","\n")
-$resetNew=[regex]::Replace($resetNew,"\r\n?","\n")
+$resetAnchor=[regex]::Replace($resetAnchor,"\r\n?","`n")
+$resetNew=[regex]::Replace($resetNew,"\r\n?","`n")
 $r=Replace-Required $r $resetAnchor $resetNew
 Set-Content $resultsPath $r -Encoding UTF8
 
 $solvePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
-$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","\n")
+$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","`n")
 
 $auditField='        private int _asterMaxSolveDuplicateRequestsRejected;'
 $auditFields=@'
@@ -51,8 +51,8 @@ $captureNew=@'
                 _asterMaxSolveModelSessionPreserved=false;
                 string work=_controller.Settings.GetWorkDirectory();
 '@
-$captureOld=[regex]::Replace($captureOld,"\r\n?","\n")
-$captureNew=[regex]::Replace($captureNew,"\r\n?","\n")
+$captureOld=[regex]::Replace($captureOld,"\r\n?","`n")
+$captureNew=[regex]::Replace($captureNew,"\r\n?","`n")
 $s=Replace-Required $s $captureOld $captureNew
 
 $publishOld=@'
@@ -72,13 +72,13 @@ $publishNew=@'
                 _asterMaxSolveModelSessionPreserved=true;
                 _asterMaxLoadedResults=completedBundle;
 '@
-$publishOld=[regex]::Replace($publishOld,"\r\n?","\n")
-$publishNew=[regex]::Replace($publishNew,"\r\n?","\n")
+$publishOld=[regex]::Replace($publishOld,"\r\n?","`n")
+$publishNew=[regex]::Replace($publishNew,"\r\n?","`n")
 $s=Replace-Required $s $publishOld $publishNew
 Set-Content $solvePath $s -Encoding UTF8
 
 $crossPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceCrossChecks.cs'
-$c=[regex]::Replace((Get-Content $crossPath -Raw),"\r\n?","\n")
+$c=[regex]::Replace((Get-Content $crossPath -Raw),"\r\n?","`n")
 
 $crossAnchor=@'
             catch(Exception ex)
@@ -125,8 +125,8 @@ $crossInsert=@'
             {
                 string solveWorkspace = _asterMaxSolveTransaction == null ? null : _asterMaxSolveTransaction.Workspace;
 '@
-$crossAnchor=[regex]::Replace($crossAnchor,"\r\n?","\n")
-$crossInsert=[regex]::Replace($crossInsert,"\r\n?","\n")
+$crossAnchor=[regex]::Replace($crossAnchor,"\r\n?","`n")
+$crossInsert=[regex]::Replace($crossInsert,"\r\n?","`n")
 $c=Replace-Required $c $crossAnchor $crossInsert
 Set-Content $crossPath $c -Encoding UTF8
 

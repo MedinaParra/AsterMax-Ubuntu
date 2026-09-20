@@ -7,7 +7,7 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
 }
 
 $solvePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
-$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","\n")
+$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","`n")
 
 $oldEnum='internal enum AsterMaxSolveState { Idle, Preparing, ReadyToRun, Running, Postprocessing, SolutionCurrent, SolutionStale, Failed }'
 $newEnum='internal enum AsterMaxSolveState { Idle, Preparing, ReadyToRun, Running, Postprocessing, Cancelling, Cancelled, SolutionCurrent, SolutionStale, Failed }'
@@ -116,8 +116,8 @@ $solverOld=@'
 $solverNew=@'
             RunnerExitCode=RunTrackedProcess(psi,"CODE_ASTER_RUNNER_STDOUT.log","CODE_ASTER_RUNNER_STDERR.log");
 '@
-$solverOld=[regex]::Replace($solverOld,"\r\n?","\n")
-$solverNew=[regex]::Replace($solverNew,"\r\n?","\n")
+$solverOld=[regex]::Replace($solverOld,"\r\n?","`n")
+$solverNew=[regex]::Replace($solverNew,"\r\n?","`n")
 $s=Replace-Required $s $solverOld $solverNew
 
 $handoffAnchor=@'
@@ -133,8 +133,8 @@ $handoffNew=@'
             ThrowIfCancellationRequested();
             RequireUnchangedModel(liveModel);
 '@
-$handoffAnchor=[regex]::Replace($handoffAnchor,"\r\n?","\n")
-$handoffNew=[regex]::Replace($handoffNew,"\r\n?","\n")
+$handoffAnchor=[regex]::Replace($handoffAnchor,"\r\n?","`n")
+$handoffNew=[regex]::Replace($handoffNew,"\r\n?","`n")
 $s=Replace-Required $s $handoffAnchor $handoffNew
 
 $capturedOld=@'
@@ -157,8 +157,8 @@ $capturedNew=@'
             return RunTrackedProcess(psi,stem+"_STDOUT.log",stem+"_STDERR.log");
         }
 '@
-$capturedOld=[regex]::Replace($capturedOld,"\r\n?","\n")
-$capturedNew=[regex]::Replace($capturedNew,"\r\n?","\n")
+$capturedOld=[regex]::Replace($capturedOld,"\r\n?","`n")
+$capturedNew=[regex]::Replace($capturedNew,"\r\n?","`n")
 $s=Replace-Required $s $capturedOld $capturedNew
 
 $oldRibbon='                if(ribbon!=null) { _asterMaxSolveRibbonWasEnabled=ribbon.Enabled; ribbon.Enabled=false; }'
@@ -204,19 +204,19 @@ $catchNew=@'
                     CaeGlobals.MessageBoxes.ShowError("AsterMax Solve blocked: "+ex.Message);
             }
 '@
-$catchOld=[regex]::Replace($catchOld,"\r\n?","\n")
-$catchNew=[regex]::Replace($catchNew,"\r\n?","\n")
+$catchOld=[regex]::Replace($catchOld,"\r\n?","`n")
+$catchNew=[regex]::Replace($catchNew,"\r\n?","`n")
 $s=Replace-Required $s $catchOld $catchNew
 Set-Content $solvePath $s -Encoding UTF8
 
 $uiPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
-$u=[regex]::Replace((Get-Content $uiPath -Raw),"\r\n?","\n")
+$u=[regex]::Replace((Get-Content $uiPath -Raw),"\r\n?","`n")
 $solveTile='                CommandTile("Solve", "CODE_ASTER", () => RunAsterMaxNativeSolve(), true),'
-$u=Replace-Required $u $solveTile ($solveTile+"\n"+'                CommandTile("Cancel Solve", "CODE_ASTER", () => CancelAsterMaxNativeSolve()),')
+$u=Replace-Required $u $solveTile ($solveTile+"`n"+'                CommandTile("Cancel Solve", "CODE_ASTER", () => CancelAsterMaxNativeSolve()),')
 Set-Content $uiPath $u -Encoding UTF8
 
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxButtonAudit.cs'
-$b=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","\n")
+$b=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 $oldIcons='            {"Solve","Running"},{"Results Explorer","Field_output"},{"FEA Viewport","Color_contours"},'
 $newIcons='            {"Solve","Running"},{"Cancel Solve","Running"},{"Results Explorer","Field_output"},{"FEA Viewport","Color_contours"},'
 $b=Replace-Required $b $oldIcons $newIcons
@@ -226,7 +226,7 @@ $b=Replace-Required $b $oldExpected $newExpected
 $invokeAnchor=@'
         private void InvokeAsterMaxCommand(string caption, Action action)
         {
-            try { action(); }
+            try { if (!RouteAsterMaxIntegratedCommand(caption)) action(); RefreshAsterMaxResultAvailability(); }
 '@
 $invokeNew=@'
         private void InvokeAsterMaxCommand(string caption, Action action)
@@ -236,13 +236,13 @@ $invokeNew=@'
                 tsslState.Text="AsterMax Solve: model editing is locked while the solve is running";
                 return;
             }
-            try { action(); }
+            try { if (!RouteAsterMaxIntegratedCommand(caption)) action(); RefreshAsterMaxResultAvailability(); }
 '@
-$invokeAnchor=[regex]::Replace($invokeAnchor,"\r\n?","\n")
-$invokeNew=[regex]::Replace($invokeNew,"\r\n?","\n")
+$invokeAnchor=[regex]::Replace($invokeAnchor,"\r\n?","`n")
+$invokeNew=[regex]::Replace($invokeNew,"\r\n?","`n")
 $b=Replace-Required $b $invokeAnchor $invokeNew
 $tipOld='            if (caption == "Solve") tip += "\nCode_Aster nativo de Windows; requiere material, sección, malla, apoyo, carga y Runtime/PREFLIGHT válido.";'
-$tipNew=$tipOld+"\n"+'            else if (caption == "Cancel Solve") tip += "\nCancela el cálculo activo y termina el árbol de procesos del runner.";'
+$tipNew=$tipOld+"`n"+'            else if (caption == "Cancel Solve") tip += "\nCancela el cálculo activo y termina el árbol de procesos del runner.";'
 $b=Replace-Required $b $tipOld $tipNew
 Set-Content $auditPath $b -Encoding UTF8
 
