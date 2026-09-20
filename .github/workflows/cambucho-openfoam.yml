@@ -6,6 +6,7 @@ on:
       - experiment/cambucho-openfoam
       - experiment/cambucho-fire-plume
       - experiment/cambucho-coupled-bioheat
+      - experiment/cambucho-physical-v2
   workflow_dispatch:
 
 jobs:
@@ -31,7 +32,7 @@ jobs:
           command -v surfaceFeatureExtract
           command -v snappyHexMesh
           command -v checkMesh
-          command -v buoyantBoussinesqPimpleFoam
+          command -v buoyantPimpleFoam
           blockMesh -help | head -n 5
 
       - name: Install Python helper dependency
@@ -73,6 +74,10 @@ jobs:
         run: |
           set -o pipefail
           checkMesh -allGeometry -allTopology 2>&1 | tee log.checkMesh
+          if ! grep -q "Mesh OK" log.checkMesh; then
+            echo "STRICT_MESH_GATE_FAILED: checkMesh did not report Mesh OK"
+            exit 2
+          fi
 
       - name: Validate required initial fields
         shell: bash
@@ -81,12 +86,14 @@ jobs:
           set -euxo pipefail
           test -f 0/U
           test -f 0/T
+          test -f 0/p
           test -f 0/p_rgh
           test -f 0/alphat
           grep -q "skin" 0/U
           grep -q "cambucho" 0/U
           grep -q "skin" 0/T
           grep -q "cambucho" 0/T
+          grep -q "skin" 0/p
           grep -q "skin" 0/p_rgh
           grep -q "cambucho" 0/p_rgh
 
@@ -95,7 +102,7 @@ jobs:
         working-directory: experiments/cambucho-openfoam/case
         run: |
           set -o pipefail
-          buoyantBoussinesqPimpleFoam 2>&1 | tee log.buoyantBoussinesqPimpleFoam
+          buoyantPimpleFoam 2>&1 | tee log.buoyantPimpleFoam
 
       - name: Compute wall heat flux
         if: always()
@@ -103,7 +110,7 @@ jobs:
         working-directory: experiments/cambucho-openfoam/case
         run: |
           set -o pipefail
-          postProcess -func wallHeatFlux -latestTime 2>&1 | tee log.wallHeatFlux || true
+          postProcess -func wallHeatFlux 2>&1 | tee log.wallHeatFlux || true
 
       - name: Convert fields to VTK
         if: always()
@@ -124,14 +131,16 @@ jobs:
             echo "=== Mesh summary ==="
             grep -E "cells:|faces:|points:|Mesh OK|Failed" log.checkMesh || true
             echo "=== Solver tail ==="
-            tail -n 100 log.buoyantBoussinesqPimpleFoam 2>/dev/null || true
+            tail -n 140 log.buoyantPimpleFoam 2>/dev/null || true
+            echo "=== wallHeatFlux tail ==="
+            tail -n 120 log.wallHeatFlux 2>/dev/null || true
           } | tee RUN_SUMMARY.txt
 
       - name: Upload OpenFOAM results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cambucho-openfoam-v2312-results
+          name: cambucho-physical-v2-openfoam-results
           path: |
             experiments/cambucho-openfoam/case
           if-no-files-found: warn
