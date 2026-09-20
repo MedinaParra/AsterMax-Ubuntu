@@ -31,7 +31,6 @@ tri.mkdir(parents=True, exist_ok=True)
 L = 0.50
 r_small = 0.020
 r_large = 0.125
-th = 0.008          # numerical shell thickness; shell extends OUTWARD
 z0 = 0.002          # leakage gap to skin; parametric assumption
 nseg = 128
 
@@ -40,35 +39,27 @@ def facet(f, a, b, c):
     n=np.cross(b-a,c-a)
     nn=np.linalg.norm(n)
     if nn > 0: n /= nn
-    f.write(f"facet normal {n[0]:.8e} {n[1]:.8e} {n[2]:.8e}\n")
-    f.write("  outer loop\n")
+    f.write(f"facet normal {n[0]:.8e} {n[1]:.8e} {n[2]:.8e}\\n")
+    f.write("  outer loop\\n")
     for p in (a,b,c):
-        f.write(f"    vertex {p[0]:.8e} {p[1]:.8e} {p[2]:.8e}\n")
-    f.write("  endloop\nendfacet\n")
+        f.write(f"    vertex {p[0]:.8e} {p[1]:.8e} {p[2]:.8e}\\n")
+    f.write("  endloop\\nendfacet\\n")
 
+# Zero-thickness conical paper surface. snappyHexMesh converts this surface
+# directly into a baffle, avoiding the poor cells created by meshing a thin
+# 3-D shell with annular rims.
 with (tri/"cambucho.stl").open("w") as f:
-    f.write("solid cambucho\n")
-    ro_small = r_small + th
-    ro_large = r_large + th
+    f.write("solid cambucho\\n")
     for kseg in range(nseg):
         a1=2*math.pi*kseg/nseg
         a2=2*math.pi*(kseg+1)/nseg
-        # inner physical cone surface
-        ib1=(r_small*math.cos(a1), r_small*math.sin(a1), z0)
-        ib2=(r_small*math.cos(a2), r_small*math.sin(a2), z0)
-        it1=(r_large*math.cos(a1), r_large*math.sin(a1), z0+L)
-        it2=(r_large*math.cos(a2), r_large*math.sin(a2), z0+L)
-        # outer numerical shell surface
-        ob1=(ro_small*math.cos(a1), ro_small*math.sin(a1), z0)
-        ob2=(ro_small*math.cos(a2), ro_small*math.sin(a2), z0)
-        ot1=(ro_large*math.cos(a1), ro_large*math.sin(a1), z0+L)
-        ot2=(ro_large*math.cos(a2), ro_large*math.sin(a2), z0+L)
-        # inner, outer, and thin annular rims
-        facet(f,it1,it2,ib2); facet(f,it1,ib2,ib1)
-        facet(f,ob1,ob2,ot2); facet(f,ob1,ot2,ot1)
-        facet(f,ot1,ot2,it2); facet(f,ot1,it2,it1)
-        facet(f,ib1,ib2,ob2); facet(f,ib1,ob2,ob1)
-    f.write("endsolid cambucho\n")
+        b1=(r_small*math.cos(a1), r_small*math.sin(a1), z0)
+        b2=(r_small*math.cos(a2), r_small*math.sin(a2), z0)
+        t1=(r_large*math.cos(a1), r_large*math.sin(a1), z0+L)
+        t2=(r_large*math.cos(a2), r_large*math.sin(a2), z0+L)
+        facet(f,t1,t2,b2)
+        facet(f,t1,b2,b1)
+    f.write("endsolid cambucho\\n")
 
 header = r"""/*--------------------------------*- C++ -*----------------------------------*\
 | =========                 | OpenFOAM v2312 - Cambucho physical-v2           |
@@ -181,7 +172,9 @@ castellatedMeshControls
     {
         cambucho
         {
-            level (3 4);
+            level (3 3);
+            faceZone cambucho;
+            faceType baffle;
             patchInfo { type wall; }
         }
     }
@@ -279,7 +272,7 @@ boundaryField
         value uniform (0 0 0);
     }
     skin { type noSlip; }
-    cambucho { type noSlip; }
+    cambucho { type noSlip; }\n    cambucho_slave { type noSlip; }
 }
 """)
 
@@ -332,6 +325,35 @@ boundaryField
             operator==(Tw);
         #};
     }
+    cambucho_slave
+    {
+        type codedFixedValue;
+        value uniform 295.15;
+        name movingFireFrontSlave;
+        code
+        #{
+            const vectorField& Cf = patch().Cf();
+            scalarField Tw(Cf.size(), 295.15);
+            const scalar t = this->db().time().value();
+
+            if (t > 3.0)
+            {
+                const scalar tau = t - 3.0;
+                const scalar ramp = min(tau/0.5, scalar(1));
+                const scalar zFire = max(0.15, 0.49 - 0.060*tau);
+                const scalar sigma = 0.018;
+                const scalar Tpeak = 750.0;
+
+                forAll(Cf, faceI)
+                {
+                    const scalar dz = Cf[faceI].z() - zFire;
+                    const scalar band = exp(-sqr(dz/sigma));
+                    Tw[faceI] = 295.15 + ramp*(Tpeak - 295.15)*band;
+                }
+            }
+            operator==(Tw);
+        #};
+    }
 }
 """)
 
@@ -349,7 +371,7 @@ boundaryField
         value uniform 101325;
     }
     skin { type zeroGradient; }
-    cambucho { type zeroGradient; }
+    cambucho { type zeroGradient; }\n    cambucho_slave { type zeroGradient; }
 }
 """)
 
@@ -375,6 +397,11 @@ boundaryField
         type fixedFluxPressure;
         value uniform 101325;
     }
+    cambucho_slave
+    {
+        type fixedFluxPressure;
+        value uniform 101325;
+    }
 }
 """)
 
@@ -386,7 +413,7 @@ boundaryField
 {
     atmosphere { type calculated; value uniform 0; }
     skin { type calculated; value uniform 0; }
-    cambucho { type calculated; value uniform 0; }
+    cambucho { type calculated; value uniform 0; }\n    cambucho_slave { type calculated; value uniform 0; }
 }
 """)
 
