@@ -163,10 +163,7 @@ castellatedMeshControls
     minRefinementCells 0;
     nCellsBetweenLevels 3;
 
-    features
-    (
-        { file "cambucho.eMesh"; level 3; }
-    );
+    features ();
 
     refinementSurfaces
     {
