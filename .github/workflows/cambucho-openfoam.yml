@@ -80,7 +80,7 @@ jobs:
           test -f 0/U
           test -f 0/T
           test -f 0/p_rgh
-          test ! -f 0/alphat
+          test -f 0/alphat
           grep -q "skin" 0/U
           grep -q "cambucho" 0/U
           grep -q "skin" 0/T
