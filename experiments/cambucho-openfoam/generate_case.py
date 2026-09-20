@@ -95,7 +95,7 @@ vertices
 );
 blocks
 (
-    hex (0 1 2 3 4 5 6 7) (16 16 20) simpleGrading (1 1 1)
+    hex (0 1 2 3 4 5 6 7) (12 12 14) simpleGrading (1 1 1)
 );
 edges ();
 boundary
@@ -165,8 +165,8 @@ geometry
 
 castellatedMeshControls
 {
-    maxLocalCells 500000;
-    maxGlobalCells 750000;
+    maxLocalCells 250000;
+    maxGlobalCells 400000;
     minRefinementCells 0;
     nCellsBetweenLevels 2;
 
@@ -179,7 +179,7 @@ castellatedMeshControls
     {
         cambucho
         {
-            level (2 3);
+            level (1 2);
             patchInfo { type wall; }
         }
     }
@@ -191,12 +191,12 @@ castellatedMeshControls
         nearCone
         {
             mode distance;
-            levels ((0.035 3) (0.10 2));
+            levels ((0.04 2) (0.12 1));
         }
         throat
         {
             mode inside;
-            levels ((1e15 3));
+            levels ((1e15 2));
         }
     }
 
@@ -386,10 +386,10 @@ application buoyantBoussinesqPimpleFoam;
 startFrom startTime;
 startTime 0;
 stopAt endTime;
-endTime 2.0;
+endTime 0.10;
 deltaT 0.002;
 writeControl adjustableRunTime;
-writeInterval 0.10;
+writeInterval 0.02;
 purgeWrite 0;
 writeFormat binary;
 writePrecision 8;
@@ -426,7 +426,7 @@ Bottom clearance used in verification mesh = {z0} m
 Ambient = 295.15 K
 Skin wall = 307.15 K
 Cambucho wall = 373.15 K (uniform validation stage)
-End time = 2 s
+End time = 0.10 s (pipeline verification run)
 
 This first run validates the OpenFOAM mesh/solver pipeline.
 It is NOT yet the final burning-paper model.
