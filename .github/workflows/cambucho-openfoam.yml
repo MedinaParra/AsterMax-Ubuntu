@@ -1,0 +1,45 @@
+name: Cambucho OpenFOAM 2312
+
+on:
+  push:
+    branches:
+      - experiment/cambucho-openfoam
+  workflow_dispatch:
+
+jobs:
+  openfoam-diagnostic:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenFOAM 2312
+        uses: gerlero/setup-openfoam@v1
+        with:
+          openfoam-version: 2312
+
+      - name: Verify installation and inspect thermal tutorial
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "WM_PROJECT_VERSION=$WM_PROJECT_VERSION"
+          echo "FOAM_TUTORIALS=$FOAM_TUTORIALS"
+          command -v blockMesh
+          command -v snappyHexMesh
+          command -v buoyantBoussinesqPimpleFoam
+          buoyantBoussinesqPimpleFoam -help | head -n 20
+          TUT="$FOAM_TUTORIALS/heatTransfer/buoyantBoussinesqPimpleFoam/hotRoom"
+          find "$TUT" -maxdepth 2 -type f | sort
+          echo "===== transportProperties ====="
+          cat "$TUT/constant/transportProperties"
+          echo "===== controlDict ====="
+          cat "$TUT/system/controlDict"
+          echo "===== fvSchemes ====="
+          cat "$TUT/system/fvSchemes"
+          echo "===== fvSolution ====="
+          cat "$TUT/system/fvSolution"
+          echo "===== 0.orig/U ====="
+          cat "$TUT/0.orig/U"
+          echo "===== 0.orig/T ====="
+          cat "$TUT/0.orig/T"
+          echo "===== 0.orig/p_rgh ====="
+          cat "$TUT/0.orig/p_rgh"
