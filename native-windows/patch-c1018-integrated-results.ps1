@@ -46,9 +46,7 @@ $s=Replace-Required $s $renderStart @'
         {
             string renderStage="preflight";
             if(_axRendering) {
-                LastRenderError=null;
-                LastRenderSkipped=true;
-                LastRenderSkipReason="render already in progress";
+                // The active render owns completion status; nested UI events must not overwrite it.
                 return;
             }
             if(!IsHandleCreated || !Visible) {
@@ -107,7 +105,7 @@ $s=Replace-Required $s '                _view.UpdateScalarsAndCameraAndRedraw();
 $s=Replace-Required $s '                _view.SetSelectBy(CaeGlobals.vtkSelectBy.Node);' ('                renderStage="selection-mode";'+[Environment]::NewLine+'                _view.SetSelectBy(CaeGlobals.vtkSelectBy.Node);')
 $s=Replace-Required $s '                _view.OnMouseLeftButtonUpSelection+=OnNativeVtkSelection;' ('                renderStage="selection-event";'+[Environment]::NewLine+'                _view.OnMouseLeftButtonUpSelection+=OnNativeVtkSelection;')
 $s=Replace-Required $s '                _view.AdjustCameraDistanceAndClipping();' ('                renderStage="camera-fit";'+[Environment]::NewLine+'                if(firstRender) _view.AdjustCameraDistanceAndClipping();')
-$s=Replace-Required $s '                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ' ('                renderStage="complete";'+[Environment]::NewLine+'                RenderRevision++;'+[Environment]::NewLine+'                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ')
+$s=Replace-Required $s '                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ' ('                renderStage="complete";'+[Environment]::NewLine+'                LastRenderError=null; LastRenderSkipped=false; LastRenderSkipReason=null;'+[Environment]::NewLine+'                RenderRevision++;'+[Environment]::NewLine+'                _status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCount+" nodes / "+_bundle.ElementCount+" volume elements • scalar contours ')
 $s=Replace-Required $s '                _status.Text="Render blocked: "+ex.GetType().Name;' ('                LastRenderError="stage="+renderStage+"; "+ex.ToString();'+[Environment]::NewLine+'                LastRenderSkipped=false;'+[Environment]::NewLine+'                LastRenderSkipReason=null;'+[Environment]::NewLine+'                try { System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(),"AsterMax-render-error.log"),LastRenderError); } catch {}'+[Environment]::NewLine+'                _status.Text="Render blocked @ "+renderStage+": "+ex.GetType().Name;')
 $s=Replace-Required $s '                MessageBox.Show(this,"AsterMax results renderer blocked safely.\n\n"+ex.GetType().Name+": "+ex.Message,' ('                if(AuditMode) throw;'+[Environment]::NewLine+'                MessageBox.Show(this,"AsterMax results renderer blocked safely.\n\nStage: "+renderStage+"\n"+ex.GetType().Name+": "+ex.Message,')
 $anchor=@'
