@@ -84,7 +84,7 @@ vertices
 );
 blocks
 (
-    hex (0 1 2 3 4 5 6 7) (20 20 28) simpleGrading (1 1 1)
+    hex (0 1 2 3 4 5 6 7) (14 14 20) simpleGrading (1 1 1)
 );
 edges ();
 boundary
@@ -158,8 +158,8 @@ geometry
 
 castellatedMeshControls
 {
-    maxLocalCells 700000;
-    maxGlobalCells 900000;
+    maxLocalCells 350000;
+    maxGlobalCells 450000;
     minRefinementCells 0;
     nCellsBetweenLevels 3;
 
@@ -183,17 +183,17 @@ castellatedMeshControls
         nearCone
         {
             mode distance;
-            levels ((0.035 3) (0.10 2));
+            levels ((0.035 2) (0.10 1));
         }
         throat
         {
             mode inside;
-            levels ((1e15 5));
+            levels ((1e15 4));
         }
         plume
         {
             mode inside;
-            levels ((1e15 2));
+            levels ((1e15 1));
         }
     }
 
@@ -461,7 +461,7 @@ stopAt endTime;
 endTime 8.0;
 deltaT 0.002;
 writeControl adjustableRunTime;
-writeInterval 0.25;
+writeInterval 0.50;
 purgeWrite 0;
 writeFormat binary;
 writePrecision 8;
