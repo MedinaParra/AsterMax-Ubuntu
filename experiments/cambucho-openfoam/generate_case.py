@@ -491,7 +491,7 @@ Domain: 1.2 m x 1.2 m x 1.6 m
 Cone length = {L} m
 Inner Dmin = {2*r_small} m
 Inner Dmax = {2*r_large} m
-Numerical shell thickness = {th} m outward from physical inner cone
+Paper wall = zero-thickness baffle (physical paper thickness neglected)
 Leakage gap to skin = {z0} m (assumption; requires experiment)
 Ambient initial T = 295.15 K
 Skin T = 307.15 K
