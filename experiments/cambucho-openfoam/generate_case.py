@@ -17,6 +17,14 @@ if (CASE / "0.orig").exists():
         shutil.rmtree(CASE / "0")
     shutil.copytree(CASE / "0.orig", CASE / "0")
 
+# Keep only fields required by the laminar buoyantBoussinesq baseline.
+# The hotRoom tutorial also carries turbulence fields (alphat/k/epsilon/nut);
+# leaving them behind makes post-processing and patch validation fail after
+# snappyHexMesh adds the skin/cambucho patches.
+for p in (CASE / "0").iterdir():
+    if p.is_file() and p.name not in {"U", "T", "p_rgh"}:
+        p.unlink()
+
 tri = CASE / "constant" / "triSurface"
 tri.mkdir(parents=True, exist_ok=True)
 
@@ -25,9 +33,9 @@ tri.mkdir(parents=True, exist_ok=True)
 L = 0.50
 r_small = 0.020       # Dmin = 40 mm at skin
 r_large = 0.125       # Dmax = 250 mm
-th = 0.004            # numerical wall thickness; NOT physical paper thickness
+th = 0.008            # numerical wall thickness for robust meshing; NOT physical paper thickness
 z0 = 0.002            # 2 mm above plane to avoid geometric degeneracy in first run
-nseg = 160
+nseg = 96
 
 def facet(f, a, b, c):
     import numpy as np
@@ -87,7 +95,7 @@ vertices
 );
 blocks
 (
-    hex (0 1 2 3 4 5 6 7) (18 18 21) simpleGrading (1 1 1)
+    hex (0 1 2 3 4 5 6 7) (16 16 20) simpleGrading (1 1 1)
 );
 edges ();
 boundary
@@ -157,14 +165,14 @@ geometry
 
 castellatedMeshControls
 {
-    maxLocalCells 700000;
-    maxGlobalCells 1200000;
+    maxLocalCells 500000;
+    maxGlobalCells 750000;
     minRefinementCells 0;
     nCellsBetweenLevels 2;
 
     features
     (
-        { file "cambucho.eMesh"; level 3; }
+        { file "cambucho.eMesh"; level 2; }
     );
 
     refinementSurfaces
@@ -188,7 +196,7 @@ castellatedMeshControls
         throat
         {
             mode inside;
-            levels ((1e15 4));
+            levels ((1e15 3));
         }
     }
 
@@ -202,7 +210,7 @@ snapControls
     tolerance 2.0;
     nSolveIter 40;
     nRelaxIter 6;
-    nFeatureSnapIter 12;
+    nFeatureSnapIter 8;
     implicitFeatureSnap false;
     explicitFeatureSnap true;
     multiRegionFeatureSnap false;
@@ -395,7 +403,7 @@ Geometry: 3-D, full 360 degree air domain inside and outside cone
 L = {L} m
 Dmin = {2*r_small} m
 Dmax = {2*r_large} m
-Numerical shell thickness = {th} m (not physical paper thickness)
+Numerical shell thickness = {th} m (not physical paper thickness; chosen for mesh robustness)
 Bottom clearance used in verification mesh = {z0} m
 Ambient = 295.15 K
 Skin wall = 307.15 K
