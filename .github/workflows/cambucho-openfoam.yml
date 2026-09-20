@@ -7,8 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  openfoam-diagnostic:
+  run-cambucho-cfd:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
     steps:
       - uses: actions/checkout@v4
 
@@ -17,29 +19,96 @@ jobs:
         with:
           openfoam-version: 2312
 
-      - name: Verify installation and inspect thermal tutorial
+      - name: Verify OpenFOAM installation
         shell: bash
         run: |
           set -euxo pipefail
           echo "WM_PROJECT_VERSION=$WM_PROJECT_VERSION"
           echo "FOAM_TUTORIALS=$FOAM_TUTORIALS"
           command -v blockMesh
+          command -v surfaceFeatureExtract
           command -v snappyHexMesh
+          command -v checkMesh
           command -v buoyantBoussinesqPimpleFoam
-          buoyantBoussinesqPimpleFoam -help | head -n 20
-          TUT="$FOAM_TUTORIALS/heatTransfer/buoyantBoussinesqPimpleFoam/hotRoom"
-          find "$TUT" -maxdepth 2 -type f | sort
-          echo "===== transportProperties ====="
-          cat "$TUT/constant/transportProperties"
-          echo "===== controlDict ====="
-          cat "$TUT/system/controlDict"
-          echo "===== fvSchemes ====="
-          cat "$TUT/system/fvSchemes"
-          echo "===== fvSolution ====="
-          cat "$TUT/system/fvSolution"
-          echo "===== 0.orig/U ====="
-          cat "$TUT/0.orig/U"
-          echo "===== 0.orig/T ====="
-          cat "$TUT/0.orig/T"
-          echo "===== 0.orig/p_rgh ====="
-          cat "$TUT/0.orig/p_rgh"
+          blockMesh -help | head -n 5
+
+      - name: Generate 3-D cambucho case
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 experiments/cambucho-openfoam/generate_case.py
+          find experiments/cambucho-openfoam/case -maxdepth 3 -type f | sort
+
+      - name: Mesh - blockMesh
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          blockMesh 2>&1 | tee log.blockMesh
+
+      - name: Mesh - extract surface features
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          surfaceFeatureExtract 2>&1 | tee log.surfaceFeatureExtract
+
+      - name: Mesh - snappyHexMesh
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          snappyHexMesh -overwrite 2>&1 | tee log.snappyHexMesh
+
+      - name: Mesh quality
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          checkMesh -allGeometry -allTopology 2>&1 | tee log.checkMesh
+
+      - name: Solver dry-run
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          buoyantBoussinesqPimpleFoam -dry-run-write 2>&1 | tee log.dryRun
+
+      - name: Run transient CFD
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          buoyantBoussinesqPimpleFoam 2>&1 | tee log.buoyantBoussinesqPimpleFoam
+
+      - name: Convert fields to VTK
+        if: always()
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -o pipefail
+          foamToVTK -latestTime 2>&1 | tee log.foamToVTK || true
+
+      - name: Summarize run
+        if: always()
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          {
+            echo "=== OpenFOAM version ==="
+            echo "$WM_PROJECT_VERSION"
+            echo "=== Mesh summary ==="
+            grep -E "cells:|faces:|points:|Mesh OK|Failed" log.checkMesh || true
+            echo "=== Solver tail ==="
+            tail -n 80 log.buoyantBoussinesqPimpleFoam 2>/dev/null || true
+          } | tee RUN_SUMMARY.txt
+
+      - name: Upload OpenFOAM results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cambucho-openfoam-v2312-results
+          path: |
+            experiments/cambucho-openfoam/case
+          if-no-files-found: warn
+          retention-days: 14
