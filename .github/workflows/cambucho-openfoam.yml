@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - experiment/cambucho-openfoam
+      - experiment/cambucho-fire-plume
   workflow_dispatch:
 
 jobs:
