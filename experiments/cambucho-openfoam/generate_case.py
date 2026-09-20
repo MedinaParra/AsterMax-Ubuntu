@@ -123,7 +123,7 @@ cambucho.stl
 w("system/snappyHexMeshDict", r"""
 FoamFile { version 2.0; format ascii; class dictionary; object snappyHexMeshDict; }
 castellatedMesh true;
-snap true;
+snap false;
 addLayers false;
 
 geometry
