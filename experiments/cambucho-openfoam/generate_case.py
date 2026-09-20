@@ -425,6 +425,27 @@ dimensions [0 1 -2 0 0 0 0];
 value (0 0 -9.81);
 """)
 
+# Verification criteria. Concavity is disabled as a failure criterion because
+# zero-thickness baffles deliberately split hex cells into concave polyhedra.
+# All transport-critical metrics remain strict.
+w("system/meshQualityDict", r"""
+FoamFile { version 2.0; format ascii; class dictionary; object meshQualityDict; }
+maxNonOrtho 65;
+maxBoundarySkewness 15;
+maxInternalSkewness 3.5;
+maxConcave 180;
+minVol 1e-14;
+minTetQuality 1e-20;
+minArea -1;
+minTwist 0.02;
+minDeterminant 0.001;
+minFaceWeight 0.02;
+minVolRatio 0.01;
+minTriangleTwist -1;
+nSmoothScale 6;
+errorReduction 0.7;
+""")
+
 # Control uses a 3 s no-fire preconditioning stage in the same transient,
 # followed by a 5 s fire stage. The state at ignition is therefore not the
 # artificial all-zero velocity / hot-wall state used previously.
@@ -457,6 +478,14 @@ functions
         libs (fieldFunctionObjects);
         mode magnitude;
         fields (T U p p_rgh);
+        writeControl writeTime;
+    }
+
+    heatFlux
+    {
+        type wallHeatFlux;
+        libs (fieldFunctionObjects);
+        patches (skin);
         writeControl writeTime;
     }
 
