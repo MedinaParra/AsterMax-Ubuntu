@@ -269,7 +269,8 @@ boundaryField
         value uniform (0 0 0);
     }
     skin { type noSlip; }
-    cambucho { type noSlip; }\n    cambucho_slave { type noSlip; }
+    cambucho { type noSlip; }
+    cambucho_slave { type noSlip; }
 }
 """)
 
@@ -368,7 +369,8 @@ boundaryField
         value uniform 101325;
     }
     skin { type zeroGradient; }
-    cambucho { type zeroGradient; }\n    cambucho_slave { type zeroGradient; }
+    cambucho { type zeroGradient; }
+    cambucho_slave { type zeroGradient; }
 }
 """)
 
@@ -410,7 +412,8 @@ boundaryField
 {
     atmosphere { type calculated; value uniform 0; }
     skin { type calculated; value uniform 0; }
-    cambucho { type calculated; value uniform 0; }\n    cambucho_slave { type calculated; value uniform 0; }
+    cambucho { type calculated; value uniform 0; }
+    cambucho_slave { type calculated; value uniform 0; }
 }
 """)
 
