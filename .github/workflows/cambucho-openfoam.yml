@@ -7,6 +7,7 @@ on:
       - experiment/cambucho-fire-plume
       - experiment/cambucho-coupled-bioheat
       - experiment/cambucho-physical-v2
+      - experiment/cambucho-physical-v2-fast
   workflow_dispatch:
 
 jobs:
