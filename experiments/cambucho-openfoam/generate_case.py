@@ -345,13 +345,13 @@ boundaryField
     }
     skin
     {
-        type compressible::alphatWallFunction;
+        type alphatJayatillekeWallFunction;
         Prt 0.85;
         value uniform 0;
     }
     cambucho
     {
-        type compressible::alphatWallFunction;
+        type alphatJayatillekeWallFunction;
         Prt 0.85;
         value uniform 0;
     }
