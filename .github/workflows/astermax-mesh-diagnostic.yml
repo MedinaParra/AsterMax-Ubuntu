@@ -170,6 +170,44 @@ jobs:
                 stdout=$stdout
                 stderr=$stderr
               } | ConvertTo-Json -Depth 5 | Set-Content "$PWD\dist\Audit\C10.20\netgen-replay.json" -Encoding UTF8
+              $variants=@(
+                [ordered]@{name='no-localh'; values=@{uselocalh='0'}},
+                [ordered]@{name='coarse'; values=@{uselocalh='0';maxh='10';minh='0.5';fineness='0.3';grading='0.2'}},
+                [ordered]@{name='very-coarse'; values=@{uselocalh='0';maxh='20';minh='1';fineness='0.2';grading='0.1'}},
+                [ordered]@{name='no-volume-opt'; values=@{uselocalh='0';optvolmeshenable='0';optsteps_3d='0'}},
+                [ordered]@{name='uniform'; values=@{uselocalh='0';grading='0';maxh='10';minh='1'}}
+              )
+              $sweep=@()
+              foreach($variant in $variants){
+                $variantDir=Join-Path "$PWD\dist\Audit\C10.20\netgen-sweep" $variant.name
+                New-Item -ItemType Directory -Force $variantDir | Out-Null
+                $variantParams=Join-Path $variantDir 'meshParameters'
+                Copy-Item $params $variantParams -Force
+                $lines=Get-Content $variantParams
+                foreach($key in $variant.values.Keys){
+                  for($i=0;$i -lt $lines.Count-1;$i++){
+                    if($lines[$i] -match ('^\s*(int|double)\s+'+[regex]::Escape($key)+'\b')){
+                      $lines[$i+1]=[string]$variant.values[$key]
+                      break
+                    }
+                  }
+                }
+                Set-Content $variantParams $lines -Encoding Ascii
+                $variantVol=Join-Path $variantDir 'geometry.vol'
+                $variantStdout=Join-Path $variantDir 'stdout.log'
+                $variantStderr=Join-Path $variantDir 'stderr.log'
+                $args=@('BREP_MESH',$brep,$variantVol,$variantParams,$refine)
+                $vp=Start-Process -FilePath $netgen -ArgumentList $args -WorkingDirectory $work -Wait -PassThru -RedirectStandardOutput $variantStdout -RedirectStandardError $variantStderr
+                $sweep += [ordered]@{
+                  name=$variant.name
+                  exit_code=$vp.ExitCode
+                  exit_hex=('0x{0:X8}' -f ([uint32]$vp.ExitCode))
+                  vol_present=(Test-Path $variantVol)
+                  vol_bytes=$(if(Test-Path $variantVol){(Get-Item $variantVol).Length}else{0})
+                  values=$variant.values
+                }
+              }
+              $sweep | ConvertTo-Json -Depth 10 | Set-Content "$PWD\dist\Audit\C10.20\netgen-parameter-sweep.json" -Encoding UTF8
             }
           }
 
