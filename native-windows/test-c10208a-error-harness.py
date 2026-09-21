@@ -20,7 +20,7 @@ for token in [
     assert token in h, token
 
 assert "structural anchor missing: RunCaptured(ProcessStartInfo psi,string stem)" in p
-assert "$capturedPattern=" in p
+assert "$capturedSignature=" in p\nassert "$capturedStart=$s.IndexOf" in p\nassert "$depth=0" in p\nassert "$capturedEnd=$i+1" in p\nassert "$capturedPattern=" not in p
 assert "$capturedOld=@'" not in p
 assert 'return RunTrackedProcess(psi,stem+"_STDOUT.log",stem+"_STDERR.log");' in p
 assert "(?<![A-Za-z0-9_.-])" in v
