@@ -13,6 +13,7 @@ $session=Join-Path $outPath 'workflow-conformance-session.json'
 $report=Join-Path $outPath 'workflow-conformance-report.json'
 Remove-Item $session,$report -Force -ErrorAction SilentlyContinue
 
+$env:ASTERMAX_C1020_AUDIT_DIR=$outPath
 $args=@($stepPath,'-US','MM_TON_S_C',"--astermax-c1020-workflow=$outPath")
 $p=Start-Process -FilePath $exePath -WorkingDirectory (Split-Path $exePath -Parent) -ArgumentList $args -PassThru
 $timedOut=$false
