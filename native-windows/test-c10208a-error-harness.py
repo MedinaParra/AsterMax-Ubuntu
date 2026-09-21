@@ -14,6 +14,8 @@ for token in [
     "critical_hashes_after",
     "ANCHOR_DRIFT",
     "failure-snapshot",
+    "final-snapshot",
+    "AsterMaxIntegratedResults.cs",
     "PATCH_FAILURE.json",
     "Do not continue dependent patches",
 ]:
