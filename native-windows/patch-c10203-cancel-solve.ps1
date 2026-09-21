@@ -137,29 +137,34 @@ $handoffAnchor=[regex]::Replace($handoffAnchor,"\r\n?","`n")
 $handoffNew=[regex]::Replace($handoffNew,"\r\n?","`n")
 $s=Replace-Required $s $handoffAnchor $handoffNew
 
-$capturedOld=@'
-        private int RunCaptured(ProcessStartInfo psi,string stem)
-        {
-            using(var p=Process.Start(psi))
-            {
-                string stdout=p.StandardOutput.ReadToEnd();
-                string stderr=p.StandardError.ReadToEnd();
-                p.WaitForExit();
-                File.WriteAllText(Path.Combine(Workspace,stem+"_STDOUT.log"),stdout,new UTF8Encoding(false));
-                File.WriteAllText(Path.Combine(Workspace,stem+"_STDERR.log"),stderr,new UTF8Encoding(false));
-                return p.ExitCode;
-            }
-        }
-'@
 $capturedNew=@'
         private int RunCaptured(ProcessStartInfo psi,string stem)
         {
             return RunTrackedProcess(psi,stem+"_STDOUT.log",stem+"_STDERR.log");
         }
 '@
-$capturedOld=[regex]::Replace($capturedOld,"\r\n?","`n")
-$capturedNew=[regex]::Replace($capturedNew,"\r\n?","`n")
-$s=Replace-Required $s $capturedOld $capturedNew
+$capturedNew=[regex]::Replace($capturedNew,"\\r\\n?","`n")
+
+# C10.20.8a: match RunCaptured by method structure instead of one historical body.
+# Earlier Windows-runtime patches are allowed to change sync/async pipe handling.
+if($s.Contains($capturedNew.TrimEnd()))
+{
+    Write-Host 'C10.20.3 RunCaptured already uses tracked process execution.'
+}
+else
+{
+    $capturedPattern='(?ms)^        private int RunCaptured\\(ProcessStartInfo psi,string stem\\)\\s*\\{\\n.*?^        \\}\\n?'
+    $capturedMatch=[regex]::Match($s,$capturedPattern)
+    if(-not $capturedMatch.Success)
+    {
+        throw 'C10.20.3 structural anchor missing: RunCaptured(ProcessStartInfo psi,string stem)'
+    }
+    if($capturedMatch.Value -notmatch 'Process\\.Start|RunTrackedProcess')
+    {
+        throw 'C10.20.3 RunCaptured was found but has an unexpected implementation; refusing blind replacement.'
+    }
+    $s=$s.Substring(0,$capturedMatch.Index)+$capturedNew.TrimEnd()+"`n"+$s.Substring($capturedMatch.Index+$capturedMatch.Length)
+}
 
 $oldRibbon='                if(ribbon!=null) { _asterMaxSolveRibbonWasEnabled=ribbon.Enabled; ribbon.Enabled=false; }'
 $newRibbon='                if(ribbon!=null) _asterMaxSolveRibbonWasEnabled=ribbon.Enabled;'
