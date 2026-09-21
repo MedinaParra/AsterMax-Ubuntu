@@ -172,6 +172,8 @@ jobs:
               } | ConvertTo-Json -Depth 5 | Set-Content "$PWD\dist\Audit\C10.20\netgen-replay.json" -Encoding UTF8
               $variants=@(
                 [ordered]@{name='no-localh'; values=@{uselocalh='0'}},
+                [ordered]@{name='coarse-localh'; values=@{maxh='10';minh='0.5';fineness='0.3';grading='0.2'}},
+                [ordered]@{name='maxh10-only'; values=@{maxh='10'}},
                 [ordered]@{name='coarse'; values=@{uselocalh='0';maxh='10';minh='0.5';fineness='0.3';grading='0.2'}},
                 [ordered]@{name='very-coarse'; values=@{uselocalh='0';maxh='20';minh='1';fineness='0.2';grading='0.1'}},
                 [ordered]@{name='no-volume-opt'; values=@{uselocalh='0';optvolmeshenable='0';optsteps_3d='0'}},
@@ -201,13 +203,13 @@ jobs:
                 $sweep += [ordered]@{
                   name=$variant.name
                   exit_code=$vp.ExitCode
-                  exit_hex=('0x{0:X8}' -f ([uint32]$vp.ExitCode))
                   vol_present=(Test-Path $variantVol)
                   vol_bytes=$(if(Test-Path $variantVol){(Get-Item $variantVol).Length}else{0})
                   values=$variant.values
                 }
               }
               $sweep | ConvertTo-Json -Depth 10 | Set-Content "$PWD\dist\Audit\C10.20\netgen-parameter-sweep.json" -Encoding UTF8
+              Write-Host ("PARAMETER_SWEEP_JSON="+($sweep | ConvertTo-Json -Depth 10 -Compress))
 
               # Cross-check the B01 baseline against NetGen runtimes close to the pinned source date.
               # These downloads are diagnostic only; hashes are recorded and no runtime is promoted automatically.
@@ -244,6 +246,12 @@ jobs:
                 }
               }
               $runtimeSweep | ConvertTo-Json -Depth 10 | Set-Content "$PWD\dist\Audit\C10.20\netgen-runtime-sweep.json" -Encoding UTF8
+              Write-Host ("RUNTIME_SWEEP_JSON="+($runtimeSweep | ConvertTo-Json -Depth 10 -Compress))
+              foreach($candidate in $runtimeCandidates){
+                $root=Join-Path "$PWD\dist\Audit\C10.20\runtime-sweep" $candidate.name
+                Remove-Item (Join-Path $root 'runtime.zip') -Force -ErrorAction SilentlyContinue
+                Remove-Item (Join-Path $root 'expanded') -Recurse -Force -ErrorAction SilentlyContinue
+              }
             }
           }
 
