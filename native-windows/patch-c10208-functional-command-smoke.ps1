@@ -13,6 +13,44 @@ $meshingAudit='                    if(!_asterMaxUiAuditMode) MessageBoxes.ShowEr
 $m=Replace-Required $m $meshingPopup $meshingAudit
 Set-Content $mainPath $m -Encoding UTF8
 
+# Preserve native NetGen meshing output during the C10.20 audit.
+$controllerPath=Join-Path $Root 'PrePoMax/Controller.cs'
+$controller=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","`n")
+$netgenOutputOld=@'
+        void netgenJobMeshing_AppendOutput(string data)
+        {
+            _form.WriteDataToOutput(data);
+        }
+'@
+$netgenOutputNew=@'
+        void netgenJobMeshing_AppendOutput(string data)
+        {
+            _form.WriteDataToOutput(data);
+            try
+            {
+                string auditDirectory=Environment.GetEnvironmentVariable("ASTERMAX_C1020_AUDIT_DIR");
+                if(!String.IsNullOrWhiteSpace(auditDirectory))
+                {
+                    Directory.CreateDirectory(auditDirectory);
+                    File.AppendAllText(Path.Combine(auditDirectory,"netgen-mesh-output.log"),
+                        DateTime.UtcNow.ToString("O")+" "+data+Environment.NewLine);
+                }
+            }
+            catch { }
+        }
+'@
+$netgenOutputOld=[regex]::Replace($netgenOutputOld,"\r\n?","`n")
+$netgenOutputNew=[regex]::Replace($netgenOutputNew,"\r\n?","`n")
+if($controller.Contains($netgenOutputOld))
+{
+    $controller=$controller.Replace($netgenOutputOld,$netgenOutputNew)
+}
+elseif(-not $controller.Contains('netgen-mesh-output.log'))
+{
+    throw 'C10.20.8 NetGen output diagnostic anchor missing.'
+}
+Set-Content $controllerPath $controller -Encoding UTF8
+
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
 $a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 
