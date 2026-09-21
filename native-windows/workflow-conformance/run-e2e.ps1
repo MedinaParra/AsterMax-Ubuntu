@@ -23,6 +23,36 @@ if(-not $p.WaitForExit($TimeoutSeconds*1000)) {
 }
 $exitCode=-1
 try { $exitCode=$p.ExitCode } catch {}
+
+# Preserve the exact native meshing workspace after the GUI process exits.
+# This captures NetGen inputs/outputs without fabricating or modifying solver data.
+$meshPreflight=Join-Path $outPath 'mesh-command-preflight.json'
+if(Test-Path $meshPreflight) {
+    try {
+        $meshInfo=Get-Content $meshPreflight -Raw | ConvertFrom-Json
+        $meshWork=[string]$meshInfo.work_directory
+        if(-not [String]::IsNullOrWhiteSpace($meshWork) -and (Test-Path $meshWork)) {
+            $meshEvidence=Join-Path $outPath 'mesh-workdir'
+            New-Item -ItemType Directory -Force $meshEvidence | Out-Null
+            Copy-Item (Join-Path $meshWork '*') $meshEvidence -Recurse -Force -ErrorAction Continue
+            $entries=@()
+            Get-ChildItem $meshEvidence -Recurse -File | ForEach-Object {
+                $entries += [ordered]@{
+                    relative_path=$_.FullName.Substring($meshEvidence.Length).TrimStart('\')
+                    bytes=$_.Length
+                    sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                }
+            }
+            [ordered]@{
+                source_work_directory=$meshWork
+                captured_utc=[DateTime]::UtcNow.ToString('o')
+                files=$entries
+            } | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $outPath 'mesh-workdir-manifest.json') -Encoding UTF8
+        }
+    } catch {
+        Write-Warning "Could not preserve meshing workspace: $($_.Exception.Message)"
+    }
+}
 if(-not(Test-Path $session)) {
     [ordered]@{
         release='C10.20.8';pass=$false;partial=$true;
