@@ -73,25 +73,18 @@ $stepNew=@'
 $stepNew=[regex]::Replace($stepNew,"\r\n?","`n").TrimEnd()
 $a=Replace-Required $a $stepAnchor $stepNew
 
-$structuralAnchor=@'
-            RegenerateTree();
-            _modelTree.RefreshAsterMaxOutline();
-            C1020SelectOutlineNode("ax-analysis");
-'@
-$structuralNew=@'
-            RegenerateTree();
-            _modelTree.RefreshAsterMaxOutline();
+$analysisAnchor='            C1020RevealOutlineNode("ax-analysis");'
+$analysisNew=@'
             C10208RecordCommandSmoke(directory, commandSmoke,
                 C10208SmokeEditorCommand("Environment", "Supports", _frmBoundaryCondition,
                     () => model.StepCollection.StepsList.Sum(s => s.BoundaryConditions.Count)));
             C10208RecordCommandSmoke(directory, commandSmoke,
                 C10208SmokeEditorCommand("Environment", "Loads", _frmLoad,
                     () => model.StepCollection.StepsList.Sum(s => s.Loads.Count)));
-            C1020SelectOutlineNode("ax-analysis");
+            C1020RevealOutlineNode("ax-analysis");
 '@
-$structuralAnchor=[regex]::Replace($structuralAnchor,"\r\n?","`n")
-$structuralNew=[regex]::Replace($structuralNew,"\r\n?","`n")
-$a=Replace-Required $a $structuralAnchor $structuralNew
+$analysisNew=[regex]::Replace($analysisNew,"\r\n?","`n").TrimEnd()
+$a=Replace-Required $a $analysisAnchor $analysisNew
 
 $resultAnchor=@'
             _modelTree.SelectAsterMaxResultField(resultField);
