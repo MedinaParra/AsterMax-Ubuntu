@@ -208,6 +208,42 @@ jobs:
                 }
               }
               $sweep | ConvertTo-Json -Depth 10 | Set-Content "$PWD\dist\Audit\C10.20\netgen-parameter-sweep.json" -Encoding UTF8
+
+              # Cross-check the B01 baseline against NetGen runtimes close to the pinned source date.
+              # These downloads are diagnostic only; hashes are recorded and no runtime is promoted automatically.
+              $runtimeCandidates=@(
+                [ordered]@{name='v1.4.1';url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.1.zip'},
+                [ordered]@{name='v2.0.0';url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.0.0.zip'},
+                [ordered]@{name='v2.1.0';url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.1.0.zip'}
+              )
+              $runtimeSweep=@()
+              foreach($candidate in $runtimeCandidates){
+                $root=Join-Path "$PWD\dist\Audit\C10.20\runtime-sweep" $candidate.name
+                New-Item -ItemType Directory -Force $root | Out-Null
+                $zip=Join-Path $root 'runtime.zip'
+                try {
+                  Invoke-WebRequest $candidate.url -OutFile $zip
+                  $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+                  $expanded=Join-Path $root 'expanded'
+                  Expand-Archive $zip $expanded -Force
+                  $exe=Get-ChildItem $expanded -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+                  if(-not $exe){ throw 'NetGenMesher.exe missing from runtime archive.' }
+                  $exeHash=(Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                  $outVol=Join-Path $root 'geometry.vol'
+                  $outStdout=Join-Path $root 'stdout.log'
+                  $outStderr=Join-Path $root 'stderr.log'
+                  $args=@('BREP_MESH',$brep,$outVol,$params,$refine)
+                  $rp=Start-Process -FilePath $exe.FullName -ArgumentList $args -WorkingDirectory $work -Wait -PassThru -RedirectStandardOutput $outStdout -RedirectStandardError $outStderr
+                  $runtimeSweep += [ordered]@{
+                    name=$candidate.name; url=$candidate.url; zip_sha256=$zipHash; netgen_sha256=$exeHash;
+                    exit_code=$rp.ExitCode; vol_present=(Test-Path $outVol);
+                    vol_bytes=$(if(Test-Path $outVol){(Get-Item $outVol).Length}else{0})
+                  }
+                } catch {
+                  $runtimeSweep += [ordered]@{name=$candidate.name;url=$candidate.url;error=$_.Exception.ToString()}
+                }
+              }
+              $runtimeSweep | ConvertTo-Json -Depth 10 | Set-Content "$PWD\dist\Audit\C10.20\netgen-runtime-sweep.json" -Encoding UTF8
             }
           }
 
