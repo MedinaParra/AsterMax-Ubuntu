@@ -2,7 +2,7 @@ name: AsterMax C10.20.8 Windows Workflow Conformance
 
 on:
   push:
-    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke ]
+    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness ]
     paths:
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
@@ -44,6 +44,8 @@ jobs:
         run: python3 native-windows/test-c10207-model-session-identity.py
       - name: Guard functional ribbon command execution
         run: python3 native-windows/test-c10208-functional-command-smoke.py
+      - name: Guard patch error harness and structural anchor repair
+        run: python3 native-windows/test-c10208a-error-harness.py
 
   windows-workflow-conformance:
     needs: validate-patch-chain
@@ -195,6 +197,7 @@ jobs:
           name: AsterMax-C10.20.8-Workflow-Conformance
           path: |
             dist/Audit/C10.20
+            dist/Audit/PatchChain
             dist/Validation
             upstream/PrePoMax/Forms/AsterMaxWorkflowConformance*.cs
           if-no-files-found: warn
