@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 h=(ROOT/"harness-c10208a-patch-chain.ps1").read_text(encoding="utf-8-sig")
 p=(ROOT/"patch-c10203-cancel-solve.ps1").read_text(encoding="utf-8-sig")
+v=(ROOT/"validate-patch-chain.py").read_text(encoding="utf-8-sig")
+w=(ROOT.parent/".github"/"workflows"/"astermax-workflow-conformance.yml").read_text(encoding="utf-8-sig")
 
 for token in [
     "astermax-patch-harness/v1",
@@ -21,4 +23,7 @@ assert "structural anchor missing: RunCaptured(ProcessStartInfo psi,string stem)
 assert "$capturedPattern=" in p
 assert "$capturedOld=@'" not in p
 assert 'return RunTrackedProcess(psi,stem+"_STDOUT.log",stem+"_STDERR.log");' in p
+assert "(?<![A-Za-z0-9_.-])" in v
+assert "harness-c10208a-patch-chain.ps1" in w
+assert "foreach($p in $patches)" not in w
 print("C10.20.8a PATCH_ERROR_HARNESS_REGRESSION_OK")
