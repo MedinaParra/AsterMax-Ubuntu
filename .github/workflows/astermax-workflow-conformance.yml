@@ -96,7 +96,8 @@ jobs:
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
             'patch-c10208-functional-command-smoke.ps1'
           )
-          foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
+          & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
+          if($LASTEXITCODE -ne 0){ throw "Patch-chain harness failed; inspect dist/Audit/PatchChain." }
 
       - name: Setup Python runtime
         uses: actions/setup-python@v6
