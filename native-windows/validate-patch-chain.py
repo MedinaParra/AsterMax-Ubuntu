@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "native-windows" / "patch-chain.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
-PATCH_RE = re.compile(r"(?P<name>patch-[A-Za-z0-9_.-]+\.ps1)")
+PATCH_RE = re.compile(r"(?<![A-Za-z0-9_.-])(?P<name>patch-[A-Za-z0-9_.-]+\\.ps1)")
 QUOTED_PATCH_RE = re.compile(r"['\"](?P<name>patch-[A-Za-z0-9_.-]+\.ps1)['\"]")
 
 
