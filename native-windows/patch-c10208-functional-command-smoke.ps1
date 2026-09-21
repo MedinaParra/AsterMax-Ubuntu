@@ -173,9 +173,19 @@ $helpers=@'
             CloseAllForms();
             Application.DoEvents();
             _controller.CurrentView=ViewGeometryModelResults.Geometry;
+
+            var candidates=_controller.GetGeometryPartsWithoutSubParts();
+            string[] candidateNames=candidates==null ? new string[0] : candidates.Select(x => x.Name).ToArray();
+            string[] candidateTypes=candidates==null ? new string[0] : candidates.Select(x => x.GetType().FullName).ToArray();
             int geometryParts=model.Geometry==null?0:model.Geometry.Parts.Count;
+            int meshingParameterCount=_controller.GetMeshingParameters()==null?0:_controller.GetMeshingParameters().Length;
             int nodesBefore=model.Mesh==null?0:model.Mesh.Nodes.Count;
             int elementsBefore=model.Mesh==null?0:model.Mesh.Elements.Count;
+            string baseDirectory=AppDomain.CurrentDomain.BaseDirectory;
+            string netgenExe=Path.Combine(baseDirectory,"NetGen","NetGenMesher.exe");
+            string workDirectory=null;
+            try { workDirectory=_controller.Settings.GetWorkDirectory(); } catch { }
+
             C10208ClickRibbonButton("Mesh","Generate Mesh");
 
             DateTime deadline=DateTime.UtcNow.AddSeconds(180);
@@ -187,18 +197,63 @@ $helpers=@'
                 if(!IsStateWorking() && model.Mesh!=null && model.Mesh.Elements.Count>elementsBefore) break;
                 System.Threading.Thread.Sleep(50);
             }
+
             bool timedOut=IsStateWorking();
-            int nodesAfter=model.Mesh==null?0:model.Mesh.Nodes.Count;
-            int elementsAfter=model.Mesh==null?0:model.Mesh.Elements.Count;
-            bool pass=geometryParts==1 && !timedOut && nodesAfter>nodesBefore && elementsAfter>elementsBefore;
+            int ribbonNodesAfter=model.Mesh==null?0:model.Mesh.Nodes.Count;
+            int ribbonElementsAfter=model.Mesh==null?0:model.Mesh.Elements.Count;
+            bool ribbonProducedMesh=ribbonNodesAfter>nodesBefore && ribbonElementsAfter>elementsBefore;
+
+            // If the real ribbon path returned without a mesh, execute the exact native
+            // controller call once only as a diagnostic. This does not turn the smoke PASS:
+            // it exists to expose the swallowed CreatePartMeshes exception in CI evidence.
+            bool directDiagnosticAttempted=false;
+            bool directDiagnosticProducedMesh=false;
+            string directDiagnosticError=null;
+            int diagnosticNodesAfter=ribbonNodesAfter;
+            int diagnosticElementsAfter=ribbonElementsAfter;
+            if(!ribbonProducedMesh && !timedOut && candidateNames.Length==1)
+            {
+                directDiagnosticAttempted=true;
+                try
+                {
+                    Task.Run(() => _controller.CreateMeshCommand(candidateNames[0])).GetAwaiter().GetResult();
+                    diagnosticNodesAfter=model.Mesh==null?0:model.Mesh.Nodes.Count;
+                    diagnosticElementsAfter=model.Mesh==null?0:model.Mesh.Elements.Count;
+                    directDiagnosticProducedMesh=diagnosticNodesAfter>nodesBefore && diagnosticElementsAfter>elementsBefore;
+                }
+                catch(Exception ex)
+                {
+                    directDiagnosticError=ex.ToString();
+                }
+            }
+
+            bool pass=geometryParts==1 && candidateNames.Length==1 && !timedOut && ribbonProducedMesh;
             return new JObject {
                 ["tab"]="Mesh",["command"]="Generate Mesh",["pass"]=pass,
-                ["geometry_parts"]=geometryParts,["saw_working_state"]=sawWorking,["timed_out"]=timedOut,
-                ["nodes_before"]=nodesBefore,["nodes_after"]=nodesAfter,
-                ["elements_before"]=elementsBefore,["elements_after"]=elementsAfter,
+                ["geometry_parts"]=geometryParts,
+                ["mesh_candidate_count"]=candidateNames.Length,
+                ["mesh_candidate_names"]=new JArray(candidateNames),
+                ["mesh_candidate_types"]=new JArray(candidateTypes),
+                ["meshing_parameter_count"]=meshingParameterCount,
+                ["saw_working_state"]=sawWorking,
+                ["timed_out"]=timedOut,
+                ["nodes_before"]=nodesBefore,
+                ["ribbon_nodes_after"]=ribbonNodesAfter,
+                ["elements_before"]=elementsBefore,
+                ["ribbon_elements_after"]=ribbonElementsAfter,
+                ["ribbon_produced_mesh"]=ribbonProducedMesh,
+                ["direct_diagnostic_attempted"]=directDiagnosticAttempted,
+                ["direct_diagnostic_produced_mesh"]=directDiagnosticProducedMesh,
+                ["direct_diagnostic_nodes_after"]=diagnosticNodesAfter,
+                ["direct_diagnostic_elements_after"]=diagnosticElementsAfter,
+                ["direct_diagnostic_error"]=directDiagnosticError,
+                ["base_directory"]=baseDirectory,
+                ["work_directory"]=workDirectory,
+                ["netgen_exe"]=netgenExe,
+                ["netgen_exe_present"]=File.Exists(netgenExe),
                 ["execution"]="REAL_NATIVE_CREATE_MESH_COMMAND",
-                ["evidence"]=pass ? "Generate Mesh produced a non-empty native mesh before the deterministic HE8 fixture replaced it." :
-                    "Generate Mesh did not produce a real non-empty mesh within the audit window."
+                ["evidence"]=pass ? "Generate Mesh produced a non-empty native mesh through the real ribbon command before the deterministic HE8 fixture replaced it." :
+                    "Generate Mesh did not produce a real non-empty mesh through the ribbon path; direct native diagnostic evidence is attached."
             };
         }
 
