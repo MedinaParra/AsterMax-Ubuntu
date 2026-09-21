@@ -52,7 +52,7 @@ $meshNew=@'
             C10208RecordCommandSmoke(directory, commandSmoke,
                 C10208SmokeEditorCommand("Mesh", "Mesh Controls", _frmMeshingParameters,
                     () => _controller.GetMeshingParameters().Length));
-            C10208RecordCommandSmoke(directory, commandSmoke, C10208ExerciseRealGenerateMesh(model));
+            C10208RecordCommandSmoke(directory, commandSmoke, C10208ExerciseRealGenerateMesh(directory, model));
             C10208RecordCommandSmoke(directory, commandSmoke,
                 C10208SmokeEditorCommand("Materiales", "Asignar seccion", _frmSection, () => model.Sections.Count));
 
@@ -168,7 +168,7 @@ $helpers=@'
             };
         }
 
-        private JObject C10208ExerciseRealGenerateMesh(FeModel model)
+        private JObject C10208ExerciseRealGenerateMesh(string directory,FeModel model)
         {
             CloseAllForms();
             Application.DoEvents();
@@ -186,28 +186,51 @@ $helpers=@'
             string workDirectory=null;
             try { workDirectory=_controller.Settings.GetWorkDirectory(); } catch { }
 
+            File.WriteAllText(Path.Combine(directory,"mesh-command-preflight.json"),
+                new JObject {
+                    ["geometry_parts"]=geometryParts,
+                    ["mesh_candidate_count"]=candidateNames.Length,
+                    ["mesh_candidate_names"]=new JArray(candidateNames),
+                    ["mesh_candidate_types"]=new JArray(candidateTypes),
+                    ["meshing_parameter_count"]=meshingParameterCount,
+                    ["base_directory"]=baseDirectory,
+                    ["work_directory"]=workDirectory,
+                    ["work_directory_present"]=!String.IsNullOrWhiteSpace(workDirectory) && Directory.Exists(workDirectory),
+                    ["netgen_exe"]=netgenExe,
+                    ["netgen_exe_present"]=File.Exists(netgenExe),
+                    ["fea_values_invented"]=false
+                }.ToString(Formatting.Indented));
+
             C10208ClickRibbonButton("Mesh","Generate Mesh");
 
             DateTime deadline=DateTime.UtcNow.AddSeconds(180);
             bool sawWorking=IsStateWorking();
+            bool sawWorkingThenReady=false;
             while(DateTime.UtcNow<deadline)
             {
                 Application.DoEvents();
-                if(IsStateWorking()) sawWorking=true;
-                if(!IsStateWorking() && model.Mesh!=null && model.Mesh.Elements.Count>elementsBefore) break;
+                bool working=IsStateWorking();
+                if(working) sawWorking=true;
+                int currentElements=model.Mesh==null?0:model.Mesh.Elements.Count;
+                if(currentElements>elementsBefore) break;
+                if(sawWorking && !working)
+                {
+                    sawWorkingThenReady=true;
+                    break;
+                }
                 System.Threading.Thread.Sleep(50);
             }
 
-            bool timedOut=IsStateWorking();
+            bool timedOut=IsStateWorking() && DateTime.UtcNow>=deadline;
             int ribbonNodesAfter=model.Mesh==null?0:model.Mesh.Nodes.Count;
             int ribbonElementsAfter=model.Mesh==null?0:model.Mesh.Elements.Count;
             bool ribbonProducedMesh=ribbonNodesAfter>nodesBefore && ribbonElementsAfter>elementsBefore;
 
-            // If the real ribbon path returned without a mesh, execute the exact native
-            // controller call once only as a diagnostic. This does not turn the smoke PASS:
-            // it exists to expose the swallowed CreatePartMeshes exception in CI evidence.
             bool directDiagnosticAttempted=false;
+            bool directDiagnosticCompleted=false;
+            bool directDiagnosticReturned=false;
             bool directDiagnosticProducedMesh=false;
+            bool directDiagnosticTimedOut=false;
             string directDiagnosticError=null;
             int diagnosticNodesAfter=ribbonNodesAfter;
             int diagnosticElementsAfter=ribbonElementsAfter;
@@ -216,7 +239,23 @@ $helpers=@'
                 directDiagnosticAttempted=true;
                 try
                 {
-                    Task.Run(() => _controller.CreateMeshCommand(candidateNames[0])).GetAwaiter().GetResult();
+                    Task<bool> diagnosticTask=Task.Run(() => _controller.CreateMesh(candidateNames[0]));
+                    DateTime diagnosticDeadline=DateTime.UtcNow.AddSeconds(120);
+                    while(!diagnosticTask.IsCompleted && DateTime.UtcNow<diagnosticDeadline)
+                    {
+                        Application.DoEvents();
+                        System.Threading.Thread.Sleep(50);
+                    }
+                    if(!diagnosticTask.IsCompleted)
+                    {
+                        directDiagnosticTimedOut=true;
+                        try { _controller.StopNetGenJob(); } catch { }
+                    }
+                    else
+                    {
+                        directDiagnosticCompleted=true;
+                        directDiagnosticReturned=diagnosticTask.GetAwaiter().GetResult();
+                    }
                     diagnosticNodesAfter=model.Mesh==null?0:model.Mesh.Nodes.Count;
                     diagnosticElementsAfter=model.Mesh==null?0:model.Mesh.Elements.Count;
                     directDiagnosticProducedMesh=diagnosticNodesAfter>nodesBefore && diagnosticElementsAfter>elementsBefore;
@@ -228,7 +267,7 @@ $helpers=@'
             }
 
             bool pass=geometryParts==1 && candidateNames.Length==1 && !timedOut && ribbonProducedMesh;
-            return new JObject {
+            JObject result=new JObject {
                 ["tab"]="Mesh",["command"]="Generate Mesh",["pass"]=pass,
                 ["geometry_parts"]=geometryParts,
                 ["mesh_candidate_count"]=candidateNames.Length,
@@ -236,6 +275,7 @@ $helpers=@'
                 ["mesh_candidate_types"]=new JArray(candidateTypes),
                 ["meshing_parameter_count"]=meshingParameterCount,
                 ["saw_working_state"]=sawWorking,
+                ["saw_working_then_ready"]=sawWorkingThenReady,
                 ["timed_out"]=timedOut,
                 ["nodes_before"]=nodesBefore,
                 ["ribbon_nodes_after"]=ribbonNodesAfter,
@@ -243,18 +283,24 @@ $helpers=@'
                 ["ribbon_elements_after"]=ribbonElementsAfter,
                 ["ribbon_produced_mesh"]=ribbonProducedMesh,
                 ["direct_diagnostic_attempted"]=directDiagnosticAttempted,
+                ["direct_diagnostic_completed"]=directDiagnosticCompleted,
+                ["direct_diagnostic_returned"]=directDiagnosticReturned,
                 ["direct_diagnostic_produced_mesh"]=directDiagnosticProducedMesh,
+                ["direct_diagnostic_timed_out"]=directDiagnosticTimedOut,
                 ["direct_diagnostic_nodes_after"]=diagnosticNodesAfter,
                 ["direct_diagnostic_elements_after"]=diagnosticElementsAfter,
                 ["direct_diagnostic_error"]=directDiagnosticError,
                 ["base_directory"]=baseDirectory,
                 ["work_directory"]=workDirectory,
+                ["work_directory_present"]=!String.IsNullOrWhiteSpace(workDirectory) && Directory.Exists(workDirectory),
                 ["netgen_exe"]=netgenExe,
                 ["netgen_exe_present"]=File.Exists(netgenExe),
                 ["execution"]="REAL_NATIVE_CREATE_MESH_COMMAND",
                 ["evidence"]=pass ? "Generate Mesh produced a non-empty native mesh through the real ribbon command before the deterministic HE8 fixture replaced it." :
-                    "Generate Mesh did not produce a real non-empty mesh through the ribbon path; direct native diagnostic evidence is attached."
+                    "Generate Mesh did not produce a real non-empty mesh through the ribbon path; bounded direct native diagnostic evidence is attached."
             };
+            File.WriteAllText(Path.Combine(directory,"mesh-command-diagnostic.json"),result.ToString(Formatting.Indented));
+            return result;
         }
 
         private JObject C10208SmokeResultCommand(string tab,string caption)
