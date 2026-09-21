@@ -40,6 +40,15 @@ for token in [
     "direct_diagnostic_produced_mesh",
     "direct_diagnostic_error",
     "netgen_exe_present",
-    "_controller.CreateMeshCommand(candidateNames[0])",
+    "_controller.CreateMesh(candidateNames[0])",
 ]:
     assert token in smoke, token
+
+runner=(ROOT/"workflow-conformance"/"run-e2e.ps1").read_text(encoding="utf-8-sig")
+for token in [
+    "mesh-command-preflight.json",
+    "mesh-workdir-manifest.json",
+    "source_work_directory",
+    "Get-FileHash",
+]:
+    assert token in runner, token
