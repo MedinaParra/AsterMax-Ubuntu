@@ -145,27 +145,58 @@ $capturedNew=@'
 '@
 $capturedNew=[regex]::Replace($capturedNew,"\\r\\n?","`n")
 
-# C10.20.8a: match RunCaptured by method structure instead of one historical body.
-# Earlier Windows-runtime patches are allowed to change sync/async pipe handling.
+# C10.20.8a: replace RunCaptured by signature + balanced C# braces instead of a historical body.
+# Earlier Windows-runtime patches may legitimately change sync/async pipe handling.
 if($s.Contains($capturedNew.TrimEnd()))
 {
     Write-Host 'C10.20.3 RunCaptured already uses tracked process execution.'
 }
 else
 {
-    $capturedPattern='(?ms)^        private int RunCaptured\\(ProcessStartInfo psi,string stem\\)\\s*\\{\\n.*?^        \\}\\n?'
-    $capturedMatch=[regex]::Match($s,$capturedPattern)
-    if(-not $capturedMatch.Success)
+    $capturedSignature='        private int RunCaptured(ProcessStartInfo psi,string stem)'
+    $capturedStart=$s.IndexOf($capturedSignature,[StringComparison]::Ordinal)
+    if($capturedStart -lt 0)
     {
         throw 'C10.20.3 structural anchor missing: RunCaptured(ProcessStartInfo psi,string stem)'
     }
-    if($capturedMatch.Value -notmatch 'Process\\.Start|RunTrackedProcess')
+
+    $capturedOpen=$s.IndexOf('{',$capturedStart+$capturedSignature.Length)
+    if($capturedOpen -lt 0)
+    {
+        throw 'C10.20.3 opening brace missing for RunCaptured(ProcessStartInfo psi,string stem)'
+    }
+
+    $depth=0
+    $capturedEnd=-1
+    for($i=$capturedOpen;$i -lt $s.Length;$i++)
+    {
+        if($s[$i] -eq '{')
+        {
+            $depth++
+        }
+        elseif($s[$i] -eq '}')
+        {
+            $depth--
+            if($depth -eq 0)
+            {
+                $capturedEnd=$i+1
+                break
+            }
+        }
+    }
+    if($capturedEnd -lt 0)
+    {
+        throw 'C10.20.3 closing brace missing for RunCaptured(ProcessStartInfo psi,string stem)'
+    }
+
+    $capturedExisting=$s.Substring($capturedStart,$capturedEnd-$capturedStart)
+    if($capturedExisting -notmatch 'Process\.Start|RunTrackedProcess')
     {
         throw 'C10.20.3 RunCaptured was found but has an unexpected implementation; refusing blind replacement.'
     }
-    $s=$s.Substring(0,$capturedMatch.Index)+$capturedNew.TrimEnd()+"`n"+$s.Substring($capturedMatch.Index+$capturedMatch.Length)
-}
 
+    $s=$s.Substring(0,$capturedStart)+$capturedNew.TrimEnd()+$s.Substring($capturedEnd)
+}
 $oldRibbon='                if(ribbon!=null) { _asterMaxSolveRibbonWasEnabled=ribbon.Enabled; ribbon.Enabled=false; }'
 $newRibbon='                if(ribbon!=null) _asterMaxSolveRibbonWasEnabled=ribbon.Enabled;'
 $s=Replace-Required $s $oldRibbon $newRibbon
