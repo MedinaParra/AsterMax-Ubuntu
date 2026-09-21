@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent
 h=(ROOT/"harness-c10208a-patch-chain.ps1").read_text(encoding="utf-8-sig")
-p=(ROOT/"patch-c10203-cancel-solve.ps1").read_text(encoding="utf-8-8-sig")
+p=(ROOT/"patch-c10203-cancel-solve.ps1").read_text(encoding="utf-8-sig")
 
 for token in [
     "astermax-patch-harness/v1",
