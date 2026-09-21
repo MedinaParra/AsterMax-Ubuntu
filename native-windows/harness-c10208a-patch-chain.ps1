@@ -9,6 +9,7 @@ function Get-CriticalHashes([string]$TargetRoot)
 {
     $relative=@(
         'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs',
+        'PrePoMax/Forms/AsterMaxIntegratedResults.cs',
         'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs',
         'PrePoMax/Forms/AsterMaxButtonAudit.cs',
         'PrePoMax/Forms/AsterMaxNativeUi.cs'
@@ -34,6 +35,7 @@ function Copy-FailureSnapshot([string]$TargetRoot,[string]$Destination)
     New-Item -ItemType Directory -Force $Destination | Out-Null
     foreach($rel in @(
         'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs',
+        'PrePoMax/Forms/AsterMaxIntegratedResults.cs',
         'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs',
         'PrePoMax/Forms/AsterMaxButtonAudit.cs',
         'PrePoMax/Forms/AsterMaxNativeUi.cs'
@@ -173,5 +175,6 @@ if($failed)
     exit 1
 }
 
+Copy-FailureSnapshot $rootPath (Join-Path $outDirPath 'final-snapshot')
 Write-Host "ASTERMAX_PATCH_HARNESS_PASS patches=$($rows.Count) report=$reportPath"
 exit 0
