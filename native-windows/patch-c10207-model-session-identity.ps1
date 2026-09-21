@@ -80,22 +80,12 @@ Set-Content $solvePath $s -Encoding UTF8
 $crossPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceCrossChecks.cs'
 $c=[regex]::Replace((Get-Content $crossPath -Raw),"\r\n?","`n")
 
-$crossAnchor=@'
-            catch(Exception ex)
-            {
-                add("async_solve_ui","FAIL",ex.Message,null);
-            }
-
+$cloadAnchor=@'
             try
             {
                 string solveWorkspace = _asterMaxSolveTransaction == null ? null : _asterMaxSolveTransaction.Workspace;
 '@
-$crossInsert=@'
-            catch(Exception ex)
-            {
-                add("async_solve_ui","FAIL",ex.Message,null);
-            }
-
+$sessionCheck=@'
             try
             {
                 bool sameInstance=_asterMaxSolveFrozenModelInstance!=null && _controller!=null &&
@@ -121,13 +111,22 @@ $crossInsert=@'
                 add("model_session_identity","FAIL",ex.Message,null);
             }
 
-            try
-            {
-                string solveWorkspace = _asterMaxSolveTransaction == null ? null : _asterMaxSolveTransaction.Workspace;
 '@
-$crossAnchor=[regex]::Replace($crossAnchor,"\r\n?","`n")
-$crossInsert=[regex]::Replace($crossInsert,"\r\n?","`n")
-$c=Replace-Required $c $crossAnchor $crossInsert
+$cloadAnchor=[regex]::Replace($cloadAnchor,"\r\n?","`n")
+$sessionCheck=[regex]::Replace($sessionCheck,"\r\n?","`n")
+if($c.Contains('add("model_session_identity"'))
+{
+    Write-Host 'C10.20.7 model-session cross-check already present.'
+}
+else
+{
+    $cloadIndex=$c.IndexOf($cloadAnchor,[StringComparison]::Ordinal)
+    if($cloadIndex -lt 0)
+    {
+        throw 'C10.20.7 structural anchor missing: cload_semantics cross-check entry'
+    }
+    $c=$c.Substring(0,$cloadIndex)+$sessionCheck+$c.Substring($cloadIndex)
+}
 Set-Content $crossPath $c -Encoding UTF8
 
 Write-Host 'C10.20.7 model-session identity publication guard applied.' -ForegroundColor Green
