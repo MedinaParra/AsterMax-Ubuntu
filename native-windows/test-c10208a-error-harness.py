@@ -33,3 +33,13 @@ assert "(?<![A-Za-z0-9_.-])" in v
 assert "harness-c10208a-patch-chain.ps1" in w
 assert "foreach($p in $patches)" not in w
 print("C10.20.8a PATCH_ERROR_HARNESS_REGRESSION_OK")
+
+smoke=(ROOT/"patch-c10208-functional-command-smoke.ps1").read_text(encoding="utf-8-sig")
+for token in [
+    "direct_diagnostic_attempted",
+    "direct_diagnostic_produced_mesh",
+    "direct_diagnostic_error",
+    "netgen_exe_present",
+    "_controller.CreateMeshCommand(candidateNames[0])",
+]:
+    assert token in smoke, token
