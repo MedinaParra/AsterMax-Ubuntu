@@ -104,12 +104,19 @@ $resultAnchor=[regex]::Replace($resultAnchor,"\r\n?","`n")
 $resultNew=[regex]::Replace($resultNew,"\r\n?","`n")
 $a=Replace-Required $a $resultAnchor $resultNew
 
-$sessionAnchor='                    ["fea_values_invented"] = false,'
+$sessionAnchor=@'
+                    ["solver"] = "native Windows Code_Aster",
+                    ["fea_values_invented"] = false,
+                    ["rows"] = rows,
+'@
 $sessionNew=@'
+                    ["solver"] = "native Windows Code_Aster",
                     ["fea_values_invented"] = false,
                     ["command_execution_smoke"] = commandSmoke,
+                    ["rows"] = rows,
 '@
-$sessionNew=[regex]::Replace($sessionNew,"\r\n?","`n").TrimEnd()
+$sessionAnchor=[regex]::Replace($sessionAnchor,"\r\n?","`n")
+$sessionNew=[regex]::Replace($sessionNew,"\r\n?","`n")
 $a=Replace-Required $a $sessionAnchor $sessionNew
 
 $helperAnchor='        private void C1020ClickRibbonButton(string caption)'
