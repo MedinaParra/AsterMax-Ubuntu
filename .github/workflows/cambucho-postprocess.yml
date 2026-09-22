@@ -1,0 +1,61 @@
+name: Cambucho Compact Postprocess
+
+on:
+  push:
+    branches:
+      - experiment/cambucho-physical-v2
+    paths:
+      - .github/workflows/cambucho-postprocess.yml
+  workflow_dispatch:
+
+jobs:
+  compact-results:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Download completed CFD artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cambucho-physical-v2-openfoam-results
+          path: source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: MedinaParra/AsterMax-Ubuntu
+          run-id: 35719162576
+
+      - name: Build compact analysis package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p compact/VTK compact/system compact/final
+          cp source/RUN_SUMMARY.txt compact/ || true
+          cp source/CASE_ASSUMPTIONS.txt compact/ || true
+          cp source/log.checkMesh compact/ || true
+          cp source/log.checkMeshQuality compact/ || true
+          cp source/log.buoyantPimpleFoam compact/ || true
+          cp source/system/controlDict compact/system/ || true
+          cp source/system/fvSolution compact/system/ || true
+          cp source/system/fvSchemes compact/system/ || true
+          cp source/system/snappyHexMeshDict compact/system/ || true
+          cp -r source/postProcessing compact/ || true
+          cp source/8/wallHeatFlux compact/final/ || true
+          cp source/8/T compact/final/ || true
+          cp source/8/U compact/final/ || true
+          cp source/8/p compact/final/ || true
+          cp source/8/p_rgh compact/final/ || true
+          latest=$(find source/VTK -mindepth 1 -maxdepth 1 -type d -name 'case_*' | sort -V | tail -1)
+          echo "Latest VTK: $latest"
+          cp -r "$latest" compact/VTK/
+          cp source/VTK/case.vtm.series compact/VTK/ || true
+          du -sh compact
+          find compact -maxdepth 4 -type f | sort
+
+      - name: Upload compact results
+        uses: actions/upload-artifact@v4
+        with:
+          name: cambucho-physical-v2-compact
+          path: compact
+          retention-days: 14
+          if-no-files-found: error
