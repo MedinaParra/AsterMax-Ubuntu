@@ -69,25 +69,25 @@ jobs:
           if(-not $a.Contains($anchor)){ throw 'Exit-smoke audit anchor missing.' }
           if(-not $a.Contains('private void C1020RequestAuditExit(')){ throw 'Clean-exit helper missing from patched source.' }
           $method=@'
-        private void StartAsterMaxC1020ExitSmoke()
-        {
-            const string prefix = "--astermax-exit-smoke=";
-            string arg = Environment.GetCommandLineArgs()
-                .FirstOrDefault(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-            if (arg == null) return;
-            string directory = arg.Substring(prefix.Length).Trim('"');
-            Directory.CreateDirectory(directory);
-            var exitTimer = new Timer { Interval = 750 };
-            exitTimer.Tick += (s, e) =>
-            {
-                exitTimer.Stop();
-                exitTimer.Dispose();
-                C1020RequestAuditExit(directory, 0);
-            };
-            exitTimer.Start();
-        }
-
-'@
+                  private void StartAsterMaxC1020ExitSmoke()
+                  {
+                      const string prefix = "--astermax-exit-smoke=";
+                      string arg = Environment.GetCommandLineArgs()
+                          .FirstOrDefault(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                      if (arg == null) return;
+                      string directory = arg.Substring(prefix.Length).Trim('"');
+                      Directory.CreateDirectory(directory);
+                      var exitTimer = new Timer { Interval = 750 };
+                      exitTimer.Tick += (s, e) =>
+                      {
+                          exitTimer.Stop();
+                          exitTimer.Dispose();
+                          C1020RequestAuditExit(directory, 0);
+                      };
+                      exitTimer.Start();
+                  }
+          
+          '@
           $a=$a.Replace($anchor,$method+$anchor)
           Set-Content $audit $a -Encoding UTF8
 
