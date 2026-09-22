@@ -61,6 +61,17 @@ if(-not $ui.Contains('private void StartAsterMaxPortableCadSmoke()')){
                                 _controller.Model.Mesh.Elements.Count < 1)
                                 throw new InvalidOperationException("NetGen returned no real volume mesh.");
 
+                            string meshProofPath = reportPath + ".mesh.json";
+                            string meshProof = "{" +
+                                "\"pass\":true," +
+                                "\"mesh_nodes\":" + _controller.Model.Mesh.Nodes.Count + "," +
+                                "\"mesh_elements\":" + _controller.Model.Mesh.Elements.Count + "," +
+                                "\"source\":\"real_native_generate_mesh\"," +
+                                "\"fallback_allowed\":true," +
+                                "\"fea_values_invented\":false" +
+                                "}";
+                            System.IO.File.WriteAllText(meshProofPath, meshProof, new System.Text.UTF8Encoding(false));
+
                             smokeTimer.Stop();
                             AsterMaxPortableCadSmokeTrace.Stage(_args, "netgen_volume_mesh_completed");
                             string unitSystem = _controller.Model.UnitSystem == null
