@@ -16,7 +16,19 @@ $lf=[string][char]10
 $cr=[string][char]13
 $a=(Get-Content $auditPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 
-$signature='        private void C1020RequestAuditExit(string directory, int exitCode)'
+$signature='        private void C10209TraceUnhandled(string directory, string source, Exception exception)
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(directory, "audit-unhandled-exception.log"),
+                    DateTime.UtcNow.ToString("O") + "|" + source + "|" +
+                    (exception == null ? "<non-Exception>" : exception.ToString()) + Environment.NewLine);
+            }
+            catch { }
+            C10209TraceShutdown(directory, "unhandled." + source);
+        }
+
+        private void C1020RequestAuditExit(string directory, int exitCode)'
 $helper=@'
         private string _c10209AuditShutdownDirectory;
 
@@ -91,6 +103,10 @@ $a=Replace-Required $a '            Environment.ExitCode = exitCode;
                     _asterMaxUiAuditMode = false;
                     Close();' '            Environment.ExitCode = exitCode;
             C10209TraceShutdown(directory, "C1020RequestAuditExit.before_begininvoke");
+            Application.ThreadException += (sender,args) =>
+                C10209TraceUnhandled(directory, "Application.ThreadException", args == null ? null : args.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (sender,args) =>
+                C10209TraceUnhandled(directory, "AppDomain.UnhandledException", args == null ? null : args.ExceptionObject as Exception);
             FormClosed += (sender,args) => C10209TraceShutdown(directory, "FormClosed");
             Application.ApplicationExit += (sender,args) => C10209TraceShutdown(directory, "ApplicationExit");
             BeginInvoke(new Action(() =>
