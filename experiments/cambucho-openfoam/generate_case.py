@@ -381,12 +381,12 @@ dimensions [1 -1 -2 0 0 0 0];
 internalField uniform 101325;
 boundaryField
 {
-    // Static atmospheric pressure with the hydrostatic contribution removed
-    // consistently from p_rgh.
+    // Hydrostatic far field: hold p_rgh constant. The solver reconstructs
+    // p = p_rgh + rho*gh, so static pressure decreases with elevation.
+    // Imposing a constant static p on every side/top face would be non-hydrostatic.
     atmosphere
     {
-        type prghPressure;
-        p uniform 101325;
+        type fixedValue;
         value uniform 101325;
     }
     skin
@@ -529,7 +529,7 @@ Ambient initial T = 295.15 K
 Skin T = 307.15 K
 Paper initial T = 295.15 K
 Preconditioning = 0 to 3 s with NO fire
-Atmosphere pressure BC = prghPressure(p=101325 Pa); p itself is calculated
+Atmosphere pressure BC = fixed p_rgh=101325 Pa (hydrostatic far field); p itself is calculated
 Ignition = 3 s
 Fire ramp = 0.5 s
 Equivalent peak fire-band wall T = 750 K
