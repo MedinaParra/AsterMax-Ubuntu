@@ -137,8 +137,20 @@ namespace PrePoMax
             Action<string,Action<FeModel>,string,int> check=(name,change,key,expected)=>{
                 var model=CreateAsterMaxStatusFixture();
                 change(model);
-                int actual=EvaluateAsterMaxSectionStates(model)[key].State;
-                if(actual!=expected) throw new InvalidOperationException("Workflow status regression: "+name+" expected "+expected+" got "+actual);
+                var states=EvaluateAsterMaxSectionStates(model);
+                int actual=states[key].State;
+                if(actual!=expected) {
+                    var assignment=AsterMaxAssignmentQualityGate.Evaluate(model);
+                    var readiness=AsterMaxPreSolveReadiness.Evaluate(model);
+                    string stateVector=String.Join(",",states.OrderBy(x=>x.Key,StringComparer.Ordinal)
+                        .Select(x=>x.Key+"="+x.Value.State.ToString()));
+                    throw new InvalidOperationException("Workflow status regression: "+name+" expected "+expected+" got "+actual+
+                        " | states="+stateVector+
+                        " | assignment="+assignment.AuditSummary()+
+                        " | assignment_issues="+String.Join(",",assignment.Issues)+
+                        " | readiness="+readiness.AuditSummary()+
+                        " | readiness_issues="+String.Join(",",readiness.Issues));
+                }
                 evidence.Add(new JObject{["case"]=name,["section"]=key,["state"]=actual,["pass"]=true});
             };
             check("complete_native_part_assignment",m=>{},"ax-model",2);
