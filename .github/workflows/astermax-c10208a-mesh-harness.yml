@@ -119,14 +119,278 @@ jobs:
             Copy-Item (Join-Path $work '*') $copy -Recurse -Force -ErrorAction Continue
           }
           if(Test-Path ($report+'.stages.log')){ Get-Content ($report+'.stages.log') | Write-Host }
-          if(Test-Path (Join-Path $out 'netgen-mesh-output.log')){ Get-Content (Join-Path $out 'netgen-mesh-output.log') | Write-Host }
+          $meshLog=Join-Path $out 'netgen-mesh-output.log'
+          if(Test-Path $meshLog){ Get-Content $meshLog | Write-Host }
           if($timedOut){ throw 'Native mesh smoke timed out after 300 seconds.' }
           if(-not(Test-Path $report)){ throw 'Portable CAD smoke report was not produced.' }
           $j=Get-Content $report -Raw | ConvertFrom-Json
           $j | ConvertTo-Json -Depth 10 | Write-Host
           if(-not $j.pass){
-            Write-Warning "Native GUI mesh path failed: $($j.reason)"
+            Write-Warning "Native GUI workflow audit failed after/around meshing: $($j.reason)"
           }
+
+          $meshText=$(if(Test-Path $meshLog){Get-Content $meshLog -Raw}else{''})
+          $exitMatches=[regex]::Matches($meshText,'NetGen process exit code:\s*(-?\d+)')
+          $pointMatches=[regex]::Matches($meshText,'(?m)^\s*Points:\s*(\d+)\s*
+      - name: Probe NetGen runtime generations
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD\mesh-harness\runtime"
+          $work=Join-Path $env:LOCALAPPDATA 'AsterMax\Work'
+          $report=Join-Path $out 'netgen-runtime-probe.json'
+          if(-not(Test-Path (Join-Path $work 'geometry.brep'))){ throw 'geometry.brep missing; cannot compare NetGen runtimes.' }
+          function Invoke-NetGenProbe([string]$label,[string]$exePath) {
+            $probeWork=Join-Path $out ($label+'-work')
+            Remove-Item $probeWork -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $probeWork | Out-Null
+            Copy-Item (Join-Path $work 'meshParameters') $probeWork -Force
+            Copy-Item (Join-Path $work 'meshRefinement') $probeWork -Force
+
+            $step="$PWD\mesh-dist\B01-100x10x10.step"
+            $brepBase=Join-Path $probeWork 'probe.brep'
+            $importStdout=Join-Path $out ($label+'.import.stdout.log')
+            $importStderr=Join-Path $out ($label+'.import.stderr.log')
+            $importArgs='STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS "{0}" "{1}"' -f $step,$brepBase
+            $import=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $importArgs -RedirectStandardOutput $importStdout -RedirectStandardError $importStderr -PassThru
+            $importTimedOut=-not $import.WaitForExit(120000)
+            if($importTimedOut){
+              Stop-Process -Id $import.Id -Force -ErrorAction SilentlyContinue
+              try { $import.WaitForExit(10000) | Out-Null } catch {}
+            }
+            $importExit=$null
+            try { $importExit=$import.ExitCode } catch {}
+            $generatedBrep=Get-ChildItem $probeWork -Filter 'probe*.brep' | Where-Object {$_.Length -gt 0} | Sort-Object Length -Descending | Select-Object -First 1
+
+            $vol=Join-Path $probeWork 'geometry.vol'
+            $stdout=Join-Path $out ($label+'.mesh.stdout.log')
+            $stderr=Join-Path $out ($label+'.mesh.stderr.log')
+            $meshExit=$null
+            $meshTimedOut=$false
+            if($generatedBrep){
+              $meshArgs='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f $generatedBrep.FullName,$vol,(Join-Path $probeWork 'meshParameters'),(Join-Path $probeWork 'meshRefinement')
+              $mesh=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $meshArgs -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              $meshTimedOut=-not $mesh.WaitForExit(120000)
+              if($meshTimedOut){
+                Stop-Process -Id $mesh.Id -Force -ErrorAction SilentlyContinue
+                try { $mesh.WaitForExit(10000) | Out-Null } catch {}
+              }
+              try { $meshExit=$mesh.ExitCode } catch {}
+            }
+            [ordered]@{
+              label=$label
+              exe=$exePath
+              exe_sha256=(Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+              import_exit_code=$importExit
+              import_timed_out=$importTimedOut
+              brep_present=[bool]$generatedBrep
+              brep_bytes=$(if($generatedBrep){$generatedBrep.Length}else{0})
+              mesh_exit_code=$meshExit
+              mesh_timed_out=$meshTimedOut
+              vol_present=(Test-Path $vol)
+              vol_bytes=$(if(Test-Path $vol){(Get-Item $vol).Length}else{0})
+              import_stdout=$importStdout
+              import_stderr=$importStderr
+              mesh_stdout=$stdout
+              mesh_stderr=$stderr
+              work_directory=$probeWork
+            }
+          }
+
+          $probes=@()
+          $probes += Invoke-NetGenProbe 'v140-direct' "$PWD\mesh-dist\NetGen\NetGenMesher.exe"
+
+          $v260Url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.6.0.zip'
+          $v260Zip=Join-Path $out 'PrePoMax-v2.6.0.zip'
+          Invoke-WebRequest $v260Url -OutFile $v260Zip
+          $v260ZipSha=(Get-FileHash $v260Zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $v260Dir=Join-Path $out 'runtime-v260'
+          Remove-Item $v260Dir -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $v260Zip $v260Dir
+          $v260Exe=Get-ChildItem $v260Dir -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $v260Exe){ throw 'PrePoMax v2.6.0 NetGenMesher.exe missing.' }
+          $probes += Invoke-NetGenProbe 'v260-direct' $v260Exe.FullName
+
+          [ordered]@{
+            generated_utc=[DateTime]::UtcNow.ToString('o')
+            source_model='B01-100x10x10.step'
+            v260_zip_url=$v260Url
+            v260_zip_sha256=$v260ZipSha
+            probes=$probes
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content $report -Encoding UTF8
+          Get-Content $report | Write-Host
+
+      - name: Enforce real native mesh
+        if: always()
+        shell: pwsh
+        run: |
+          $mesh="$PWD\mesh-harness\runtime\native-mesh-evidence.json"
+          if(-not(Test-Path $mesh)){ throw 'Native mesh evidence was not produced.' }
+          $m=Get-Content $mesh -Raw | ConvertFrom-Json
+          $m | ConvertTo-Json -Depth 10 | Write-Host
+          if($m.pass -and [int]$m.netgen_last_exit_code -eq 0 -and
+             [int64]$m.vol_bytes -gt 0 -and [int]$m.mesh_points -gt 0 -and [int]$m.mesh_elements -gt 0){
+            Write-Host "ASTERMAX_REAL_NATIVE_MESH_PASS points=$($m.mesh_points) elements=$($m.mesh_elements) vol_bytes=$($m.vol_bytes) stl_fallback=$($m.stl_fallback_used)"
+            exit 0
+          }
+          throw "Real native mesh gate failed: exit=$($m.netgen_last_exit_code) vol=$($m.vol_bytes) points=$($m.mesh_points) elements=$($m.mesh_elements)"
+
+      - name: Upload native mesh evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.20.8a-Native-Mesh-Harness
+          path: |
+            mesh-harness
+            mesh-dist/B01-100x10x10.step
+          if-no-files-found: warn
+)
+          $elementMatches=[regex]::Matches($meshText,'(?m)^\s*Elements:\s*(\d+)\s*
+      - name: Probe NetGen runtime generations
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD\mesh-harness\runtime"
+          $work=Join-Path $env:LOCALAPPDATA 'AsterMax\Work'
+          $report=Join-Path $out 'netgen-runtime-probe.json'
+          if(-not(Test-Path (Join-Path $work 'geometry.brep'))){ throw 'geometry.brep missing; cannot compare NetGen runtimes.' }
+          function Invoke-NetGenProbe([string]$label,[string]$exePath) {
+            $probeWork=Join-Path $out ($label+'-work')
+            Remove-Item $probeWork -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $probeWork | Out-Null
+            Copy-Item (Join-Path $work 'meshParameters') $probeWork -Force
+            Copy-Item (Join-Path $work 'meshRefinement') $probeWork -Force
+
+            $step="$PWD\mesh-dist\B01-100x10x10.step"
+            $brepBase=Join-Path $probeWork 'probe.brep'
+            $importStdout=Join-Path $out ($label+'.import.stdout.log')
+            $importStderr=Join-Path $out ($label+'.import.stderr.log')
+            $importArgs='STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS "{0}" "{1}"' -f $step,$brepBase
+            $import=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $importArgs -RedirectStandardOutput $importStdout -RedirectStandardError $importStderr -PassThru
+            $importTimedOut=-not $import.WaitForExit(120000)
+            if($importTimedOut){
+              Stop-Process -Id $import.Id -Force -ErrorAction SilentlyContinue
+              try { $import.WaitForExit(10000) | Out-Null } catch {}
+            }
+            $importExit=$null
+            try { $importExit=$import.ExitCode } catch {}
+            $generatedBrep=Get-ChildItem $probeWork -Filter 'probe*.brep' | Where-Object {$_.Length -gt 0} | Sort-Object Length -Descending | Select-Object -First 1
+
+            $vol=Join-Path $probeWork 'geometry.vol'
+            $stdout=Join-Path $out ($label+'.mesh.stdout.log')
+            $stderr=Join-Path $out ($label+'.mesh.stderr.log')
+            $meshExit=$null
+            $meshTimedOut=$false
+            if($generatedBrep){
+              $meshArgs='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f $generatedBrep.FullName,$vol,(Join-Path $probeWork 'meshParameters'),(Join-Path $probeWork 'meshRefinement')
+              $mesh=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $meshArgs -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              $meshTimedOut=-not $mesh.WaitForExit(120000)
+              if($meshTimedOut){
+                Stop-Process -Id $mesh.Id -Force -ErrorAction SilentlyContinue
+                try { $mesh.WaitForExit(10000) | Out-Null } catch {}
+              }
+              try { $meshExit=$mesh.ExitCode } catch {}
+            }
+            [ordered]@{
+              label=$label
+              exe=$exePath
+              exe_sha256=(Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+              import_exit_code=$importExit
+              import_timed_out=$importTimedOut
+              brep_present=[bool]$generatedBrep
+              brep_bytes=$(if($generatedBrep){$generatedBrep.Length}else{0})
+              mesh_exit_code=$meshExit
+              mesh_timed_out=$meshTimedOut
+              vol_present=(Test-Path $vol)
+              vol_bytes=$(if(Test-Path $vol){(Get-Item $vol).Length}else{0})
+              import_stdout=$importStdout
+              import_stderr=$importStderr
+              mesh_stdout=$stdout
+              mesh_stderr=$stderr
+              work_directory=$probeWork
+            }
+          }
+
+          $probes=@()
+          $probes += Invoke-NetGenProbe 'v140-direct' "$PWD\mesh-dist\NetGen\NetGenMesher.exe"
+
+          $v260Url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.6.0.zip'
+          $v260Zip=Join-Path $out 'PrePoMax-v2.6.0.zip'
+          Invoke-WebRequest $v260Url -OutFile $v260Zip
+          $v260ZipSha=(Get-FileHash $v260Zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $v260Dir=Join-Path $out 'runtime-v260'
+          Remove-Item $v260Dir -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $v260Zip $v260Dir
+          $v260Exe=Get-ChildItem $v260Dir -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $v260Exe){ throw 'PrePoMax v2.6.0 NetGenMesher.exe missing.' }
+          $probes += Invoke-NetGenProbe 'v260-direct' $v260Exe.FullName
+
+          [ordered]@{
+            generated_utc=[DateTime]::UtcNow.ToString('o')
+            source_model='B01-100x10x10.step'
+            v260_zip_url=$v260Url
+            v260_zip_sha256=$v260ZipSha
+            probes=$probes
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content $report -Encoding UTF8
+          Get-Content $report | Write-Host
+
+      - name: Enforce real native mesh
+        if: always()
+        shell: pwsh
+        run: |
+          $gui="$PWD\mesh-harness\runtime\portable-cad-smoke.json"
+          $probe="$PWD\mesh-harness\runtime\netgen-runtime-probe.json"
+          if(Test-Path $gui){
+            $j=Get-Content $gui -Raw | ConvertFrom-Json
+            if($j.pass){ exit 0 }
+          }
+          if(Test-Path $probe){
+            $p=Get-Content $probe -Raw | ConvertFrom-Json
+            $current=$p.probes | Where-Object {$_.label -eq 'v260-direct'} | Select-Object -First 1
+            if($current -and $current.vol_present -and [int64]$current.vol_bytes -gt 0){
+              throw 'Legacy packaged NetGen failed, but PrePoMax v2.6.0 produced a real .vol. Upgrade the staged NetGen runtime before this gate can pass.'
+            }
+          }
+          throw 'No tested native NetGen runtime produced the required real geometry.vol.'
+
+      - name: Upload native mesh evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.20.8a-Native-Mesh-Harness
+          path: |
+            mesh-harness
+            mesh-dist/B01-100x10x10.step
+          if-no-files-found: warn
+)
+          $lastExit=$null
+          $lastPoints=0
+          $lastElements=0
+          if($exitMatches.Count -gt 0){ $lastExit=[int]$exitMatches[$exitMatches.Count-1].Groups[1].Value }
+          if($pointMatches.Count -gt 0){ $lastPoints=[int]$pointMatches[$pointMatches.Count-1].Groups[1].Value }
+          if($elementMatches.Count -gt 0){ $lastElements=[int]$elementMatches[$elementMatches.Count-1].Groups[1].Value }
+          $volPath=Join-Path $work 'geometry.vol'
+          $volPresent=Test-Path $volPath
+          $volBytes=$(if($volPresent){(Get-Item $volPath).Length}else{0})
+          $meshPass=($lastExit -eq 0 -and $volPresent -and $volBytes -gt 0 -and $lastPoints -gt 0 -and $lastElements -gt 0)
+          [ordered]@{
+            pass=$meshPass
+            netgen_last_exit_code=$lastExit
+            mesh_points=$lastPoints
+            mesh_elements=$lastElements
+            vol_path=$volPath
+            vol_present=$volPresent
+            vol_bytes=$volBytes
+            brep_access_violation=($meshText -match 'NetGen process exit code:\s*-1073741819')
+            stl_fallback_used=($meshText -match 'STL_MESH')
+            portable_workflow_pass=[bool]$j.pass
+            portable_workflow_reason=[string]$j.reason
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $out 'native-mesh-evidence.json') -Encoding UTF8
 
       - name: Probe NetGen runtime generations
         if: always()
