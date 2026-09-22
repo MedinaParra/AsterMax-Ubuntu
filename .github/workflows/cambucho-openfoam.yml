@@ -68,6 +68,33 @@ jobs:
           set -o pipefail
           snappyHexMesh -overwrite 2>&1 | tee log.snappyHexMesh
 
+      - name: Create physical cambucho baffle
+        shell: bash
+        working-directory: experiments/cambucho-openfoam/case
+        run: |
+          set -euxo pipefail
+          createBaffles -overwrite 2>&1 | tee log.createBaffles
+
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          txt = Path("constant/polyMesh/boundary").read_text()
+          counts = {}
+          for name in ("cambucho", "cambucho_slave"):
+              m = re.search(r"\\b" + re.escape(name) + r"\\b\\s*\\{(.*?)\\}", txt, re.S)
+              if not m:
+                  raise SystemExit(f"ERROR: required patch {name!r} is absent")
+              n = re.search(r"\\bnFaces\\s+(\\d+)\\s*;", m.group(1))
+              if not n:
+                  raise SystemExit(f"ERROR: nFaces not found for {name!r}")
+              counts[name] = int(n.group(1))
+              if counts[name] <= 0:
+                  raise SystemExit(f"ERROR: patch {name!r} has zero faces")
+          print("Baffle patch face counts:", counts)
+          PY
+
+          grep -E "Selected|Converted|cambucho" log.createBaffles || true
+
       - name: Mesh quality
         shell: bash
         working-directory: experiments/cambucho-openfoam/case
@@ -94,8 +121,10 @@ jobs:
           test -f 0/alphat
           grep -q "skin" 0/U
           grep -q "cambucho" 0/U
+          grep -q "cambucho_slave" 0/U
           grep -q "skin" 0/T
           grep -q "cambucho" 0/T
+          grep -q "cambucho_slave" 0/T
           grep -q "skin" 0/p
           grep -q "skin" 0/p_rgh
           grep -q "cambucho" 0/p_rgh
