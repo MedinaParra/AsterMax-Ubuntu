@@ -118,12 +118,23 @@ jobs:
           if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
           $out="$PWD\exit-smoke\runtime"
           New-Item -ItemType Directory -Force $out | Out-Null
+
+          # Enable per-user Windows Error Reporting dumps for the audited executable.
+          $wer='HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\AsterMax Mechanical.exe'
+          New-Item -Path $wer -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpFolder -PropertyType ExpandString -Value $out -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpType -PropertyType DWord -Value 2 -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpCount -PropertyType DWord -Value 4 -Force | Out-Null
+
           $p=Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.Directory.FullName -ArgumentList "--astermax-exit-smoke=$out" -PassThru
           if(-not $p.WaitForExit(30000)){
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
             throw 'Clean exit smoke timed out.'
           }
           $code=$p.ExitCode
+          Start-Sleep -Seconds 2
+          $dumps=Get-ChildItem $out -Filter '*.dmp' -ErrorAction SilentlyContinue
+          foreach($dump in $dumps){ Write-Host "ASTERMAX_WER_DUMP=$($dump.FullName) bytes=$($dump.Length)" }
           Write-Host "ASTERMAX_EXIT_SMOKE_CODE=$code"
           $proof=Join-Path $out 'audit-exit-request.json'
           if(Test-Path $proof){ Get-Content $proof | Write-Host }
