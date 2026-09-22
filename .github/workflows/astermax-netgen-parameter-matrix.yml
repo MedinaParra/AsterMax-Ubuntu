@@ -24,6 +24,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\netgen-matrix | Out-Null
           $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.6.0.zip'
           $sha='7a08995fb776d3e962f859ee576078bf34d13f2b59d81c8012cddf8e69b1c384'
           Invoke-WebRequest $url -OutFile .\netgen-matrix\runtime.zip
