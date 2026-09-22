@@ -124,7 +124,88 @@ jobs:
           if(-not(Test-Path $report)){ throw 'Portable CAD smoke report was not produced.' }
           $j=Get-Content $report -Raw | ConvertFrom-Json
           $j | ConvertTo-Json -Depth 10 | Write-Host
-          if(-not $j.pass){ throw "Native STEP-NetGen mesh smoke failed: $($j.reason)" }
+          if(-not $j.pass){
+            Write-Warning "Native GUI mesh path failed: $($j.reason)"
+          }
+
+      - name: Probe NetGen runtime generations
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD\mesh-harness\runtime"
+          $work=Join-Path $env:LOCALAPPDATA 'AsterMax\Work'
+          $report=Join-Path $out 'netgen-runtime-probe.json'
+          if(-not(Test-Path (Join-Path $work 'geometry.brep'))){ throw 'geometry.brep missing; cannot compare NetGen runtimes.' }
+          function Invoke-NetGenProbe([string]$label,[string]$exePath) {
+            $vol=Join-Path $out ($label+'.vol')
+            $stdout=Join-Path $out ($label+'.stdout.log')
+            $stderr=Join-Path $out ($label+'.stderr.log')
+            Remove-Item $vol,$stdout,$stderr -Force -ErrorAction SilentlyContinue
+            $args='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f (Join-Path $work 'geometry.brep'),$vol,(Join-Path $work 'meshParameters'),(Join-Path $work 'meshRefinement')
+            $p=Start-Process -FilePath $exePath -WorkingDirectory $work -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $timedOut=-not $p.WaitForExit(120000)
+            if($timedOut){
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              try { $p.WaitForExit(10000) | Out-Null } catch {}
+            }
+            $exitCode=$null
+            try { $exitCode=$p.ExitCode } catch {}
+            [ordered]@{
+              label=$label
+              exe=$exePath
+              exe_sha256=(Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+              exit_code=$exitCode
+              timed_out=$timedOut
+              vol_present=(Test-Path $vol)
+              vol_bytes=$(if(Test-Path $vol){(Get-Item $vol).Length}else{0})
+              stdout=$stdout
+              stderr=$stderr
+            }
+          }
+
+          $probes=@()
+          $probes += Invoke-NetGenProbe 'v140-direct' "$PWD\mesh-dist\NetGen\NetGenMesher.exe"
+
+          $v260Url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.6.0.zip'
+          $v260Zip=Join-Path $out 'PrePoMax-v2.6.0.zip'
+          Invoke-WebRequest $v260Url -OutFile $v260Zip
+          $v260ZipSha=(Get-FileHash $v260Zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $v260Dir=Join-Path $out 'runtime-v260'
+          Remove-Item $v260Dir -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $v260Zip $v260Dir
+          $v260Exe=Get-ChildItem $v260Dir -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $v260Exe){ throw 'PrePoMax v2.6.0 NetGenMesher.exe missing.' }
+          $probes += Invoke-NetGenProbe 'v260-direct' $v260Exe.FullName
+
+          [ordered]@{
+            generated_utc=[DateTime]::UtcNow.ToString('o')
+            source_model='B01-100x10x10.step'
+            v260_zip_url=$v260Url
+            v260_zip_sha256=$v260ZipSha
+            probes=$probes
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content $report -Encoding UTF8
+          Get-Content $report | Write-Host
+
+      - name: Enforce real native mesh
+        if: always()
+        shell: pwsh
+        run: |
+          $gui="$PWD\mesh-harness\runtime\portable-cad-smoke.json"
+          $probe="$PWD\mesh-harness\runtime\netgen-runtime-probe.json"
+          if(Test-Path $gui){
+            $j=Get-Content $gui -Raw | ConvertFrom-Json
+            if($j.pass){ exit 0 }
+          }
+          if(Test-Path $probe){
+            $p=Get-Content $probe -Raw | ConvertFrom-Json
+            $current=$p.probes | Where-Object {$_.label -eq 'v260-direct'} | Select-Object -First 1
+            if($current -and $current.vol_present -and [int64]$current.vol_bytes -gt 0){
+              throw 'Legacy packaged NetGen failed, but PrePoMax v2.6.0 produced a real .vol. Upgrade the staged NetGen runtime before this gate can pass.'
+            }
+          }
+          throw 'No tested native NetGen runtime produced the required real geometry.vol.'
 
       - name: Upload native mesh evidence
         if: always()
