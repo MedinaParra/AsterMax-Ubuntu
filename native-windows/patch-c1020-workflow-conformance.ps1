@@ -148,7 +148,7 @@ $catchOld=@'
                             ["error"] = ex.ToString(),
                             ["historical_pending_closed"] = false
                         }.ToString(Formatting.Indented));
-                    C1020RequestAuditExit(directory, 1);
+                    Environment.Exit(1);
                 }
 '@
 $catchNew=@'
@@ -173,7 +173,7 @@ $catchNew=@'
                     failure["error"] = ex.ToString();
                     failure["historical_pending_closed"] = false;
                     File.WriteAllText(sessionPath, failure.ToString(Formatting.Indented));
-                    Environment.Exit(1);
+                    C1020RequestAuditExit(directory, 1);
                 }
 '@
 $a=Replace-Required $a $catchOld $catchNew
