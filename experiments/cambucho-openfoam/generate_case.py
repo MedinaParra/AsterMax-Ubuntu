@@ -169,10 +169,10 @@ castellatedMeshControls
     {
         cambucho
         {
+            // Surface used here for local refinement only.
+            // The actual impermeable two-sided wall is created afterwards
+            // with createBaffles using the same STL.
             level (3 3);
-            faceZone cambucho;
-            faceType baffle;
-            patchInfo { type wall; }
         }
     }
 
@@ -252,6 +252,44 @@ meshQualityControls
 }
 debug 0;
 mergeTolerance 1e-6;
+""")
+
+# -----------------------------
+# Robust free-standing baffle creation
+# -----------------------------
+# snappyHexMesh refinement alone does not guarantee that an open STL becomes
+# an internal wall. createBaffles explicitly selects all internal mesh faces
+# whose owner-neighbour centre segment intersects the conical STL and converts
+# them into two wall patches.
+w("system/createBafflesDict", r"""
+FoamFile { version 2.0; format ascii; class dictionary; object createBafflesDict; }
+
+internalFacesOnly true;
+noFields true;
+
+baffles
+{
+    cambuchoWall
+    {
+        type searchableSurface;
+        surface triSurfaceMesh;
+        name cambucho.stl;
+
+        patches
+        {
+            master
+            {
+                name cambucho;
+                type wall;
+            }
+            slave
+            {
+                name cambucho_slave;
+                type wall;
+            }
+        }
+    }
+}
 """)
 
 # -----------------------------
@@ -538,6 +576,7 @@ End time = 8 s
 
 IMPORTANT LIMITATIONS
 - Fire is an equivalent moving thermal boundary, not reactive combustion.
+- The conical wall is created explicitly by createBaffles from the STL after meshing.
 - Burned paper geometry is not removed dynamically.
 - Radiation is not yet solved in-domain.
 - 2 mm leakage gap is assumed, not measured.
