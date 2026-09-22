@@ -484,7 +484,9 @@
       "depends": [
         "patch-c10207-model-session-identity"
       ],
-      "declares": [],
+      "declares": [
+        "C10208ExerciseRealGenerateMesh"
+      ],
       "consumes": []
     },
     {
@@ -521,7 +523,7 @@
         "AsterMaxWaitMeshAudit"
       ],
       "consumes": [
-        "AsterMaxWorkflowConformanceAudit"
+        "C10208ExerciseRealGenerateMesh"
       ]
     }
   ]
