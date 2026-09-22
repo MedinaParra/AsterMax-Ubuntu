@@ -90,10 +90,10 @@ jobs:
           txt = boundary.read_text()
           counts = {}
           for name in ("cambucho", "cambucho_slave"):
-              m = re.search(r"\\b" + re.escape(name) + r"\\b\\s*\\{(.*?)\\}", txt, re.S)
+              m = re.search(re.escape(name) + r"\s*\{([^}]*)\}", txt, re.S)
               if not m:
                   raise SystemExit(f"ERROR: required patch {name!r} is absent in {boundary}")
-              n = re.search(r"\\bnFaces\\s+(\\d+)\\s*;", m.group(1))
+              n = re.search(r"nFaces\s+(\d+)\s*;", m.group(1))
               if not n:
                   raise SystemExit(f"ERROR: nFaces not found for {name!r}")
               counts[name] = int(n.group(1))
