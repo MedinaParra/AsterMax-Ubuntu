@@ -272,8 +272,18 @@ baffles
     cambuchoWall
     {
         type searchableSurface;
-        surface triSurfaceMesh;
-        name cambucho.stl;
+
+        // Analytic zero-thickness cone. Setting inner radii equal to outer
+        // radii collapses the end annuli to zero area while retaining the
+        // lateral conical surface. This avoids STL intersection tolerance
+        // issues in createBaffles.
+        surface searchableCone;
+        point1 (0 0 0.002);
+        radius1 0.020;
+        innerRadius1 0.020;
+        point2 (0 0 0.502);
+        radius2 0.125;
+        innerRadius2 0.125;
 
         patches
         {
@@ -576,7 +586,7 @@ End time = 8 s
 
 IMPORTANT LIMITATIONS
 - Fire is an equivalent moving thermal boundary, not reactive combustion.
-- The conical wall is created explicitly by createBaffles from the STL after meshing.
+- The conical wall is created explicitly by createBaffles using an analytic zero-thickness searchableCone after meshing.
 - Burned paper geometry is not removed dynamically.
 - Radiation is not yet solved in-domain.
 - 2 mm leakage gap is assumed, not measured.
