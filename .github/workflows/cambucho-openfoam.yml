@@ -78,18 +78,28 @@ jobs:
           python3 - <<'PY'
           import re
           from pathlib import Path
-          txt = Path("constant/polyMesh/boundary").read_text()
+
+          # createBaffles may store the topologically modified mesh in the
+          # start-time directory (0/polyMesh) even when invoked with -overwrite.
+          # OpenFOAM then uses that time-resolved mesh at startTime=0.
+          candidates = [Path("0/polyMesh/boundary"), Path("constant/polyMesh/boundary")]
+          boundary = next((p for p in candidates if p.exists()), None)
+          if boundary is None:
+              raise SystemExit("ERROR: no polyMesh/boundary file found after createBaffles")
+
+          txt = boundary.read_text()
           counts = {}
           for name in ("cambucho", "cambucho_slave"):
               m = re.search(r"\\b" + re.escape(name) + r"\\b\\s*\\{(.*?)\\}", txt, re.S)
               if not m:
-                  raise SystemExit(f"ERROR: required patch {name!r} is absent")
+                  raise SystemExit(f"ERROR: required patch {name!r} is absent in {boundary}")
               n = re.search(r"\\bnFaces\\s+(\\d+)\\s*;", m.group(1))
               if not n:
                   raise SystemExit(f"ERROR: nFaces not found for {name!r}")
               counts[name] = int(n.group(1))
               if counts[name] <= 0:
                   raise SystemExit(f"ERROR: patch {name!r} has zero faces")
+          print("Baffle mesh file:", boundary)
           print("Baffle patch face counts:", counts)
           PY
 
