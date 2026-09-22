@@ -521,7 +521,7 @@
         "AsterMaxWaitMeshAudit"
       ],
       "consumes": [
-        "C10208ExerciseRealGenerateMesh"
+        "AsterMaxWorkflowConformanceAudit"
       ]
     }
   ]
