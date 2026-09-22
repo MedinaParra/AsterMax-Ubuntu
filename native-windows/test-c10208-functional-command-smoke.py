@@ -23,6 +23,8 @@ required=[
     'C10.20.2',
     'C10.20.8',
     'if(!_asterMaxUiAuditMode) MessageBoxes.ShowError("Errors occurred during meshing.',
+    'NetGen process exit code: ',
+    '_jobStatus = exitCode == 0 ? JobStatus.OK : JobStatus.Failed;',
 ]
 for token in required:
     assert token in patch, token
