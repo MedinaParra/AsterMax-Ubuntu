@@ -499,6 +499,17 @@
       "consumes": [
         "AsterMaxWorkflowConformanceAudit"
       ]
+    },
+    {
+      "id": "patch-c10210-audit-hook-release",
+      "file": "patch-c10210-audit-hook-release.ps1",
+      "depends": [
+        "patch-c10209-audit-exit-diagnostics"
+      ],
+      "declares": [],
+      "consumes": [
+        "C10209TraceShutdown"
+      ]
     }
   ]
 }
