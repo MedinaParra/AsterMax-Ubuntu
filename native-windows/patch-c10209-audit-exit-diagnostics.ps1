@@ -16,19 +16,7 @@ $lf=[string][char]10
 $cr=[string][char]13
 $a=(Get-Content $auditPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 
-$signature='        private void C10209TraceUnhandled(string directory, string source, Exception exception)
-        {
-            try
-            {
-                File.AppendAllText(Path.Combine(directory, "audit-unhandled-exception.log"),
-                    DateTime.UtcNow.ToString("O") + "|" + source + "|" +
-                    (exception == null ? "<non-Exception>" : exception.ToString()) + Environment.NewLine);
-            }
-            catch { }
-            C10209TraceShutdown(directory, "unhandled." + source);
-        }
-
-        private void C1020RequestAuditExit(string directory, int exitCode)'
+$signature='        private void C1020RequestAuditExit(string directory, int exitCode)'
 $helper=@'
         private string _c10209AuditShutdownDirectory;
 
@@ -80,6 +68,18 @@ $helper=@'
                 try { File.AppendAllText(Path.Combine(directory, "audit-shutdown-trace-errors.log"), ex + Environment.NewLine); }
                 catch { }
             }
+        }
+
+        private void C10209TraceUnhandled(string directory, string source, Exception exception)
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(directory, "audit-unhandled-exception.log"),
+                    DateTime.UtcNow.ToString("O") + "|" + source + "|" +
+                    (exception == null ? "<non-Exception>" : exception.ToString()) + Environment.NewLine);
+            }
+            catch { }
+            C10209TraceShutdown(directory, "unhandled." + source);
         }
 
 '@
