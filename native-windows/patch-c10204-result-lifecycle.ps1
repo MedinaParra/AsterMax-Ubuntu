@@ -48,11 +48,9 @@ $infoOld='            if (_asterMaxLoadedResults != null) text += "\r\nBundle: "
 $infoNew=@'
             if (_asterMaxLoadedResults != null)
             {
-                text += "
-Bundle: " + _asterMaxLoadedResults.SourceFile;
+                text += "\r\nBundle: " + _asterMaxLoadedResults.SourceFile;
                 if (_asterMaxPreviousResultsRetained)
-                    text += "
-Status: previous successful result retained after a later Solve did not complete successfully.";
+                    text += "\r\nStatus: previous successful result retained after a later Solve did not complete successfully.";
             }
 '@
 $infoNew=[regex]::Replace($infoNew,"\r\n?","`n").TrimEnd()

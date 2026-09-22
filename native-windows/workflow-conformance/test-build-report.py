@@ -23,6 +23,13 @@ class ReportGateTests(unittest.TestCase):
     def test_missing_proof(self):self.assertFalse(self.run_report(self.good(),False)['summary']['release_gate_pass'])
     def test_missing_cross(self):
         s=self.good();s.pop('cross_cutting');self.assertFalse(self.run_report(s)['summary']['release_gate_pass'])
+    def test_environment_not_exercised_is_not_fake_pass(self):
+        s=self.good();s['cross_cutting']['checks'][0]['status']='NOT_EXERCISED'
+        r=self.run_report(s)
+        self.assertTrue(r['summary']['release_gate_pass'])
+        self.assertFalse(r['summary']['closure_candidate'])
+        self.assertEqual(r['summary']['cross_not_exercised'],1)
+        self.assertFalse(r['claims']['not_exercised_counts_as_pass'])
     def test_explicit_fail_without_proof(self):
         s=self.good();s['rows'][0]['status']='FAIL';r=self.run_report(s,False);self.assertEqual(r['summary']['mandatory_failures'],1)
 if __name__=='__main__':unittest.main()

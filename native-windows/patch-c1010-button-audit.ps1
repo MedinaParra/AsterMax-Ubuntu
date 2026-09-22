@@ -117,26 +117,55 @@ Set-Content $bridge $b -Encoding UTF8
 # Use native part labels as well as element sets when checking material coverage.
 $gatePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxResultsWorkspace.cs'
 $q=Get-Content $gatePath -Raw
-$start=$q.IndexOf('                    if (section.RegionType != CaeGlobals.RegionTypeEnum.ElementSetName ||')
-$end=$q.IndexOf('                    foreach (int id in set.Labels)', $start)
-if($start -lt 0 -or $end -lt 0){throw 'Material coverage region anchor missing.'}
-$replacement=@'
-                    int[] regionLabels = null;
-                    if (section.RegionType == CaeGlobals.RegionTypeEnum.ElementSetName &&
-                        !String.IsNullOrWhiteSpace(section.RegionName) && model.Mesh.ElementSets.ContainsKey(section.RegionName))
-                        regionLabels = model.Mesh.ElementSets[section.RegionName].Labels;
-                    else if (section.RegionType == CaeGlobals.RegionTypeEnum.PartName &&
-                        !String.IsNullOrWhiteSpace(section.RegionName) && model.Mesh.Parts.ContainsKey(section.RegionName))
-                        regionLabels = model.Mesh.Parts[section.RegionName].Labels;
-                    if (!(section is CaeModel.SolidSection) || !section.Active || !section.Valid ||
-                        regionLabels == null || regionLabels.Length == 0)
+$legacyAnchor='                    if (section.RegionType != CaeGlobals.RegionTypeEnum.ElementSetName ||'
+$newAnchor='                    int[] regionElementIds = null;'
+$start=$q.IndexOf($legacyAnchor)
+if($start -ge 0) {
+    $legacyLoop='                    foreach (int id in set.Labels)'
+    $end=$q.IndexOf($legacyLoop, $start)
+    if($end -lt 0){throw 'Material coverage legacy loop anchor missing.'}
+    $replacement=@'
+                    int[] regionElementIds = null;
+                    if (section.RegionType == CaeGlobals.RegionTypeEnum.ElementSetName)
+                    {
+                        if (model.Mesh.ElementSets == null || String.IsNullOrWhiteSpace(section.RegionName) ||
+                            !model.Mesh.ElementSets.ContainsKey(section.RegionName) ||
+                            model.Mesh.ElementSets[section.RegionName] == null)
+                        {
+                            r.MissingSectionRegionCount++;
+                            continue;
+                        }
+                        regionElementIds = model.Mesh.ElementSets[section.RegionName].Labels;
+                    }
+                    else if (section.RegionType == CaeGlobals.RegionTypeEnum.PartName)
+                    {
+                        if (model.Mesh.Parts == null || String.IsNullOrWhiteSpace(section.RegionName) ||
+                            !model.Mesh.Parts.ContainsKey(section.RegionName) ||
+                            model.Mesh.Parts[section.RegionName] == null)
+                        {
+                            r.MissingSectionRegionCount++;
+                            continue;
+                        }
+                        regionElementIds = model.Mesh.Parts[section.RegionName].Labels;
+                    }
+                    else
                     {
                         r.MissingSectionRegionCount++;
                         continue;
                     }
-                    foreach (int id in regionLabels)
+                    if (regionElementIds == null || regionElementIds.Length == 0)
+                    {
+                        r.MissingSectionRegionCount++;
+                        continue;
+                    }
+                    foreach (int id in regionElementIds)
 '@
-$q=$q.Substring(0,$start)+$replacement+$q.Substring($end+'                    foreach (int id in set.Labels)'.Length)
+    $q=$q.Substring(0,$start)+$replacement+$q.Substring($end+$legacyLoop.Length)
+} elseif($q.Contains($newAnchor) -and $q.Contains('CaeGlobals.RegionTypeEnum.PartName')) {
+    Write-Host 'C10.10.1 material coverage gate already supports PartName regions.' -ForegroundColor DarkGray
+} else {
+    throw 'Material coverage region anchor/state not recognized.'
+}
 Set-Content $gatePath $q -Encoding UTF8
 
 # Native export must enforce coverage instead of applying the only material to unassigned elements.

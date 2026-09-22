@@ -72,7 +72,7 @@ namespace PrePoMax
             int bc=steps.Sum(s=>s.BoundaryConditions.Count),loads=steps.Sum(s=>s.Loads.Count);
             bool supportValid=contract!=null && ValidAsterMaxGroups(contract,"supports","fixed") &&
                 steps.SelectMany(s=>s.BoundaryConditions.Values).All(x=>x.Active&&x.Valid);
-            bool loadValid=contract!=null && ValidAsterMaxGroups(contract,"loads","nodal_force_total") &&
+            bool loadValid=contract!=null && ValidAsterMaxLoadGroups(contract) &&
                 steps.SelectMany(s=>s.Loads.Values).All(x=>x.Active&&x.Valid);
             states["supports"]=new AsterMaxSectionState(bc==0?0:supportValid?2:1,bc==0?"Obligatorio: definir apoyo y región.":
                 supportValid?"Apoyo fijo con grupo de nodos válido.":"Revisar apoyo activo y región; Run admite un apoyo fijo. "+contractError);
@@ -99,8 +99,27 @@ namespace PrePoMax
             if(meshNodes==null) return false;
             var ids=new HashSet<string>(meshNodes.Select(n=>(string)n["id"]));
             if(nodes.Any(n=>!ids.Contains((string)n))) return false;
-            if(name=="loads") foreach(string field in new[]{"fx_total_n","fy_total_n","fz_total_n"}) {
-                double value=(double?)items[0][field]??Double.NaN;
+            return true;
+        }
+
+        private static bool ValidAsterMaxLoadGroups(JObject contract)
+        {
+            var items=contract["loads"] as JArray;
+            if(items==null||items.Count!=1) return false;
+            string type=(string)items[0]["type"];
+            bool perNode=String.Equals(type,"nodal_force_per_node",StringComparison.Ordinal);
+            bool legacyTotal=String.Equals(type,"nodal_force_total",StringComparison.Ordinal);
+            if(!perNode&&!legacyTotal) return false;
+            string group=(string)items[0]["group"];
+            var nodes=group==null?null:contract["mesh"]?["node_groups"]?[group] as JArray;
+            if(nodes==null||nodes.Count==0) return false;
+            var meshNodes=contract["mesh"]?["nodes"] as JArray;
+            if(meshNodes==null) return false;
+            var ids=new HashSet<string>(meshNodes.Select(n=>(string)n["id"]));
+            if(nodes.Any(n=>!ids.Contains((string)n))) return false;
+            string suffix=perNode?"_per_node_n":"_total_n";
+            foreach(string axis in new[]{"fx","fy","fz"}) {
+                double value=(double?)items[0][axis+suffix]??Double.NaN;
                 if(Double.IsNaN(value)||Double.IsInfinity(value)) return false;
             }
             return true;
@@ -137,8 +156,20 @@ namespace PrePoMax
             Action<string,Action<FeModel>,string,int> check=(name,change,key,expected)=>{
                 var model=CreateAsterMaxStatusFixture();
                 change(model);
-                int actual=EvaluateAsterMaxSectionStates(model)[key].State;
-                if(actual!=expected) throw new InvalidOperationException("Workflow status regression: "+name+" expected "+expected+" got "+actual);
+                var states=EvaluateAsterMaxSectionStates(model);
+                int actual=states[key].State;
+                if(actual!=expected) {
+                    var assignment=AsterMaxAssignmentQualityGate.Evaluate(model);
+                    var readiness=AsterMaxPreSolveReadiness.Evaluate(model);
+                    string stateVector=String.Join(",",states.OrderBy(x=>x.Key,StringComparer.Ordinal)
+                        .Select(x=>x.Key+"="+x.Value.State.ToString()));
+                    throw new InvalidOperationException("Workflow status regression: "+name+" expected "+expected+" got "+actual+
+                        " | states="+stateVector+
+                        " | assignment="+assignment.AuditSummary()+
+                        " | assignment_issues="+String.Join(",",assignment.Issues)+
+                        " | readiness="+readiness.AuditSummary()+
+                        " | readiness_issues="+String.Join(",",readiness.Issues));
+                }
                 evidence.Add(new JObject{["case"]=name,["section"]=key,["state"]=actual,["pass"]=true});
             };
             check("complete_native_part_assignment",m=>{},"ax-model",2);

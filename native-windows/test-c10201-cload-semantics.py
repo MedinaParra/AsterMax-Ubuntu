@@ -22,4 +22,8 @@ assert b01["total_force_n"] == [10000.0, 0.0, 0.0]
 assert b01["cload_per_node_n"] == [2500.0, 0.0, 0.0]
 assert 4 * b01["cload_per_node_n"][0] == b01["total_force_n"][0]
 assert "cload_semantics" in contract["cross_cutting_checks"]
+workflow_states = (ROOT / "AsterMaxWorkflowStates.cs").read_text(encoding="utf-8-sig")
+assert 'ValidAsterMaxLoadGroups(contract)' in workflow_states
+assert '"nodal_force_per_node"' in workflow_states
+assert '"_per_node_n"' in workflow_states
 print("C10.20.1 CLOAD_SEMANTICS_REGRESSION_OK")

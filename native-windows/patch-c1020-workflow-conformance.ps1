@@ -15,8 +15,50 @@ Copy-Item $crossSource $crossDestination -Force
 # Keep the nine mandatory stages and the cross-cutting checks separate in source and evidence.
 $a=Get-Content $destination -Raw
 $old='                    ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);'+[Environment]::NewLine+'                    Environment.Exit(0);'
-$new='                    ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);'+[Environment]::NewLine+'                    C1020AttachCrossCuttingToSession(directory);'+[Environment]::NewLine+'                    Environment.Exit(0);'
+$new='                    ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);'+[Environment]::NewLine+'                    C1020AttachCrossCuttingToSession(directory);'+[Environment]::NewLine+'                    C1020RequestAuditExit(directory, 0);'
 $a=Replace-Required $a $old $new
+
+# Exit the WinForms audit only after the current Timer.Tick callback has unwound.
+# Environment.Exit from inside the native callback produced STATUS_FATAL_USER_CALLBACK_EXCEPTION
+# (0xC000041D) even after all nine workflow stages had passed.
+$executeSignature='        private void ExecuteAsterMaxC1020WorkflowConformanceAudit(string directory)'
+$exitHelper=@'
+        private void C1020RequestAuditExit(string directory, int exitCode)
+        {
+            try
+            {
+                File.WriteAllText(Path.Combine(directory, "audit-exit-request.json"),
+                    new JObject {
+                        ["requested_exit_code"] = exitCode,
+                        ["requested_utc"] = DateTime.UtcNow.ToString("O"),
+                        ["deferred_until_callback_unwinds"] = true
+                    }.ToString(Formatting.Indented));
+            }
+            catch { }
+
+            Environment.ExitCode = exitCode;
+            BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    _asterMaxUiAuditMode = false;
+                    Close();
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        File.WriteAllText(Path.Combine(directory, "audit-close-error.txt"), ex.ToString());
+                    }
+                    catch { }
+                    if (Environment.ExitCode == 0) Environment.ExitCode = 2;
+                    Application.ExitThread();
+                }
+            }));
+        }
+
+'@
+$a=Replace-Required $a $executeSignature ($exitHelper+$executeSignature)
 
 # Header nodes in the projected Outline are audit/navigation surfaces. Selecting them invokes
 # the production AfterSelect routing and can re-enter the hidden source tree. C10.20 only needs
@@ -131,7 +173,7 @@ $catchNew=@'
                     failure["error"] = ex.ToString();
                     failure["historical_pending_closed"] = false;
                     File.WriteAllText(sessionPath, failure.ToString(Formatting.Indented));
-                    Environment.Exit(1);
+                    C1020RequestAuditExit(directory, 1);
                 }
 '@
 $a=Replace-Required $a $catchOld $catchNew

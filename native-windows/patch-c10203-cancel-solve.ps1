@@ -137,30 +137,66 @@ $handoffAnchor=[regex]::Replace($handoffAnchor,"\r\n?","`n")
 $handoffNew=[regex]::Replace($handoffNew,"\r\n?","`n")
 $s=Replace-Required $s $handoffAnchor $handoffNew
 
-$capturedOld=@'
-        private int RunCaptured(ProcessStartInfo psi,string stem)
-        {
-            using(var p=Process.Start(psi))
-            {
-                string stdout=p.StandardOutput.ReadToEnd();
-                string stderr=p.StandardError.ReadToEnd();
-                p.WaitForExit();
-                File.WriteAllText(Path.Combine(Workspace,stem+"_STDOUT.log"),stdout,new UTF8Encoding(false));
-                File.WriteAllText(Path.Combine(Workspace,stem+"_STDERR.log"),stderr,new UTF8Encoding(false));
-                return p.ExitCode;
-            }
-        }
-'@
 $capturedNew=@'
         private int RunCaptured(ProcessStartInfo psi,string stem)
         {
             return RunTrackedProcess(psi,stem+"_STDOUT.log",stem+"_STDERR.log");
         }
 '@
-$capturedOld=[regex]::Replace($capturedOld,"\r\n?","`n")
-$capturedNew=[regex]::Replace($capturedNew,"\r\n?","`n")
-$s=Replace-Required $s $capturedOld $capturedNew
+$capturedNew=[regex]::Replace($capturedNew,"\\r\\n?","`n")
 
+# C10.20.8a: replace RunCaptured by signature + balanced C# braces instead of a historical body.
+# Earlier Windows-runtime patches may legitimately change sync/async pipe handling.
+if($s.Contains($capturedNew.TrimEnd()))
+{
+    Write-Host 'C10.20.3 RunCaptured already uses tracked process execution.'
+}
+else
+{
+    $capturedSignature='        private int RunCaptured(ProcessStartInfo psi,string stem)'
+    $capturedStart=$s.IndexOf($capturedSignature,[StringComparison]::Ordinal)
+    if($capturedStart -lt 0)
+    {
+        throw 'C10.20.3 structural anchor missing: RunCaptured(ProcessStartInfo psi,string stem)'
+    }
+
+    $capturedOpen=$s.IndexOf('{',$capturedStart+$capturedSignature.Length)
+    if($capturedOpen -lt 0)
+    {
+        throw 'C10.20.3 opening brace missing for RunCaptured(ProcessStartInfo psi,string stem)'
+    }
+
+    $depth=0
+    $capturedEnd=-1
+    for($i=$capturedOpen;$i -lt $s.Length;$i++)
+    {
+        if($s[$i] -eq '{')
+        {
+            $depth++
+        }
+        elseif($s[$i] -eq '}')
+        {
+            $depth--
+            if($depth -eq 0)
+            {
+                $capturedEnd=$i+1
+                break
+            }
+        }
+    }
+    if($capturedEnd -lt 0)
+    {
+        throw 'C10.20.3 closing brace missing for RunCaptured(ProcessStartInfo psi,string stem)'
+    }
+
+    $capturedExisting=$s.Substring($capturedStart,$capturedEnd-$capturedStart)
+    if($capturedExisting -notmatch 'Process\.Start|RunTrackedProcess')
+    {
+        throw 'C10.20.3 RunCaptured was found but has an unexpected implementation; refusing blind replacement.'
+    }
+
+    $s=$s.Substring(0,$capturedStart)+$capturedNew.TrimEnd()+$s.Substring($capturedEnd)
+}
 $oldRibbon='                if(ribbon!=null) { _asterMaxSolveRibbonWasEnabled=ribbon.Enabled; ribbon.Enabled=false; }'
 $newRibbon='                if(ribbon!=null) _asterMaxSolveRibbonWasEnabled=ribbon.Enabled;'
 $s=Replace-Required $s $oldRibbon $newRibbon

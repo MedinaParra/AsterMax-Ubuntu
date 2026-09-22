@@ -10,7 +10,7 @@ contract=json.loads((ROOT/"workflow-conformance"/"workflow-contract.json").read_
 required=[
     'C10208SmokeEditorCommand("Model", "Materials"',
     'C10208SmokeEditorCommand("Mesh", "Mesh Controls"',
-    'C10208ExerciseRealGenerateMesh(model)',
+    'C10208ExerciseRealGenerateMesh(directory, model)',
     'C10208SmokeEditorCommand("Materiales", "Asignar seccion"',
     'C10208SmokeEditorCommand("Environment", "Analysis Step"',
     'C10208SmokeEditorCommand("Environment", "Supports"',
@@ -23,6 +23,11 @@ required=[
     'C10.20.2',
     'C10.20.8',
     'if(!_asterMaxUiAuditMode) MessageBoxes.ShowError("Errors occurred during meshing.',
+    'NetGen process exit code: ',
+    '_jobStatus = exitCode == 0 ? JobStatus.OK : JobStatus.Failed;',
+    'Retrying with the existing STL_MESH path.',
+    'bool stlFallbackOk = CreateMeshFromSolidStl(part);',
+    'STL_MESH fallback completed for part',
 ]
 for token in required:
     assert token in patch, token
@@ -30,8 +35,16 @@ for token in required:
 marker="$meshNew=@'\n"
 assert marker in patch, "meshNew block missing"
 mesh_new=patch.split(marker,1)[1].split("\n'@",1)[0]
-assert mesh_new.index("C10208ExerciseRealGenerateMesh(model)") < mesh_new.index("C1020PopulateB01Mesh(model);")
+assert mesh_new.index("C10208ExerciseRealGenerateMesh(directory, model)") < mesh_new.index("C1020PopulateB01Mesh(model);")
 assert "commands.Count>=11" in patch
+assert 'x["ribbon_elements_after"]' in patch
+assert patch.count('["command_execution_smoke"] = commandSmoke,') == 1
+session_marker="$sessionAnchor=@'\n"
+assert session_marker in patch
+session_anchor=patch.split(session_marker,1)[1].split("\n'@",1)[0]
+assert '["solver"] = "native Windows Code_Aster",' in session_anchor
+assert '["fea_values_invented"] = false,' in session_anchor
+assert '["rows"] = rows,' in session_anchor
 
 assert "command_execution_smoke" in contract["cross_cutting_checks"]
 assert contract["release"]=="C10.20.8"

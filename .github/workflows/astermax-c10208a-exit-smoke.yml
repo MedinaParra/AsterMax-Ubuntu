@@ -1,0 +1,157 @@
+name: AsterMax C10.20.8a Clean Exit Smoke
+
+on:
+  push:
+    branches: [ codex/c10208a-error-harness ]
+    paths:
+      - '.github/workflows/astermax-c10208a-exit-smoke.yml'
+      - 'native-windows/patch-c10209-audit-exit-diagnostics.ps1'
+      - 'native-windows/patch-c10210-audit-hook-release.ps1'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-c10208a-exit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clean-exit-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply audited AsterMax patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
+            'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
+            'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1','patch-c10210-audit-hook-release.ps1'
+          )
+          & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\exit-smoke\patch-chain"
+          if($LASTEXITCODE -ne 0){ throw 'Patch-chain harness failed.' }
+
+      - name: Inject test-only clean-exit trigger
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $audit='.\upstream\PrePoMax\Forms\AsterMaxWorkflowConformanceAudit.cs'
+          $a=Get-Content $audit -Raw
+          $anchor='        private void ExecuteAsterMaxC1020WorkflowConformanceAudit(string directory)'
+          if(-not $a.Contains($anchor)){ throw 'Exit-smoke audit anchor missing.' }
+          if(-not $a.Contains('private void C1020RequestAuditExit(')){ throw 'Clean-exit helper missing from patched source.' }
+          $method=@'
+                  private void StartAsterMaxC1020ExitSmoke()
+                  {
+                      const string prefix = "--astermax-exit-smoke=";
+                      string arg = Environment.GetCommandLineArgs()
+                          .FirstOrDefault(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                      if (arg == null) return;
+                      string directory = arg.Substring(prefix.Length).Trim('"');
+                      Directory.CreateDirectory(directory);
+                      var exitTimer = new Timer { Interval = 750 };
+                      exitTimer.Tick += (s, e) =>
+                      {
+                          exitTimer.Stop();
+                          exitTimer.Dispose();
+                          C1020RequestAuditExit(directory, 0);
+                      };
+                      exitTimer.Start();
+                  }
+          
+          '@
+          $a=$a.Replace($anchor,$method+$anchor)
+          Set-Content $audit $a -Encoding UTF8
+
+          $ui='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'
+          $u=Get-Content $ui -Raw
+          $call='                StartAsterMaxC1020WorkflowConformanceAudit();'
+          if(-not $u.Contains($call)){ throw 'Workflow audit startup call missing.' }
+          $u=$u.Replace($call,$call+[Environment]::NewLine+'                StartAsterMaxC1020ExitSmoke();')
+          Set-Content $ui $u -Encoding UTF8
+
+      - name: Restore and build Windows x64
+        shell: pwsh
+        run: |
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          if($LASTEXITCODE -ne 0){ throw 'NuGet restore failed.' }
+      - uses: microsoft/setup-msbuild@v2
+      - name: Compile AsterMax
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Execute clean WinForms exit smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
+          $out="$PWD\exit-smoke\runtime"
+          New-Item -ItemType Directory -Force $out | Out-Null
+
+          # Enable per-user Windows Error Reporting dumps for the audited executable.
+          $wer='HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\AsterMax Mechanical.exe'
+          New-Item -Path $wer -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpFolder -PropertyType ExpandString -Value $out -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpType -PropertyType DWord -Value 2 -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpCount -PropertyType DWord -Value 4 -Force | Out-Null
+
+          $p=Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.Directory.FullName -ArgumentList "--astermax-exit-smoke=$out" -PassThru
+          if(-not $p.WaitForExit(30000)){
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            throw 'Clean exit smoke timed out.'
+          }
+          $code=$p.ExitCode
+          Start-Sleep -Seconds 2
+          $dumps=Get-ChildItem $out -Filter '*.dmp' -ErrorAction SilentlyContinue
+          foreach($dump in $dumps){ Write-Host "ASTERMAX_WER_DUMP=$($dump.FullName) bytes=$($dump.Length)" }
+          Write-Host "ASTERMAX_EXIT_SMOKE_CODE=$code"
+          $proof=Join-Path $out 'audit-exit-request.json'
+          if(Test-Path $proof){ Get-Content $proof | Write-Host }
+          if($code -ne 0){ throw "AsterMax clean exit returned $code" }
+          if(-not(Test-Path $proof)){ throw 'Clean exit request evidence missing.' }
+          $j=Get-Content $proof -Raw | ConvertFrom-Json
+          if([int]$j.requested_exit_code -ne 0 -or -not [bool]$j.deferred_until_callback_unwinds){
+            throw 'Clean exit evidence is inconsistent.'
+          }
+
+      - name: Upload exit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.20.8a-Clean-Exit-Smoke
+          path: |
+            exit-smoke
+            upstream/PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs
+            upstream/PrePoMax/Forms/FrmMain.cs
+          if-no-files-found: warn

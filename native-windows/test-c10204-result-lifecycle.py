@@ -17,4 +17,7 @@ required=[
 ]
 for token in required:
     assert token in patch, token
+assert 'text += "\\r\\nBundle: "' in patch
+assert 'text += "\\r\\nStatus: previous successful result retained' in patch
+assert 'text += "\nBundle: "' not in patch
 print("C10.20.4 RESULT_LIFECYCLE_REGRESSION_OK")
