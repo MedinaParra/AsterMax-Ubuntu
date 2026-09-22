@@ -86,6 +86,53 @@ elseif(-not $netgenJob.Contains('NetGen process exit code: '))
 }
 Set-Content $netgenJobPath $netgenJob -Encoding UTF8
 
+# BREP volume meshing can terminate in native NetGen with an access violation on otherwise
+# valid CAD. Fall back to PrePoMax's existing STL_MESH production path; never synthesize a mesh.
+$controller=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","`n")
+$brepReturnOld=@'
+            if (_netgenJob.JobStatus == JobStatus.OK)
+            {
+                //bool convertToSecondOrder = meshingParameters.SecondOrder && !meshingParameters.MidsideNodesOnGeometry;
+                ImportGeneratedMesh(volFileName, part, true);
+                return true;
+            }
+            else return false;
+        }
+        private void CreateMeshRefinementFile
+'@
+$brepReturnNew=@'
+            if (_netgenJob.JobStatus == JobStatus.OK && File.Exists(volFileName) && new FileInfo(volFileName).Length > 0)
+            {
+                //bool convertToSecondOrder = meshingParameters.SecondOrder && !meshingParameters.MidsideNodesOnGeometry;
+                ImportGeneratedMesh(volFileName, part, true);
+                return true;
+            }
+
+            _form.WriteDataToOutput("BREP_MESH failed for part '" + part.Name +
+                                    "'. Retrying with the existing STL_MESH path.");
+            bool stlFallbackOk = CreateMeshFromSolidStl(part);
+            if (stlFallbackOk)
+            {
+                _form.WriteDataToOutput("STL_MESH fallback completed for part '" + part.Name + "'.");
+                return true;
+            }
+            _form.WriteDataToOutput("STL_MESH fallback also failed for part '" + part.Name + "'.");
+            return false;
+        }
+        private void CreateMeshRefinementFile
+'@
+$brepReturnOld=[regex]::Replace($brepReturnOld,"\r\n?","`n")
+$brepReturnNew=[regex]::Replace($brepReturnNew,"\r\n?","`n")
+if($controller.Contains($brepReturnOld))
+{
+    $controller=$controller.Replace($brepReturnOld,$brepReturnNew)
+}
+elseif(-not $controller.Contains('STL_MESH fallback completed for part'))
+{
+    throw 'C10.20.8 BREP-to-STL fallback anchor missing.'
+}
+Set-Content $controllerPath $controller -Encoding UTF8
+
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
 $a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 
