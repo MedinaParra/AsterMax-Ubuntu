@@ -525,6 +525,17 @@
       "consumes": [
         "C10208ExerciseRealGenerateMesh"
       ]
+    },
+    {
+      "id": "patch-c10212-messagebox-hook-lifetime",
+      "file": "patch-c10212-messagebox-hook-lifetime.ps1",
+      "depends": [
+        "patch-c10210-audit-hook-release"
+      ],
+      "declares": [
+        "MessageBoxManagerHookLifetimeCleanup"
+      ],
+      "consumes": []
     }
   ]
 }
