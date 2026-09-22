@@ -51,6 +51,41 @@ elseif(-not $controller.Contains('netgen-mesh-output.log'))
 }
 Set-Content $controllerPath $controller -Encoding UTF8
 
+# NetgenJob must not report a crashed native mesher as OK.
+$netgenJobPath=Join-Path $Root 'CaeJob/NetgenJob.cs'
+$netgenJob=[regex]::Replace((Get-Content $netgenJobPath -Raw),"\r\n?","`n")
+$netgenStatusOld=@'
+                if (_exe.WaitForExit(ms) && _outputWaitHandle.WaitOne(ms) && _errorWaitHandle.WaitOne(ms))
+                {
+                    // Process completed. Check process.ExitCode here.
+                    // after Kill() _jobStatus is Killed
+                    if (_jobStatus == JobStatus.Running) _jobStatus = JobStatus.OK;
+                }
+'@
+$netgenStatusNew=@'
+                if (_exe.WaitForExit(ms) && _outputWaitHandle.WaitOne(ms) && _errorWaitHandle.WaitOne(ms))
+                {
+                    // A native crash must never be promoted to a successful mesh job.
+                    if (_jobStatus == JobStatus.Running)
+                    {
+                        int exitCode = _exe.ExitCode;
+                        AddDataToOutput("NetGen process exit code: " + exitCode);
+                        _jobStatus = exitCode == 0 ? JobStatus.OK : JobStatus.Failed;
+                    }
+                }
+'@
+$netgenStatusOld=[regex]::Replace($netgenStatusOld,"\r\n?","`n")
+$netgenStatusNew=[regex]::Replace($netgenStatusNew,"\r\n?","`n")
+if($netgenJob.Contains($netgenStatusOld))
+{
+    $netgenJob=$netgenJob.Replace($netgenStatusOld,$netgenStatusNew)
+}
+elseif(-not $netgenJob.Contains('NetGen process exit code: '))
+{
+    throw 'C10.20.8 NetgenJob exit-code integrity anchor missing.'
+}
+Set-Content $netgenJobPath $netgenJob -Encoding UTF8
+
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
 $a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 
