@@ -1,0 +1,193 @@
+name: AsterMax NetGen Parameter Matrix
+
+on:
+  push:
+    branches: [ codex/c10208a-error-harness ]
+    paths:
+      - '.github/workflows/astermax-netgen-parameter-matrix.yml'
+      - 'native-windows/workflow-conformance/generate-b01-step.py'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-netgen-parameter-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  netgen-parameter-matrix:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Generate B01 STEP
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check gmsh
+          New-Item -ItemType Directory -Force .\netgen-matrix | Out-Null
+          python native-windows/workflow-conformance/generate-b01-step.py --out "$PWD/netgen-matrix/B01-100x10x10.step"
+
+      - name: Download pinned PrePoMax v2.6.0 NetGen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.6.0.zip'
+          $sha='7a08995fb776d3e962f859ee576078bf34d13f2b59d81c8012cddf8e69b1c384'
+          Invoke-WebRequest $url -OutFile .\netgen-matrix\runtime.zip
+          $actual=(Get-FileHash .\netgen-matrix\runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $sha){ throw "PrePoMax v2.6.0 digest mismatch: $actual" }
+          Expand-Archive .\netgen-matrix\runtime.zip .\netgen-matrix\runtime
+          $ng=Get-ChildItem .\netgen-matrix\runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing.' }
+          $ng.FullName | Set-Content .\netgen-matrix\netgen-path.txt
+
+      - name: Execute meshing parameter matrix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root="$PWD\netgen-matrix"
+          $step=Join-Path $root 'B01-100x10x10.step'
+          $netgen=Get-Content (Join-Path $root 'netgen-path.txt') -Raw
+          $netgen=$netgen.Trim()
+
+          function Write-MeshParameters(
+            [string]$path,[int]$useLocal,[double]$maxh,[double]$minh,
+            [double]$fineness,[double]$grading,[double]$edge,[double]$curve,
+            [int]$optvol,[int]$checkOverlap,[int]$checkBoundary) {
+            $ci=[Globalization.CultureInfo]::InvariantCulture
+            $txt=@"
+int      uselocalh                   ... Switch to enable / disable usage of local mesh size modifiers.
+$useLocal
+double   maxh                        ... Maximum global mesh size allowed.
+$($maxh.ToString($ci))
+double   minh                        ... Minimum global mesh size allowed.
+$($minh.ToString($ci))
+double   fineness                    ... Mesh density: 0...1 (0 => coarse; 1 => fine).
+$($fineness.ToString($ci))
+double   grading                     ... Mesh grading: 0...1 (0 => uniform mesh; 1 => aggressive local grading).
+$($grading.ToString($ci))
+double   elementsperedge             ... Number of elements to generate per edge of the geometry.
+$($edge.ToString($ci))
+double   elementspercurve            ... Elements to generate per curvature radius.
+$($curve.ToString($ci))
+int      closeedgeenable             ... Enable / Disable mesh refinement at close edges.
+0
+double   closeedgefact               ... Factor to use for refinement at close edges (larger => finer).
+2.0
+int      minedgelenenable            ... Enable / Disable user defined minimum edge length for edge subdivision.
+0
+double   minedgelen                  ... Minimum edge length to use while subdividing the edges (default = 1e-4).
+0.0001
+int      second_order                ... Generate second-order surface and volume elements.
+0
+int      quad_dominated              ... Creates a Quad-dominated mesh.
+0
+char*    meshsize_filename           ... Optional external mesh size file.
+
+int      optsurfmeshenable           ... Enable / Disable automatic surface mesh optimization.
+1
+int      optvolmeshenable            ... Enable / Disable automatic volume mesh optimization.
+$optvol
+int      optsteps_3d                 ... Number of optimize steps to use for 3-D mesh optimization.
+3
+int      optsteps_2d                 ... Number of optimize steps to use for 2-D mesh optimization.
+3
+int      invert_tets                 ... Invert all the volume elements.
+0
+int      invert_trigs                ... Invert all the surface triangle elements.
+0
+int      check_overlap               ... Check for overlapping surfaces during Surface meshing.
+$checkOverlap
+int      check_overlapping_boundary  ... Check for overlapping surface elements before volume meshing.
+$checkBoundary
+double   deflection                  ... Open cascade visualization deflection.
+0.01
+"@
+            [IO.File]::WriteAllText($path,$txt,[Text.Encoding]::ASCII)
+          }
+
+          function Run-Process([string]$exe,[string]$args,[string]$cwd,[string]$stdout,[string]$stderr,[int]$timeoutMs=90000) {
+            Remove-Item $stdout,$stderr -Force -ErrorAction SilentlyContinue
+            $p=Start-Process -FilePath $exe -WorkingDirectory $cwd -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            $timedOut=-not $p.WaitForExit($timeoutMs)
+            if($timedOut){
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              try { $p.WaitForExit(10000) | Out-Null } catch {}
+            }
+            $exitCode=$null
+            try { $exitCode=$p.ExitCode } catch {}
+            return [ordered]@{exit_code=$exitCode;timed_out=$timedOut}
+          }
+
+          $variants=@(
+            [ordered]@{name='baseline';local=1;maxh=5.0;minh=0.1;fine=0.5;grading=0.3;edge=2.0;curve=2.0;optvol=1;overlap=1;boundary=1},
+            [ordered]@{name='no_local_h';local=0;maxh=5.0;minh=0.1;fine=0.5;grading=0.3;edge=2.0;curve=2.0;optvol=1;overlap=1;boundary=1},
+            [ordered]@{name='coarse_10';local=0;maxh=10.0;minh=0.5;fine=0.3;grading=0.3;edge=1.0;curve=1.0;optvol=1;overlap=1;boundary=1},
+            [ordered]@{name='coarse_20';local=0;maxh=20.0;minh=1.0;fine=0.2;grading=0.3;edge=1.0;curve=1.0;optvol=1;overlap=1;boundary=1},
+            [ordered]@{name='fine_2p5';local=0;maxh=2.5;minh=0.05;fine=0.7;grading=0.3;edge=2.0;curve=2.0;optvol=1;overlap=1;boundary=1},
+            [ordered]@{name='no_volume_opt';local=0;maxh=5.0;minh=0.1;fine=0.5;grading=0.3;edge=2.0;curve=2.0;optvol=0;overlap=1;boundary=1},
+            [ordered]@{name='no_overlap_checks';local=0;maxh=5.0;minh=0.1;fine=0.5;grading=0.3;edge=2.0;curve=2.0;optvol=1;overlap=0;boundary=0},
+            [ordered]@{name='coarse_safe';local=0;maxh=10.0;minh=0.5;fine=0.2;grading=0.2;edge=1.0;curve=1.0;optvol=0;overlap=0;boundary=0}
+          )
+
+          $results=@()
+          foreach($v in $variants){
+            $dir=Join-Path $root $v.name
+            Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            Write-MeshParameters (Join-Path $dir 'meshParameters') $v.local $v.maxh $v.minh $v.fine $v.grading $v.edge $v.curve $v.optvol $v.overlap $v.boundary
+            [IO.File]::WriteAllText((Join-Path $dir 'meshRefinement'),"0`r`n0`r`n",[Text.Encoding]::ASCII)
+
+            $brepBase=Join-Path $dir 'probe.brep'
+            $importArgs='STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS "{0}" "{1}"' -f $step,$brepBase
+            $imp=Run-Process $netgen $importArgs $dir (Join-Path $dir 'import.stdout.log') (Join-Path $dir 'import.stderr.log')
+            $brep=Get-ChildItem $dir -Filter 'probe*.brep' | Where-Object {$_.Length -gt 0} | Sort-Object Length -Descending | Select-Object -First 1
+
+            $meshResult=[ordered]@{exit_code=$null;timed_out=$false}
+            $vol=Join-Path $dir 'geometry.vol'
+            if($brep){
+              $meshArgs='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f $brep.FullName,$vol,(Join-Path $dir 'meshParameters'),(Join-Path $dir 'meshRefinement')
+              $meshResult=Run-Process $netgen $meshArgs $dir (Join-Path $dir 'mesh.stdout.log') (Join-Path $dir 'mesh.stderr.log')
+            }
+            $tail=''
+            $meshLog=Join-Path $dir 'mesh.stdout.log'
+            if(Test-Path $meshLog){ $tail=((Get-Content $meshLog -Tail 12) -join "`n") }
+            $results += [ordered]@{
+              name=$v.name
+              settings=$v
+              import_exit_code=$imp.exit_code
+              import_timed_out=$imp.timed_out
+              brep_present=[bool]$brep
+              mesh_exit_code=$meshResult.exit_code
+              mesh_timed_out=$meshResult.timed_out
+              vol_present=(Test-Path $vol)
+              vol_bytes=$(if(Test-Path $vol){(Get-Item $vol).Length}else{0})
+              mesh_log_tail=$tail
+            }
+          }
+
+          $summary=[ordered]@{
+            generated_utc=[DateTime]::UtcNow.ToString('o')
+            netgen_exe=$netgen
+            netgen_sha256=(Get-FileHash $netgen -Algorithm SHA256).Hash.ToLowerInvariant()
+            runtime_zip_sha256='7a08995fb776d3e962f859ee576078bf34d13f2b59d81c8012cddf8e69b1c384'
+            results=$results
+            successful_variants=@($results | Where-Object {$_.vol_present -and [int64]$_.vol_bytes -gt 0 -and $_.mesh_exit_code -eq 0} | ForEach-Object {$_.name})
+            fea_values_invented=$false
+          }
+          $summary | ConvertTo-Json -Depth 20 | Set-Content (Join-Path $root 'parameter-matrix.json') -Encoding UTF8
+          $summary | ConvertTo-Json -Depth 20 | Write-Host
+
+      - name: Enforce at least one real mesh
+        shell: pwsh
+        run: |
+          $j=Get-Content .\netgen-matrix\parameter-matrix.json -Raw | ConvertFrom-Json
+          if(@($j.successful_variants).Count -lt 1){ throw 'No NetGen parameter variant produced a real non-empty .vol.' }
+
+      - name: Upload parameter-matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-NetGen-Parameter-Matrix
+          path: netgen-matrix
+          if-no-files-found: error
