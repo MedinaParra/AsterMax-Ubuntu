@@ -497,7 +497,7 @@
         "C10209TraceShutdown"
       ],
       "consumes": [
-        "C1020RequestAuditExit"
+        "AsterMaxWorkflowConformanceAudit"
       ]
     }
   ]
