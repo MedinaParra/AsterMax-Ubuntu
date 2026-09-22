@@ -38,6 +38,9 @@ $new=@'
                     _controller.Settings.General.SaveFormSize(this);
 '@
 $m=Replace-Required $m $old $new
+# A completed automated audit owns a disposable fixture. Interactive projects must
+# retain their save prompt; active jobs still go through the existing close guards.
+$m=Replace-Required $m '                else if (_controller.ModelChanged)' '                else if (_controller.ModelChanged && String.IsNullOrWhiteSpace(_c10209AuditShutdownDirectory))'
 Set-Content $mainPath $m -Encoding UTF8
 
 Write-Host 'C10.20.10 audit-only keyboard hook release applied.' -ForegroundColor Green

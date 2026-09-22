@@ -2,7 +2,7 @@ name: AsterMax C10.20.8 Windows Workflow Conformance
 
 on:
   push:
-    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness ]
+    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair ]
     paths:
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'

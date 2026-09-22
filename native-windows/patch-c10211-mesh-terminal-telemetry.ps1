@@ -280,7 +280,7 @@ $a=(Get-Content $auditPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 $pattern='(?s)        private JObject C10208ExerciseRealGenerateMesh\(string directory,FeModel model\).*?(?=\n        private JObject C10208SmokeResultCommand)'
 if(-not [regex]::IsMatch($a,$pattern)){ throw 'C10.20.11 C10208ExerciseRealGenerateMesh method anchor missing.' }
 $method=@'
-        private JObject C10208ExerciseRealGenerateMesh(string directory,FeModel model)
+        private async Task<JObject> C10208ExerciseRealGenerateMesh(string directory,FeModel model)
         {
             CloseAllForms();
             Application.DoEvents();
@@ -316,12 +316,16 @@ $method=@'
             _controller.AsterMaxResetMeshAudit();
             var monotonic=System.Diagnostics.Stopwatch.StartNew();
             C10208ClickRibbonButton("Mesh","Generate Mesh");
-            bool terminalObserved=_controller.AsterMaxWaitMeshAudit(180000);
+            // Controller mesh import uses UI-thread Invoke. Never block that thread
+            // while waiting for the worker: resume on the WinForms context after await.
+            bool terminalObserved=await Task.Run(() => _controller.AsterMaxWaitMeshAudit(180000));
             monotonic.Stop();
 
-            // Pump once after the worker terminal signal so the async WinForms continuation can
-            // publish its final UI state. This is not the synchronization primitive.
-            Application.DoEvents();
+            // Allow the command's UI continuation to publish its Ready state before
+            // the audit mutates the model. The timeout remains a separate failure.
+            var readyDeadline=System.Diagnostics.Stopwatch.StartNew();
+            while (terminalObserved && IsStateWorking() && readyDeadline.ElapsedMilliseconds < 10000)
+                await Task.Delay(25);
 
             bool deadlineExpired=!terminalObserved;
             int ribbonNodesAfter=model.Mesh==null?0:model.Mesh.Nodes.Count;
@@ -337,7 +341,7 @@ $method=@'
             bool generationFailure=terminalObserved && !generationSucceeded;
             bool importFailure=terminalObserved && generationSucceeded && !importSucceeded;
 
-            bool pass=geometryParts==1 && candidateNames.Length==1 && terminalObserved && !deadlineExpired &&
+            bool pass=geometryParts==1 && candidateNames.Length==1 && terminalObserved && !deadlineExpired && !IsStateWorking() &&
                       generationSucceeded && importSucceeded && ribbonProducedMesh;
             JObject result=new JObject {
                 ["tab"]="Mesh",["command"]="Generate Mesh",["pass"]=pass,
@@ -381,6 +385,10 @@ $method=@'
         }
 '@
 $a=[regex]::Replace($a,$pattern,$method.TrimEnd(),1)
+$a=Replace-Required $a '            timer.Tick += (s, e) =>' '            timer.Tick += async (s, e) =>'
+$a=Replace-Required $a '                    ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);' '                    await ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);'
+$a=Replace-Required $a '        private void ExecuteAsterMaxC1020WorkflowConformanceAudit(string directory)' '        private async Task ExecuteAsterMaxC1020WorkflowConformanceAudit(string directory)'
+$a=Replace-Required $a 'C10208RecordCommandSmoke(directory, commandSmoke, C10208ExerciseRealGenerateMesh(directory, model));' 'C10208RecordCommandSmoke(directory, commandSmoke, await C10208ExerciseRealGenerateMesh(directory, model));'
 Set-Content $auditPath $a -Encoding UTF8
 
 Write-Host 'C10.20.11 terminal-signal Generate Mesh telemetry applied.' -ForegroundColor Green
