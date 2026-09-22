@@ -487,7 +487,9 @@ $crossNew=@'
                     JArray commands=evidence["commands"] as JArray;
                     bool generateMesh=commands!=null && commands.Any(x =>
                         String.Equals((string)x["command"],"Generate Mesh",StringComparison.Ordinal) &&
-                        (bool?)x["pass"]==true && (int?)x["elements_after"]>(int?)x["elements_before"]);
+                        (bool?)x["pass"]==true &&
+                        ((int?)x["ribbon_elements_after"] ?? (int?)x["elements_after"] ?? 0) >
+                        ((int?)x["elements_before"] ?? 0));
                     bool pass=(bool?)evidence["pass"]==true && commands!=null && commands.Count>=11 && generateMesh;
                     add("command_execution_smoke",pass?"PASS":"FAIL",
                         pass ? "Workflow executed native editor, meshing and integrated-result ribbon commands." :
