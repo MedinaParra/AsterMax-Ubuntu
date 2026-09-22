@@ -7,7 +7,9 @@ function Replace-Required([string]$Text,[string]$Old,[string]$New) {
 }
 
 $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceAudit.cs'
-$a=Get-Content $auditPath -Raw
+$lf=[string][char]10
+$cr=[string][char]13
+$a=(Get-Content $auditPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 
 $signature='        private void C1020RequestAuditExit(string directory, int exitCode)'
 $helper=@'
@@ -107,7 +109,7 @@ $a=Replace-Required $a '                    Application.ExitThread();
 Set-Content $auditPath $a -Encoding UTF8
 
 $mainPath=Join-Path $Root 'PrePoMax/Forms/FrmMain.cs'
-$m=Get-Content $mainPath -Raw
+$m=(Get-Content $mainPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 
 $m=Replace-Required $m '        private async void FrmMain_FormClosing(object sender, FormClosingEventArgs e)
         {
