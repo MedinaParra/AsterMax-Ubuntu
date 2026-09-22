@@ -47,6 +47,10 @@ if(-not $c.Contains('using System.Threading;'))
 {
     $c=Replace-Required $c 'using System.Threading.Tasks;' "using System.Threading.Tasks;`nusing System.Threading;"
 }
+if(-not $c.Contains('using System.Diagnostics;'))
+{
+    $c=Replace-Required $c 'using System.ComponentModel;' "using System.ComponentModel;`nusing System.Diagnostics;"
+}
 
 $c=Replace-Required $c '        protected NetgenJob _netgenJob;' @'
         protected NetgenJob _netgenJob;
