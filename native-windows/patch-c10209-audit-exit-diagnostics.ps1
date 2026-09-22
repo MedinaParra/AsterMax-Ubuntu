@@ -2,6 +2,11 @@ param([string]$Root)
 $ErrorActionPreference='Stop'
 
 function Replace-Required([string]$Text,[string]$Old,[string]$New) {
+    $lf=[string][char]10
+    $cr=[string][char]13
+    $Text=$Text.Replace($cr+$lf,$lf).Replace($cr,$lf)
+    $Old=$Old.Replace($cr+$lf,$lf).Replace($cr,$lf)
+    $New=$New.Replace($cr+$lf,$lf).Replace($cr,$lf)
     if(-not $Text.Contains($Old)){ throw "C10.20.9 diagnostics anchor missing: $Old" }
     return $Text.Replace($Old,$New)
 }
