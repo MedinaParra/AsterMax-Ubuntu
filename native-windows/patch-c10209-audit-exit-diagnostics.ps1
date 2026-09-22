@@ -18,6 +18,8 @@ $a=(Get-Content $auditPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 
 $signature='        private void C1020RequestAuditExit(string directory, int exitCode)'
 $helper=@'
+        private string _c10209AuditShutdownDirectory;
+
         private void C10209TraceShutdown(string directory, string eventName, FormClosingEventArgs closingArgs = null)
         {
             if (String.IsNullOrWhiteSpace(directory)) return;
@@ -50,6 +52,7 @@ $helper=@'
                     "solve_state=" + (_asterMaxSolveTransaction == null ? "<null>" : _asterMaxSolveTransaction.State.ToString()),
                     "solve_ui_thread=" + _asterMaxSolveUiThreadId,
                     "solve_worker_thread=" + _asterMaxSolveWorkerThreadId,
+                    "keyboard_hook_present=" + (_keyboardHook != null),
                     "vtk_present=" + (_vtk != null),
                     "results_present=" + (_axEmbeddedResults != null),
                     "results_visible=" + (_axEmbeddedResults != null && _axEmbeddedResults.Visible),
@@ -74,6 +77,7 @@ $a=Replace-Required $a '        {
             try
             {
                 File.WriteAllText(Path.Combine(directory, "audit-exit-request.json"),' '        {
+            _c10209AuditShutdownDirectory = directory;
             C10209TraceShutdown(directory, "C1020RequestAuditExit.enter");
             try
             {
@@ -120,7 +124,8 @@ $m=Replace-Required $m '        private async void FrmMain_FormClosing(object se
         {
             try' '        private async void FrmMain_FormClosing(object sender, FormClosingEventArgs e)
         {
-            string c10209AuditDirectory = AsterMaxC1020WorkflowDirectoryFromCommandLine();
+            string c10209AuditDirectory = !String.IsNullOrWhiteSpace(_c10209AuditShutdownDirectory)
+                ? _c10209AuditShutdownDirectory : AsterMaxC1020WorkflowDirectoryFromCommandLine();
             C10209TraceShutdown(c10209AuditDirectory, "FrmMain_FormClosing.enter", e);
             try'
 
