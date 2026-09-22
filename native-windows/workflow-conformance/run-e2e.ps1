@@ -19,6 +19,87 @@ $p=Start-Process -FilePath $exePath -WorkingDirectory (Split-Path $exePath -Pare
 $timedOut=$false
 if(-not $p.WaitForExit($TimeoutSeconds*1000)) {
     $timedOut=$true
+
+    $inventoryPath=Join-Path $outPath 'timeout-window-thread-inventory.json'
+    try {
+        $windowProbe=@'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class AsterMaxTimeoutWindowProbe {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] static extern int GetClassName(IntPtr hWnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
+    public static string[] ForProcess(int targetPid) {
+        var rows=new List<string>();
+        EnumWindows((hWnd,lParam) => {
+            uint pid; GetWindowThreadProcessId(hWnd,out pid);
+            if(pid==(uint)targetPid) {
+                var title=new StringBuilder(1024); GetWindowText(hWnd,title,title.Capacity);
+                var cls=new StringBuilder(256); GetClassName(hWnd,cls,cls.Capacity);
+                rows.Add("0x"+hWnd.ToInt64().ToString("X")+"|visible="+IsWindowVisible(hWnd)+"|class="+cls+"|title="+title);
+            }
+            return true;
+        },IntPtr.Zero);
+        return rows.ToArray();
+    }
+}
+'@
+        Add-Type -TypeDefinition $windowProbe -ErrorAction SilentlyContinue
+        $proc=Get-Process -Id $p.Id -ErrorAction Stop
+        $threads=@()
+        foreach($thread in $proc.Threads) {
+            $waitReason=$null
+            try { $waitReason=$thread.WaitReason.ToString() } catch {}
+            $threads += [ordered]@{
+                id=$thread.Id
+                state=$thread.ThreadState.ToString()
+                wait_reason=$waitReason
+                total_processor_time_ms=$thread.TotalProcessorTime.TotalMilliseconds
+            }
+        }
+        $windows=@()
+        try { $windows=[AsterMaxTimeoutWindowProbe]::ForProcess($p.Id) } catch {}
+        [ordered]@{
+            captured_utc=[DateTime]::UtcNow.ToString('O')
+            process_id=$p.Id
+            process_name=$proc.ProcessName
+            main_window_title=$proc.MainWindowTitle
+            responding=$proc.Responding
+            handle_count=$proc.HandleCount
+            thread_count=$proc.Threads.Count
+            threads=$threads
+            windows=$windows
+        } | ConvertTo-Json -Depth 10 | Set-Content $inventoryPath -Encoding UTF8
+    }
+    catch {
+        [ordered]@{captured_utc=[DateTime]::UtcNow.ToString('O');process_id=$p.Id;error=$_.Exception.ToString()} |
+            ConvertTo-Json -Depth 5 | Set-Content $inventoryPath -Encoding UTF8
+    }
+
+    $dumpPath=Join-Path $outPath 'timeout-process.dmp'
+    $dumpEvidence=Join-Path $outPath 'timeout-process-dump.json'
+    try {
+        $rundll=Join-Path $env:WINDIR 'System32\rundll32.exe'
+        $comsvcs=Join-Path $env:WINDIR 'System32\comsvcs.dll'
+        $dumpProc=Start-Process -FilePath $rundll -ArgumentList @("$comsvcs,MiniDump",$p.Id,$dumpPath,'full') -PassThru -Wait
+        [ordered]@{
+            attempted=$true
+            tool='comsvcs.dll MiniDump'
+            helper_exit_code=$dumpProc.ExitCode
+            dump_present=(Test-Path $dumpPath)
+            dump_bytes=$(if(Test-Path $dumpPath){(Get-Item $dumpPath).Length}else{0})
+        } | ConvertTo-Json -Depth 5 | Set-Content $dumpEvidence -Encoding UTF8
+    }
+    catch {
+        [ordered]@{attempted=$true;tool='comsvcs.dll MiniDump';dump_present=(Test-Path $dumpPath);error=$_.Exception.ToString()} |
+            ConvertTo-Json -Depth 5 | Set-Content $dumpEvidence -Encoding UTF8
+    }
+
     Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     try { $p.WaitForExit(10000) | Out-Null } catch {}
 }
