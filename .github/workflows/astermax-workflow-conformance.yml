@@ -94,7 +94,7 @@ jobs:
             'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
             'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
-            'patch-c10208-functional-command-smoke.ps1'
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1'
           )
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw "Patch-chain harness failed; inspect dist/Audit/PatchChain." }
@@ -201,6 +201,7 @@ jobs:
             dist/Audit/PatchChain
             dist/Validation
             upstream/PrePoMax/Forms/AsterMaxWorkflowConformance*.cs
+            upstream/PrePoMax/Forms/FrmMain.cs
           if-no-files-found: warn
 
       - name: Upload C10.20 executable test distribution
