@@ -510,6 +510,19 @@
       "consumes": [
         "C10209TraceShutdown"
       ]
+    },
+    {
+      "id": "patch-c10211-mesh-terminal-telemetry",
+      "file": "patch-c10211-mesh-terminal-telemetry.ps1",
+      "depends": [
+        "patch-c10210-audit-hook-release"
+      ],
+      "declares": [
+        "AsterMaxWaitMeshAudit"
+      ],
+      "consumes": [
+        "C10208ExerciseRealGenerateMesh"
+      ]
     }
   ]
 }
