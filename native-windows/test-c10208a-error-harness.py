@@ -52,3 +52,16 @@ for token in [
     "Get-FileHash",
 ]:
     assert token in runner, token
+
+workflow_patch=(ROOT/"patch-c1020-workflow-conformance.ps1").read_text(encoding="utf-8-sig")
+for token in [
+    "C1020RequestAuditExit(directory, 0)",
+    "C1020RequestAuditExit(directory, 1)",
+    "deferred_until_callback_unwinds",
+    "Environment.ExitCode = exitCode",
+    "BeginInvoke(new Action(() =>",
+    "audit-exit-request.json",
+]:
+    assert token in workflow_patch, token
+assert "                    Environment.Exit(0);" not in workflow_patch
+assert "                    Environment.Exit(1);" not in workflow_patch
