@@ -361,16 +361,17 @@ dimensions [1 -1 -2 0 0 0 0];
 internalField uniform 101325;
 boundaryField
 {
+    // p is reconstructed from p_rgh + rho*gh by buoyantPimpleFoam.
+    // Do not independently impose totalPressure here; doing so over-constrained
+    // the open atmosphere and generated a spurious ~5 m/s startup jet.
     atmosphere
     {
-        type totalPressure;
-        p0 uniform 101325;
-        gamma 1.4;
+        type calculated;
         value uniform 101325;
     }
-    skin { type zeroGradient; }
-    cambucho { type zeroGradient; }
-    cambucho_slave { type zeroGradient; }
+    skin { type calculated; value uniform 101325; }
+    cambucho { type calculated; value uniform 101325; }
+    cambucho_slave { type calculated; value uniform 101325; }
 }
 """)
 
@@ -380,10 +381,12 @@ dimensions [1 -1 -2 0 0 0 0];
 internalField uniform 101325;
 boundaryField
 {
+    // Static atmospheric pressure with the hydrostatic contribution removed
+    // consistently from p_rgh.
     atmosphere
     {
-        type prghTotalPressure;
-        p0 uniform 101325;
+        type prghPressure;
+        p uniform 101325;
         value uniform 101325;
     }
     skin
@@ -526,6 +529,7 @@ Ambient initial T = 295.15 K
 Skin T = 307.15 K
 Paper initial T = 295.15 K
 Preconditioning = 0 to 3 s with NO fire
+Atmosphere pressure BC = prghPressure(p=101325 Pa); p itself is calculated
 Ignition = 3 s
 Fire ramp = 0.5 s
 Equivalent peak fire-band wall T = 750 K
