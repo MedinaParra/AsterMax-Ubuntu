@@ -25,6 +25,9 @@ required=[
     'if(!_asterMaxUiAuditMode) MessageBoxes.ShowError("Errors occurred during meshing.',
     'NetGen process exit code: ',
     '_jobStatus = exitCode == 0 ? JobStatus.OK : JobStatus.Failed;',
+    'Retrying with the existing STL_MESH path.',
+    'bool stlFallbackOk = CreateMeshFromSolidStl(part);',
+    'STL_MESH fallback completed for part',
 ]
 for token in required:
     assert token in patch, token
