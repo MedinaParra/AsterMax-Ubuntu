@@ -138,29 +138,59 @@ jobs:
           $report=Join-Path $out 'netgen-runtime-probe.json'
           if(-not(Test-Path (Join-Path $work 'geometry.brep'))){ throw 'geometry.brep missing; cannot compare NetGen runtimes.' }
           function Invoke-NetGenProbe([string]$label,[string]$exePath) {
-            $vol=Join-Path $out ($label+'.vol')
-            $stdout=Join-Path $out ($label+'.stdout.log')
-            $stderr=Join-Path $out ($label+'.stderr.log')
-            Remove-Item $vol,$stdout,$stderr -Force -ErrorAction SilentlyContinue
-            $args='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f (Join-Path $work 'geometry.brep'),$vol,(Join-Path $work 'meshParameters'),(Join-Path $work 'meshRefinement')
-            $p=Start-Process -FilePath $exePath -WorkingDirectory $work -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-            $timedOut=-not $p.WaitForExit(120000)
-            if($timedOut){
-              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-              try { $p.WaitForExit(10000) | Out-Null } catch {}
+            $probeWork=Join-Path $out ($label+'-work')
+            Remove-Item $probeWork -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $probeWork | Out-Null
+            Copy-Item (Join-Path $work 'meshParameters') $probeWork -Force
+            Copy-Item (Join-Path $work 'meshRefinement') $probeWork -Force
+
+            $step="$PWD\mesh-dist\B01-100x10x10.step"
+            $brepBase=Join-Path $probeWork 'probe.brep'
+            $importStdout=Join-Path $out ($label+'.import.stdout.log')
+            $importStderr=Join-Path $out ($label+'.import.stderr.log')
+            $importArgs='STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS "{0}" "{1}"' -f $step,$brepBase
+            $import=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $importArgs -RedirectStandardOutput $importStdout -RedirectStandardError $importStderr -PassThru
+            $importTimedOut=-not $import.WaitForExit(120000)
+            if($importTimedOut){
+              Stop-Process -Id $import.Id -Force -ErrorAction SilentlyContinue
+              try { $import.WaitForExit(10000) | Out-Null } catch {}
             }
-            $exitCode=$null
-            try { $exitCode=$p.ExitCode } catch {}
+            $importExit=$null
+            try { $importExit=$import.ExitCode } catch {}
+            $generatedBrep=Get-ChildItem $probeWork -Filter 'probe*.brep' | Where-Object {$_.Length -gt 0} | Sort-Object Length -Descending | Select-Object -First 1
+
+            $vol=Join-Path $probeWork 'geometry.vol'
+            $stdout=Join-Path $out ($label+'.mesh.stdout.log')
+            $stderr=Join-Path $out ($label+'.mesh.stderr.log')
+            $meshExit=$null
+            $meshTimedOut=$false
+            if($generatedBrep){
+              $meshArgs='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f $generatedBrep.FullName,$vol,(Join-Path $probeWork 'meshParameters'),(Join-Path $probeWork 'meshRefinement')
+              $mesh=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $meshArgs -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              $meshTimedOut=-not $mesh.WaitForExit(120000)
+              if($meshTimedOut){
+                Stop-Process -Id $mesh.Id -Force -ErrorAction SilentlyContinue
+                try { $mesh.WaitForExit(10000) | Out-Null } catch {}
+              }
+              try { $meshExit=$mesh.ExitCode } catch {}
+            }
             [ordered]@{
               label=$label
               exe=$exePath
               exe_sha256=(Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
-              exit_code=$exitCode
-              timed_out=$timedOut
+              import_exit_code=$importExit
+              import_timed_out=$importTimedOut
+              brep_present=[bool]$generatedBrep
+              brep_bytes=$(if($generatedBrep){$generatedBrep.Length}else{0})
+              mesh_exit_code=$meshExit
+              mesh_timed_out=$meshTimedOut
               vol_present=(Test-Path $vol)
               vol_bytes=$(if(Test-Path $vol){(Get-Item $vol).Length}else{0})
-              stdout=$stdout
-              stderr=$stderr
+              import_stdout=$importStdout
+              import_stderr=$importStderr
+              mesh_stdout=$stdout
+              mesh_stderr=$stderr
+              work_directory=$probeWork
             }
           }
 
