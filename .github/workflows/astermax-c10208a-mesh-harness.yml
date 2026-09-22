@@ -87,6 +87,8 @@ jobs:
           $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
           if(-not $ng){ throw 'NetGenMesher.exe missing from pinned runtime.' }
           Copy-Item $ng.Directory.FullName .\mesh-dist\NetGen -Recurse -Force
+          python .\native-windows\build-c1010-materials.py --out .\mesh-dist
+          if(-not(Test-Path .\mesh-dist\AsterMaxReferenceMaterials.lib)){ throw 'AsterMax reference material library staging failed.' }
 
       - name: Generate B01 STEP
         shell: pwsh
