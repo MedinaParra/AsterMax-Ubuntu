@@ -37,6 +37,7 @@ assert marker in patch, "meshNew block missing"
 mesh_new=patch.split(marker,1)[1].split("\n'@",1)[0]
 assert mesh_new.index("C10208ExerciseRealGenerateMesh(directory, model)") < mesh_new.index("C1020PopulateB01Mesh(model);")
 assert "commands.Count>=11" in patch
+assert 'x["ribbon_elements_after"]' in patch
 assert patch.count('["command_execution_smoke"] = commandSmoke,') == 1
 session_marker="$sessionAnchor=@'\n"
 assert session_marker in patch
