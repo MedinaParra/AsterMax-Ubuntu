@@ -150,32 +150,51 @@ namespace PrePoMax
             try
             {
                 int deviceDpiBefore = DeviceDpi;
+                int deviceDpiAfter = deviceDpiBefore;
                 string before = Path.Combine(directory, "dpi-before.png");
-                string scaled = Path.Combine(directory, "dpi-layout-125pct.png");
                 C1020CaptureWindow(before);
-                SuspendLayout();
-                Scale(new SizeF(1.25f, 1.25f));
-                ResumeLayout(true);
-                Application.DoEvents();
-                C1020CaptureWindow(scaled);
-                SuspendLayout();
-                Scale(new SizeF(0.8f, 0.8f));
-                ResumeLayout(true);
-                Application.DoEvents();
-                int deviceDpiAfter = DeviceDpi;
+                Rectangle originalBounds = Bounds;
+                bool transitionObserved = false;
+                int screensVisited = 0;
+                try
+                {
+                    foreach (Screen screen in Screen.AllScreens)
+                    {
+                        screensVisited++;
+                        Rectangle target = screen.WorkingArea;
+                        StartPosition = FormStartPosition.Manual;
+                        Location = new Point(target.Left + Math.Max(0, Math.Min(32, target.Width - Width)),
+                                             target.Top + Math.Max(0, Math.Min(32, target.Height - Height)));
+                        Application.DoEvents();
+                        deviceDpiAfter = DeviceDpi;
+                        if (deviceDpiAfter != deviceDpiBefore)
+                        {
+                            transitionObserved = true;
+                            C1020CaptureWindow(Path.Combine(directory, "dpi-real-transition.png"));
+                            break;
+                        }
+                    }
+                }
+                finally
+                {
+                    Bounds = originalBounds;
+                    Application.DoEvents();
+                }
                 var dpi = new JObject {
                     ["device_dpi_before"] = deviceDpiBefore,
                     ["device_dpi_after"] = deviceDpiAfter,
-                    ["logical_layout_scale_exercised"] = true,
-                    ["system_dpi_transition_observed"] = deviceDpiAfter != deviceDpiBefore,
-                    ["screenshots"] = new JArray(Path.GetFileName(before), Path.GetFileName(scaled))
+                    ["screens_visited"] = screensVisited,
+                    ["live_form_scale_mutation_used"] = false,
+                    ["system_dpi_transition_observed"] = transitionObserved,
+                    ["screenshots"] = new JArray(Path.GetFileName(before))
                 };
                 File.WriteAllText(Path.Combine(directory, "dpi-change.json"), dpi.ToString(Formatting.Indented));
-                string status = deviceDpiAfter != deviceDpiBefore ? "PASS" : "NOT_EXERCISED";
+                string status = transitionObserved ? "PASS" : "NOT_EXERCISED";
                 add("dpi_change", status,
-                    status == "PASS" ? "A DeviceDpi transition was observed." :
-                    "The hosted runner exposes a single fixed-DPI desktop. A 125% WinForms layout-scale regression was exercised, but it is not reported as a real OS/monitor DPI change.",
-                    new JObject { ["file"] = "dpi-change.json", ["system_dpi_transition_observed"] = deviceDpiAfter != deviceDpiBefore });
+                    status == "PASS" ? "A real DeviceDpi transition was observed while moving the native window between physical/virtual displays." :
+                    "No different-DPI display was available. The audit deliberately does not scale the live VTK/WinForms window synthetically.",
+                    new JObject { ["file"] = "dpi-change.json", ["system_dpi_transition_observed"] = transitionObserved,
+                                  ["screens_visited"] = screensVisited, ["synthetic_dpi_claim"] = false });
             }
             catch (Exception ex)
             {
