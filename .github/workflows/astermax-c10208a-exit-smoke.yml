@@ -2,7 +2,7 @@ name: AsterMax C10.20.8a Clean Exit Smoke
 
 on:
   push:
-    branches: [ codex/c10208a-error-harness, codex/c10212-async-mesh-repair ]
+    branches: [ codex/c10208a-error-harness, codex/c10212-async-mesh-repair, release/windows-stable-rc1 ]
     paths:
       - '.github/workflows/astermax-c10208a-exit-smoke.yml'
       - 'native-windows/patch-c10209-audit-exit-diagnostics.ps1'
