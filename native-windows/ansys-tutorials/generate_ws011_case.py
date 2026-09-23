@@ -47,8 +47,13 @@ try:
     for r in records:
         b=r["bbox"]
         lower_skin=(b[2] >= -tol and b[5] <= 0.501+tol)
+        # OCC reports deliberately conservative bounding boxes for the four
+        # bottom corner toroidal fillets (zmax ~0.855 although their surface
+        # mass/centroid belongs to the z=0..0.5 outer skin). Include exactly
+        # that four-face family by its invariant area and centroid.
+        corner_fillet=(b[2] >= -tol and 8.0 < r["area"] < 11.0 and r["com"][2] < 0.30)
         outer_wall=(near(b[2],0.5) and near(b[5],20.0) and r["area"]>200.0)
-        if lower_skin or outer_wall:
+        if lower_skin or corner_fillet or outer_wall:
             pressure.append(r["tag"])
 
     # Four planar annular counterbore seats at z=1 mm.
