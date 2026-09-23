@@ -59,4 +59,39 @@ $v=Replace-Required $v '        protected override void OnHandleDestroyed(System
             if (_renderWindowInteractor != null) _renderWindowInteractor.Disable();'
 Set-Content $vtkPath $v -Encoding UTF8
 
-Write-Host 'C10.20.10 audit-only keyboard hook release applied.' -ForegroundColor Green
+# PrePoMax registers a managed WH_CALLWNDPROCRET callback through MessageBoxManager
+# on the main STA thread but upstream does not unregister it. During CLR teardown,
+# MSCTF destroys its hidden thread message window and USER32 can invoke this stale
+# managed hook after managed/unmanaged transitions have been disabled, producing
+# c0020001 / STATUS_FATAL_USER_CALLBACK_EXCEPTION (0xC000041D).
+#
+# Always release the thread hook after the WinForms message loop returns and before
+# the CLR begins process shutdown. This is not audit-only: it fixes the real app
+# lifecycle while preserving MessageBoxManager behavior for the entire UI session.
+$programPath=Join-Path $Root 'PrePoMax/Program.cs'
+$p=(Get-Content $programPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
+$programOld=@'
+            MessageBoxManager.Register();
+            //
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new FrmMain(args));
+'@
+$programNew=@'
+            MessageBoxManager.Register();
+            //
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            try
+            {
+                Application.Run(new FrmMain(args));
+            }
+            finally
+            {
+                MessageBoxManager.Unregister();
+            }
+'@
+$p=Replace-Required $p $programOld $programNew
+Set-Content $programPath $p -Encoding UTF8
+
+Write-Host 'C10.20.10 shutdown hook release applied (keyboard, VTK, MessageBoxManager).' -ForegroundColor Green
