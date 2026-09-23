@@ -20,7 +20,7 @@
       "loads": [
         {
           "type": "pressure",
-          "magnitude_mpa": 1,
+          "magnitude_mpa": 1.1,
           "scope": "17 exterior faces"
         }
       ],
@@ -39,10 +39,11 @@
         }
       ],
       "ansys_reference": {
-        "evidence": "NUMERIC_REFERENCE_FROM_PUBLIC_PROJECT_REPORT",
+        "evidence": "NUMERIC_REFERENCE_FROM_PUBLIC_PROJECT_REPORT_PLUS_17_0_TRAINING_SETUP",
         "maximum_total_deformation_mm": 0.058591,
         "minimum_safety_factor": 1.0335,
-        "interpretation": "Training material states minimum safety factor is just over 1."
+        "interpretation": "Training material states minimum safety factor is just over 1.",
+        "setup_note": "Release 17.0 workshop specifies 1.1 MPa on 17 exterior faces; do not compare to older 1.0 MPa workshop revisions."
       },
       "astermax_result": null
     },
