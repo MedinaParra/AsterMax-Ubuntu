@@ -2,7 +2,7 @@ name: AsterMax ANSYS Tutorial Geometry Qualification
 
 on:
   push:
-    branches: [ codex/c10212-async-mesh-repair ]
+    branches: [ codex/c10212-async-mesh-repair, release/windows-stable-rc1 ]
     paths:
       - 'native-windows/patch-c10213-ansys-tutorial-geometry.ps1'
       - 'native-windows/ansys-tutorials/**'
