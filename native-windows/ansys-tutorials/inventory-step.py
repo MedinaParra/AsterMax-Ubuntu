@@ -40,9 +40,20 @@ def inspect(step_path, out_dir):
                 "bbox":vec3(bbox),
                 "adjacent_volumes":[int(x) for x in adj[0]],
             })
-        # mesh for an exact-geometry smoke. Gmsh chooses a bounded automatic size.
-        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 10)
+
+        # Bounded coarse volume mesh for topology/capability validation, not the final
+        # tutorial accuracy mesh. This keeps the multi-part pump smoke deterministic.
+        all_boxes=[v["bbox"] for v in volume_rows]
+        if all_boxes:
+            xmin=min(b[0] for b in all_boxes); ymin=min(b[1] for b in all_boxes); zmin=min(b[2] for b in all_boxes)
+            xmax=max(b[3] for b in all_boxes); ymax=max(b[4] for b in all_boxes); zmax=max(b[5] for b in all_boxes)
+            diag=math.sqrt((xmax-xmin)**2+(ymax-ymin)**2+(zmax-zmin)**2)
+        else:
+            diag=100.0
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 6)
         gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 1)
+        gmsh.option.setNumber("Mesh.MeshSizeMax", max(diag/10.0, 1e-3))
+        gmsh.option.setNumber("Mesh.MeshSizeMin", max(diag/40.0, 1e-4))
         gmsh.model.mesh.generate(3)
         node_tags, coords, _ = gmsh.model.mesh.getNodes()
         types,tags,nodeTags=gmsh.model.mesh.getElements(3)
@@ -56,7 +67,9 @@ def inspect(step_path, out_dir):
             "surfaces":surface_rows,
             "surface_count":len(surface_rows),
             "volume_count":len(volume_rows),
-            "mesh":{"nodes":len(node_tags),"volume_elements":element_count,"msh":os.path.basename(msh)},
+            "geometry_diagonal":diag,
+            "mesh":{"nodes":len(node_tags),"volume_elements":element_count,"msh":os.path.basename(msh),
+                    "purpose":"COARSE_TOPOLOGY_CAPABILITY_SMOKE_NOT_FINAL_FEA"},
             "invented_fea_results":False,
         }
         with open(os.path.join(out_dir,base+"-inventory.json"),"w",encoding="utf-8") as f:
