@@ -1,0 +1,89 @@
+name: AsterMax ANSYS Tutorial Validation
+
+on:
+  push:
+    branches: [ codex/ansys-tutorial-validation-c10212 ]
+    paths:
+      - '.github/workflows/astermax-ansys-tutorial-validation.yml'
+      - 'native-windows/ansys-tutorials/**'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-ansys-tutorials-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exact-training-geometry:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout tutorial validation branch
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install geometry probe dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh
+
+      - name: Download exact ANSYS training STEP fixtures
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\tutorial-input | Out-Null
+          $base='https://ecampus.paris-saclay.fr/pluginfile.php/2561407/mod_folder/content/0/Formation%20Polytech/Mechanical_Introduction_16.0_v1/Mechanical_Introduction_16.0_v1/workshop_input_files'
+          $files=[ordered]@{
+            'Cap_fillets.stp'='Cap_fillets.stp'
+            'Pump_assy_3.stp'='Pump_assy_3.stp'
+            'Flange Mount.stp'='Flange%20Mount.stp'
+          }
+          foreach($entry in $files.GetEnumerator()){
+            $url="$base/$($entry.Value)?forcedownload=1"
+            $out=Join-Path $PWD ('tutorial-input\'+$entry.Key)
+            Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 10
+            if((Get-Item $out).Length -lt 1024){ throw "Downloaded fixture is unexpectedly small: $($entry.Key)" }
+            $head=[System.IO.File]::ReadAllText($out).Substring(0,[Math]::Min(256,(Get-Item $out).Length))
+            if($head -notmatch 'ISO-10303-21'){ throw "Downloaded file is not STEP: $($entry.Key)" }
+            $hash=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host "TUTORIAL_FIXTURE=$($entry.Key) bytes=$((Get-Item $out).Length) sha256=$hash"
+          }
+
+      - name: Import and mesh exact tutorial geometry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\tutorial-evidence | Out-Null
+          python .\native-windows\ansys-tutorials\inventory-step.py .\tutorial-evidence '.\tutorial-input\Cap_fillets.stp' '.\tutorial-input\Pump_assy_3.stp' '.\tutorial-input\Flange Mount.stp'
+
+      - name: Build source integrity manifest
+        shell: pwsh
+        run: |
+          $items=@()
+          Get-ChildItem .\tutorial-input -Filter *.stp | ForEach-Object {
+            $items += [ordered]@{
+              file=$_.Name
+              bytes=$_.Length
+              sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              source='Paris-Saclay public ANSYS Mechanical training folder'
+            }
+          }
+          [ordered]@{
+            generated_utc=(Get-Date).ToUniversalTime().ToString('O')
+            branch='codex/ansys-tutorial-validation-c10212'
+            commit='${{ github.sha }}'
+            fixtures=$items
+            fea_results_invented=$false
+            state='GEOMETRY_IMPORTED_AND_MESHED_ONLY'
+          } | ConvertTo-Json -Depth 8 | Set-Content .\tutorial-evidence\source-manifest.json -Encoding UTF8
+
+      - name: Upload tutorial geometry evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-ANSYS-Tutorial-Geometry-Evidence
+          path: |
+            tutorial-evidence
+            tutorial-input/*.stp
+          if-no-files-found: error
