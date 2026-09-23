@@ -400,7 +400,7 @@ $s=Replace-Required $s '                _asterMaxSolveInProgress=false;' @'
                 if(!IsDisposed && !Disposing && tsslState.Text.StartsWith("AsterMax Solve:", StringComparison.Ordinal))
                 {
                     tsslState.ToolTipText=tsslState.Text;
-                    tsslState.Text=CaeGlobals.Globals.ReadyText;
+                    tsslState.Text=Globals.ReadyText;
                 }
 '@
 $s=Replace-Required $s 'tsslState.Text="AsterMax Solve: no active solve to cancel";' 'tsslState.ToolTipText="AsterMax Solve: no active solve to cancel";'
