@@ -108,7 +108,9 @@ try:
     gmsh.option.setNumber("Mesh.Algorithm3D", 1)
     gmsh.model.mesh.generate(3)
 
-    mesh_path=os.path.join(a.out_dir,"ws01-1-cap-fillets.mmed")
+    # Gmsh selects the MED writer from the file extension. Code_Aster's .export
+    # file type remains "mmed"; the physical file itself can and should be .med.
+    mesh_path=os.path.join(a.out_dir,"ws01-1-cap-fillets.med")
     gmsh.write(mesh_path)
 
     node_tags,coords,_=gmsh.model.mesh.getNodes()
@@ -129,6 +131,7 @@ try:
             {"type":"frictionless","group":"SUPPORT_RECESS","implementation":"FACE_IMPO DNOR=0"},
             {"type":"frictionless","group":"SUPPORT_LIP","implementation":"FACE_IMPO DNOR=0"},
         ],
+        "mesh_file":os.path.basename(mesh_path),
         "fea_values_invented":False,
     }
     with open(os.path.join(a.out_dir,"ws01-1-model-evidence.json"),"w",encoding="utf-8") as f:
