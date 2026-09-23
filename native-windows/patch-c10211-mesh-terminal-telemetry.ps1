@@ -391,4 +391,24 @@ $a=Replace-Required $a '        private void ExecuteAsterMaxC1020WorkflowConform
 $a=Replace-Required $a 'C10208RecordCommandSmoke(directory, commandSmoke, C10208ExerciseRealGenerateMesh(directory, model));' 'C10208RecordCommandSmoke(directory, commandSmoke, await C10208ExerciseRealGenerateMesh(directory, model));'
 Set-Content $auditPath $a -Encoding UTF8
 
+# Native close/command guards use the status text as a busy sentinel. Retain
+# solve diagnostics in the tooltip, but release that sentinel on every outcome.
+$solvePath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
+$s=[regex]::Replace((Get-Content $solvePath -Raw),"\r\n?","`n")
+$s=Replace-Required $s '                _asterMaxSolveInProgress=false;' @'
+                _asterMaxSolveInProgress=false;
+                if(!IsDisposed && !Disposing && tsslState.Text.StartsWith("AsterMax Solve:", StringComparison.Ordinal))
+                {
+                    tsslState.ToolTipText=tsslState.Text;
+                    tsslState.Text=CaeGlobals.Globals.ReadyText;
+                }
+'@
+$s=Replace-Required $s 'tsslState.Text="AsterMax Solve: no active solve to cancel";' 'tsslState.ToolTipText="AsterMax Solve: no active solve to cancel";'
+Set-Content $solvePath $s -Encoding UTF8
+
+$buttonPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxButtonAudit.cs'
+$b=[regex]::Replace((Get-Content $buttonPath -Raw),"\r\n?","`n")
+$b=Replace-Required $b 'tsslState.Text="AsterMax Solve: model editing is locked while the solve is running";' 'tsslState.ToolTipText="AsterMax Solve: model editing is locked while the solve is running";'
+Set-Content $buttonPath $b -Encoding UTF8
+
 Write-Host 'C10.20.11 terminal-signal Generate Mesh telemetry applied.' -ForegroundColor Green
