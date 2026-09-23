@@ -36,7 +36,7 @@ jobs:
             & curl.exe -L --fail --retry 3 --retry-delay 2 -A 'Mozilla/5.0 AsterMax tutorial qualification' -o $dest $case.url
             if($LASTEXITCODE -ne 0){ throw "Download failed: $($case.file)" }
             if((Get-Item $dest).Length -lt 1024){ throw "Downloaded STEP is unexpectedly small: $($case.file)" }
-            $head=Get-Content $dest -TotalCount 5 -Raw
+            $head=(Get-Content $dest -TotalCount 5) -join "`n"
             if($head -notmatch 'ISO-10303-21'){ throw "Not a STEP file: $($case.file)" }
             Write-Host "DOWNLOADED=$($case.file) bytes=$((Get-Item $dest).Length)"
           }
