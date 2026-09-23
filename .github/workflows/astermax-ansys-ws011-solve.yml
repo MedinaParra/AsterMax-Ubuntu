@@ -1,0 +1,106 @@
+name: AsterMax ANSYS WS01.1 Solver Comparison
+
+on:
+  push:
+    branches: [ codex/c10212-async-mesh-repair ]
+    paths:
+      - 'native-windows/ansys-tutorials/generate_ws011_case.py'
+      - 'native-windows/ansys-tutorials/ws01-1-cap-fillets.comm'
+      - 'native-windows/ansys-tutorials/ws01-1-cap-fillets.export'
+      - 'native-windows/ansys-tutorials/compare_ws011.py'
+      - '.github/workflows/astermax-ansys-ws011-solve.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-ansys-ws011-solve-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ws011:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install meshing and MED dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh numpy h5py
+
+      - name: Download exact ANSYS WS01.1 STEP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\ws011\solve | Out-Null
+          $url='https://ecampus.paris-saclay.fr/pluginfile.php/2561407/mod_folder/content/0/Formation%20Polytech/Mechanical_Introduction_16.0_v1/Mechanical_Introduction_16.0_v1/workshop_input_files/Cap_fillets.stp?forcedownload=1'
+          & curl.exe -L --fail --retry 4 --retry-delay 3 -A 'Mozilla/5.0 AsterMax WS01.1 validation' -o .\ws011\Cap_fillets.stp $url
+          if($LASTEXITCODE -ne 0){ throw 'Cap_fillets.stp download failed.' }
+          $head=(Get-Content .\ws011\Cap_fillets.stp -TotalCount 5) -join [Environment]::NewLine
+          if($head -notmatch 'ISO-10303-21'){ throw 'Downloaded input is not STEP.' }
+
+      - name: Generate exact CAD mesh and ANSYS tutorial groups
+        shell: pwsh
+        run: |
+          python .\native-windows\ansys-tutorials\generate_ws011_case.py --input .\ws011\Cap_fillets.stp --out-dir .\ws011\solve --mesh-size 3.0
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 mesh/group generation failed.' }
+          Copy-Item .\native-windows\ansys-tutorials\ws01-1-cap-fillets.comm .\ws011\solve\ -Force
+          Copy-Item .\native-windows\ansys-tutorials\ws01-1-cap-fillets.export .\ws011\solve\ -Force
+          Get-Content .\ws011\solve\ws01-1-model-evidence.json | Write-Host
+
+      - name: Assemble AsterMax native runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\CodeAster | Out-Null
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
+          Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
+          $pythonRoot=Split-Path (Get-Command python).Source -Parent
+          Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
+          & .\dist\AsterMaxRuntime\Python\python.exe -c "import numpy,h5py; print('ASTERMAX_WS011_PYTHON_OK')"
+          if($LASTEXITCODE -ne 0){ throw 'Packaged Python runtime failed.' }
+
+      - name: Install and verify native Windows Code_Aster
+        shell: pwsh
+        run: .\native-windows\test-c1011-native-windows.ps1 -Dist "$PWD\dist"
+
+      - name: Solve exact ANSYS WS01.1 with AsterMax Code_Aster runtime
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=(Resolve-Path .\dist\AsterMaxRuntime\CodeAster\astermax-codeaster-runner.cmd).Path
+          $solve=(Resolve-Path .\ws011\solve).Path
+          & $runner (Join-Path $solve 'ws01-1-cap-fillets.export') $solve | Tee-Object (Join-Path $solve 'ASTERMAX_CODE_ASTER_STDOUT.log')
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 native Code_Aster solve failed.' }
+          $mess=Join-Path $solve 'ws01-1-cap-fillets.mess'
+          if(-not(Test-Path $mess)){ throw 'WS01.1 .mess evidence missing.' }
+          if((Get-Content $mess -Raw) -notmatch 'ARRET NORMAL'){ throw 'WS01.1 did not reach Code_Aster normal termination.' }
+          if(-not(Test-Path (Join-Path $solve 'ws01-1-cap-fillets.rmed'))){ throw 'WS01.1 MED result missing.' }
+
+      - name: Import real MED into AsterMax results bundle
+        shell: pwsh
+        run: |
+          $env:ASTERMAX_MED_BRIDGE_MODE='production'
+          $python=(Resolve-Path .\dist\AsterMaxRuntime\Python\python.exe).Path
+          & $python .\native-windows\bridge-c964-med-results.py .\ws011\solve\ws01-1-cap-fillets.rmed .\ws011\solve\ws01-1-cap-fillets.astermax-results.json .\ws011\solve\ws01-1-cap-fillets.astermax-results.vtu
+          if($LASTEXITCODE -ne 0){ throw 'AsterMax MED results handoff failed.' }
+
+      - name: Compare AsterMax result with ANSYS workshop reference
+        shell: pwsh
+        run: |
+          python .\native-windows\ansys-tutorials\compare_ws011.py --bundle .\ws011\solve\ws01-1-cap-fillets.astermax-results.json --model-evidence .\ws011\solve\ws01-1-model-evidence.json --out .\ws011\solve\WS01.1-ANSYS-vs-AsterMax.json
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 comparison integrity gate failed.' }
+
+      - name: Upload WS01.1 solver comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-ANSYS-WS01.1-Solver-Comparison
+          path: ws011
+          if-no-files-found: error
