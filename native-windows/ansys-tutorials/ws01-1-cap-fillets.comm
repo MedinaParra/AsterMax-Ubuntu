@@ -1,0 +1,56 @@
+DEBUT()
+
+mesh = LIRE_MAILLAGE(FORMAT='MED', UNITE=20)
+
+model = AFFE_MODELE(
+    MAILLAGE=mesh,
+    AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'),
+)
+
+aluminum = DEFI_MATERIAU(
+    ELAS=_F(E=71000.0, NU=0.33),
+)
+
+matfield = AFFE_MATERIAU(
+    MAILLAGE=mesh,
+    AFFE=_F(TOUT='OUI', MATER=aluminum),
+)
+
+frictionless = AFFE_CHAR_MECA(
+    MODELE=model,
+    FACE_IMPO=(
+        _F(GROUP_MA='SUPPORT_COUNTERBORE', DNOR=0.0),
+        _F(GROUP_MA='SUPPORT_RECESS', DNOR=0.0),
+        _F(GROUP_MA='SUPPORT_LIP', DNOR=0.0),
+    ),
+)
+
+pressure = AFFE_CHAR_MECA(
+    MODELE=model,
+    PRES_REP=_F(GROUP_MA='PRESSURE', PRES=1.1),
+)
+
+result = MECA_STATIQUE(
+    MODELE=model,
+    CHAM_MATER=matfield,
+    EXCIT=(
+        _F(CHARGE=frictionless),
+        _F(CHARGE=pressure),
+    ),
+)
+
+result = CALC_CHAMP(
+    reuse=result,
+    RESULTAT=result,
+    CONTRAINTE=('SIGM_ELNO',),
+    CRITERES=('SIEQ_ELNO',),
+    FORCE=('REAC_NODA',),
+)
+
+IMPR_RESU(
+    FORMAT='MED',
+    UNITE=81,
+    RESU=_F(RESULTAT=result),
+)
+
+FIN()
