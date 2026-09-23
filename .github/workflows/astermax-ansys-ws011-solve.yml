@@ -20,7 +20,7 @@ concurrency:
 jobs:
   ws011:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - name: Checkout AsterMax branch
         uses: actions/checkout@v5
@@ -45,15 +45,25 @@ jobs:
           $head=(Get-Content .\ws011\Cap_fillets.stp -TotalCount 5) -join [Environment]::NewLine
           if($head -notmatch 'ISO-10303-21'){ throw 'Downloaded input is not STEP.' }
 
-      - name: Generate exact CAD mesh and ANSYS tutorial groups
+      - name: Generate quadratic TET10 mesh sweep
         shell: pwsh
         run: |
-          python .\native-windows\ansys-tutorials\generate_ws011_case.py --input .\ws011\Cap_fillets.stp --out-dir .\ws011\solve --mesh-size 3.0
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 mesh/group generation failed.' }
-          Copy-Item .\native-windows\ansys-tutorials\ws01-1-cap-fillets.comm .\ws011\solve\ -Force
-          Copy-Item .\native-windows\ansys-tutorials\ws01-1-cap-fillets.export .\ws011\solve\ -Force
-          Get-Content .\ws011\solve\ws01-1-model-evidence.json | Write-Host
-
+          $ErrorActionPreference='Stop'
+          $sizes=@(4.0,3.0,2.5,2.0,1.5)
+          $cases=@()
+          foreach($size in $sizes) {
+            $tag=('{0:0.0}' -f $size).Replace('.','p')
+            $dir=".\ws011\solve-$tag"
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            python .\native-windows\ansys-tutorials\generate_ws011_case.py --input .\ws011\Cap_fillets.stp --out-dir $dir --mesh-size $size --element-order 2
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 TET10 mesh failed for size $size mm." }
+            Copy-Item .\native-windows\ansys-tutorials\ws01-1-cap-fillets.comm $dir -Force
+            Copy-Item .\native-windows\ansys-tutorials\ws01-1-cap-fillets.export $dir -Force
+            $m=Get-Content (Join-Path $dir 'ws01-1-model-evidence.json') -Raw | ConvertFrom-Json
+            $cases += [pscustomobject]@{tag=$tag;mesh_size_mm=$size;nodes=$m.mesh.nodes;elements=$m.mesh.volume_elements;formulation=$m.mesh.formulation}
+          }
+          $cases | Format-Table -AutoSize
+          $cases | ConvertTo-Json -Depth 5 | Set-Content .\ws011\mesh-sweep.json -Encoding UTF8
       - name: Assemble AsterMax native runtime
         shell: pwsh
         run: |
@@ -71,34 +81,52 @@ jobs:
         shell: pwsh
         run: .\native-windows\test-c1011-native-windows.ps1 -Dist "$PWD\dist"
 
-      - name: Solve exact ANSYS WS01.1 with AsterMax Code_Aster runtime
+      - name: Solve TET10 mesh sweep with AsterMax Code_Aster runtime
         shell: pwsh
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           $ErrorActionPreference='Stop'
           $runner=(Resolve-Path .\dist\AsterMaxRuntime\CodeAster\astermax-codeaster-runner.cmd).Path
-          $solve=(Resolve-Path .\ws011\solve).Path
-          & $runner (Join-Path $solve 'ws01-1-cap-fillets.export') $solve | Tee-Object (Join-Path $solve 'ASTERMAX_CODE_ASTER_STDOUT.log')
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 native Code_Aster solve failed.' }
-          $mess=Join-Path $solve 'ws01-1-cap-fillets.mess'
-          if(-not(Test-Path $mess)){ throw 'WS01.1 .mess evidence missing.' }
-          if((Get-Content $mess -Raw) -notmatch 'ARRET NORMAL'){ throw 'WS01.1 did not reach Code_Aster normal termination.' }
-          if(-not(Test-Path (Join-Path $solve 'ws01-1-cap-fillets.rmed'))){ throw 'WS01.1 MED result missing.' }
-
-      - name: Import real MED into AsterMax results bundle
+          Get-ChildItem .\ws011 -Directory -Filter 'solve-*' | Sort-Object Name | ForEach-Object {
+            $solve=$_.FullName
+            Write-Host "SOLVING_TET10_CASE=$($_.Name)"
+            & $runner (Join-Path $solve 'ws01-1-cap-fillets.export') $solve | Tee-Object (Join-Path $solve 'ASTERMAX_CODE_ASTER_STDOUT.log')
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 native Code_Aster solve failed: $($_.Name)" }
+            $mess=Join-Path $solve 'ws01-1-cap-fillets.mess'
+            if(-not(Test-Path $mess)){ throw "WS01.1 .mess evidence missing: $($_.Name)" }
+            if((Get-Content $mess -Raw) -notmatch 'ARRET NORMAL'){ throw "WS01.1 normal termination missing: $($_.Name)" }
+            if(-not(Test-Path (Join-Path $solve 'ws01-1-cap-fillets.rmed'))){ throw "WS01.1 MED result missing: $($_.Name)" }
+          }
+      - name: Import real MED and compare every mesh level
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
           $env:ASTERMAX_MED_BRIDGE_MODE='production'
           $python=(Resolve-Path .\dist\AsterMaxRuntime\Python\python.exe).Path
-          & $python .\native-windows\bridge-c964-med-results.py .\ws011\solve\ws01-1-cap-fillets.rmed .\ws011\solve\ws01-1-cap-fillets.astermax-results.json .\ws011\solve\ws01-1-cap-fillets.astermax-results.vtu
-          if($LASTEXITCODE -ne 0){ throw 'AsterMax MED results handoff failed.' }
-
-      - name: Compare AsterMax result with ANSYS workshop reference
-        shell: pwsh
-        run: |
-          python .\native-windows\ansys-tutorials\compare_ws011.py --bundle .\ws011\solve\ws01-1-cap-fillets.astermax-results.json --model-evidence .\ws011\solve\ws01-1-model-evidence.json --out .\ws011\solve\WS01.1-ANSYS-vs-AsterMax.json
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 comparison integrity gate failed.' }
-
+          $summary=@()
+          Get-ChildItem .\ws011 -Directory -Filter 'solve-*' | Sort-Object Name | ForEach-Object {
+            $solve=$_.FullName
+            & $python .\native-windows\bridge-c964-med-results.py (Join-Path $solve 'ws01-1-cap-fillets.rmed') (Join-Path $solve 'ws01-1-cap-fillets.astermax-results.json') (Join-Path $solve 'ws01-1-cap-fillets.astermax-results.vtu')
+            if($LASTEXITCODE -ne 0){ throw "AsterMax MED handoff failed: $($_.Name)" }
+            python .\native-windows\ansys-tutorials\compare_ws011.py --bundle (Join-Path $solve 'ws01-1-cap-fillets.astermax-results.json') --model-evidence (Join-Path $solve 'ws01-1-model-evidence.json') --out (Join-Path $solve 'WS01.1-ANSYS-vs-AsterMax.json')
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 comparison integrity failed: $($_.Name)" }
+            $cmp=Get-Content (Join-Path $solve 'WS01.1-ANSYS-vs-AsterMax.json') -Raw | ConvertFrom-Json
+            $summary += [pscustomobject]@{
+              case=$_.Name
+              mesh_size_mm=$cmp.astermax_code_aster.mesh.target_size_mm
+              nodes=$cmp.astermax_code_aster.mesh.nodes
+              elements=$cmp.astermax_code_aster.mesh.volume_elements
+              vm_mpa=$cmp.astermax_code_aster.von_mises_ansys_corner_component_first_max_mpa
+              u_mm=$cmp.astermax_code_aster.total_deformation_max_mm
+              sf=$cmp.astermax_code_aster.safety_factor_ansys_parity
+              vm_error_pct=$cmp.comparison.stress_error_pct
+              u_error_pct=$cmp.comparison.deformation_error_pct
+              within_5pct=$cmp.comparison.both_primary_results_within_5pct
+            }
+          }
+          $summary=$summary | Sort-Object mesh_size_mm -Descending
+          $summary | Format-Table -AutoSize
+          $summary | ConvertTo-Json -Depth 5 | Set-Content .\ws011\WS01.1-TET10-SWEEP-SUMMARY.json -Encoding UTF8
       - name: Upload WS01.1 solver comparison evidence
         if: always()
         uses: actions/upload-artifact@v4
