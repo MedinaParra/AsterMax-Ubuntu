@@ -34,8 +34,25 @@ if any(len(stress[k])!=n for k in need):
 vm_component_first=[]
 for i in range(n):
     vm_component_first.append(vmises(*(float(stress[k][i]) for k in need)))
-vm_ansys_parity=max(vm_component_first)
-vm_ansys_node=vm_component_first.index(vm_ansys_parity)+1
+
+# ANSYS Mechanical higher-order-element parity:
+# solver stress data are fundamentally corner-node data; Mechanical derives
+# midside stresses from averaged corner values. Therefore a directly supplied
+# Code_Aster midside-node SIGM_ELNO value must not decide the benchmark maximum.
+# TET10 connectivity stores the four corner nodes first.
+connectivity=result.get("arrays",{}).get("connectivity",[])
+corner_node_ids=set()
+for element in connectivity:
+    if len(element) != 10:
+        raise SystemExit("ANSYS WS01 parity requires pure TET10 connectivity")
+    corner_node_ids.update(int(x) for x in element[:4])
+if not corner_node_ids:
+    raise SystemExit("No TET10 corner nodes found")
+
+corner_pairs=[(vm_component_first[node_id-1], node_id) for node_id in corner_node_ids]
+vm_ansys_parity,vm_ansys_node=max(corner_pairs)
+vm_all_nodes=max(vm_component_first)
+vm_all_node=vm_component_first.index(vm_all_nodes)+1
 
 yield_mpa=float(model["material"]["yield_MPa"])
 sf_parity=yield_mpa/vm_ansys_parity if vm_ansys_parity>0 else math.inf
@@ -59,13 +76,15 @@ report={
       "total_deformation_max_mm":ANSYS_U,
       "minimum_safety_factor":ANSYS_SF,
     },
-    "stress_parity_method":"average six stress tensor components at each node, then compute von Mises",
+    "stress_parity_method":"average six stress tensor components at TET10 corner nodes, then compute von Mises; midside stress is derived from corners in ANSYS and cannot govern above the corner maximum",
     "mesh_note":"Quadratic TET10/TRI6 formulation is reproduced. Exact ANSYS run node/element count is not attested because the workshop project database is absent."
   },
   "astermax_code_aster":{
     "total_deformation_max_mm":disp,
-    "von_mises_ansys_component_first_max_mpa":vm_ansys_parity,
-    "von_mises_ansys_component_first_max_node_index":vm_ansys_node,
+    "von_mises_ansys_corner_component_first_max_mpa":vm_ansys_parity,
+    "von_mises_ansys_corner_component_first_max_node_id":vm_ansys_node,
+    "von_mises_direct_all_nodes_component_first_diagnostic_mpa":vm_all_nodes,
+    "von_mises_direct_all_nodes_diagnostic_node_id":vm_all_node,
     "von_mises_scalar_first_nodal_max_mpa":vm_scalar_nodal,
     "von_mises_raw_elno_max_mpa":vm_raw,
     "safety_factor_ansys_parity":sf_parity,
