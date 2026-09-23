@@ -525,6 +525,19 @@
       "consumes": [
         "C10208ExerciseRealGenerateMesh"
       ]
+    },
+    {
+      "id": "patch-c10213-ansys-tutorial-geometry",
+      "file": "patch-c10213-ansys-tutorial-geometry.ps1",
+      "depends": [
+        "patch-c10210-audit-hook-release"
+      ],
+      "declares": [
+        "StartAsterMaxC10213TutorialGeometryAudit"
+      ],
+      "consumes": [
+        "AsterMaxWorkflowConformanceAudit"
+      ]
     }
   ]
 }
