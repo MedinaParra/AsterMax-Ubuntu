@@ -2,7 +2,7 @@ name: AsterMax C10.20.8a Clean Exit Smoke
 
 on:
   push:
-    branches: [ codex/c10208a-error-harness ]
+    branches: [ codex/c10208a-error-harness, codex/c10212-async-mesh-repair ]
     paths:
       - '.github/workflows/astermax-c10208a-exit-smoke.yml'
       - 'native-windows/patch-c10209-audit-exit-diagnostics.ps1'
@@ -109,6 +109,17 @@ jobs:
       - name: Compile AsterMax
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Diagnose native exit callbacks with CDB
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          $cdb="${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+          if(-not(Test-Path $cdb)){ throw 'Windows SDK CDB is missing.' }
+          $out="$PWD\exit-smoke\debugger"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          & $cdb -logo "$out\cdb.txt" -c 'sxe -c ".ecxr; kv; ~* kb; q" c0020001; sxe -c ".ecxr; kv; ~* kb; q" c000041d; g' $exe.FullName "--astermax-exit-smoke=$out"
 
       - name: Execute clean WinForms exit smoke
         shell: pwsh
