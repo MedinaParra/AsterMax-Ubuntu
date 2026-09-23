@@ -10,12 +10,41 @@ a=p.parse_args()
 with open(a.bundle,encoding="utf-8") as f: result=json.load(f)
 with open(a.model_evidence,encoding="utf-8") as f: model=json.load(f)
 
+ANSYS_VM=235.96
+ANSYS_U=0.064809
+ANSYS_SF=1.1866
+TOL_PCT=5.0
+
+def vmises(sx,sy,sz,txy,tyz,txz):
+    return math.sqrt(max(0.0,0.5*((sx-sy)**2+(sy-sz)**2+(sz-sx)**2)+3.0*(txy*txy+tyz*tyz+txz*txz)))
+
 disp=float(result["fields"]["displacement"]["total_max"])
-vm_nodal=float(result["fields"]["von_mises"]["nodal_max"])
+vm_scalar_nodal=float(result["fields"]["von_mises"]["nodal_max"])
 vm_raw=float(result["fields"]["von_mises"]["raw_elno_max"])
+
+stress=result.get("arrays",{}).get("stress",{})
+need=("SIXX","SIYY","SIZZ","SIXY","SIYZ","SIXZ")
+missing=[k for k in need if k not in stress]
+if missing:
+    raise SystemExit("Missing averaged stress components for ANSYS-parity von Mises: "+",".join(missing))
+n=len(stress["SIXX"])
+if any(len(stress[k])!=n for k in need):
+    raise SystemExit("Stress component arrays have inconsistent lengths")
+
+vm_component_first=[]
+for i in range(n):
+    vm_component_first.append(vmises(*(float(stress[k][i]) for k in need)))
+vm_ansys_parity=max(vm_component_first)
+vm_ansys_node=vm_component_first.index(vm_ansys_parity)+1
+
 yield_mpa=float(model["material"]["yield_MPa"])
-sf_nodal=yield_mpa/vm_nodal if vm_nodal>0 else math.inf
+sf_parity=yield_mpa/vm_ansys_parity if vm_ansys_parity>0 else math.inf
+sf_scalar=yield_mpa/vm_scalar_nodal if vm_scalar_nodal>0 else math.inf
 sf_raw=yield_mpa/vm_raw if vm_raw>0 else math.inf
+
+vm_error=100.0*(vm_ansys_parity-ANSYS_VM)/ANSYS_VM
+u_error=100.0*(disp-ANSYS_U)/ANSYS_U
+sf_error=100.0*(sf_parity-ANSYS_SF)/ANSYS_SF
 
 report={
   "case":"ANSYS Mechanical WS01.1 Mechanical Basics",
@@ -24,33 +53,42 @@ report={
     "load":"1.1 MPa on 17 exterior surfaces",
     "material":"Aluminum Alloy, E=71000 MPa, nu=0.33, tensile yield=280 MPa",
     "supports":"frictionless normal constraints on 4 counterbores + 8 recess faces + 1 lip face",
+    "ansys_reference_classification":"PRE_REFINEMENT_TUTORIAL_SNAPSHOT",
     "ansys_documented_numeric_reference":{
-      "minimum_safety_factor":"slightly greater than 1.0",
-      "total_deformation_mm":None,
-      "equivalent_stress_mpa":None
+      "equivalent_stress_max_mpa":ANSYS_VM,
+      "total_deformation_max_mm":ANSYS_U,
+      "minimum_safety_factor":ANSYS_SF,
     },
-    "mesh_note":"ANSYS workshop baseline does not publish a numeric mesh size; AsterMax uses the declared mesh size from model evidence."
+    "stress_parity_method":"average six stress tensor components at each node, then compute von Mises",
+    "mesh_note":"Quadratic TET10/TRI6 formulation is reproduced. Exact ANSYS run node/element count is not attested because the workshop project database is absent."
   },
   "astermax_code_aster":{
     "total_deformation_max_mm":disp,
-    "von_mises_nodal_averaged_max_mpa":vm_nodal,
+    "von_mises_ansys_component_first_max_mpa":vm_ansys_parity,
+    "von_mises_ansys_component_first_max_node_index":vm_ansys_node,
+    "von_mises_scalar_first_nodal_max_mpa":vm_scalar_nodal,
     "von_mises_raw_elno_max_mpa":vm_raw,
-    "safety_factor_from_nodal_vm":sf_nodal,
-    "safety_factor_from_raw_elno_vm":sf_raw,
+    "safety_factor_ansys_parity":sf_parity,
+    "safety_factor_scalar_first":sf_scalar,
+    "safety_factor_raw_elno":sf_raw,
     "mesh":model["mesh"],
     "integrity":result.get("integrity",{})
   },
   "comparison":{
-    "safety_factor_directionally_consistent_with_ansys":sf_nodal>1.0,
-    "numeric_deformation_difference_pct":None,
-    "numeric_stress_difference_pct":None,
-    "reason_numeric_difference_unavailable":"The supplied/public workshop states safety factor qualitatively but does not publish baseline deformation or stress maxima.",
+    "stress_error_pct":vm_error,
+    "deformation_error_pct":u_error,
+    "safety_factor_error_pct":sf_error,
+    "stress_within_5pct":abs(vm_error)<=TOL_PCT,
+    "deformation_within_5pct":abs(u_error)<=TOL_PCT,
+    "both_primary_results_within_5pct":abs(vm_error)<=TOL_PCT and abs(u_error)<=TOL_PCT,
+    "tolerance_pct":TOL_PCT
   },
   "pass_integrity":(
       model.get("fea_values_invented") is False and
       result.get("integrity",{}).get("fea_values_invented") is False and
       result.get("integrity",{}).get("solver_output_modified") is False and
-      math.isfinite(disp) and disp>=0 and math.isfinite(vm_nodal) and vm_nodal>0
+      math.isfinite(disp) and disp>=0 and
+      math.isfinite(vm_ansys_parity) and vm_ansys_parity>0
   )
 }
 
