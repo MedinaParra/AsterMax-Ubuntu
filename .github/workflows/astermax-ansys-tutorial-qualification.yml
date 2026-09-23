@@ -94,6 +94,27 @@ jobs:
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
+      - name: Install pinned NetGen CAD runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' |
+               Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile .\ansys-tutorials\prepomax-runtime.zip
+          $actual=(Get-FileHash .\ansys-tutorials\prepomax-runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $runtimeSha256){ throw "Pinned CAD runtime digest mismatch: $actual" }
+          Expand-Archive .\ansys-tutorials\prepomax-runtime.zip .\ansys-tutorials\runtime -Force
+          $ng=Get-ChildItem .\ansys-tutorials\runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing from pinned runtime.' }
+          $target=Join-Path $exe.Directory.FullName 'NetGen'
+          if(Test-Path $target){ Remove-Item $target -Recurse -Force }
+          Copy-Item $ng.Directory.FullName $target -Recurse -Force
+          if(-not(Test-Path (Join-Path $target 'NetGenMesher.exe'))){ throw 'NetGen runtime copy failed.' }
+          Write-Host "ASTERMAX_TUTORIAL_NETGEN=$target"
+
       - name: Execute exact ANSYS tutorial STEP import and native meshing
         shell: pwsh
         timeout-minutes: 18
