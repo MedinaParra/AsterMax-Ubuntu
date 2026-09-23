@@ -18,45 +18,65 @@ $signature='        private void ExecuteAsterMaxC1020WorkflowConformanceAudit(st
 $helpers=@'
         private void StartAsterMaxC10213TutorialGeometryAudit()
         {
-            const string prefix = "--astermax-tutorial-audit=";
-            string arg = Environment.GetCommandLineArgs()
-                .FirstOrDefault(x => x.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-            if (arg == null) return;
+            const string auditPrefix = "--astermax-tutorial-audit=";
+            const string inputPrefix = "--astermax-tutorial-input=";
+            string[] commandLine = Environment.GetCommandLineArgs();
+            string auditArg = commandLine.FirstOrDefault(x => x.StartsWith(auditPrefix, StringComparison.OrdinalIgnoreCase));
+            string inputArg = commandLine.FirstOrDefault(x => x.StartsWith(inputPrefix, StringComparison.OrdinalIgnoreCase));
+            if (auditArg == null) return;
 
-            string directory = arg.Substring(prefix.Length).Trim('"');
+            string directory = auditArg.Substring(auditPrefix.Length).Trim('"');
+            string inputPath = inputArg == null ? null : inputArg.Substring(inputPrefix.Length).Trim('"');
             Directory.CreateDirectory(directory);
-            int attempts = 0;
+
             var timer = new Timer { Interval = 1000 };
-            timer.Tick += (sender, args) =>
+            timer.Tick += async (sender, args) =>
             {
-                attempts++;
+                timer.Stop();
                 try
                 {
+                    // The normal PrePoMax command-line import starts from FrmMain_Shown while
+                    // some centering/message-box infrastructure may not yet own an HWND.
+                    // Tutorial qualification therefore imports from this deferred UI callback,
+                    // after the main form and VTK controls are fully created.
+                    if (!IsHandleCreated)
+                    {
+                        timer.Start();
+                        return;
+                    }
+                    if (String.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+                        throw new FileNotFoundException("Tutorial STEP input is missing.", inputPath);
+
+                    if (!New(ModelSpaceEnum.ThreeD, UnitSystemType.MM_TON_S_C))
+                        throw new InvalidOperationException("Could not create a new mm-ton-s tutorial model.");
+
+                    await _controller.ImportFileAsync(inputPath, false);
+                    _controller.OpenedFileName = null;
+                    Application.DoEvents();
+
                     FeModel model = _controller == null ? null : _controller.Model;
                     int geometryParts = model == null || model.Geometry == null ? 0 : model.Geometry.Parts.Count;
-                    if (geometryParts <= 0 && attempts < 90) return;
-
-                    timer.Stop();
-                    timer.Dispose();
                     if (geometryParts <= 0)
-                        throw new InvalidOperationException("Tutorial STEP import did not produce geometry within 90 s.");
+                        throw new InvalidOperationException("Deferred tutorial STEP import completed without geometry.");
 
-                    C10213RunTutorialGeometryAudit(directory);
+                    C10213RunTutorialGeometryAudit(directory, inputPath);
                     C1020RequestAuditExit(directory, 0);
                 }
                 catch (Exception ex)
                 {
                     try { File.WriteAllText(Path.Combine(directory, "tutorial-geometry-error.txt"), ex.ToString()); }
                     catch { }
-                    timer.Stop();
-                    timer.Dispose();
                     C1020RequestAuditExit(directory, 1);
+                }
+                finally
+                {
+                    timer.Dispose();
                 }
             };
             timer.Start();
         }
 
-        private void C10213RunTutorialGeometryAudit(string directory)
+        private void C10213RunTutorialGeometryAudit(string directory, string inputPath)
         {
             FeModel model = _controller.Model;
             var candidates = _controller.GetGeometryPartsWithoutSubParts();
@@ -122,7 +142,8 @@ $helpers=@'
             JObject report = new JObject {
                 ["release"] = "C10.20.13",
                 ["purpose"] = "ANSYS tutorial exact-geometry import/mesh qualification",
-                ["source_file"] = _args != null && _args.Length > 0 ? Path.GetFileName(_args[0]) : null,
+                ["source_file"] = Path.GetFileName(inputPath),
+                ["source_path"] = inputPath,
                 ["geometry_part_count"] = model.Geometry == null ? 0 : model.Geometry.Parts.Count,
                 ["mesh_candidate_count"] = names.Length,
                 ["candidate_names"] = new JArray(names),
