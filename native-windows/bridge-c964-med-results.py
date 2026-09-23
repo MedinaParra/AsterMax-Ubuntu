@@ -43,6 +43,17 @@ SUPPORTED_FAMILIES = {
     "T10": (10, "TETRA10", 24),
 }
 
+# MED meshes used for real engineering models commonly retain boundary cells
+# (points/edges/faces) because physical surface groups are required to apply
+# loads and supports. They are topology/support entities, not unsupported
+# volume elements, and must not poison the 3-D result bridge.
+NON_VOLUME_FAMILIES = {
+    "PO1",              # point
+    "SE2", "SE3",       # line
+    "TR3", "TR6", "TR7",  # triangle
+    "QU4", "QU8", "QU9",  # quadrilateral
+}
+
 
 def decode_components(raw, width=16):
     if isinstance(raw, bytes):
@@ -131,6 +142,8 @@ def discover_mesh_families(h, mesh_root):
     for code in sorted(h[mai_path].keys()):
         group = h[f"{mai_path}/{code}"]
         if "NOD" not in group or "NUM" not in group:
+            continue
+        if code in NON_VOLUME_FAMILIES:
             continue
         if code not in SUPPORTED_FAMILIES:
             unsupported.append(code)
