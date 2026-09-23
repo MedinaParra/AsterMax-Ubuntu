@@ -1,0 +1,146 @@
+{
+  "schema": "astermax.ansys_tutorial_reference.v1",
+  "notes": [
+    "References are transcribed from ANSYS Mechanical training material and supporting public reports; they are not AsterMax outputs.",
+    "AsterMax outputs must remain null until a real CI solve produces evidence.",
+    "ANSYS 16.0 public workshop inputs use the same STEP filenames referenced by the supplied 17.0 training slides; byte identity across releases is not assumed without hashing both releases."
+  ],
+  "cases": [
+    {
+      "id": "WS01.1",
+      "title": "Mechanical Basics / control-box cover",
+      "geometry": "Cap_fillets.stp",
+      "analysis": "linear_static",
+      "material": {
+        "name": "Aluminum Alloy",
+        "young_modulus_mpa": 71000,
+        "poisson_ratio": 0.33,
+        "tensile_yield_mpa": 280
+      },
+      "loads": [
+        {
+          "type": "pressure",
+          "magnitude_mpa": 1,
+          "scope": "17 exterior faces"
+        }
+      ],
+      "supports": [
+        {
+          "type": "frictionless",
+          "scope": "4 counterbore surfaces"
+        },
+        {
+          "type": "frictionless",
+          "scope": "inner surfaces of bottom recess"
+        },
+        {
+          "type": "frictionless",
+          "scope": "lip surface at bottom of recess"
+        }
+      ],
+      "ansys_reference": {
+        "evidence": "NUMERIC_REFERENCE_FROM_PUBLIC_PROJECT_REPORT",
+        "maximum_total_deformation_mm": 0.058591,
+        "minimum_safety_factor": 1.0335,
+        "interpretation": "Training material states minimum safety factor is just over 1."
+      },
+      "astermax_result": null
+    },
+    {
+      "id": "WS03.1",
+      "title": "Structural Analysis with Contact / pump assembly",
+      "geometry": "Pump_assy_3.stp",
+      "expected_bodies": 5,
+      "analysis": "linear_static_with_contact",
+      "material_overrides": [
+        {
+          "body": "PumpHousing",
+          "name": "Polyethylene",
+          "young_modulus_mpa": 800,
+          "poisson_ratio": 0.46,
+          "tensile_yield_mpa": 25
+        }
+      ],
+      "contacts": [
+        {
+          "pair": "PumpHousing to Shaft",
+          "type": "no_separation"
+        },
+        {
+          "scope": "remaining contacts",
+          "type": "bonded"
+        }
+      ],
+      "loads": [
+        {
+          "type": "bearing_load",
+          "component_x_n": 100,
+          "scope": "pulley groove surface"
+        }
+      ],
+      "supports": [
+        {
+          "type": "frictionless",
+          "scope": "pump-housing mating face"
+        },
+        {
+          "type": "frictionless",
+          "scope": "8 countersink portions of mounting holes"
+        }
+      ],
+      "ansys_reference": {
+        "evidence": "NUMERIC_AND_QUALITATIVE_REFERENCE_FROM_TRAINING",
+        "maximum_impeller_total_deformation_mm_approx": 0.028,
+        "deformation_acceptance_mm": 0.075,
+        "housing_stress_acceptance_mpa": 25,
+        "interpretation": "Training states impeller deformation is approximately 0.028 mm and housing stresses remain below the 25 MPa elastic limit."
+      },
+      "astermax_result": null
+    },
+    {
+      "id": "WS03.2",
+      "title": "Beam Connections / bolted flange",
+      "geometry": "Flange Mount.stp",
+      "expected_bodies": 2,
+      "analysis": "static_with_frictionless_contact_and_beam_fasteners",
+      "contact": {
+        "type": "frictionless"
+      },
+      "beam_connections": {
+        "count": 4,
+        "radius_mm": 5,
+        "material": "Structural Steel",
+        "reference_behavior": "deformable",
+        "mobile_behavior": "deformable"
+      },
+      "loads": [
+        {
+          "type": "remote_force",
+          "component_x_n": 1000,
+          "location_mm": [
+            0,
+            0,
+            100
+          ],
+          "scope": "flange face"
+        }
+      ],
+      "supports": [
+        {
+          "type": "fixed_support",
+          "scope": "mount/end-of-pipe face"
+        }
+      ],
+      "ansys_reference": {
+        "evidence": "FUNCTIONAL_ONLY",
+        "requested_results": [
+          "Equivalent von-Mises stress",
+          "Total Deformation",
+          "Beam probes"
+        ],
+        "interpretation": "Training material supplies workflow/qualitative separation behavior but no authoritative numeric result table in the available source."
+      },
+      "astermax_result": null
+    }
+  ]
+}
