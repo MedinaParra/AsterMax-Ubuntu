@@ -113,7 +113,7 @@ jobs:
             $input=(Resolve-Path (Join-Path '.\ansys-tutorials\inputs' $case.file)).Path
             $out=Join-Path "$PWD\ansys-tutorials\evidence" $case.id
             New-Item -ItemType Directory -Force $out | Out-Null
-            $argLine='"'+$input+'" -US MM_TON_S_C "--astermax-tutorial-audit='+$out+'"'
+            $argLine='"--astermax-tutorial-input='+$input+'" "--astermax-tutorial-audit='+$out+'"'
             Write-Host "RUNNING $($case.id): $($case.file)"
             $p=Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.Directory.FullName -ArgumentList $argLine -PassThru
             if(-not $p.WaitForExit(240000)) {
