@@ -119,7 +119,7 @@ jobs:
           if(-not(Test-Path $cdb)){ throw 'Windows SDK CDB is missing.' }
           $out="$PWD\exit-smoke\debugger"
           New-Item -ItemType Directory -Force $out | Out-Null
-          & $cdb -logo "$out\cdb.txt" -c 'sxe -c ".ecxr; kv; ~* kb; q" c0020001; sxe -c ".ecxr; kv; ~* kb; q" c000041d; g' $exe.FullName "--astermax-exit-smoke=$out"
+          & $cdb -G -logo "$out\cdb.txt" -c 'sxe -c ".ecxr; kv; ~* kb; q" c0020001; sxe -c ".ecxr; kv; ~* kb; q" c000041d; g' $exe.FullName "--astermax-exit-smoke=$out"
 
       - name: Execute clean WinForms exit smoke
         shell: pwsh
