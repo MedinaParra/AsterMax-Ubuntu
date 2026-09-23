@@ -1,0 +1,124 @@
+name: AsterMax WS01 Native NetGen Quadratic Qualification
+
+on:
+  push:
+    branches: [ codex/c10212-async-mesh-repair ]
+    paths:
+      - 'native-windows/ansys-tutorials/inspect_netgen_vol.py'
+      - '.github/workflows/astermax-ansys-ws011-netgen.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-ws011-netgen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  netgen:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download pinned PrePoMax runtime and exact WS01 STEP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\netgen-ws01 | Out-Null
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          & curl.exe -L --fail --retry 4 --retry-delay 3 -o runtime.zip $runtimeUrl
+          if($LASTEXITCODE -ne 0){ throw 'Pinned PrePoMax runtime download failed.' }
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){ throw 'Pinned runtime digest mismatch.' }
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing.' }
+          Copy-Item $ng.Directory.FullName .\netgen-ws01\NetGen -Recurse -Force
+          $url='https://ecampus.paris-saclay.fr/pluginfile.php/2561407/mod_folder/content/0/Formation%20Polytech/Mechanical_Introduction_16.0_v1/Mechanical_Introduction_16.0_v1/workshop_input_files/Cap_fillets.stp?forcedownload=1'
+          & curl.exe -L --fail --retry 4 --retry-delay 3 -A 'Mozilla/5.0 AsterMax NetGen qualification' -o .\netgen-ws01\Cap_fillets.stp $url
+          if($LASTEXITCODE -ne 0){ throw 'Cap_fillets.stp download failed.' }
+          $sha=(Get-FileHash .\netgen-ws01\Cap_fillets.stp -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "WS01_STEP_SHA256=$sha"
+
+      - name: Convert exact STEP to BREP with AsterMax NetGen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ng=(Resolve-Path .\netgen-ws01\NetGen\NetGenMesher.exe).Path
+          $step=(Resolve-Path .\netgen-ws01\Cap_fillets.stp).Path
+          $seed=(Join-Path (Resolve-Path .\netgen-ws01).Path 'cap.brep')
+          & $ng STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS $step $seed | Tee-Object .\netgen-ws01\STEP_TO_BREP.log
+          if($LASTEXITCODE -ne 0){ throw 'STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS failed.' }
+          $breps=Get-ChildItem .\netgen-ws01 -Filter '*.brep' | Sort-Object Length -Descending
+          if(-not $breps){ throw 'No BREP output created.' }
+          $breps | Select-Object Name,Length | Format-Table -AutoSize
+          Copy-Item $breps[0].FullName .\netgen-ws01\geometry.brep -Force
+
+      - name: Write native AsterMax default adaptive parameters
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $diag=[math]::Sqrt(80.0*80.0+50.0*50.0+20.0*20.0)
+          $maxh=[math]::Round($diag*0.05,2)
+          $minh=[math]::Round($diag*0.001,2)
+          $params=@(
+            'int      uselocalh','1',
+            'double   maxh',"$maxh",
+            'double   minh',"$minh",
+            'double   fineness','0.5',
+            'double   grading','0.3',
+            'double   elementsperedge','2',
+            'double   elementspercurve','2',
+            'int      closeedgeenable','0',
+            'double   closeedgefact','2.0',
+            'int      minedgelenenable','0',
+            'double   minedgelen','0.0001',
+            'int      second_order','1',
+            'int      quad_dominated','0',
+            'char*    meshsize_filename','',
+            'int      optsurfmeshenable','1',
+            'int      optvolmeshenable','1',
+            'int      optsteps_3d','3',
+            'int      optsteps_2d','3',
+            'int      invert_tets','0',
+            'int      invert_trigs','0',
+            'int      check_overlap','1',
+            'int      check_overlapping_boundary','1',
+            'double   deflection','0.01'
+          )
+          $params | Set-Content .\netgen-ws01\meshParameters -Encoding ascii
+          @('0','0') | Set-Content .\netgen-ws01\meshRefinement -Encoding ascii
+          [ordered]@{
+            diagonal_mm=$diag;maxh_mm=$maxh;minh_mm=$minh;fineness=0.5;grading=0.3;
+            elementsperedge=2;elementspercurve=2;second_order=1;optimize_steps_2d=3;optimize_steps_3d=3;
+            provenance='PrePoMax defaults with native second_order forced for quadratic qualification'
+          } | ConvertTo-Json | Set-Content .\netgen-ws01\parameters.json -Encoding UTF8
+          Get-Content .\netgen-ws01\parameters.json | Write-Host
+
+      - name: Run native BREP_MESH
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $ng=(Resolve-Path .\netgen-ws01\NetGen\NetGenMesher.exe).Path
+          $brep=(Resolve-Path .\netgen-ws01\geometry.brep).Path
+          $vol=(Join-Path (Resolve-Path .\netgen-ws01).Path 'geometry.vol')
+          $mp=(Resolve-Path .\netgen-ws01\meshParameters).Path
+          $mr=(Resolve-Path .\netgen-ws01\meshRefinement).Path
+          & $ng BREP_MESH $brep $vol $mp $mr | Tee-Object .\netgen-ws01\BREP_MESH.log
+          if($LASTEXITCODE -ne 0){ throw "BREP_MESH failed with exit $LASTEXITCODE" }
+          if(-not(Test-Path $vol)){ throw 'geometry.vol missing.' }
+          Write-Host "VOL_BYTES=$((Get-Item $vol).Length)"
+
+      - name: Enforce pure native TET10 TRI6
+        shell: pwsh
+        run: |
+          python .\native-windows\ansys-tutorials\inspect_netgen_vol.py --vol .\netgen-ws01\geometry.vol --out .\netgen-ws01\quadratic-evidence.json
+          if($LASTEXITCODE -ne 0){ throw 'Native NetGen did not emit pure TET10/TRI6.' }
+
+      - name: Upload native NetGen evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-WS01-Native-NetGen-Quadratic
+          path: netgen-ws01
+          if-no-files-found: error
