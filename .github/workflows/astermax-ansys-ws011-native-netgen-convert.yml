@@ -1,0 +1,100 @@
+name: AsterMax WS01 Native NetGen MED Conversion
+
+on:
+  push:
+    branches: [ codex/c10212-async-mesh-repair ]
+    paths:
+      - 'native-windows/ansys-tutorials/netgen_vol_to_ws011_med.py'
+      - '.github/workflows/astermax-ansys-ws011-native-netgen-convert.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-ws011-native-netgen-convert-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  convert:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Gmsh
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh
+
+      - name: Download known-good native NetGen WS01 artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\native-netgen | Out-Null
+          gh run download 35928816363 --repo MedinaParra/AsterMax-Ubuntu --name AsterMax-WS01-Native-NetGen-Quadratic --dir .\native-netgen
+          if($LASTEXITCODE -ne 0){ throw 'Unable to download native NetGen evidence run 35928816363.' }
+          $vol=Get-ChildItem .\native-netgen -Recurse -Filter geometry.vol | Select-Object -First 1
+          if(-not $vol){ throw 'geometry.vol missing from downloaded evidence.' }
+          Copy-Item $vol.FullName .\native-netgen\ws01-native-netgen.vol -Force
+          Write-Host "VOL_BYTES=$((Get-Item .\native-netgen\ws01-native-netgen.vol).Length)"
+
+      - name: Validate pure native quadratic mesh
+        shell: pwsh
+        run: |
+          python .\native-windows\ansys-tutorials\inspect_netgen_vol.py --vol .\native-netgen\ws01-native-netgen.vol --out .\native-netgen\quadratic-evidence.json
+          if($LASTEXITCODE -ne 0){ throw 'Known-good VOL did not pass TET10/TRI6 gate.' }
+
+      - name: Convert NetGen VOL to Code_Aster MED
+        shell: pwsh
+        run: |
+          python .\native-windows\ansys-tutorials\netgen_vol_to_ws011_med.py --vol .\native-netgen\ws01-native-netgen.vol --msh .\native-netgen\ws01-native-netgen.msh --med .\native-netgen\ws01-1-cap-fillets.med --evidence .\native-netgen\conversion-evidence.json
+          if($LASTEXITCODE -ne 0){ throw 'NetGen VOL to MED conversion failed.' }
+
+      - name: Verify MED topology and named physical groups
+        shell: pwsh
+        run: |
+          @'
+          import gmsh,json
+          gmsh.initialize()
+          try:
+              gmsh.open(r'native-netgen\ws01-1-cap-fillets.med')
+              groups={}
+              for dim,tag in gmsh.model.getPhysicalGroups():
+                  name=gmsh.model.getPhysicalName(dim,tag)
+                  ents=gmsh.model.getEntitiesForPhysicalGroup(dim,tag)
+                  count=0
+                  types=set()
+                  for ent in ents:
+                      et,ids,_=gmsh.model.mesh.getElements(dim,int(ent))
+                      count += sum(len(x) for x in ids)
+                      types.update(int(x) for x in et)
+                  groups[name]={'dim':dim,'tag':tag,'entities':[int(x) for x in ents],'element_count':count,'element_types':sorted(types)}
+              required={'PRESSURE','SUPPORT_COUNTERBORE','SUPPORT_RECESS','SUPPORT_LIP','SOLID'}
+              missing=sorted(required-set(groups))
+              if missing: raise RuntimeError('Missing MED groups: '+','.join(missing))
+              node_tags,_,_=gmsh.model.mesh.getNodes()
+              vtypes,vids,_=gmsh.model.mesh.getElements(3)
+              result={'nodes':len(node_tags),'volume_elements':sum(len(x) for x in vids),'volume_types':[int(x) for x in vtypes],'groups':groups,'pass':True}
+              open(r'native-netgen\med-verification.json','w').write(json.dumps(result,indent=2))
+              print(json.dumps(result,indent=2))
+          finally:
+              gmsh.finalize()
+          '@ | Set-Content .\native-netgen\verify_med.py -Encoding UTF8
+          python .\native-netgen\verify_med.py
+          if($LASTEXITCODE -ne 0){ throw 'MED verification failed.' }
+
+      - name: Upload converted native WS01 mesh evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-WS01-Native-NetGen-MED
+          path: |
+            native-netgen/quadratic-evidence.json
+            native-netgen/conversion-evidence.json
+            native-netgen/med-verification.json
+            native-netgen/ws01-1-cap-fillets.med
+          if-no-files-found: error
+          compression-level: 1
