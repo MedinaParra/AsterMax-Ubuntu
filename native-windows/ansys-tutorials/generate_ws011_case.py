@@ -100,13 +100,11 @@ try:
     gmsh.model.mesh.generate(3)
 
     if a.element_order == 2:
+        # Promote the generated tetrahedral mesh to complete quadratic
+        # TET10/TRI6. Do not apply a separate high-order optimizer here:
+        # the ANSYS workshop does not attest such an optimization pass, and
+        # adding one would alter the benchmark mesh beyond the known setup.
         gmsh.model.mesh.setOrder(2)
-        # Curve midside nodes back onto the CAD so the quadratic geometry is
-        # not merely a straight-sided TET4 mesh with extra nodes.
-        try:
-            gmsh.model.mesh.optimize("HighOrder")
-        except Exception as exc:
-            print(f"HighOrder optimization warning: {exc}")
 
     mesh_path=os.path.join(a.out_dir,"ws01-1-cap-fillets.med")
     gmsh.write(mesh_path)
