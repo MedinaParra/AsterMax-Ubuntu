@@ -43,55 +43,24 @@ $m=Replace-Required $m $old $new
 $m=Replace-Required $m '                else if (_controller.ModelChanged)' '                else if (_controller.ModelChanged && String.IsNullOrWhiteSpace(_c10209AuditShutdownDirectory))'
 Set-Content $mainPath $m -Encoding UTF8
 
-# VTK holds native references after managed Dispose. Disable its Win32 event
-# procedure while the HWND is still valid, not later from a finalizer.
-$vtkPath=Join-Path $Root 'vtkControl/vtkControl.Designer.cs'
-$v=(Get-Content $vtkPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
-$v=Replace-Required $v '                if (disposing)
-                {
-                    if (components != null)' '                if (disposing)
-                {
-                    if (_renderWindowInteractor != null) _renderWindowInteractor.Disable();
-                    if (components != null)'
-$v=Replace-Required $v '        protected override void OnHandleDestroyed(System.EventArgs e)
-        {' '        protected override void OnHandleDestroyed(System.EventArgs e)
-        {
-            if (_renderWindowInteractor != null) _renderWindowInteractor.Disable();'
-Set-Content $vtkPath $v -Encoding UTF8
-
-# PrePoMax registers a managed WH_CALLWNDPROCRET callback through MessageBoxManager
-# on the main STA thread but upstream does not unregister it. During CLR teardown,
-# MSCTF destroys its hidden thread message window and USER32 can invoke this stale
-# managed hook after managed/unmanaged transitions have been disabled, producing
-# c0020001 / STATUS_FATAL_USER_CALLBACK_EXCEPTION (0xC000041D).
-#
-# Always release the thread hook after the WinForms message loop returns and before
-# the CLR begins process shutdown. This is not audit-only: it fixes the real app
-# lifecycle while preserving MessageBoxManager behavior for the entire UI session.
+# MessageBoxManager owns a thread-local WH_CALLWNDPROCRET hook. Windows still
+# destroys its input-service windows after CLR shutdown; leaving that hook
+# installed invokes a managed callback after the runtime has stopped.
+# Balance Register on the same UI thread, including exceptional exits.
 $programPath=Join-Path $Root 'PrePoMax/Program.cs'
 $p=(Get-Content $programPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
-$programOld=@'
-            MessageBoxManager.Register();
-            //
-            Application.EnableVisualStyles();
+$p=Replace-Required $p '            Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new FrmMain(args));
-'@
-$programNew=@'
-            MessageBoxManager.Register();
-            //
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            try
+            Application.Run(new FrmMain(args));' '            try
             {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new FrmMain(args));
             }
             finally
             {
                 MessageBoxManager.Unregister();
-            }
-'@
-$p=Replace-Required $p $programOld $programNew
+            }'
 Set-Content $programPath $p -Encoding UTF8
 
-Write-Host 'C10.20.10 shutdown hook release applied (keyboard, VTK, MessageBoxManager).' -ForegroundColor Green
+Write-Host 'C10.20.10 audit-only keyboard hook release applied.' -ForegroundColor Green
