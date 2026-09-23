@@ -1,0 +1,150 @@
+name: AsterMax ANSYS Tutorial Geometry Qualification
+
+on:
+  push:
+    branches: [ codex/c10212-async-mesh-repair ]
+    paths:
+      - 'native-windows/patch-c10213-ansys-tutorial-geometry.ps1'
+      - '.github/workflows/astermax-ansys-tutorial-qualification.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-ansys-tutorial-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ansys-tutorial-geometry:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Download public ANSYS workshop STEP inputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\ansys-tutorials\inputs | Out-Null
+          $base='https://ecampus.paris-saclay.fr/pluginfile.php/2561407/mod_folder/content/0/Formation%20Polytech/Mechanical_Introduction_16.0_v1/Mechanical_Introduction_16.0_v1/workshop_input_files'
+          $cases=@(
+            @{file='Cap_fillets.stp'; url="$base/Cap_fillets.stp?forcedownload=1"},
+            @{file='Pump_assy_3.stp'; url="$base/Pump_assy_3.stp?forcedownload=1"},
+            @{file='Flange Mount.stp'; url="$base/Flange%20Mount.stp?forcedownload=1"}
+          )
+          foreach($case in $cases) {
+            $dest=Join-Path "$PWD\ansys-tutorials\inputs" $case.file
+            & curl.exe -L --fail --retry 3 --retry-delay 2 -A 'Mozilla/5.0 AsterMax tutorial qualification' -o $dest $case.url
+            if($LASTEXITCODE -ne 0){ throw "Download failed: $($case.file)" }
+            if((Get-Item $dest).Length -lt 1024){ throw "Downloaded STEP is unexpectedly small: $($case.file)" }
+            $head=Get-Content $dest -TotalCount 5 -Raw
+            if($head -notmatch 'ISO-10303-21'){ throw "Not a STEP file: $($case.file)" }
+            Write-Host "DOWNLOADED=$($case.file) bytes=$((Get-Item $dest).Length)"
+          }
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply AsterMax Windows patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
+            'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
+            'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
+            'patch-c10210-audit-hook-release.ps1','patch-c10213-ansys-tutorial-geometry.ps1'
+          )
+          & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\ansys-tutorials\patch-chain"
+          if($LASTEXITCODE -ne 0){ throw 'AsterMax patch chain failed.' }
+
+      - name: Restore Windows dependencies
+        shell: pwsh
+        run: |
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          if($LASTEXITCODE -ne 0){ throw 'NuGet restore failed.' }
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build AsterMax Mechanical x64
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Execute exact ANSYS tutorial STEP import and native meshing
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' |
+               Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
+
+          $cases=@(
+            @{id='WS01.1'; file='Cap_fillets.stp'; reference='ANSYS Mechanical Basics'},
+            @{id='WS03.1'; file='Pump_assy_3.stp'; reference='Structural Analysis with Contact'},
+            @{id='WS03.2'; file='Flange Mount.stp'; reference='Beam Connections'}
+          )
+          $summary=@()
+          foreach($case in $cases) {
+            $input=(Resolve-Path (Join-Path '.\ansys-tutorials\inputs' $case.file)).Path
+            $out=Join-Path "$PWD\ansys-tutorials\evidence" $case.id
+            New-Item -ItemType Directory -Force $out | Out-Null
+            $argLine='"'+$input+'" -US MM_TON_S_C "--astermax-tutorial-audit='+$out+'"'
+            Write-Host "RUNNING $($case.id): $($case.file)"
+            $p=Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.Directory.FullName -ArgumentList $argLine -PassThru
+            if(-not $p.WaitForExit(240000)) {
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              $summary += [pscustomobject]@{id=$case.id;file=$case.file;exit_code='TIMEOUT';pass=$false;parts=0;nodes=0;elements=0}
+              continue
+            }
+            $code=$p.ExitCode
+            $report=Join-Path $out 'tutorial-geometry-audit.json'
+            if(Test-Path $report) {
+              $j=Get-Content $report -Raw | ConvertFrom-Json
+              $summary += [pscustomobject]@{
+                id=$case.id; file=$case.file; exit_code=$code; pass=([bool]$j.pass -and $code -eq 0);
+                parts=$j.geometry_part_count; mesh_candidates=$j.mesh_candidate_count;
+                nodes=$j.nodes_after; elements=$j.elements_after
+              }
+            } else {
+              $summary += [pscustomobject]@{id=$case.id;file=$case.file;exit_code=$code;pass=$false;parts=0;nodes=0;elements=0}
+            }
+          }
+          $summary | Format-Table -AutoSize
+          $summary | ConvertTo-Json -Depth 5 | Set-Content .\ansys-tutorials\evidence\summary.json -Encoding UTF8
+          $summary | Export-Csv .\ansys-tutorials\evidence\summary.csv -NoTypeInformation -Encoding UTF8
+          if(($summary | Where-Object {-not $_.pass}).Count -gt 0){ throw 'One or more ANSYS tutorial exact-geometry qualification cases failed.' }
+
+      - name: Upload ANSYS tutorial qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-ANSYS-Tutorial-Geometry-Qualification
+          path: |
+            ansys-tutorials/evidence
+            ansys-tutorials/patch-chain
+          if-no-files-found: warn
