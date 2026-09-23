@@ -106,6 +106,20 @@ public static class AsterMaxTimeoutWindowProbe {
 $exitCode=-1
 try { $exitCode=$p.ExitCode } catch {}
 
+# Keep Windows' own crash diagnosis; an abnormal exit must never become PASS.
+if($exitCode -ne 0) {
+    try {
+        $events=@(Get-WinEvent -FilterHashtable @{
+            LogName='Application'; StartTime=(Get-Date).AddMinutes(-15)
+        } -ErrorAction Stop | Where-Object {
+            $_.ProviderName -in @('Application Error','.NET Runtime','Windows Error Reporting')
+        } | Select-Object TimeCreated,Id,ProviderName,Message)
+        $events | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $outPath 'windows-exit-events.json') -Encoding UTF8
+    } catch {
+        $_.Exception.ToString() | Set-Content (Join-Path $outPath 'windows-exit-events-error.txt')
+    }
+}
+
 # Preserve the exact native meshing workspace after the GUI process exits.
 # This captures NetGen inputs/outputs without fabricating or modifying solver data.
 $meshPreflight=Join-Path $outPath 'mesh-command-preflight.json'
