@@ -20,11 +20,31 @@ function Test-NativeProbe {
 
 $nativeReady=Test-NativeProbe
 if(-not $nativeReady) {
-    $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
-    Write-Host 'NATIVE_STAGE: download provider MSI'
-    if(Test-Path $msi){ Remove-Item $msi -Force }
-    & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
-    if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed' }
+    $msi=if(-not [string]::IsNullOrWhiteSpace($env:ASTERMAX_CODE_ASTER_MSI_CACHE)){
+        $env:ASTERMAX_CODE_ASTER_MSI_CACHE
+    } else {
+        Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+    }
+    $msiDir=Split-Path $msi -Parent
+    if(-not [string]::IsNullOrWhiteSpace($msiDir)){ New-Item -ItemType Directory -Force $msiDir | Out-Null }
+
+    $cacheValid=$false
+    if(Test-Path $msi) {
+        $cachedSize=(Get-Item $msi).Length
+        $cachedSha256=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+        $cacheValid=($cachedSize -eq $providerMsiSize -and $cachedSha256 -eq $providerMsiSha256)
+        Write-Host "ASTER_MSI_CACHE_PRESENT=true valid=$cacheValid size=$cachedSize sha256=$cachedSha256"
+        if(-not $cacheValid){ Remove-Item $msi -Force }
+    }
+
+    if(-not $cacheValid) {
+        Write-Host 'NATIVE_STAGE: download provider MSI'
+        & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+        if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed' }
+    } else {
+        Write-Host 'NATIVE_STAGE: reuse verified provider MSI cache'
+    }
+
     $actualSize=(Get-Item $msi).Length
     $actualSha256=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
     Write-Host "ASTER_MSI_SIZE=$actualSize"
