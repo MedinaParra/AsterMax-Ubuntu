@@ -8,6 +8,8 @@ on:
       - 'native-windows/ansys-tutorials/ws01-1-cap-fillets.comm'
       - 'native-windows/ansys-tutorials/ws01-1-cap-fillets.export'
       - 'native-windows/ansys-tutorials/compare_ws011.py'
+      - 'native-windows/bridge-c964-med-results.py'
+      - 'native-windows/test-c1011-native-windows.ps1'
       - '.github/workflows/astermax-ansys-ws011-solve.yml'
   workflow_dispatch:
 
