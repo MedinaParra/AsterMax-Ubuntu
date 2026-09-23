@@ -83,6 +83,48 @@ $helpers=@'
             string[] names = candidates == null ? new string[0] : candidates.Select(x => x.Name).ToArray();
             string[] types = candidates == null ? new string[0] : candidates.Select(x => x.GetType().FullName).ToArray();
 
+            var geometryInventory = new JArray();
+            if (model.Geometry != null && model.Geometry.Parts != null)
+            {
+                foreach (var geometryEntry in model.Geometry.Parts)
+                {
+                    BasePart geometryPart = geometryEntry.Value;
+                    var faceRows = new JArray();
+                    VisualizationData visualization = geometryPart.Visualization;
+                    if (visualization != null && visualization.CellIdsByFace != null)
+                    {
+                        for (int faceId = 0; faceId < visualization.FaceCount; faceId++)
+                        {
+                            HashSet<int> nodeIds = visualization.GetNodeIdsBySurface(faceId);
+                            var faceNodes = nodeIds.Where(id => model.Geometry.Nodes.ContainsKey(id))
+                                                   .Select(id => model.Geometry.Nodes[id]).ToArray();
+                            double minX = faceNodes.Length == 0 ? Double.NaN : faceNodes.Min(n => n.X);
+                            double minY = faceNodes.Length == 0 ? Double.NaN : faceNodes.Min(n => n.Y);
+                            double minZ = faceNodes.Length == 0 ? Double.NaN : faceNodes.Min(n => n.Z);
+                            double maxX = faceNodes.Length == 0 ? Double.NaN : faceNodes.Max(n => n.X);
+                            double maxY = faceNodes.Length == 0 ? Double.NaN : faceNodes.Max(n => n.Y);
+                            double maxZ = faceNodes.Length == 0 ? Double.NaN : faceNodes.Max(n => n.Z);
+                            faceRows.Add(new JObject {
+                                ["face_id"] = faceId,
+                                ["area"] = visualization.FaceAreas != null && faceId < visualization.FaceAreas.Length
+                                    ? visualization.FaceAreas[faceId] : Double.NaN,
+                                ["type"] = visualization.FaceTypes != null && faceId < visualization.FaceTypes.Length
+                                    ? visualization.FaceTypes[faceId].ToString() : null,
+                                ["node_count"] = nodeIds.Count,
+                                ["bounds"] = new JArray(minX, minY, minZ, maxX, maxY, maxZ)
+                            });
+                        }
+                    }
+                    geometryInventory.Add(new JObject {
+                        ["name"] = geometryPart.Name,
+                        ["type"] = geometryPart.GetType().FullName,
+                        ["part_type"] = geometryPart.PartType.ToString(),
+                        ["face_count"] = visualization == null || visualization.CellIdsByFace == null ? 0 : visualization.FaceCount,
+                        ["faces"] = faceRows
+                    });
+                }
+            }
+
             var rows = new JArray();
             int nodesBefore = model.Mesh == null ? 0 : model.Mesh.Nodes.Count;
             int elementsBefore = model.Mesh == null ? 0 : model.Mesh.Elements.Count;
@@ -137,6 +179,21 @@ $helpers=@'
 
             int nodesAfter = model.Mesh == null ? 0 : model.Mesh.Nodes.Count;
             int elementsAfter = model.Mesh == null ? 0 : model.Mesh.Elements.Count;
+            var meshInventory = new JArray();
+            if (model.Mesh != null && model.Mesh.Parts != null)
+            {
+                foreach (var meshEntry in model.Mesh.Parts)
+                {
+                    BasePart meshPart = meshEntry.Value;
+                    meshInventory.Add(new JObject {
+                        ["name"] = meshPart.Name,
+                        ["type"] = meshPart.GetType().FullName,
+                        ["part_type"] = meshPart.PartType.ToString(),
+                        ["nodes"] = meshPart.NodeLabels == null ? 0 : meshPart.NodeLabels.Length,
+                        ["elements"] = meshPart.Labels == null ? 0 : meshPart.Labels.Length
+                    });
+                }
+            }
             bool pass = names.Length > 0 && rows.All(x => (bool?)x["produced_mesh"] == true);
 
             JObject report = new JObject {
@@ -145,6 +202,9 @@ $helpers=@'
                 ["source_file"] = Path.GetFileName(inputPath),
                 ["source_path"] = inputPath,
                 ["geometry_part_count"] = model.Geometry == null ? 0 : model.Geometry.Parts.Count,
+                ["geometry_inventory"] = geometryInventory,
+                ["mesh_part_count"] = model.Mesh == null || model.Mesh.Parts == null ? 0 : model.Mesh.Parts.Count,
+                ["mesh_inventory"] = meshInventory,
                 ["mesh_candidate_count"] = names.Length,
                 ["candidate_names"] = new JArray(names),
                 ["candidate_types"] = new JArray(types),
