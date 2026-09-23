@@ -2,7 +2,7 @@ name: AsterMax ANSYS WS01.1 Solver Comparison
 
 on:
   push:
-    branches: [ codex/c10212-async-mesh-repair ]
+    branches: [ codex/c10212-async-mesh-repair, release/windows-stable-rc1 ]
     paths:
       - 'native-windows/ansys-tutorials/generate_ws011_case.py'
       - 'native-windows/ansys-tutorials/ws01-1-cap-fillets.comm'
