@@ -68,6 +68,19 @@ try:
     expected={"PRESSURE":17,"SUPPORT_COUNTERBORE":4,"SUPPORT_RECESS":8,"SUPPORT_LIP":1}
     actual={"PRESSURE":len(pressure),"SUPPORT_COUNTERBORE":len(counter),
             "SUPPORT_RECESS":len(recess),"SUPPORT_LIP":len(lip)}
+    diagnostic={
+        "expected":expected,
+        "actual":actual,
+        "selected":{
+            "PRESSURE":pressure,
+            "SUPPORT_COUNTERBORE":counter,
+            "SUPPORT_RECESS":recess,
+            "SUPPORT_LIP":lip,
+        },
+        "surfaces":records,
+    }
+    with open(os.path.join(a.out_dir,"ws01-1-selection-diagnostic.json"),"w",encoding="utf-8") as f:
+        json.dump(diagnostic,f,indent=2)
     if actual!=expected:
         raise RuntimeError(f"WS01.1 CAD selection contract mismatch: expected={expected}, actual={actual}")
 
