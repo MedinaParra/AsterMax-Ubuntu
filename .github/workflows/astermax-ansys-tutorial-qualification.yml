@@ -5,6 +5,7 @@ on:
     branches: [ codex/c10212-async-mesh-repair ]
     paths:
       - 'native-windows/patch-c10213-ansys-tutorial-geometry.ps1'
+      - 'native-windows/ansys-tutorials/**'
       - '.github/workflows/astermax-ansys-tutorial-qualification.yml'
   workflow_dispatch:
 
@@ -40,6 +41,40 @@ jobs:
             if($head -notmatch 'ISO-10303-21'){ throw "Not a STEP file: $($case.file)" }
             Write-Host "DOWNLOADED=$($case.file) bytes=$((Get-Item $dest).Length)"
           }
+
+      - name: Setup Python topology inspector
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Inspect exact STEP solid topology with OpenCASCADE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check gmsh
+          New-Item -ItemType Directory -Force .\ansys-tutorials\evidence\topology | Out-Null
+          $cases=@(
+            @{id='WS01.1'; file='Cap_fillets.stp'; expected=1},
+            @{id='WS03.1'; file='Pump_assy_3.stp'; expected=5},
+            @{id='WS03.2'; file='Flange Mount.stp'; expected=2}
+          )
+          $summary=@()
+          foreach($case in $cases) {
+            $input=(Resolve-Path (Join-Path '.\ansys-tutorials\inputs' $case.file)).Path
+            $out=Join-Path '.\ansys-tutorials\evidence\topology' ($case.id+'.json')
+            python .\native-windows\ansys-tutorials\inspect_step_topology.py --input "$input" --out "$out"
+            if($LASTEXITCODE -ne 0){ throw "OpenCASCADE topology inspection failed for $($case.id)." }
+            $j=Get-Content $out -Raw | ConvertFrom-Json
+            $summary += [pscustomobject]@{
+              id=$case.id; file=$case.file; expected_volumes=$case.expected;
+              detected_volumes=$j.volume_count; surfaces=$j.surface_count;
+              expected_match=([int]$j.volume_count -eq [int]$case.expected)
+            }
+          }
+          $summary | Format-Table -AutoSize
+          $summary | ConvertTo-Json -Depth 5 | Set-Content .\ansys-tutorials\evidence\topology-summary.json -Encoding UTF8
+          # Do not fail here: a mismatch is diagnostic evidence about the public STEP,
+          # not a fabricated correction. The AsterMax mesh stage remains the hard gate.
 
       - name: Checkout pinned PrePoMax upstream
         uses: actions/checkout@v5
@@ -167,5 +202,6 @@ jobs:
           name: AsterMax-ANSYS-Tutorial-Geometry-Qualification
           path: |
             ansys-tutorials/evidence
+            ansys-tutorials/inputs
             ansys-tutorials/patch-chain
           if-no-files-found: warn
