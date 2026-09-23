@@ -156,7 +156,9 @@ namespace PrePoMax
                 _modelTree.SelectAsterMaxResultField(_axEmbeddedResults.SelectedResultField);
                 var ribbon = Controls["asterMaxRibbon"] as TabControl;
                 if (ribbon != null) foreach (TabPage page in ribbon.TabPages) if (page.Text == "Results") ribbon.SelectedTab = page;
-                tsslState.Text = "Results: " + _axEmbeddedResults.SelectedResultField;
+                // The main status text is also the native busy-state sentinel.
+                // A displayed field is not an active job; keep its label out of it.
+                tsslState.ToolTipText = "Results: " + _axEmbeddedResults.SelectedResultField;
             }
             catch
             {
