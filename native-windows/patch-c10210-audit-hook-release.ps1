@@ -43,4 +43,20 @@ $m=Replace-Required $m $old $new
 $m=Replace-Required $m '                else if (_controller.ModelChanged)' '                else if (_controller.ModelChanged && String.IsNullOrWhiteSpace(_c10209AuditShutdownDirectory))'
 Set-Content $mainPath $m -Encoding UTF8
 
+# VTK holds native references after managed Dispose. Disable its Win32 event
+# procedure while the HWND is still valid, not later from a finalizer.
+$vtkPath=Join-Path $Root 'vtkControl/vtkControl.Designer.cs'
+$v=(Get-Content $vtkPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
+$v=Replace-Required $v '                if (disposing)
+                {
+                    if (components != null)' '                if (disposing)
+                {
+                    if (_renderWindowInteractor != null) _renderWindowInteractor.Disable();
+                    if (components != null)'
+$v=Replace-Required $v '        protected override void OnHandleDestroyed(System.EventArgs e)
+        {' '        protected override void OnHandleDestroyed(System.EventArgs e)
+        {
+            if (_renderWindowInteractor != null) _renderWindowInteractor.Disable();'
+Set-Content $vtkPath $v -Encoding UTF8
+
 Write-Host 'C10.20.10 audit-only keyboard hook release applied.' -ForegroundColor Green
