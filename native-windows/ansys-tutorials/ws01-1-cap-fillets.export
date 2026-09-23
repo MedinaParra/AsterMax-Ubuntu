@@ -1,0 +1,13 @@
+P actions make_etude
+P version stable
+P mode interactif
+A tpmax 900
+A memjeveux 2048
+P ncpus 2
+P mpi_nbcpu 1
+P mpi_nbnoeud 1
+
+F comm ./ws01-1-cap-fillets.comm D 1
+F mmed ./ws01-1-cap-fillets.mmed D 20
+F mess ./ws01-1-cap-fillets.mess R 6
+F rmed ./ws01-1-cap-fillets.rmed R 81
