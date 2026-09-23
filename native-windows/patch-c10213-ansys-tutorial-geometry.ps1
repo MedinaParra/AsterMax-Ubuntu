@@ -226,6 +226,31 @@ $helpers=@'
 $a=Replace-Required $a $signature ($helpers+$signature)
 Set-Content $auditPath $a -Encoding UTF8
 
+# Preserve disconnected solids from multi-body ANSYS workshop STEP files as
+# distinct FE parts. Upstream PrePoMax already supports this operation through
+# MeshingParameters.SplitCompoundMesh, but its default is false. Scope the
+# behavior to the explicit tutorial audit so ordinary projects are unchanged
+# while we validate topology before promoting any product-wide default.
+$controllerPath=Join-Path $Root 'PrePoMax/Controller.cs'
+$controller=(Get-Content $controllerPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
+$controllerOld=@'
+            // Allow a quad dominated mesh only for shells
+            if (_model.Geometry.Parts[partName].PartType != PartType.Shell) meshingParameters.QuadDominated = false;
+            //
+            return meshingParameters;
+'@
+$controllerNew=@'
+            // Allow a quad dominated mesh only for shells
+            if (_model.Geometry.Parts[partName].PartType != PartType.Shell) meshingParameters.QuadDominated = false;
+            //
+            bool c10213TutorialAudit = Environment.GetCommandLineArgs().Any(x =>
+                x.StartsWith("--astermax-tutorial-audit=", StringComparison.OrdinalIgnoreCase));
+            if (c10213TutorialAudit) meshingParameters.SplitCompoundMesh = true;
+            return meshingParameters;
+'@
+$controller=Replace-Required $controller $controllerOld $controllerNew
+Set-Content $controllerPath $controller -Encoding UTF8
+
 $uiPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 $u=(Get-Content $uiPath -Raw).Replace($cr+$lf,$lf).Replace($cr,$lf)
 $call='                StartAsterMaxC1020WorkflowConformanceAudit();'
