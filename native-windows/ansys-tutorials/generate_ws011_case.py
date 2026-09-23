@@ -38,16 +38,17 @@ try:
         b=r["bbox"]
         return near(b[2],z) and near(b[5],z)
 
-    # Workshop: 17 exterior surfaces. For this exact CAD they are the continuous
-    # outer skin around x/y envelope, excluding the open-side top rim, plus the
-    # broad outside face at z=0.
+    # Workshop: 17 exterior surfaces. OpenCASCADE/Gmsh expands some curved
+    # bounding boxes differently from CAD kernels, so classify the exact outer
+    # skin by its z morphology rather than by x/y extrema:
+    #   9 lower-skin faces live entirely in z=0..0.5 mm;
+    #   8 outer wall/corner faces span z=0.5..20 mm and have area > 200 mm2.
     pressure=[]
     for r in records:
         b=r["bbox"]
-        envelope=(near(b[0],0.0) or near(b[3],80.0) or near(b[1],0.0) or near(b[4],50.0))
-        top_rim=flat_z(r,20.0) and r["area"]>200
-        broad_outer=flat_z(r,0.0) and r["area"]>3000
-        if (envelope and not top_rim) or broad_outer:
+        lower_skin=(b[2] >= -tol and b[5] <= 0.501+tol)
+        outer_wall=(near(b[2],0.5) and near(b[5],20.0) and r["area"]>200.0)
+        if lower_skin or outer_wall:
             pressure.append(r["tag"])
 
     # Four planar annular counterbore seats at z=1 mm.
