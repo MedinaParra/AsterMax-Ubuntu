@@ -98,7 +98,7 @@ namespace PrePoMax
                 {
                     ShowAsterMaxModelWorkspace();
                     _modelTree.SetAsterMaxResultFields(_asterMaxLoadedResults.AvailableFields(), "Stale - solve again", false);
-                    tsslState.Text = "Results are out of date: " + ex.Message;
+                    tsslState.ToolTipText = "Results are out of date: " + ex.Message;
                 }
             }
             finally { _axRefreshingResults = false; }
