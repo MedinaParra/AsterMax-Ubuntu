@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Build the exact ANSYS WS01.1 Cap_fillets tutorial mesh for AsterMax/Code_Aster.
 
-No FEA result values are embedded. Surface groups are selected from exact CAD
-geometry invariants documented by the workshop and asserted by count.
+Surface scopes reproduce the 17 pressure faces and 13 frictionless-support
+faces from the tutorial. The default volume formulation is quadratic TET10
+(surface TRI6), matching the ANSYS Mechanical Program Controlled solid
+formulation candidate recorded in the WS01 provenance audit.
+
+No FEA result values are embedded.
 """
-import argparse, json, math, os
+import argparse, json, os
 import gmsh
 
 p=argparse.ArgumentParser()
 p.add_argument("--input", required=True)
 p.add_argument("--out-dir", required=True)
 p.add_argument("--mesh-size", type=float, default=3.0)
+p.add_argument("--element-order", type=int, choices=(1,2), default=2)
 a=p.parse_args()
 os.makedirs(a.out_dir, exist_ok=True)
 
@@ -18,7 +23,7 @@ gmsh.initialize()
 try:
     gmsh.option.setNumber("General.Terminal", 1)
     gmsh.model.add("ANSYS_WS01_1_Cap_fillets")
-    ents=gmsh.model.occ.importShapes(os.path.abspath(a.input))
+    gmsh.model.occ.importShapes(os.path.abspath(a.input))
     gmsh.model.occ.synchronize()
     vols=[tag for dim,tag in gmsh.model.getEntities(3)]
     surfs=[tag for dim,tag in gmsh.model.getEntities(2)]
@@ -38,29 +43,17 @@ try:
         b=r["bbox"]
         return near(b[2],z) and near(b[5],z)
 
-    # Workshop: 17 exterior surfaces. OpenCASCADE/Gmsh expands some curved
-    # bounding boxes differently from CAD kernels, so classify the exact outer
-    # skin by its z morphology rather than by x/y extrema:
-    #   9 lower-skin faces live entirely in z=0..0.5 mm;
-    #   8 outer wall/corner faces span z=0.5..20 mm and have area > 200 mm2.
     pressure=[]
     for r in records:
         b=r["bbox"]
         lower_skin=(b[2] >= -tol and b[5] <= 0.501+tol)
-        # OCC reports deliberately conservative bounding boxes for the four
-        # bottom corner toroidal fillets (zmax ~0.855 although their surface
-        # mass/centroid belongs to the z=0..0.5 outer skin). Include exactly
-        # that four-face family by its invariant area and centroid.
         corner_fillet=(b[2] >= -tol and 8.0 < r["area"] < 11.0 and r["com"][2] < 0.30)
         outer_wall=(near(b[2],0.5) and near(b[5],20.0) and r["area"]>200.0)
         if lower_skin or corner_fillet or outer_wall:
             pressure.append(r["tag"])
 
-    # Four planar annular counterbore seats at z=1 mm.
     counter=[r["tag"] for r in records if flat_z(r,1.0) and 20.0<r["area"]<30.0]
 
-    # Eight surfaces around the inner bottom recess: four straight walls and four
-    # corner cylinders spanning z=3.5..15 at x/y = 2/78/2/48 mm.
     recess=[]
     for r in records:
         b=r["bbox"]
@@ -68,7 +61,6 @@ try:
         if inner_boundary and b[2]>=3.49-tol and b[5]<=15.01+tol and r["area"]>100:
             recess.append(r["tag"])
 
-    # Single horizontal lip at z=15 mm.
     lip=[r["tag"] for r in records if flat_z(r,15.0) and 200.0<r["area"]<300.0]
 
     expected={"PRESSURE":17,"SUPPORT_COUNTERBORE":4,"SUPPORT_RECESS":8,"SUPPORT_LIP":1}
@@ -104,26 +96,51 @@ try:
 
     gmsh.option.setNumber("Mesh.MeshSizeMin", a.mesh_size)
     gmsh.option.setNumber("Mesh.MeshSizeMax", a.mesh_size)
-    gmsh.option.setNumber("Mesh.ElementOrder", 1)
     gmsh.option.setNumber("Mesh.Algorithm3D", 1)
     gmsh.model.mesh.generate(3)
 
-    # Gmsh selects the MED writer from the file extension. Code_Aster's .export
-    # file type remains "mmed"; the physical file itself can and should be .med.
+    if a.element_order == 2:
+        gmsh.model.mesh.setOrder(2)
+        # Curve midside nodes back onto the CAD so the quadratic geometry is
+        # not merely a straight-sided TET4 mesh with extra nodes.
+        try:
+            gmsh.model.mesh.optimize("HighOrder")
+        except Exception as exc:
+            print(f"HighOrder optimization warning: {exc}")
+
     mesh_path=os.path.join(a.out_dir,"ws01-1-cap-fillets.med")
     gmsh.write(mesh_path)
 
     node_tags,coords,_=gmsh.model.mesh.getNodes()
     elem_types,elem_tags,_=gmsh.model.mesh.getElements(3)
+    surf_types,surf_elem_tags,_=gmsh.model.mesh.getElements(2)
     elem_count=sum(len(x) for x in elem_tags)
+
+    expected_volume_type = 11 if a.element_order == 2 else 4  # Gmsh TET10 / TET4
+    expected_surface_type = 9 if a.element_order == 2 else 2  # Gmsh TRI6 / TRI3
+    volume_types=[int(x) for x in elem_types]
+    surface_types=[int(x) for x in surf_types]
+    if volume_types != [expected_volume_type]:
+        raise RuntimeError(f"WS01.1 mesh formulation mismatch: expected volume type {expected_volume_type}, got {volume_types}")
+    if any(t != expected_surface_type for t in surface_types):
+        raise RuntimeError(f"WS01.1 surface formulation mismatch: expected TRI type {expected_surface_type}, got {surface_types}")
+
     evidence={
         "case":"ANSYS Mechanical WS01.1 Mechanical Basics",
         "source_file":os.path.basename(a.input),
         "geometry":{"volumes":len(vols),"surfaces":len(surfs)},
         "surface_groups":groups,
         "surface_group_counts":actual,
-        "mesh":{"target_size_mm":a.mesh_size,"nodes":len(node_tags),"volume_elements":elem_count,
-                "element_types":[int(x) for x in elem_types]},
+        "mesh":{
+            "target_size_mm":a.mesh_size,
+            "order":a.element_order,
+            "formulation":"TET10/TRI6" if a.element_order==2 else "TET4/TRI3",
+            "nodes":len(node_tags),
+            "volume_elements":elem_count,
+            "surface_elements":sum(len(x) for x in surf_elem_tags),
+            "element_types":volume_types,
+            "surface_element_types":surface_types,
+        },
         "material":{"name":"ANSYS Aluminum Alloy","E_MPa":71000.0,"nu":0.33,"yield_MPa":280.0},
         "load":{"type":"pressure","magnitude_MPa":1.1,"group":"PRESSURE"},
         "supports":[
@@ -132,6 +149,14 @@ try:
             {"type":"frictionless","group":"SUPPORT_LIP","implementation":"FACE_IMPO DNOR=0"},
         ],
         "mesh_file":os.path.basename(mesh_path),
+        "ansys_mesh_replication":{
+            "target":"pre-refinement tutorial snapshot",
+            "candidate_order":"quadratic",
+            "candidate_volume_formulation":"TET10",
+            "candidate_surface_formulation":"TRI6",
+            "run_specific_ansys_element_count_attested":False,
+            "note":"Tutorial source does not preserve its Workbench project/mesh database; formulation is reproduced, exact node/element count is not claimed."
+        },
         "fea_values_invented":False,
     }
     with open(os.path.join(a.out_dir,"ws01-1-model-evidence.json"),"w",encoding="utf-8") as f:
