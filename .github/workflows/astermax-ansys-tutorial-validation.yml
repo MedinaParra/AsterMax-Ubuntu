@@ -15,7 +15,7 @@ concurrency:
 jobs:
   exact-training-geometry:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Checkout tutorial validation branch
         uses: actions/checkout@v5
@@ -27,7 +27,7 @@ jobs:
 
       - name: Install geometry probe dependencies
         shell: pwsh
-        run: python -m pip install --disable-pip-version-check gmsh
+        run: python -m pip install --disable-pip-version-check gmsh numpy h5py
 
       - name: Download exact ANSYS training STEP fixtures
         shell: pwsh
@@ -56,6 +56,61 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force .\tutorial-evidence | Out-Null
           python .\native-windows\ansys-tutorials\inventory-step.py .\tutorial-evidence '.\tutorial-input\Cap_fillets.stp' '.\tutorial-input\Pump_assy_3.stp' '.\tutorial-input\Flange Mount.stp'
+
+      - name: Build exact WS01.1 AsterMax Code_Aster case
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\tutorial-evidence\WS01.1 | Out-Null
+          python .\native-windows\ansys-tutorials\generate-ws01.py --step '.\tutorial-input\Cap_fillets.stp' --out '.\tutorial-evidence\WS01.1' --size 3.0
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 exact model generation failed.' }
+
+      - name: Install and probe native Windows Code_Aster
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=(Resolve-Path '.\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1').Path
+          & $runner probe
+          if($LASTEXITCODE -ne 0){
+            $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+            $url='https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+            $expected='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
+            curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi $url
+            if($LASTEXITCODE -ne 0){ throw 'Code_Aster provider MSI download failed.' }
+            $actual=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+            if($actual -ne $expected){ throw "Code_Aster MSI digest mismatch: $actual" }
+            $log=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+            $p=Start-Process msiexec.exe -ArgumentList @('/i',('"'+$msi+'"'),'/qn','/norestart','/l*v',('"'+$log+'"')) -PassThru
+            if(-not $p.WaitForExit(600000)){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; throw 'Code_Aster install timed out.' }
+            if($p.ExitCode -notin @(0,3010)){ throw "Code_Aster MSI failed: $($p.ExitCode)" }
+            & $runner probe
+            if($LASTEXITCODE -ne 0){ throw 'Native Windows Code_Aster probe failed after installation.' }
+          }
+
+      - name: Solve WS01.1 with AsterMax native Code_Aster runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=(Resolve-Path '.\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1').Path
+          $ws=(Resolve-Path '.\tutorial-evidence\WS01.1').Path
+          & $runner (Join-Path $ws 'ws01.export') $ws | Tee-Object (Join-Path $ws 'ASTERMAX_CODE_ASTER_STDOUT.log')
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 genuine Code_Aster solve failed.' }
+
+      - name: Import WS01.1 genuine MED into AsterMax results format
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:ASTERMAX_MED_BRIDGE_MODE='production'
+          $ws=(Resolve-Path '.\tutorial-evidence\WS01.1').Path
+          python .\native-windows\bridge-c964-med-results.py (Join-Path $ws 'ws01.rmed') (Join-Path $ws 'ws01.astermax-results.json') (Join-Path $ws 'ws01.astermax-results.vtu') | Tee-Object (Join-Path $ws 'ASTERMAX_MED_BRIDGE.log')
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 AsterMax MED result admission failed.' }
+
+      - name: Compare WS01.1 AsterMax results with ANSYS reference
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python .\native-windows\ansys-tutorials\compare-ws01.py --bundle '.\tutorial-evidence\WS01.1\ws01.astermax-results.json' --input '.\tutorial-evidence\WS01.1\ws01-input.json' --out '.\tutorial-evidence\WS01.1\ws01-comparison.json'
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 comparison integrity gate failed.' }
 
       - name: Build source integrity manifest
         shell: pwsh
