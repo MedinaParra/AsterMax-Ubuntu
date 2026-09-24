@@ -583,6 +583,19 @@
         "AsterMaxDirectCameraControls",
         "AsterMaxSpanishChile"
       ]
+    },
+    {
+      "id": "patch-c1025-mechanical-icons",
+      "file": "patch-c1025-mechanical-icons.ps1",
+      "depends": [
+        "patch-c1024-functional-ribbon"
+      ],
+      "declares": [
+        "AsterMaxMechanicalRibbonIcons"
+      ],
+      "consumes": [
+        "AsterMaxFunctionalRibbon"
+      ]
     }
   ]
 }
