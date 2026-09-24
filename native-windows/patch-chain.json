@@ -5,7 +5,9 @@
       "id": "patch-astermax",
       "file": "patch-astermax.ps1",
       "depends": [],
-      "declares": [],
+      "declares": [
+        "AsterMaxNativeUi"
+      ],
       "consumes": []
     },
     {
