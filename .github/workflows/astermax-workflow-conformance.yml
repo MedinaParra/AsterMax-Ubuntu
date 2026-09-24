@@ -160,6 +160,13 @@ jobs:
             workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
+      - name: Upload C10.22 Windows 10 EXE immediately
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.22-Windows10-EXE
+          path: dist
+          if-no-files-found: error
+
       - name: Install and exercise native Windows Code_Aster
         shell: pwsh
         run: ./native-windows/test-c1011-native-windows.ps1 -Dist "$PWD/dist"
