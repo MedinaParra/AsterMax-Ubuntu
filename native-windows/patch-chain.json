@@ -569,6 +569,20 @@
         "AsterMaxWin10VtkVisibilityFix",
         "AsterMaxNativeUi"
       ]
+    },
+    {
+      "id": "patch-c1024-functional-ribbon",
+      "file": "patch-c1024-functional-ribbon.ps1",
+      "depends": [
+        "patch-c1023-camera-fit-step-center"
+      ],
+      "declares": [
+        "AsterMaxFunctionalRibbon"
+      ],
+      "consumes": [
+        "AsterMaxDirectCameraControls",
+        "AsterMaxSpanishChile"
+      ]
     }
   ]
 }
