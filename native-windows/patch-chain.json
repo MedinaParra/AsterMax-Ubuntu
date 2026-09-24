@@ -525,6 +525,19 @@
       "consumes": [
         "C10208ExerciseRealGenerateMesh"
       ]
+    },
+    {
+      "id": "patch-c10212-es-cl",
+      "file": "patch-c10212-es-cl.ps1",
+      "depends": [
+        "patch-c10211-mesh-terminal-telemetry"
+      ],
+      "declares": [
+        "AsterMaxSpanishChile"
+      ],
+      "consumes": [
+        "AsterMaxNativeUi"
+      ]
     }
   ]
 }
