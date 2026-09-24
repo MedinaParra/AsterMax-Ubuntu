@@ -2,7 +2,7 @@ name: AsterMax C10.20.8 Windows Workflow Conformance
 
 on:
   push:
-    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair, codex/c10214-clean-process-exit, codex/c10215-same-mesh-stability ]
+    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair, codex/c10214-clean-process-exit, codex/c10215-same-mesh-stability, codex/c10216-brep-dpi ]
     paths:
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
@@ -95,7 +95,7 @@ jobs:
             'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
-            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1'
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1','patch-c10216-brep-dpi.ps1'
           )
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw "Patch-chain harness failed; inspect dist/Audit/PatchChain." }
@@ -107,7 +107,7 @@ jobs:
 
       - name: Install MED and B01 reconstruction dependencies
         shell: pwsh
-        run: python -m pip install --disable-pip-version-check numpy h5py gmsh
+        run: python -m pip install --disable-pip-version-check numpy h5py gmsh netgen-mesher==6.2.2506 netgen-occt==7.8.1
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -131,13 +131,14 @@ jobs:
           New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
           New-Item -ItemType Directory -Force .\dist\Audit\C10.20 | Out-Null
           Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\brep-dpi\brep_mesh.py .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
           Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
           $pythonRoot=Split-Path (Get-Command python).Source -Parent
           Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
-          & .\dist\AsterMaxRuntime\Python\python.exe -c "import numpy,h5py; print('ASTERMAX_PACKAGED_PYTHON_MED_OK')"
+          & .\dist\AsterMaxRuntime\Python\python.exe -c "import numpy,h5py; import netgen.occ; print('ASTERMAX_PACKAGED_PYTHON_MED_OK')"
           if($LASTEXITCODE -ne 0){ throw 'Packaged Python MED runtime failed.' }
           $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
           $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'

@@ -525,6 +525,17 @@
       "consumes": [
         "C10208ExerciseRealGenerateMesh"
       ]
+    },
+    {
+      "id": "patch-c10216-brep-dpi",
+      "file": "patch-c10216-brep-dpi.ps1",
+      "depends": [
+        "patch-c10211-mesh-terminal-telemetry"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxWaitMeshAudit"
+      ]
     }
   ]
 }
