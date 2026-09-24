@@ -142,12 +142,7 @@ namespace UserControls
             Disposed += (s,e) => _axSectionIcons.Dispose();
             _axOutline.AfterSelect += (s,e) => {
                 if (_axRefreshing) return;
-                TreeNode info=e.Node;
-                while(info!=null && String.IsNullOrEmpty(info.ToolTipText)) info=info.Parent;
-                if(info!=null) {
-                    _axWorkflowHint.Text=info.ToolTipText;
-                    _axWorkflowHint.BackColor=info.BackColor.IsEmpty?Color.FromArgb(239,246,252):info.BackColor;
-                }
+                AxRefreshWorkflowHint(e.Node);
                 if (e.Node.Name.StartsWith("ax-result/")) {
                     AsterMaxResultRequested?.Invoke(e.Node.Name.Substring("ax-result/".Length));
                     return;
@@ -301,6 +296,16 @@ namespace UserControls
                 _axOutline.TopNode = previousTop.Length > 0 ? previousTop[0] : project;
             }
             finally { _axOutline.EndUpdate(); _axRefreshing = false; }
+            AxRefreshWorkflowHint(_axOutline.SelectedNode);
+        }
+
+        private void AxRefreshWorkflowHint(TreeNode node)
+        {
+            if (_axWorkflowHint == null) return;
+            while (node != null && String.IsNullOrEmpty(node.ToolTipText)) node = node.Parent;
+            _axWorkflowHint.Text = node == null ? String.Empty : node.ToolTipText;
+            _axWorkflowHint.BackColor = node == null || node.BackColor.IsEmpty
+                ? Color.FromArgb(239,246,252) : node.BackColor;
         }
 
         private static void AxRememberExpansion(TreeNodeCollection nodes, HashSet<string> expanded)
