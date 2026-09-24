@@ -389,6 +389,89 @@ $a=Replace-Required $a '            timer.Tick += (s, e) =>' '            timer.
 $a=Replace-Required $a '                    ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);' '                    await ExecuteAsterMaxC1020WorkflowConformanceAudit(directory);'
 $a=Replace-Required $a '        private void ExecuteAsterMaxC1020WorkflowConformanceAudit(string directory)' '        private async Task ExecuteAsterMaxC1020WorkflowConformanceAudit(string directory)'
 $a=Replace-Required $a 'C10208RecordCommandSmoke(directory, commandSmoke, C10208ExerciseRealGenerateMesh(directory, model));' 'C10208RecordCommandSmoke(directory, commandSmoke, await C10208ExerciseRealGenerateMesh(directory, model));'
+
+# Keep the actual Generate Mesh output throughout the stability audit.
+$a=Replace-Required $a '            C1020PopulateB01Mesh(model);' @'
+            C10215AssignGeneratedMesh(model);
+            string generatedMeshHash = C10215MeshHash(model);
+'@
+$meshMethod=@'
+        private static string C10215MeshHash(FeModel model)
+        {
+            using (var bytes = new MemoryStream())
+            using (var writer = new BinaryWriter(bytes))
+            {
+                foreach (var item in model.Mesh.Nodes.OrderBy(x => x.Key))
+                {
+                    writer.Write(item.Key);
+                    writer.Write(item.Value.X); writer.Write(item.Value.Y); writer.Write(item.Value.Z);
+                }
+                foreach (var item in model.Mesh.Elements.OrderBy(x => x.Key))
+                {
+                    writer.Write(item.Key); writer.Write(item.Value.GetType().FullName);
+                    writer.Write(item.Value.NodeIds.Length);
+                    foreach (int id in item.Value.NodeIds) writer.Write(id);
+                }
+                writer.Flush();
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                    return BitConverter.ToString(sha.ComputeHash(bytes.ToArray())).Replace("-", "");
+            }
+        }
+
+        private static void C10215AssignGeneratedMesh(FeModel model)
+        {
+            if (model.Mesh == null || model.Mesh.Nodes.Count == 0 || model.Mesh.Elements.Count == 0)
+                throw new InvalidOperationException("Generate Mesh produced no mesh; no substitute fixture is permitted.");
+            if (model.Mesh.Parts.Count != 1)
+                throw new InvalidOperationException("The B01 stability case requires one meshed solid.");
+            string partName = model.Mesh.Parts.Keys.Single();
+            model.Sections.Clear();
+            model.Sections.Add("B01_Steel", new SolidSection("B01_Steel", "Steel", partName, RegionTypeEnum.PartName, 1, false));
+        }
+'@
+$start=$a.IndexOf('        private static void C1020PopulateB01Mesh(FeModel model)')
+$end=$a.IndexOf('        private static void C1020PopulateB01NamedSelections(FeModel model)', $start)
+if ($start -lt 0 -or $end -le $start) { throw 'Generated mesh audit method anchors missing.' }
+$a=$a.Substring(0,$start)+$meshMethod+"`n`n"+$a.Substring($end)
+$a=Replace-Required $a '            int[] fixedNodes = Enumerable.Range(0, 4).Select(c => C1020NodeId(0, c)).ToArray();' @'
+            double xmin = model.Mesh.Nodes.Values.Min(n => n.X);
+            double xmax = model.Mesh.Nodes.Values.Max(n => n.X);
+            if (Math.Abs((xmax - xmin) - 100.0) > 1e-4)
+                throw new InvalidOperationException("Unexpected B01 CAD length.");
+            double tolerance = 1e-6;
+            int[] fixedNodes = model.Mesh.Nodes.Where(n => Math.Abs(n.Value.X - xmin) < tolerance).Select(n => n.Key).OrderBy(n => n).ToArray();
+'@
+$a=Replace-Required $a '            int[] loadNodes = Enumerable.Range(0, 4).Select(c => C1020NodeId(10, c)).ToArray();' @'
+            int[] loadNodes = model.Mesh.Nodes.Where(n => Math.Abs(n.Value.X - xmax) < tolerance).Select(n => n.Key).OrderBy(n => n).ToArray();
+            if (fixedNodes.Length < 3 || loadNodes.Length < 3 || fixedNodes.Intersect(loadNodes).Any())
+                throw new InvalidOperationException("B01 end-face selections are invalid.");
+'@
+$a=Replace-Required $a 'RegionTypeEnum.NodeSetName, 2500, 0, 0, false, false, 0)' 'RegionTypeEnum.NodeSetName, 10000.0 / model.Mesh.NodeSets["LOAD"].Labels.Length, 0, 0, false, false, 0)'
+$a=Replace-Required $a '            var evidence = new JArray();' @'
+            string expectedMeshHash = C10215MeshHash(_controller.Model);
+            var evidence = new JArray();
+'@
+$a=Replace-Required $a '_controller.Model.Mesh.Nodes.Count == 44 &&' 'C10215MeshHash(_controller.Model) == expectedMeshHash &&'
+$a=Replace-Required $a '                                    _controller.Model.Mesh.Elements.Count == 10 &&' ''
+$a=Replace-Required $a '_controller.Model.Mesh.Nodes.Count == 44;' 'C10215MeshHash(_controller.Model) == expectedMeshHash;'
+$a=Replace-Required $a '            string resultField = _asterMaxLoadedResults.AvailableFields()' @'
+            string solvedMeshHash = C10215MeshHash(_controller.Model);
+            bool sameMesh = generatedMeshHash == solvedMeshHash;
+            File.WriteAllText(Path.Combine(directory, "same-mesh-continuity.json"), new JObject {
+                ["pass"] = sameMesh, ["generated_mesh_sha256"] = generatedMeshHash,
+                ["post_solve_mesh_sha256"] = solvedMeshHash,
+                ["nodes"] = _controller.Model.Mesh.Nodes.Count,
+                ["elements"] = _controller.Model.Mesh.Elements.Count,
+                ["fixture_replacement"] = false
+            }.ToString(Formatting.Indented));
+            if (!sameMesh) throw new InvalidOperationException("The generated CAD mesh changed before results publication.");
+            string resultField = _asterMaxLoadedResults.AvailableFields()
+'@
+$a=$a.Replace('4 x 2500 N CLoad per node', 'distributed equally across the generated LOAD face nodes')
+$a=$a.Replace('// The real Generate Mesh smoke proves the native command path. Replace that', '// Preserve the actual CAD-generated mesh for the solver and persistence checks.')
+$a=$a.Replace('// non-deterministic tetra mesh with the controlled HE8 B01 solver fixture.', '// No deterministic replacement mesh is allowed in this stability audit.')
+$a=$a.Replace('This command smoke is distinct from the deterministic HE8 solver fixture that follows.', 'This mesh is retained for the subsequent solver and persistence checks.')
+
 Set-Content $auditPath $a -Encoding UTF8
 
 # Native close/command guards use the status text as a busy sentinel. Retain
@@ -412,3 +495,9 @@ $b=Replace-Required $b 'tsslState.Text="AsterMax Solve: model editing is locked 
 Set-Content $buttonPath $b -Encoding UTF8
 
 Write-Host 'C10.20.11 terminal-signal Generate Mesh telemetry applied.' -ForegroundColor Green
+
+$crossPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowConformanceCrossChecks.cs'
+$c=[regex]::Replace((Get-Content $crossPath -Raw),"\r\n?","`n")
+$c=Replace-Required $c 'loadNodes == 4 && Math.Abs(fxPerNode - 2500.0) < 1e-9 &&' 'loadNodes == _controller.Model.Mesh.NodeSets["LOAD"].Labels.Length && loadNodes > 0 && Math.Abs(fxPerNode * loadNodes - 10000.0) < 1e-6 &&'
+$c=Replace-Required $c 'Native CLoad semantics preserved: 2500 N per node across 4 LOAD nodes = 10000 N total.' 'Native CLoad semantics preserved: generated end-face nodal forces sum to 10000 N.'
+Set-Content $crossPath $c -Encoding UTF8
