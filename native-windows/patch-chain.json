@@ -538,6 +538,20 @@
       "consumes": [
         "AsterMaxNativeUi"
       ]
+    },
+    {
+      "id": "patch-c1022-win10-vtk-visible",
+      "file": "patch-c1022-win10-vtk-visible.ps1",
+      "depends": [
+        "patch-c10212-es-cl"
+      ],
+      "declares": [
+        "AsterMaxWin10VtkVisibilityFix"
+      ],
+      "consumes": [
+        "AsterMaxSpanishChile",
+        "AsterMaxNativeUi"
+      ]
     }
   ]
 }
