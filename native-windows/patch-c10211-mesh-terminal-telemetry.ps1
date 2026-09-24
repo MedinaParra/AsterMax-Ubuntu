@@ -375,7 +375,7 @@ $method=@'
                 ["netgen_exe_present"]=File.Exists(netgenExe),
                 ["execution"]="REAL_NATIVE_GENERATE_MESH_RIBBON_COMMAND",
                 ["synchronization"]="CONTROLLER_TERMINAL_SIGNAL",
-                ["fixture_replacement_follows"]=true,
+                ["fixture_replacement_follows"]=false,
                 ["evidence"]=pass ?
                     "Generate Mesh produced and imported a non-empty native mesh. This command smoke is distinct from the deterministic HE8 solver fixture that follows." :
                     "Generate Mesh did not reach a verified terminal generation/import state; see explicit deadline/job/exit/route fields."
@@ -418,6 +418,56 @@ $meshMethod=@'
             }
         }
 
+        private static JObject C10215VerifySolverMesh(FeModel model, string path)
+        {
+            if (!File.Exists(path)) throw new FileNotFoundException("Code_Aster input mesh is missing.", path);
+            var nodes = new HashSet<int>();
+            var elements = new HashSet<int>();
+            string section = null;
+            foreach (string line in File.ReadLines(path))
+            {
+                string[] fields = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                if (fields.Length == 0) continue;
+                if (fields[0] == "FINSF") { section = null; continue; }
+                if (fields.Length == 1) { section = fields[0]; continue; }
+                if (section == "COOR_3D")
+                {
+                    int id;
+                    if (fields.Length != 4 || !fields[0].StartsWith("N") || !Int32.TryParse(fields[0].Substring(1), out id) ||
+                        !model.Mesh.Nodes.ContainsKey(id) || !nodes.Add(id))
+                        throw new InvalidDataException("Unexpected or duplicate exported node: " + line);
+                    var node = model.Mesh.Nodes[id];
+                    double[] expected = { node.X, node.Y, node.Z };
+                    for (int axis = 0; axis < 3; axis++)
+                    {
+                        double actual = Double.Parse(fields[axis + 1], System.Globalization.CultureInfo.InvariantCulture);
+                        if (Double.IsNaN(actual) || Double.IsInfinity(actual) || Math.Abs(actual - expected[axis]) > 1e-10)
+                            throw new InvalidDataException("Export changed CAD mesh coordinates: " + fields[0]);
+                    }
+                }
+                else if (section == "TETRA4" || section == "TETRA10" || section == "HEXA8")
+                {
+                    int id;
+                    if (!fields[0].StartsWith("E") || !Int32.TryParse(fields[0].Substring(1), out id) ||
+                        !model.Mesh.Elements.ContainsKey(id) || !elements.Add(id))
+                        throw new InvalidDataException("Unexpected or duplicate exported element: " + line);
+                    var element = model.Mesh.Elements[id];
+                    string expectedType = element is LinearTetraElement ? "TETRA4" :
+                        element is ParabolicTetraElement ? "TETRA10" : element is LinearHexaElement ? "HEXA8" : "UNSUPPORTED";
+                    if (section != expectedType || fields.Length != element.NodeIds.Length + 1)
+                        throw new InvalidDataException("Export changed element type: " + fields[0]);
+                    for (int index = 0; index < element.NodeIds.Length; index++)
+                        if (fields[index + 1] != "N" + element.NodeIds[index])
+                            throw new InvalidDataException("Export changed mesh connectivity: " + fields[0]);
+                }
+            }
+            if (nodes.Count != model.Mesh.Nodes.Count || elements.Count != model.Mesh.Elements.Count)
+                throw new InvalidDataException("Exported mesh node/element counts differ from the CAD-generated mesh.");
+            return new JObject { ["pass"] = true, ["mail_file"] = Path.GetFileName(path),
+                ["verified_nodes"] = nodes.Count, ["verified_elements"] = elements.Count,
+                ["coordinate_tolerance_mm"] = 1e-10, ["ordered_connectivity_verified"] = true };
+        }
+
         private static void C10215AssignGeneratedMesh(FeModel model)
         {
             if (model.Mesh == null || model.Mesh.Nodes.Count == 0 || model.Mesh.Elements.Count == 0)
@@ -457,9 +507,11 @@ $a=Replace-Required $a '_controller.Model.Mesh.Nodes.Count == 44;' 'C10215MeshHa
 $a=Replace-Required $a '            string resultField = _asterMaxLoadedResults.AvailableFields()' @'
             string solvedMeshHash = C10215MeshHash(_controller.Model);
             bool sameMesh = generatedMeshHash == solvedMeshHash;
+            JObject exportedMesh = C10215VerifySolverMesh(_controller.Model,
+                Path.Combine(_asterMaxSolveTransaction.Workspace, _asterMaxSolveTransaction.BaseName + ".mail"));
             File.WriteAllText(Path.Combine(directory, "same-mesh-continuity.json"), new JObject {
                 ["pass"] = sameMesh, ["generated_mesh_sha256"] = generatedMeshHash,
-                ["post_solve_mesh_sha256"] = solvedMeshHash,
+                ["post_solve_mesh_sha256"] = solvedMeshHash, ["solver_input_mesh"] = exportedMesh,
                 ["nodes"] = _controller.Model.Mesh.Nodes.Count,
                 ["elements"] = _controller.Model.Mesh.Elements.Count,
                 ["fixture_replacement"] = false
