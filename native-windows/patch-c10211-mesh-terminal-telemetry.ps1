@@ -524,6 +524,22 @@ $a=$a.Replace('// The real Generate Mesh smoke proves the native command path. R
 $a=$a.Replace('// non-deterministic tetra mesh with the controlled HE8 B01 solver fixture.', '// No deterministic replacement mesh is allowed in this stability audit.')
 $a=$a.Replace('This command smoke is distinct from the deterministic HE8 solver fixture that follows.', 'This mesh is retained for the subsequent solver and persistence checks.')
 
+
+# DrawToBitmap omits the native OpenGL child. Capture the actual visible window.
+$a=Replace-Required $a '                    DrawToBitmap(bitmap, new Rectangle(0, 0, bitmap.Width, bitmap.Height));' @'
+                    Activate();
+                    BringToFront();
+                    Refresh();
+                    Application.DoEvents();
+                    using (var graphics = Graphics.FromImage(bitmap))
+                        graphics.CopyFromScreen(Location, Point.Empty, bitmap.Size, CopyPixelOperation.SourceCopy);
+'@
+$a=Replace-Required $a '_axEmbeddedResults.LastRenderError == null && !_axEmbeddedResults.LastRenderSkipped,' @'
+                      _axEmbeddedResults.LastRenderError == null && !_axEmbeddedResults.LastRenderSkipped &&
+                      C1020FindControl<Label>(this, x => x.Name == "asterMaxWorkflowHint").Text ==
+                          C1020FindOutlineNode("ax-result/" + resultField).ToolTipText,
+'@
+
 Set-Content $auditPath $a -Encoding UTF8
 
 # Native close/command guards use the status text as a busy sentinel. Retain
