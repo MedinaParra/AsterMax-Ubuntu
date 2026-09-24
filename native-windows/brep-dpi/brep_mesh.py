@@ -20,6 +20,27 @@ def parameters(path):
 
 
 def run(brep, output, params, refinement):
+    target = Path(output)
+    evidence_path = target.with_suffix('.brep-evidence.json')
+    temp = target.with_name(target.stem + '.pending.vol')
+    # These are generated job files, never source CAD or parameter files.
+    inputs = {Path(p).resolve() for p in (brep, params, refinement)}
+    generated = (target, evidence_path, temp)
+    if any(p.resolve() in inputs for p in generated):
+        raise ValueError('Mesh output paths must not overwrite input files')
+    for path in generated:
+        path.unlink(missing_ok=True)
+    try:
+        _generate(brep, target, params, refinement)
+    except BaseException:
+        # Never leave a previous PASS or a partially published mesh available
+        # to the native importer after a failed or interrupted attempt.
+        for path in generated:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def _generate(brep, output, params, refinement):
     from netgen.occ import OCCGeometry
     from netgen.meshing import MeshingParameters
     v = parameters(params)

@@ -162,7 +162,11 @@ jobs:
 
       - name: Qualify direct BREP curved and quadratic meshes
         shell: pwsh
-        run: python native-windows/brep-dpi/test_brep_mesh.py --out "$PWD/dist/Audit/C10.20/BrepRegression"
+        run: |
+          & .\dist\AsterMaxRuntime\Python\python.exe native-windows/brep-dpi/test_brep_failure.py
+          if($LASTEXITCODE -ne 0){ throw 'BREP failure lifecycle regression failed.' }
+          & .\dist\AsterMaxRuntime\Python\python.exe native-windows/brep-dpi/test_brep_mesh.py --out "$PWD/dist/Audit/C10.20/BrepRegression"
+          if($LASTEXITCODE -ne 0){ throw 'Packaged BREP geometry regression failed.' }
 
       - name: Install and exercise native Windows Code_Aster
         shell: pwsh
