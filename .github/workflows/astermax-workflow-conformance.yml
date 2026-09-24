@@ -1,4 +1,4 @@
-name: AsterMax C10.22 Windows 10 VTK Conformance
+name: AsterMax C10.23 Windows 10 Camera Conformance
 
 on:
   push:
@@ -66,7 +66,7 @@ jobs:
         shell: pwsh
         run: python native-windows/validate-patch-chain.py
 
-      - name: Apply AsterMax chain through C10.22
+      - name: Apply AsterMax chain through C10.23
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -96,7 +96,8 @@ jobs:
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
             'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
-            'patch-c10212-es-cl.ps1','patch-c1022-win10-vtk-visible.ps1'
+            'patch-c10212-es-cl.ps1','patch-c1022-win10-vtk-visible.ps1',
+            'patch-c1023-camera-fit-step-center.ps1'
           )
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw "Patch-chain harness failed; inspect dist/Audit/PatchChain." }
@@ -156,14 +157,14 @@ jobs:
           python .\native-windows\build-c1010-materials.py --out .\dist
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.22';commit='${{ github.sha }}';executable_sha256=$hash;
+            release='C10.23';commit='${{ github.sha }}';executable_sha256=$hash;
             workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
       - name: Upload C10.22 Windows 10 EXE immediately
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.22-Windows10-EXE
+          name: AsterMax-C10.23-Windows10-EXE
           path: dist
           if-no-files-found: error
 
@@ -204,7 +205,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.22-Workflow-Conformance
+          name: AsterMax-C10.23-Workflow-Conformance
           path: |
             dist/Audit/C10.20
             dist/Audit/PatchChain
@@ -217,6 +218,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.22-Windows10-Test-Distribution
+          name: AsterMax-C10.23-Windows10-Test-Distribution
           path: dist
           if-no-files-found: error
