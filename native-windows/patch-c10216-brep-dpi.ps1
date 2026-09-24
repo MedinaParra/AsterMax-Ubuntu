@@ -76,6 +76,10 @@ $c=Get-Content $path -Raw
 $c=Replace-Required $c '                int deviceDpiBefore = DeviceDpi;' @'
                 bool perMonitorV2 = C10216DpiContextsEqual(C10216GetWindowDpiAwarenessContext(Handle), new IntPtr(-4));
                 if (!perMonitorV2) throw new InvalidOperationException("The native window did not enter PerMonitorV2 DPI awareness.");
+                C10216CompleteDpiLayout("conformance");
+                string layoutPath = Path.Combine(directory, "dpi-native-layout.json");
+                if (!File.Exists(layoutPath) || (bool?)JObject.Parse(File.ReadAllText(layoutPath))["initial_layout_valid"] != true)
+                    throw new InvalidOperationException("Native DPI layout measurements did not pass.");
                 int deviceDpiBefore = DeviceDpi;
 '@
 $c=Replace-Required $c '                    ["device_dpi_before"] = deviceDpiBefore,' @'
@@ -103,3 +107,21 @@ $c=Replace-Required $c '            C10215AssignGeneratedMesh(model);' @'
 '@
 Set-Content $path $c -Encoding UTF8
 Write-Host 'C10216 native OCC BREP adapter and PerMonitorV2 configuration applied.'
+
+Copy-Item (Join-Path $PSScriptRoot 'brep-dpi/AsterMaxDpi.cs') (Join-Path $Root 'PrePoMax/Forms/AsterMaxDpi.cs') -Force
+$path=Join-Path $Root 'PrePoMax/PrePoMax.csproj'
+$c=Get-Content $path -Raw
+$c=Replace-Required $c '<Compile Include="Forms\AsterMaxNativeUi.cs" />' '<Compile Include="Forms\AsterMaxNativeUi.cs" /><Compile Include="Forms\AsterMaxDpi.cs" />'
+Set-Content $path $c -Encoding UTF8
+$path=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
+$c=Get-Content $path -Raw
+$c=Replace-Required $c '                ThemeRecursive(this);' "                ThemeRecursive(this);`n                C10216InitializeDpiObserver();"
+Set-Content $path $c -Encoding UTF8
+$path=Join-Path $Root 'PrePoMax/Forms/AsterMaxIntegratedResults.cs'
+$c=Get-Content $path -Raw
+$c=Replace-Required $c 'Height=250,' 'Height=LogicalToDeviceUnits(250),'
+Set-Content $path $c -Encoding UTF8
+$path=Join-Path $Root 'UserControls/ModelTree.AsterMaxOutline.cs'
+$c=Get-Content $path -Raw
+$c=Replace-Required $c 'Height=88,' 'Height=LogicalToDeviceUnits(88),'
+Set-Content $path $c -Encoding UTF8
