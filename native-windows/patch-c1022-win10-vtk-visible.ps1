@@ -7,21 +7,18 @@ $m = [regex]::Replace((Get-Content $main -Raw), "\r\n?", "`n")
 # PrePoMax performs an off-screen warm-up render during FrmMain_Shown.  The upstream
 # code hides the VTK control after that warm-up.  In the AsterMax chrome this can leave
 # the placeholder/panelControl visible above an otherwise initialized renderer.
-$old = @'
-                _vtk.Left -= _vtk.Width;
-                _vtk.Visible = false;
-'@
-$new = @'
-                _vtk.Left -= _vtk.Width;
-                _vtk.Visible = true;
-                _vtk.Enabled = true;
-                _vtk.BringToFront();
-                UpdateVtkControlSize();
-                _vtk.RenderingOn = true;
-                _vtk.Refresh();
-'@
-if(-not $m.Contains($old)) { throw 'C10.22 VTK warm-up visibility anchor missing.' }
-$m = $m.Replace($old,$new)
+$warmPattern = '(?m)^(?<indent>\s*)_vtk\.Left -= _vtk\.Width;\s*\n\k<indent>_vtk\.Visible = false;'
+$warmMatch = [regex]::Match($m, $warmPattern)
+if(-not $warmMatch.Success) { throw 'C10.22 VTK warm-up visibility anchor missing.' }
+$i = $warmMatch.Groups['indent'].Value
+$warmNew = $i + '_vtk.Left -= _vtk.Width;' + "`n" +
+           $i + '_vtk.Visible = true;' + "`n" +
+           $i + '_vtk.Enabled = true;' + "`n" +
+           $i + '_vtk.BringToFront();' + "`n" +
+           $i + 'UpdateVtkControlSize();' + "`n" +
+           $i + '_vtk.RenderingOn = true;' + "`n" +
+           $i + '_vtk.Refresh();'
+$m = [regex]::Replace($m, $warmPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($x) $warmNew }, 1)
 Set-Content $main $m -Encoding UTF8
 
 $ui = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
