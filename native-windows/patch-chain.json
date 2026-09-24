@@ -554,6 +554,21 @@
         "AsterMaxSpanishChile",
         "AsterMaxNativeUi"
       ]
+    },
+    {
+      "id": "patch-c1023-camera-fit-step-center",
+      "file": "patch-c1023-camera-fit-step-center.ps1",
+      "depends": [
+        "patch-c1022-win10-vtk-visible"
+      ],
+      "declares": [
+        "AsterMaxDirectCameraControls",
+        "AsterMaxCenterImportedGeometry"
+      ],
+      "consumes": [
+        "AsterMaxWin10VtkVisibilityFix",
+        "AsterMaxNativeUi"
+      ]
     }
   ]
 }
