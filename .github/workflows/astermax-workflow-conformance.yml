@@ -1,5 +1,6 @@
 name: AsterMax C10.26 Mechanical Outline Workspace
 # C10.26 ribbon repair build
+# C10.27 ribbon crash guard
 
 on:
   push:
