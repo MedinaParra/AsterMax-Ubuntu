@@ -24,20 +24,16 @@ $o=$o.Replace('_axOutlineTimer = new Timer { Interval = 300 };',
 
 # Move model-tree-changed notification out of the rebuild preamble so callbacks cannot
 # recursively rebuild the projected tree mid-update.
-$old = @'
-            string sourceStamp = stamp.ToString();
-            if (_axSourceStamp != sourceStamp) { _axSourceStamp=sourceStamp; AsterMaxModelTreeChanged?.Invoke(); }
-            stamp.Append(_axResultStatus).Append(_axResultsCurrent).Append(String.Join("|",_axResultFields));
-'@
-$new = @'
+if(-not $o.Contains('bool sourceChanged = _axSourceStamp != sourceStamp;')){
+  $sourcePattern='(?s)            string sourceStamp = stamp\.ToString\(\);\s*            if \(_axSourceStamp != sourceStamp\) \{ _axSourceStamp=sourceStamp; AsterMaxModelTreeChanged\?\.Invoke\(\); \}\s*            stamp\.Append\(_axResultStatus\)\.Append\(_axResultsCurrent\)\.Append\(String\.Join\("\\|",_axResultFields\)\);'
+  $sourceReplacement=@'
             string sourceStamp = stamp.ToString();
             bool sourceChanged = _axSourceStamp != sourceStamp;
             if (sourceChanged) _axSourceStamp=sourceStamp;
             stamp.Append(_axResultStatus).Append(_axResultsCurrent).Append(String.Join("|",_axResultFields));
 '@
-if(-not $o.Contains('bool sourceChanged = _axSourceStamp != sourceStamp;')){
-  if(-not $o.Contains($old)){ throw 'C10.29 source-change anchor missing.' }
-  $o=$o.Replace($old,$new)
+  if(-not [regex]::IsMatch($o,$sourcePattern)){ throw 'C10.29 source-change anchor missing.' }
+  $o=[regex]::Replace($o,$sourcePattern,$sourceReplacement,1)
 }
 
 # EndUpdate -> one repaint -> then notify observers.
