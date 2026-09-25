@@ -1,4 +1,4 @@
-name: AsterMax C10.26 Mechanical Outline Workspace
+name: AsterMax C10.27 Ribbon Crash Guard
 # C10.26 ribbon repair build
 # C10.27 ribbon crash guard
 
@@ -68,7 +68,7 @@ jobs:
         shell: pwsh
         run: python native-windows/validate-patch-chain.py
 
-      - name: Apply AsterMax chain through C10.26
+      - name: Apply AsterMax chain through C10.27
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -159,14 +159,14 @@ jobs:
           python .\native-windows\build-c1010-materials.py --out .\dist
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.26';commit='${{ github.sha }}';executable_sha256=$hash;
+            release='C10.27';commit='${{ github.sha }}';executable_sha256=$hash;
             workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
       - name: Upload C10.22 Windows 10 EXE immediately
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.26-Windows10-EXE
+          name: AsterMax-C10.27-Windows10-EXE
           path: dist
           if-no-files-found: error
 
@@ -207,7 +207,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.26-Workflow-Conformance
+          name: AsterMax-C10.27-Workflow-Conformance
           path: |
             dist/Audit/C10.20
             dist/Audit/PatchChain
@@ -220,6 +220,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.26-Windows10-Test-Distribution
+          name: AsterMax-C10.27-Windows10-Test-Distribution
           path: dist
           if-no-files-found: error
