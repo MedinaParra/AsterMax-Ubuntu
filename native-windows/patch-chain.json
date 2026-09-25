@@ -625,6 +625,22 @@
       "consumes": [
         "AsterMaxMechanicalOutline"
       ]
+    },
+    {
+      "id": "patch-c1029-antiflicker-ui",
+      "file": "patch-c1029-antiflicker-ui.ps1",
+      "depends": [
+        "patch-c1028-result-units-legend"
+      ],
+      "declares": [
+        "AsterMaxAntiFlickerUI",
+        "AsterMaxCoalescedOutlineRefresh"
+      ],
+      "consumes": [
+        "AsterMaxResultUnitSelector",
+        "AsterMaxMechanicalOutline",
+        "AsterMaxFunctionalRibbon"
+      ]
     }
   ]
 }
