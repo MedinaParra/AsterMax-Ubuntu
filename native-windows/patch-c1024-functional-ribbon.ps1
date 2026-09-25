@@ -2,211 +2,155 @@ param([string]$Root)
 $ErrorActionPreference='Stop'
 
 $ui = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
-$u = [regex]::Replace((Get-Content $ui -Raw), "\r\n?", "`n")
+$u = [regex]::Replace((Get-Content $ui -Raw), "\r\n?", [char]10)
 
-function Replace-Required([string]$Text,[string]$Old,[string]$New,[string]$Name) {
-    if(-not $Text.Contains($Old)) { throw "C10.24 ribbon anchor missing: $Name" }
-    return $Text.Replace($Old,$New)
+function Replace-Required([string]$Old,[string]$New,[string]$Name) {
+    if(-not $script:u.Contains($Old)) { throw "C10.24 ribbon anchor missing: $Name" }
+    $script:u = $script:u.Replace($Old,$New)
 }
 
-# Ribbon container layout: target only the asterMaxRibbon declaration.
+# Ribbon container layout.
 $ribbonPos = $u.IndexOf('Name = "asterMaxRibbon"')
 if($ribbonPos -lt 0) { throw 'C10.24 ribbon control anchor missing.' }
 $tail = $u.Substring($ribbonPos)
-$heightMatch = [regex]::Match($tail, '(?m)^(?<i>\s*)Height\s*=\s*\d+,\s*$')
-if(-not $heightMatch.Success) { throw 'C10.24 ribbon height anchor missing.' }
-$abs = $ribbonPos + $heightMatch.Index
-$repl = $heightMatch.Groups['i'].Value + 'Height = 132,'
-$u = $u.Substring(0,$abs) + $repl + $u.Substring($abs + $heightMatch.Length)
+$hm = [regex]::Match($tail, '(?m)^(?<i>\s*)Height\s*=\s*\d+,\s*$')
+if(-not $hm.Success) { throw 'C10.24 ribbon height anchor missing.' }
+$abs = $ribbonPos + $hm.Index
+$u = $u.Substring(0,$abs) + $hm.Groups['i'].Value + 'Height = 132,' + $u.Substring($abs + $hm.Length)
 
 $tail = $u.Substring($ribbonPos)
-$paddingMatch = [regex]::Match($tail, '(?m)^(?<i>\s*)Padding\s*=\s*new Point\(\d+,\s*\d+\),\s*$')
-if(-not $paddingMatch.Success) { throw 'C10.24 ribbon padding anchor missing.' }
-$abs = $ribbonPos + $paddingMatch.Index
-$repl = $paddingMatch.Groups['i'].Value + 'Padding = new Point(12, 5),'
-$u = $u.Substring(0,$abs) + $repl + $u.Substring($abs + $paddingMatch.Length)
+$pm = [regex]::Match($tail, '(?m)^(?<i>\s*)Padding\s*=\s*new Point\(\d+,\s*\d+\),\s*$')
+if(-not $pm.Success) { throw 'C10.24 ribbon padding anchor missing.' }
+$abs = $ribbonPos + $pm.Index
+$u = $u.Substring(0,$abs) + $pm.Groups['i'].Value + 'Padding = new Point(12, 5),' + $u.Substring($abs + $pm.Length)
 
-$homeOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Inicio", new Control[] {
-                CommandTile("New", "PROJECT", () => tsbNew.PerformClick()),
-                CommandTile("Open", "PROJECT", () => tsbOpen.PerformClick()),
-                CommandTile("Import Geometry", "CAD", () => tsbImport.PerformClick(), true),
+# Inicio
+Replace-Required '                CommandTile("New", "PROJECT", () => tsbNew.PerformClick()),' '                CommandTile("Nuevo", "ARCHIVO", () => tsbNew.PerformClick()),' 'Inicio/Nuevo'
+Replace-Required '                CommandTile("Open", "PROJECT", () => tsbOpen.PerformClick()),' '                CommandTile("Abrir", "ARCHIVO", () => tsbOpen.PerformClick()),' 'Inicio/Abrir'
+Replace-Required '                CommandTile("Import Geometry", "CAD", () => tsbImport.PerformClick(), true),' '                CommandTile("Importar", "GEOMETRÍA", () => tsbImport.PerformClick(), true),' 'Inicio/Importar'
+
+$old = @'
                 CommandTile("Save", "PROJECT", () => tsbSave.PerformClick()),
                 RibbonSeparator(),
-                CommandTile("Fit", "VIEW", AsterMaxFitView),
-                CommandTile("Isometric", "VIEW", AsterMaxIsometricView)
-            }));
 '@
-$homeNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Inicio", new Control[] {
-                CommandTile("Nuevo", "ARCHIVO", () => tsbNew.PerformClick()),
-                CommandTile("Abrir", "ARCHIVO", () => tsbOpen.PerformClick()),
-                CommandTile("Importar", "GEOMETRÍA", () => tsbImport.PerformClick(), true),
+$new = @'
                 CommandTile("Guardar", "ARCHIVO", () => tsbSave.PerformClick()),
-                RibbonSeparator(),
                 CommandTile("Deshacer", "EDICIÓN", () => tsmiUndo.PerformClick()),
                 CommandTile("Rehacer", "EDICIÓN", () => tsmiRedo.PerformClick()),
                 RibbonSeparator(),
-                CommandTile("Ajustar", "VISTA", AsterMaxFitView),
-                CommandTile("Isométrica", "VISTA", AsterMaxIsometricView)
-            }));
 '@
-$u = Replace-Required $u $homeOld $homeNew 'Inicio'
+Replace-Required $old $new 'Inicio/Guardar-Edición'
+Replace-Required '                CommandTile("Fit", "VIEW", AsterMaxFitView),' '                CommandTile("Ajustar", "VISTA", AsterMaxFitView),' 'Inicio/Ajustar'
+Replace-Required '                CommandTile("Isometric", "VIEW", AsterMaxIsometricView)' '                CommandTile("Isométrica", "VISTA", AsterMaxIsometricView)' 'Inicio/Isométrica'
 
-$geometryOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Geometría", new Control[] {
-                CommandTile("Import STEP", "CAD", () => tsbImport.PerformClick(), true),
-                CommandTile("Analyze Geometry", "CHECK", () => tsmiGeometryAnalyze.PerformClick()),
-                RibbonSeparator(),
-                CommandTile("Fit", "VIEW", AsterMaxFitView),
-                CommandTile("Edges", "DISPLAY", () => tsbShowModelEdges.PerformClick())
-            }));
-'@
-$geometryNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Geometría", new Control[] {
-                CommandTile("Importar STEP", "CAD", () => tsbImport.PerformClick(), true),
-                CommandTile("Analizar", "GEOMETRÍA", () => tsmiGeometryAnalyze.PerformClick()),
-                RibbonSeparator(),
+# Geometría
+Replace-Required '                CommandTile("Import STEP", "CAD", () => tsbImport.PerformClick(), true),' '                CommandTile("Importar STEP", "CAD", () => tsbImport.PerformClick(), true),' 'Geometría/STEP'
+Replace-Required '                CommandTile("Analyze Geometry", "CHECK", () => tsmiGeometryAnalyze.PerformClick()),' '                CommandTile("Analizar", "GEOMETRÍA", () => tsmiGeometryAnalyze.PerformClick()),' 'Geometría/Analizar'
+$old = '                CommandTile("Fit", "VIEW", AsterMaxFitView),'
+$new = @'
                 CommandTile("Ajustar", "VISTA", AsterMaxFitView),
                 CommandTile("Isométrica", "VISTA", AsterMaxIsometricView),
-                CommandTile("Aristas", "VISUAL", () => tsbShowModelEdges.PerformClick())
-            }));
 '@
-$u = Replace-Required $u $geometryOld $geometryNew 'Geometría'
+Replace-Required $old $new 'Geometría/Vistas'
+Replace-Required '                CommandTile("Edges", "DISPLAY", () => tsbShowModelEdges.PerformClick())' '                CommandTile("Aristas", "VISUAL", () => tsbShowModelEdges.PerformClick())' 'Geometría/Aristas'
 
-$modelOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Modelo", new Control[] {
-                CommandTile("Model Properties", "MODEL", () => tsmiEditModel.PerformClick()),
-                CommandTile("Materials", "MODEL", () => tsmiModel.PerformClick()),
-                InfoCard("Coordinate systems and named selections live in Outline")
-            }));
-'@
-$modelNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Modelo", new Control[] {
-                CommandTile("Propiedades", "MODELO", () => tsmiEditModel.PerformClick()),
-                CommandTile("Material", "MODELO", () => tsmiCreateMaterial.PerformClick(), true),
+# Modelo
+Replace-Required '                CommandTile("Model Properties", "MODEL", () => tsmiEditModel.PerformClick()),' '                CommandTile("Propiedades", "MODELO", () => tsmiEditModel.PerformClick()),' 'Modelo/Propiedades'
+Replace-Required '                CommandTile("Materials", "MODEL", () => tsmiModel.PerformClick()),' '                CommandTile("Material", "MODELO", () => tsmiCreateMaterial.PerformClick(), true),' 'Modelo/Material'
+$old = '                InfoCard("Coordinate systems and named selections live in Outline")'
+$new = @'
                 CommandTile("Sección", "MODELO", () => tsmiCreateSection.PerformClick()),
                 RibbonSeparator(),
                 InfoCard("Materiales y secciones quedan vinculados al árbol real del modelo")
-            }));
 '@
-$u = Replace-Required $u $modelOld $modelNew 'Modelo'
+Replace-Required $old $new 'Modelo/Sección'
 
-$connectionsOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Conexiones", new Control[] {
-                InfoCard("Connections and constraints are scoped from the real model tree"),
-                StateCard("Scope", "Geometry / Named Selection")
-            }));
-'@
-$connectionsNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Conexiones", new Control[] {
-                InfoCard("Contactos y restricciones usan el árbol nativo y el scoping real"),
-                StateCard("Ámbito", "Geometría / selección")
-            }));
-'@
-$u = Replace-Required $u $connectionsOld $connectionsNew 'Conexiones'
+# Conexiones
+Replace-Required '                InfoCard("Connections and constraints are scoped from the real model tree"),' '                InfoCard("Contactos y restricciones usan el árbol nativo y el scoping real"),' 'Conexiones/Info'
+Replace-Required '                StateCard("Scope", "Geometry / Named Selection")' '                StateCard("Ámbito", "Geometría / selección")' 'Conexiones/Ámbito'
 
-$meshOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Malla", new Control[] {
-                CommandTile("Mesh Controls", "MESH", () => tsmiCreateMeshingParameters.PerformClick()),
-                CommandTile("Generate Mesh", "MESH", () => tsmiCreateMesh.PerformClick(), true),
-                InfoCard("TET4 baseline • TET10 next gate")
-            }));
-'@
-$meshNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Malla", new Control[] {
+# Malla
+$old = '                CommandTile("Mesh Controls", "MESH", () => tsmiCreateMeshingParameters.PerformClick()),'
+$new = @'
                 CommandTile("Controles", "MALLA", () => tsmiCreateMeshingParameters.PerformClick()),
                 CommandTile("Refinamiento", "MALLA", () => tsmiCreateMeshRefinement.PerformClick()),
-                CommandTile("Generar malla", "MALLA", () => tsmiCreateMesh.PerformClick(), true),
+'@
+Replace-Required $old $new 'Malla/Controles'
+Replace-Required '                CommandTile("Generate Mesh", "MESH", () => tsmiCreateMesh.PerformClick(), true),' '                CommandTile("Generar malla", "MALLA", () => tsmiCreateMesh.PerformClick(), true),' 'Malla/Generar'
+$old = '                InfoCard("TET4 baseline • TET10 next gate")'
+$new = @'
                 RibbonSeparator(),
                 InfoCard("NetGen nativo • tamaño global y refinamientos locales")
-            }));
 '@
-$u = Replace-Required $u $meshOld $meshNew 'Malla'
+Replace-Required $old $new 'Malla/Info'
 
-$environmentOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Entorno", new Control[] {
-                InfoCard("Supports and loads remain connected to native scoping"),
-                StateCard("Analysis", "Static Structural")
-            }));
-'@
-$environmentNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Entorno", new Control[] {
+# Entorno
+$old = '                InfoCard("Supports and loads remain connected to native scoping"),'
+$new = @'
                 CommandTile("Paso", "ANÁLISIS", () => tsmiCreateStep.PerformClick(), true),
                 CommandTile("Apoyo", "CONDICIÓN", () => tsmiCreateBC.PerformClick()),
                 CommandTile("Carga", "CONDICIÓN", () => tsmiCreateLoad.PerformClick()),
                 RibbonSeparator(),
-                StateCard("Análisis", "Estructural estático")
-            }));
 '@
-$u = Replace-Required $u $environmentOld $environmentNew 'Entorno'
+Replace-Required $old $new 'Entorno/Comandos'
+Replace-Required '                StateCard("Analysis", "Static Structural")' '                StateCard("Análisis", "Estructural estático")' 'Entorno/Estado'
 
-$solutionOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Solución", new Control[] {
-                StateCard("Solver", "Code_Aster integration path"),
-                InfoCard("Solution requests stay in the analysis tree; no synthetic results")
-            }));
-'@
-$solutionNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Solución", new Control[] {
+# Solución
+$old = '                StateCard("Solver", "Code_Aster integration path"),'
+$new = @'
                 CommandTile("Verificar", "MODELO", () => tsmiCheckModel.PerformClick()),
                 CommandTile("Análisis", "SOLVER", () => tsmiCreateAnalysis.PerformClick()),
                 CommandTile("Ejecutar", "CODE_ASTER", () => tsmiRunAnalysis.PerformClick(), true),
                 CommandTile("Monitor", "CODE_ASTER", () => tsmiMonitorAnalysis.PerformClick()),
                 RibbonSeparator(),
-                StateCard("Solver", "Code_Aster nativo")
-            }));
+                StateCard("Solver", "Code_Aster nativo"),
 '@
-$u = Replace-Required $u $solutionOld $solutionNew 'Solución'
+Replace-Required $old $new 'Solución/Comandos'
+Replace-Required '                InfoCard("Solution requests stay in the analysis tree; no synthetic results")' '                InfoCard("Flujo nativo: verificar → ejecutar → monitorear → resultados")' 'Solución/Info'
 
-$resultsOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Resultados", new Control[] {
-                CommandTile("Contours", "RESULT", () => tsbResultsColorContours.PerformClick(), true),
-                CommandTile("Deformed", "RESULT", () => tsbResultsDeformed.PerformClick()),
-                InfoCard("Deformation • Equivalent Stress • Reactions")
-            }));
-'@
-$resultsNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Resultados", new Control[] {
+# Resultados
+$old = '                CommandTile("Contours", "RESULT", () => tsbResultsColorContours.PerformClick(), true),'
+$new = @'
                 CommandTile("Abrir", "RESULTADOS", () => tsmiResultsAnalysis.PerformClick()),
                 CommandTile("Contornos", "RESULTADOS", () => tsbResultsColorContours.PerformClick(), true),
+'@
+Replace-Required $old $new 'Resultados/Abrir'
+$old = '                CommandTile("Deformed", "RESULT", () => tsbResultsDeformed.PerformClick()),'
+$new = @'
                 CommandTile("Deformada", "RESULTADOS", () => tsbResultsDeformed.PerformClick()),
                 CommandTile("Original", "RESULTADOS", () => tsbResultsUndeformed.PerformClick()),
+'@
+Replace-Required $old $new 'Resultados/Deformada'
+$old = '                InfoCard("Deformation • Equivalent Stress • Reactions")'
+$new = @'
                 RibbonSeparator(),
                 InfoCard("Desplazamiento • tensión equivalente • reacciones")
-            }));
 '@
-$u = Replace-Required $u $resultsOld $resultsNew 'Resultados'
+Replace-Required $old $new 'Resultados/Info'
 
-$viewOld = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Vista", new Control[] {
-                CommandTile("Fit", "CAMERA", AsterMaxFitView),
-                CommandTile("Front", "CAMERA", AsterMaxFrontView),
-                CommandTile("Top", "CAMERA", AsterMaxTopView),
-                CommandTile("Right", "CAMERA", AsterMaxRightView),
-                CommandTile("Isometric", "CAMERA", AsterMaxIsometricView),
-                RibbonSeparator(),
-                CommandTile("Edges", "DISPLAY", () => tsbShowModelEdges.PerformClick())
-            }));
-'@
-$viewNew = @'
-            ribbon.TabPages.Add(BuildRibbonPage("Vista", new Control[] {
-                CommandTile("Ajustar", "CÁMARA", AsterMaxFitView),
-                CommandTile("Frontal", "CÁMARA", AsterMaxFrontView),
-                CommandTile("Superior", "CÁMARA", AsterMaxTopView),
-                CommandTile("Derecha", "CÁMARA", AsterMaxRightView),
-                CommandTile("Isométrica", "CÁMARA", AsterMaxIsometricView),
-                RibbonSeparator(),
+# Vista
+Replace-Required '                CommandTile("Fit", "CAMERA", AsterMaxFitView),' '                CommandTile("Ajustar", "CÁMARA", AsterMaxFitView),' 'Vista/Ajustar'
+Replace-Required '                CommandTile("Front", "CAMERA", AsterMaxFrontView),' '                CommandTile("Frontal", "CÁMARA", AsterMaxFrontView),' 'Vista/Frontal'
+Replace-Required '                CommandTile("Top", "CAMERA", AsterMaxTopView),' '                CommandTile("Superior", "CÁMARA", AsterMaxTopView),' 'Vista/Superior'
+Replace-Required '                CommandTile("Right", "CAMERA", AsterMaxRightView),' '                CommandTile("Derecha", "CÁMARA", AsterMaxRightView),' 'Vista/Derecha'
+Replace-Required '                CommandTile("Isometric", "CAMERA", AsterMaxIsometricView),' '                CommandTile("Isométrica", "CÁMARA", AsterMaxIsometricView),' 'Vista/Isométrica'
+$old = '                CommandTile("Edges", "DISPLAY", () => tsbShowModelEdges.PerformClick())'
+$new = @'
                 CommandTile("Aristas", "VISUAL", () => tsbShowModelEdges.PerformClick()),
                 CommandTile("Alámbrico", "VISUAL", () => tsbShowWireframeEdges.PerformClick()),
                 CommandTile("Sin aristas", "VISUAL", () => tsbShowNoEdges.PerformClick())
-            }));
 '@
-$u = Replace-Required $u $viewOld $viewNew 'Vista'
+Replace-Required $old $new 'Vista/Visual'
 
-$u = Replace-Required $u '                Width = text.Length > 14 ? 132 : 112,' '                Width = text.Length > 13 ? 124 : 104,' 'tile width'
-$u = Replace-Required $u '                Height = 62,' '                Height = 70,' 'tile height'
-$u = Replace-Required $u '                Font = new Font("Segoe UI", 8.5f)' '                Font = new Font("Segoe UI", 8.25f)' 'tile font'
+# Compact CommandTile only.
+$cmdStart = $u.IndexOf('        private Button CommandTile(')
+$cmdEnd = $u.IndexOf('        private Label InfoCard(', $cmdStart)
+if($cmdStart -lt 0 -or $cmdEnd -lt 0) { throw 'C10.24 CommandTile method anchors missing.' }
+$cmd = $u.Substring($cmdStart, $cmdEnd-$cmdStart)
+$cmd = $cmd.Replace('Width = text.Length > 14 ? 132 : 112,','Width = text.Length > 13 ? 124 : 104,')
+$cmd = $cmd.Replace('Height = 62,','Height = 70,')
+$cmd = $cmd.Replace('Font = new Font("Segoe UI", 8.5f)','Font = new Font("Segoe UI", 8.25f)')
+$u = $u.Substring(0,$cmdStart) + $cmd + $u.Substring($cmdEnd)
 
 Set-Content $ui $u -Encoding UTF8
 Write-Host 'C10.24: expanded functional Mechanical ribbon applied.' -ForegroundColor Green
