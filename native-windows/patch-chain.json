@@ -641,6 +641,20 @@
         "AsterMaxMechanicalOutline",
         "AsterMaxFunctionalRibbon"
       ]
+    },
+    {
+      "id": "patch-c1030-fast-mesh-vtk-reentry",
+      "file": "patch-c1030-fast-mesh-vtk-reentry.ps1",
+      "depends": [
+        "patch-c1029-antiflicker-ui"
+      ],
+      "declares": [
+        "AsterMaxFastTet4Default",
+        "AsterMaxVtkRenderReentryGuard"
+      ],
+      "consumes": [
+        "AsterMaxAntiFlickerUI"
+      ]
     }
   ]
 }
