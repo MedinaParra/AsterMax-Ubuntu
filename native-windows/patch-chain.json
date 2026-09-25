@@ -655,6 +655,22 @@
       "consumes": [
         "AsterMaxAntiFlickerUI"
       ]
+    },
+    {
+      "id": "patch-c1031-auto-contacts-viewer",
+      "file": "patch-c1031-auto-contacts-viewer.ps1",
+      "depends": [
+        "patch-c1030-fast-mesh-vtk-reentry"
+      ],
+      "declares": [
+        "AsterMaxAutoContacts",
+        "AsterMaxContactInspectionViewer"
+      ],
+      "consumes": [
+        "AsterMaxFastTet4Default",
+        "AsterMaxVtkRenderReentryGuard",
+        "AsterMaxMechanicalOutline"
+      ]
     }
   ]
 }
