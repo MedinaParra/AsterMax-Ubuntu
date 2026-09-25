@@ -29,7 +29,14 @@ Replace-Required '                CommandTile("New", "PROJECT", () => tsbNew.Per
 Replace-Required '                CommandTile("Open", "PROJECT", () => tsbOpen.PerformClick()),' '                CommandTile("Abrir", "ARCHIVO", () => tsbOpen.PerformClick()),' 'Inicio/Abrir'
 Replace-Required '                CommandTile("Import Geometry", "CAD", () => tsbImport.PerformClick(), true),' '                CommandTile("Importar", "GEOMETRÍA", () => tsbImport.PerformClick(), true),' 'Inicio/Importar'
 
-$savePattern = '(?m)^(?<i>\s*)CommandTile\("[^"]+",\s*"[^"]+",\s*\(\)\s*=>\s*tsbSave\.PerformClick\(\)\),\s*
+$savePattern = '(?m)^(?<i>\s*)CommandTile\("[^"]+",\s*"[^"]+",\s*\(\)\s*=>\s*tsbSave\.PerformClick\(\)\),\s*$'
+$sm = [regex]::Match($u, $savePattern)
+if(-not $sm.Success) { throw 'C10.24 ribbon anchor missing: Inicio/Guardar' }
+$si = $sm.Groups['i'].Value
+$saveReplacement = $si + 'CommandTile("Guardar", "ARCHIVO", () => tsbSave.PerformClick()),' + "`n" +
+                   $si + 'CommandTile("Deshacer", "EDICIÓN", () => tsmiUndo.PerformClick()),' + "`n" +
+                   $si + 'CommandTile("Rehacer", "EDICIÓN", () => tsmiRedo.PerformClick()),'
+$u = [regex]::Replace($u, $savePattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($x) $saveReplacement }, 1)
 Replace-Required '                CommandTile("Fit", "VIEW", AsterMaxFitView),' '                CommandTile("Ajustar", "VISTA", AsterMaxFitView),' 'Inicio/Ajustar'
 Replace-Required '                CommandTile("Isometric", "VIEW", AsterMaxIsometricView)' '                CommandTile("Isométrica", "VISTA", AsterMaxIsometricView)' 'Inicio/Isométrica'
 
