@@ -8,32 +8,36 @@ $u = [regex]::Replace((Get-Content $ui -Raw), "\r\n?", "`n")
 # They intentionally follow a Mechanical-style visual language (charcoal + amber,
 # compact line icons) without copying ANSYS artwork or resources.
 
-$commandAnchor = @'
-                Text = group + Environment.NewLine + text,
-                Width = text.Length > 13 ? 124 : 104,
-                Height = 70,
-'@
-$commandNew = @'
-                Text = group + Environment.NewLine + text,
-                Width = text.Length > 13 ? 124 : 104,
-                Height = 82,
-                Image = CreateAsterMaxRibbonIcon(text, group, primary),
-                ImageAlign = ContentAlignment.TopCenter,
-                TextImageRelation = TextImageRelation.ImageAboveText,
-'@
-if(-not $u.Contains($commandAnchor)) { throw 'C10.25 CommandTile image anchor missing.' }
-$u = $u.Replace($commandAnchor,$commandNew)
+$cmdStart = $u.IndexOf('        private Button CommandTile(')
+$cmdEnd = $u.IndexOf('        private Label InfoCard(', $cmdStart)
+if($cmdStart -lt 0 -or $cmdEnd -lt 0) { throw 'C10.25 CommandTile method anchors missing.' }
+$cmd = $u.Substring($cmdStart, $cmdEnd-$cmdStart)
 
-$paddingOld = '                Padding = new Padding(4),'
-$paddingNew = '                Padding = new Padding(4, 5, 4, 3),'
-if(-not $u.Contains($paddingOld)) { throw 'C10.25 CommandTile padding anchor missing.' }
-$u = $u.Replace($paddingOld,$paddingNew)
+if($cmd.Contains('CreateAsterMaxRibbonIcon(text, group, primary)')) {
+    throw 'C10.25 icon layer already applied unexpectedly.'
+}
 
-$fontOld = '                Font = new Font("Segoe UI", 8.25f)'
-$fontNew = '                Font = new Font("Segoe UI Semibold", 8.0f)'
-if(-not $u.Contains($fontOld)) { throw 'C10.25 CommandTile font anchor missing.' }
-$u = $u.Replace($fontOld,$fontNew)
+$heightPattern = '(?m)^(?<i>\s*)Height\s*=\s*\d+,\s*$'
+$hm = [regex]::Match($cmd, $heightPattern)
+if(-not $hm.Success) { throw 'C10.25 CommandTile height anchor missing.' }
+$hi = $hm.Groups['i'].Value
+$heightNew = $hi + 'Height = 82,' + "`n" +
+             $hi + 'Image = CreateAsterMaxRibbonIcon(text, group, primary),' + "`n" +
+             $hi + 'ImageAlign = ContentAlignment.TopCenter,' + "`n" +
+             $hi + 'TextImageRelation = TextImageRelation.ImageAboveText,'
+$cmd = [regex]::Replace($cmd, $heightPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($x) $heightNew }, 1)
 
+$paddingPattern = '(?m)^(?<i>\s*)Padding\s*=\s*new Padding\([^\r\n]+\),\s*$'
+$pm = [regex]::Match($cmd, $paddingPattern)
+if(-not $pm.Success) { throw 'C10.25 CommandTile padding anchor missing.' }
+$paddingNew = $pm.Groups['i'].Value + 'Padding = new Padding(4, 5, 4, 3),'
+$cmd = [regex]::Replace($cmd, $paddingPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($x) $paddingNew }, 1)
+
+$fontPattern = 'Font\s*=\s*new Font\("Segoe UI",\s*[0-9.]+f\)'
+if(-not [regex]::IsMatch($cmd, $fontPattern)) { throw 'C10.25 CommandTile font anchor missing.' }
+$cmd = [regex]::Replace($cmd, $fontPattern, 'Font = new Font("Segoe UI Semibold", 8.0f)', 1)
+
+$u = $u.Substring(0,$cmdStart) + $cmd + $u.Substring($cmdEnd)
 $helperAnchor = '        private Label InfoCard(string text)'
 $helpers = @'
         private Image CreateAsterMaxRibbonIcon(string text, string group, bool primary)
