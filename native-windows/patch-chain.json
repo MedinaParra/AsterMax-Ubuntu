@@ -611,6 +611,20 @@
         "AsterMaxMechanicalRibbonIcons",
         "AsterMaxSpanishChile"
       ]
+    },
+    {
+      "id": "patch-c1028-result-units-legend",
+      "file": "patch-c1028-result-units-legend.ps1",
+      "depends": [
+        "patch-c1026-mechanical-outline"
+      ],
+      "declares": [
+        "AsterMaxResultUnitSelector",
+        "AsterMaxCleanScalarLegend"
+      ],
+      "consumes": [
+        "AsterMaxMechanicalOutline"
+      ]
     }
   ]
 }
