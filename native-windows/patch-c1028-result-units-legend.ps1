@@ -166,19 +166,25 @@ $sceneNew = @'
             _displayScalarFactor=AsterMaxDisplayFactor(rawScene.Unit,displayUnit);
             _scene=rawScene.ConvertScalarDisplay(_displayScalarFactor,displayUnit);
 '@
-if($v.Contains($sceneLine)) $v=$v.Replace($sceneLine,$sceneNew.TrimEnd())
+if($v.Contains($sceneLine)) {
+    $v=$v.Replace($sceneLine,$sceneNew.TrimEnd())
+}
 elseif(-not $v.Contains('_displayScalarFactor=AsterMaxDisplayFactor')){ throw 'C10.28 scene conversion anchor missing.' }
 
 # Probe value is stored in source units; convert only for display.
 $probeLine = '            double value=_bundle.ProbeNode(node,_scene.Field);'
 $probeNew = '            double value=_bundle.ProbeNode(node,_scene.Field) * _displayScalarFactor;'
-if($v.Contains($probeLine)) $v=$v.Replace($probeLine,$probeNew)
+if($v.Contains($probeLine)) {
+    $v=$v.Replace($probeLine,$probeNew)
+}
 elseif(-not $v.Contains('ProbeNode(node,_scene.Field) * _displayScalarFactor')){ throw 'C10.28 probe conversion anchor missing.' }
 
 # Evidence summary remains truthful but follows selected display units.
 $evidenceProbe = '_bundle.ProbeNode((int)_probeNode.Value-1,_scene.Field));'
 $evidenceNew = '_bundle.ProbeNode((int)_probeNode.Value-1,_scene.Field)*_displayScalarFactor);'
-if($v.Contains($evidenceProbe)) $v=$v.Replace($evidenceProbe,$evidenceNew)
+if($v.Contains($evidenceProbe)) {
+    $v=$v.Replace($evidenceProbe,$evidenceNew)
+}
 
 # Auto/manual spectrum follows user-selected number of bands.
 $autoSpectrum = '            if(_autoRange.Checked) return contract.CreateVtkSpectrum();'
@@ -190,7 +196,9 @@ $autoNew = @'
                 return autoSpectrum;
             }
 '@
-if($v.Contains($autoSpectrum)) $v=$v.Replace($autoSpectrum,$autoNew.TrimEnd())
+if($v.Contains($autoSpectrum)) {
+    $v=$v.Replace($autoSpectrum,$autoNew.TrimEnd())
+}
 elseif(-not $v.Contains('autoSpectrum.NumberOfColors=(int)_legendBands.Value')){ throw 'C10.28 auto spectrum anchor missing.' }
 
 $v=$v.Replace('            spectrum.NumberOfColors=12;','            spectrum.NumberOfColors=(int)_legendBands.Value;')
@@ -209,7 +217,9 @@ elseif(-not $v.Contains('_view.SetScalarBarNumberFormat(AsterMaxScalarBarFormat(
 # Improve the detached/custom numeric legend too.
 $legendFormatOld = 'g.DrawString(v.ToString("G6",System.Globalization.CultureInfo.InvariantCulture),f,Brushes.Black,x+w+8,yy-7);'
 $legendFormatNew = 'g.DrawString(AsterMaxFormatLegendValue(v),f,Brushes.Black,x+w+8,yy-7);'
-if($v.Contains($legendFormatOld)) $v=$v.Replace($legendFormatOld,$legendFormatNew)
+if($v.Contains($legendFormatOld)) {
+    $v=$v.Replace($legendFormatOld,$legendFormatNew)
+}
 
 $legendClassAnchor = '        private sealed class AsterMaxLegendPanel : Control'
 $legendHelper = @'
