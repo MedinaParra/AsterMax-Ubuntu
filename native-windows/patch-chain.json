@@ -671,6 +671,21 @@
         "AsterMaxVtkRenderReentryGuard",
         "AsterMaxMechanicalOutline"
       ]
+    },
+    {
+      "id": "patch-c1032-default-material-assignment",
+      "file": "patch-c1032-default-material-assignment.ps1",
+      "depends": [
+        "patch-c1031-auto-contacts-viewer"
+      ],
+      "declares": [
+        "AsterMaxDefaultMaterial",
+        "AsterMaxAutoMaterialAssignment"
+      ],
+      "consumes": [
+        "AsterMaxAutoContacts",
+        "AsterMaxMechanicalOutline"
+      ]
     }
   ]
 }
