@@ -47,7 +47,6 @@ Replace-Required '                CommandTile("Edges", "DISPLAY", () => tsbShowM
 
 # Modelo
 Replace-Required '                CommandTile("Model Properties", "MODEL", () => tsmiEditModel.PerformClick()),' '                CommandTile("Propiedades", "MODELO", () => tsmiEditModel.PerformClick()),' 'Modelo/Propiedades'
-Replace-Required '                CommandTile("Materials", "MODEL", () => tsmiModel.PerformClick()),' '                CommandTile("Material", "MODELO", () => tsmiCreateMaterial.PerformClick(), true),' 'Modelo/Material'
 $old = '                InfoCard("Coordinate systems and named selections live in Outline")'
 $new = @'
                 CommandTile("Sección", "MODELO", () => tsmiCreateSection.PerformClick()),
