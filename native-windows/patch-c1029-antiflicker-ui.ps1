@@ -3,42 +3,64 @@ $ErrorActionPreference='Stop'
 
 $outlinePath = Join-Path $Root 'UserControls/ModelTree.AsterMaxOutline.cs'
 $uiPath      = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
-$modelPath   = Join-Path $Root 'UserControls/ModelTree.cs'
-foreach($p in @($outlinePath,$uiPath,$modelPath)){ if(!(Test-Path $p)){ throw "C10.29 missing: $p" } }
+if(!(Test-Path $outlinePath)){ throw 'C10.29 projected Outline source missing.' }
+if(!(Test-Path $uiPath)){ throw 'C10.29 AsterMaxNativeUi source missing.' }
 
-# ---------------- Outline: coalesce refreshes and double-buffer the projected tree ----------------
+# ----------------------------------------------------------------------
+# Projected Outline: double buffer + coalesced refresh
+# ----------------------------------------------------------------------
 $o=[regex]::Replace((Get-Content $outlinePath -Raw),"\r\n?","`n")
 
-if(-not $o.Contains('AsterMaxEnableDoubleBuffering(_axOutline);')){
-  $outlineInitPos=$o.IndexOf('_axOutline = new TreeView')
-  if($outlineInitPos -lt 0){ throw 'C10.29 outline tree init anchor missing.' }
-  $outlineInitEnd=$o.IndexOf(';',$outlineInitPos)
-  if($outlineInitEnd -lt 0){ throw 'C10.29 outline tree init terminator missing.' }
-  $insertPos=$outlineInitEnd+1
-  $o=$o.Substring(0,$insertPos)+"`n            AsterMaxEnableDoubleBuffering(_axOutline);"+$o.Substring($insertPos)
-}
-
-# Slow the polling slightly. Native operations still invalidate the stamp immediately.
-$o=$o.Replace('_axOutlineTimer = new Timer { Interval = 300 };',
-              '_axOutlineTimer = new Timer { Interval = 650 };')
-
-# Move model-tree-changed notification out of the rebuild preamble so callbacks cannot
-# recursively rebuild the projected tree mid-update.
-if(-not $o.Contains('bool sourceChanged = _axSourceStamp != sourceStamp;')){
-  $sourcePattern='(?s)            string sourceStamp = stamp\.ToString\(\);\s*            if \(_axSourceStamp != sourceStamp\) \{ _axSourceStamp=sourceStamp; AsterMaxModelTreeChanged\?\.Invoke\(\); \}\s*            stamp\.Append\(_axResultStatus\)\.Append\(_axResultsCurrent\)\.Append\(String\.Join\("\\|",_axResultFields\)\);'
-  $sourceReplacement=@'
-            string sourceStamp = stamp.ToString();
-            bool sourceChanged = _axSourceStamp != sourceStamp;
-            if (sourceChanged) _axSourceStamp=sourceStamp;
-            stamp.Append(_axResultStatus).Append(_axResultsCurrent).Append(String.Join("|",_axResultFields));
+if(-not $o.Contains('private static void AxEnableDoubleBuffering(Control control)'))
+{
+    $classAnchor='    public partial class ModelTree'+"`n"+'    {'
+    $helper=@'
+    public partial class ModelTree
+    {
+        private static void AxEnableDoubleBuffering(Control control)
+        {
+            if(control==null || control.IsDisposed) return;
+            try
+            {
+                var p=typeof(Control).GetProperty("DoubleBuffered",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if(p!=null) p.SetValue(control,true,null);
+            }
+            catch { }
+        }
 '@
-  if(-not [regex]::IsMatch($o,$sourcePattern)){ throw 'C10.29 source-change anchor missing.' }
-  $o=[regex]::Replace($o,$sourcePattern,$sourceReplacement,1)
+    if(-not $o.Contains($classAnchor)){ throw 'C10.29 ModelTree partial-class anchor missing.' }
+    $o=$o.Replace($classAnchor,$helper.TrimEnd())
 }
 
-# EndUpdate -> one repaint -> then notify observers.
-$finallyOld = '            finally { _axOutline.EndUpdate(); _axRefreshing = false; }'
-$finallyNew = @'
+if(-not $o.Contains('AxEnableDoubleBuffering(_axOutline);'))
+{
+    $p=$o.IndexOf('_axOutline = new TreeView')
+    if($p -lt 0){ throw 'C10.29 Outline constructor missing.' }
+    $q=$o.IndexOf(';',$p)
+    if($q -lt 0){ throw 'C10.29 Outline constructor terminator missing.' }
+    $q++
+    $o=$o.Substring(0,$q)+"`n            AxEnableDoubleBuffering(_axOutline);"+$o.Substring($q)
+}
+
+# Poll less aggressively. Explicit invalidation still happens through stamps.
+$o=$o.Replace('_axOutlineTimer = new Timer { Interval = 300 };',
+              '_axOutlineTimer = new Timer { Interval = 700 };')
+
+# Delay AsterMaxModelTreeChanged until EndUpdate has completed. This prevents a
+# callback from recursively refreshing the projection while it is being rebuilt.
+if(-not $o.Contains('bool sourceChanged = _axSourceStamp != sourceStamp;'))
+{
+    $oldNotify='if (_axSourceStamp != sourceStamp) { _axSourceStamp=sourceStamp; AsterMaxModelTreeChanged?.Invoke(); }'
+    $newNotify='bool sourceChanged = _axSourceStamp != sourceStamp; if (sourceChanged) _axSourceStamp=sourceStamp;'
+    if(-not $o.Contains($oldNotify)){ throw 'C10.29 source notification anchor missing.' }
+    $o=$o.Replace($oldNotify,$newNotify)
+}
+
+if(-not $o.Contains('if (sourceChanged) AsterMaxModelTreeChanged?.Invoke();'))
+{
+    $oldFinally='            finally { _axOutline.EndUpdate(); _axRefreshing = false; }'
+    $newFinally=@'
             finally
             {
                 _axOutline.EndUpdate();
@@ -47,147 +69,68 @@ $finallyNew = @'
             }
             if (sourceChanged) AsterMaxModelTreeChanged?.Invoke();
 '@
-if(-not $o.Contains('if (sourceChanged) AsterMaxModelTreeChanged?.Invoke();')){
-  if(-not $o.Contains($finallyOld)){ throw 'C10.29 outline finalization anchor missing.' }
-  $o=$o.Replace($finallyOld,$finallyNew.TrimEnd())
+    if(-not $o.Contains($oldFinally)){ throw 'C10.29 Outline EndUpdate anchor missing.' }
+    $o=$o.Replace($oldFinally,$newFinally.TrimEnd())
 }
 
 Set-Content $outlinePath $o -Encoding UTF8
 
-# ---------------- ModelTree host: buffer Details and tabs ----------------
-$m=[regex]::Replace((Get-Content $modelPath -Raw),"\r\n?","`n")
-$styleAnchor='        private void AsterMaxStyleTree(CodersLabTreeView tree)'
-$helper=@'
-        private static void AsterMaxEnableDoubleBuffering(Control control)
-        {
-            if (control == null || control.IsDisposed) return;
-            try
-            {
-                var p = typeof(Control).GetProperty("DoubleBuffered",
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                if (p != null) p.SetValue(control, true, null);
-            }
-            catch { }
-        }
-
-'@
-if(-not $m.Contains('private static void AsterMaxEnableDoubleBuffering(Control control)')){
-  if(-not $m.Contains($styleAnchor)){ throw 'C10.29 ModelTree buffering helper anchor missing.' }
-  $m=$m.Replace($styleAnchor,$helper+$styleAnchor)
-}
-
-$styleStart = @'
-        private void AsterMaxStyleTree(CodersLabTreeView tree)
-        {
-            tree.BackColor = Color.White;
-'@
-$styleNew = @'
-        private void AsterMaxStyleTree(CodersLabTreeView tree)
-        {
-            AsterMaxEnableDoubleBuffering(tree);
-            tree.BackColor = Color.White;
-'@
-if(-not $m.Contains('AsterMaxEnableDoubleBuffering(tree);')){
-  if(-not $m.Contains($styleStart)){ throw 'C10.29 tree style anchor missing.' }
-  $m=$m.Replace($styleStart,$styleNew)
-}
-
-$detailsAnchor = @'
-            _asterMaxDetailsPanel = new Panel
-            {
-                Name = "asterMaxDetailsPanel",
-'@
-$detailsNew = @'
-            _asterMaxDetailsPanel = new Panel
-            {
-                Name = "asterMaxDetailsPanel",
-'@
-# Insert buffering after object initializer is complete, before header creation.
-$detailsAfter = '            var header = new Label'
-if(-not $m.Contains('AsterMaxEnableDoubleBuffering(_asterMaxDetailsPanel);')){
-  $pos=$m.IndexOf($detailsAfter,$m.IndexOf('private void BuildAsterMaxDetailsPanel()'))
-  if($pos -lt 0){ throw 'C10.29 details buffering anchor missing.' }
-  $m=$m.Substring(0,$pos)+'            AsterMaxEnableDoubleBuffering(_asterMaxDetailsPanel);'+"`n`n"+$m.Substring($pos)
-}
-
-# Buffer tab host once when applying Mechanical presentation.
-$applyLine='            tcGeometryModelResults.Font = new Font("Segoe UI Semibold", 9.0f);'
-if(-not $m.Contains('AsterMaxEnableDoubleBuffering(tcGeometryModelResults);')){
-  if(-not $m.Contains($applyLine)){ throw 'C10.29 tab buffer anchor missing.' }
-  $m=$m.Replace($applyLine,'            AsterMaxEnableDoubleBuffering(tcGeometryModelResults);'+"`n"+$applyLine)
-}
-Set-Content $modelPath $m -Encoding UTF8
-
-# ---------------- Ribbon: buffer TabControl, pages and FlowLayoutPanels ----------------
+# ----------------------------------------------------------------------
+# Ribbon: double buffer only pure WinForms chrome. Do not buffer vtkControl.
+# ----------------------------------------------------------------------
 $u=[regex]::Replace((Get-Content $uiPath -Raw),"\r\n?","`n")
 
-$buildAnchor='        private void BuildAsterMaxTopChrome()'
-$uiHelper=@'
-        private static void AsterMaxEnableUiBuffering(Control control)
+if(-not $u.Contains('private static void AsterMaxEnableChromeBuffering(Control control)'))
+{
+    $methodAnchor='        private void BuildAsterMaxTopChrome()'
+    $helper=@'
+        private static void AsterMaxEnableChromeBuffering(Control control)
         {
-            if (control == null || control.IsDisposed) return;
+            if(control==null || control.IsDisposed) return;
             try
             {
-                var p = typeof(Control).GetProperty("DoubleBuffered",
+                var p=typeof(Control).GetProperty("DoubleBuffered",
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-                if (p != null) p.SetValue(control, true, null);
+                if(p!=null) p.SetValue(control,true,null);
             }
             catch { }
         }
 
 '@
-if(-not $u.Contains('private static void AsterMaxEnableUiBuffering(Control control)')){
-  if(-not $u.Contains($buildAnchor)){ throw 'C10.29 UI buffering helper anchor missing.' }
-  $u=$u.Replace($buildAnchor,$uiHelper+$buildAnchor)
+    if(-not $u.Contains($methodAnchor)){ throw 'C10.29 BuildAsterMaxTopChrome anchor missing.' }
+    $u=$u.Replace($methodAnchor,$helper+$methodAnchor)
 }
 
-# Buffer ribbon immediately after construction.
-$ribbonClose='                Appearance = TabAppearance.Normal'+"`n"+'            };'
-$ribbonNew=$ribbonClose+"`n"+'            AsterMaxEnableUiBuffering(ribbon);'
-if(-not $u.Contains('AsterMaxEnableUiBuffering(ribbon);')){
-  if(-not $u.Contains($ribbonClose)){ throw 'C10.29 ribbon construction anchor missing.' }
-  $u=$u.Replace($ribbonClose,$ribbonNew)
+if(-not $u.Contains('AsterMaxEnableChromeBuffering(ribbon);'))
+{
+    $p=$u.IndexOf('var ribbon = new TabControl')
+    if($p -lt 0){ throw 'C10.29 ribbon constructor missing.' }
+    $q=$u.IndexOf('};',$p)
+    if($q -lt 0){ throw 'C10.29 ribbon constructor terminator missing.' }
+    $q+=2
+    $u=$u.Substring(0,$q)+"`n            AsterMaxEnableChromeBuffering(ribbon);"+$u.Substring($q)
 }
 
-# Buffer page and flow host.
-$pageAnchor='            var flow = new FlowLayoutPanel'
-if(-not $u.Contains('AsterMaxEnableUiBuffering(page);')){
-  $pos=$u.IndexOf($pageAnchor,$u.IndexOf('private TabPage BuildRibbonPage'))
-  if($pos -lt 0){ throw 'C10.29 ribbon page anchor missing.' }
-  $u=$u.Substring(0,$pos)+'            AsterMaxEnableUiBuffering(page);'+"`n"+$u.Substring($pos)
+if(-not $u.Contains('AsterMaxEnableChromeBuffering(page);'))
+{
+    $method=$u.IndexOf('private TabPage BuildRibbonPage')
+    if($method -lt 0){ throw 'C10.29 BuildRibbonPage missing.' }
+    $flow=$u.IndexOf('var flow = new FlowLayoutPanel',$method)
+    if($flow -lt 0){ throw 'C10.29 Ribbon flow constructor missing.' }
+    $u=$u.Substring(0,$flow)+'AsterMaxEnableChromeBuffering(page);'+"`n            "+$u.Substring($flow)
 }
 
-$flowAdd='            flow.Controls.AddRange(controls);'
-$flowNew='            AsterMaxEnableUiBuffering(flow);'+"`n"+$flowAdd
-if(-not $u.Contains('AsterMaxEnableUiBuffering(flow);')){
-  if(-not $u.Contains($flowAdd)){ throw 'C10.29 ribbon flow anchor missing.' }
-  $u=$u.Replace($flowAdd,$flowNew)
+if(-not $u.Contains('AsterMaxEnableChromeBuffering(flow);'))
+{
+    $add=$u.IndexOf('flow.Controls.AddRange(controls);',$u.IndexOf('private TabPage BuildRibbonPage'))
+    if($add -lt 0){ throw 'C10.29 Ribbon flow add anchor missing.' }
+    $u=$u.Substring(0,$add)+'AsterMaxEnableChromeBuffering(flow);'+"`n            "+$u.Substring($add)
 }
 
-# Avoid forcing synchronous full-form redraw after initial UI setup.
-$oldFinally=@'
-            finally
-            {
-                ResumeLayout(true);
-                PerformLayout();
-            }
-'@
-$newFinally=@'
-            finally
-            {
-                ResumeLayout(false);
-                BeginInvoke(new Action(() => {
-                    if (IsDisposed) return;
-                    PerformLayout();
-                    Invalidate(false);
-                }));
-            }
-'@
-if(-not $u.Contains('Invalidate(false);')){
-  if(-not $u.Contains($oldFinally)){ throw 'C10.29 Apply UI finalization anchor missing.' }
-  $u=$u.Replace($oldFinally,$newFinally)
-}
+# Do not force Refresh on the ribbon; let WinForms coalesce paint messages.
+$u=$u.Replace('            ribbon.Refresh();'+"`n",'')
+$u=$u.Replace('            titleBar.Refresh();'+"`n",'')
 
 Set-Content $uiPath $u -Encoding UTF8
 
-Write-Host 'C10.29: anti-flicker buffering + coalesced Outline refresh applied.' -ForegroundColor Green
+Write-Host 'C10.29: anti-flicker projected Outline and Ribbon buffering applied.' -ForegroundColor Green
