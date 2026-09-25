@@ -596,6 +596,21 @@
       "consumes": [
         "AsterMaxFunctionalRibbon"
       ]
+    },
+    {
+      "id": "patch-c1026-mechanical-outline",
+      "file": "patch-c1026-mechanical-outline.ps1",
+      "depends": [
+        "patch-c1025-mechanical-icons"
+      ],
+      "declares": [
+        "AsterMaxMechanicalOutline",
+        "AsterMaxDetailsWorkspace"
+      ],
+      "consumes": [
+        "AsterMaxMechanicalRibbonIcons",
+        "AsterMaxSpanishChile"
+      ]
     }
   ]
 }
