@@ -201,7 +201,18 @@ if($v.Contains($autoSpectrum)) {
 }
 elseif(-not $v.Contains('autoSpectrum.NumberOfColors=(int)_legendBands.Value')){ throw 'C10.28 auto spectrum anchor missing.' }
 
-$v=$v.Replace('            spectrum.NumberOfColors=12;','            spectrum.NumberOfColors=(int)_legendBands.Value;')
+$spectrumMethodStart=$v.IndexOf('        private vtkControl.vtkMaxColorSpectrum CreateDisplaySpectrum(')
+if($spectrumMethodStart -lt 0){ throw 'C10.28 CreateDisplaySpectrum method missing.' }
+$spectrumMethodEnd=$v.IndexOf('        private void RefreshMetadata()', $spectrumMethodStart)
+if($spectrumMethodEnd -lt 0){ throw 'C10.28 CreateDisplaySpectrum end anchor missing.' }
+$spectrumMethod=$v.Substring($spectrumMethodStart,$spectrumMethodEnd-$spectrumMethodStart)
+if($spectrumMethod.Contains('            spectrum.NumberOfColors=12;')){
+    $spectrumMethod=$spectrumMethod.Replace('            spectrum.NumberOfColors=12;','            spectrum.NumberOfColors=(int)_legendBands.Value;')
+}
+elseif(-not $spectrumMethod.Contains('spectrum.NumberOfColors=(int)_legendBands.Value;')){
+    throw 'C10.28 manual spectrum bands anchor missing.'
+}
+$v=$v.Substring(0,$spectrumMethodStart)+$spectrumMethod+$v.Substring($spectrumMethodEnd)
 
 # Native scalar bar formatting is the circled visualization in the user screenshot.
 $barText = '                _view.SetScalarBarText(colorContract.Field,"",colorContract.Unit,"","");'
