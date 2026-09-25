@@ -77,11 +77,15 @@ namespace PrePoMax
         private static string AsterMaxSafeControlToken(string value)
         {
             if (String.IsNullOrEmpty(value)) return "Command";
-            var chars = value.Normalize(System.Text.NormalizationForm.FormD)
-                .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark)
-                .Select(ch => Char.IsLetterOrDigit(ch) ? ch : '_')
-                .ToArray();
-            return new string(chars);
+            string normalized = value.Normalize(System.Text.NormalizationForm.FormD);
+            var sb = new System.Text.StringBuilder(normalized.Length);
+            foreach (char ch in normalized)
+            {
+                if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) ==
+                    System.Globalization.UnicodeCategory.NonSpacingMark) continue;
+                sb.Append(Char.IsLetterOrDigit(ch) ? ch : '_');
+            }
+            return sb.ToString();
         }
 
         private static Image CreateAsterMaxCommandIcon(Image source,string caption,string group)
