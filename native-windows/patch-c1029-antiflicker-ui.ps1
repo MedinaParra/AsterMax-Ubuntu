@@ -9,22 +9,13 @@ foreach($p in @($outlinePath,$uiPath,$modelPath)){ if(!(Test-Path $p)){ throw "C
 # ---------------- Outline: coalesce refreshes and double-buffer the projected tree ----------------
 $o=[regex]::Replace((Get-Content $outlinePath -Raw),"\r\n?","`n")
 
-$treeInit = @'
-            _axOutline = new TreeView { Name = "asterMaxOutline", Dock = DockStyle.Fill,
-                HideSelection = false, ShowLines = true, ShowRootLines = true,
-                BackColor = Color.White, ForeColor = Color.FromArgb(34,42,53),
-                Font = new Font("Segoe UI", 9), BorderStyle = BorderStyle.None };
-'@
-$treeNew = @'
-            _axOutline = new TreeView { Name = "asterMaxOutline", Dock = DockStyle.Fill,
-                HideSelection = false, ShowLines = true, ShowRootLines = true,
-                BackColor = Color.White, ForeColor = Color.FromArgb(34,42,53),
-                Font = new Font("Segoe UI", 9), BorderStyle = BorderStyle.None };
-            AsterMaxEnableDoubleBuffering(_axOutline);
-'@
 if(-not $o.Contains('AsterMaxEnableDoubleBuffering(_axOutline);')){
-  if(-not $o.Contains($treeInit)){ throw 'C10.29 outline tree init anchor missing.' }
-  $o=$o.Replace($treeInit,$treeNew)
+  $outlineInitPos=$o.IndexOf('_axOutline = new TreeView')
+  if($outlineInitPos -lt 0){ throw 'C10.29 outline tree init anchor missing.' }
+  $outlineInitEnd=$o.IndexOf(';',$outlineInitPos)
+  if($outlineInitEnd -lt 0){ throw 'C10.29 outline tree init terminator missing.' }
+  $insertPos=$outlineInitEnd+1
+  $o=$o.Substring(0,$insertPos)+"`n            AsterMaxEnableDoubleBuffering(_axOutline);"+$o.Substring($insertPos)
 }
 
 # Slow the polling slightly. Native operations still invalidate the stamp immediately.
