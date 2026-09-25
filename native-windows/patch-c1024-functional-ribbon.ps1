@@ -2,7 +2,7 @@ param([string]$Root)
 $ErrorActionPreference='Stop'
 
 $ui = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
-$u = [regex]::Replace((Get-Content $ui -Raw), "\r\n?", [char]10)
+$u = [regex]::Replace((Get-Content $ui -Raw), "\r\n?", "`n")
 
 function Replace-Required([string]$Old,[string]$New,[string]$Name) {
     if(-not $script:u.Contains($Old)) { throw "C10.24 ribbon anchor missing: $Name" }
