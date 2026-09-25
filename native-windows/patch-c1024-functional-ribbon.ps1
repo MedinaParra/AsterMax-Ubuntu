@@ -43,12 +43,6 @@ Replace-Required '                CommandTile("Isometric", "VIEW", AsterMaxIsome
 # Geometría
 Replace-Required '                CommandTile("Import STEP", "CAD", () => tsbImport.PerformClick(), true),' '                CommandTile("Importar STEP", "CAD", () => tsbImport.PerformClick(), true),' 'Geometría/STEP'
 Replace-Required '                CommandTile("Analyze Geometry", "CHECK", () => tsmiGeometryAnalyze.PerformClick()),' '                CommandTile("Analizar", "GEOMETRÍA", () => tsmiGeometryAnalyze.PerformClick()),' 'Geometría/Analizar'
-$old = '                CommandTile("Fit", "VIEW", AsterMaxFitView),'
-$new = @'
-                CommandTile("Ajustar", "VISTA", AsterMaxFitView),
-                CommandTile("Isométrica", "VISTA", AsterMaxIsometricView),
-'@
-Replace-Required $old $new 'Geometría/Vistas'
 Replace-Required '                CommandTile("Edges", "DISPLAY", () => tsbShowModelEdges.PerformClick())' '                CommandTile("Aristas", "VISUAL", () => tsbShowModelEdges.PerformClick())' 'Geometría/Aristas'
 
 # Modelo
