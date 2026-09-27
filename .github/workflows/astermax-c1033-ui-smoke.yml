@@ -36,8 +36,35 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $chain=Get-Content .\native-windows\patch-chain.json -Raw | ConvertFrom-Json
-          $patches=@($chain.patches | ForEach-Object { $_.file })
+          $patches=@(
+'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
+            'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
+            'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
+            'patch-c10212-es-cl.ps1','patch-c1022-win10-vtk-visible.ps1',
+            'patch-c1023-camera-fit-step-center.ps1','patch-c1024-functional-ribbon.ps1','patch-c1025-mechanical-icons.ps1','patch-c1026-mechanical-outline.ps1','patch-c1028-result-units-legend.ps1','patch-c1029-antiflicker-ui.ps1','patch-c1030-fast-mesh-vtk-reentry.ps1','patch-c1031-auto-contacts-viewer.ps1','patch-c1032-default-material-assignment.ps1','patch-c1033-responsive-workspace.ps1'
+          )
           if($patches[-1] -ne 'patch-c1033-responsive-workspace.ps1'){ throw 'C10.33 is not the terminal registered patch.' }
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw 'C10.33 patch chain failed.' }
