@@ -6,10 +6,12 @@ on:
   push:
     branches: [ codex/windows-repair-20260926, codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, agent/c1022-win10-vtk-visible ]
     paths:
+      - '.gitattributes'
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
   pull_request:
     paths:
+      - '.gitattributes'
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
   workflow_dispatch:
