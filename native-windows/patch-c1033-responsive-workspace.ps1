@@ -144,22 +144,6 @@ if(-not $viewDisk.Contains('asterMaxResultsToolbar') -or -not $viewDisk.Contains
 # 2. Integrated workspace proportions: narrower Outline, compact Details,
 #    smaller output console, more VTK viewport.
 # ----------------------------------------------------------------------
-$integratedText=[IO.File]::ReadAllText($integratedPath)
-$integratedText=[regex]::Replace($integratedText,"\r\n?","`n")
-if([string]::IsNullOrWhiteSpace($integratedText)){ throw 'C10.33 integrated results source is empty.' }
-
-$detailsOld='_axResultDetailsHost = new Panel { Name="asterMaxResultDetails", Dock=DockStyle.Bottom, Height=250, BackColor=Color.White };'
-$detailsNew='_axResultDetailsHost = new Panel { Name="asterMaxResultDetails", Dock=DockStyle.Bottom, Height=210, BackColor=Color.White, AutoScroll=true };'
-if($integratedText.Contains($detailsOld)){$integratedText=$integratedText.Replace($detailsOld,$detailsNew)}
-elseif(-not $integratedText.Contains('Height=210, BackColor=Color.White, AutoScroll=true')){ throw 'C10.33 integrated details host anchor missing.' }
-
-$showAnchor='                _axResultDetailsHost.Show();'
-if(-not $integratedText.Contains('AsterMaxApplyResponsiveWorkspaceLayout();')){
-    if(-not $integratedText.Contains($showAnchor)){ throw 'C10.33 integrated result show anchor missing.' }
-    $integratedText=$integratedText.Replace($showAnchor,$showAnchor+"`n                AsterMaxApplyResponsiveWorkspaceLayout();")
-}
-[IO.File]::WriteAllText($integratedPath,$integratedText,(New-Object System.Text.UTF8Encoding($true)))
-
 $layoutMethod=@'
         private void AsterMaxApplyResponsiveWorkspaceLayout()
         {
@@ -195,17 +179,37 @@ $layoutMethod=@'
         }
 
 '@
-$integratedMethodText=[IO.File]::ReadAllText($integratedPath)
-if([string]::IsNullOrWhiteSpace($integratedMethodText)){ throw 'C10.33 integrated source vanished before method insertion.' }
-if(-not $integratedMethodText.Contains('private void AsterMaxApplyResponsiveWorkspaceLayout()')){
-    $closeToken="`n    }`n}"
-    $classClose=$integratedMethodText.LastIndexOf($closeToken,[StringComparison]::Ordinal)
-    if($classClose -lt 0){ throw 'C10.33 partial-class closing anchor missing.' }
-    $integratedMethodText=$integratedMethodText.Insert($classClose+1,$layoutMethod)
+$integratedText=[IO.File]::ReadAllText($integratedPath)
+$integratedText=[regex]::Replace($integratedText,"\\r\\n?","`n")
+if([string]::IsNullOrWhiteSpace($integratedText)){ throw 'C10.33 integrated results source is empty.' }
+
+$detailsOld='_axResultDetailsHost = new Panel { Name="asterMaxResultDetails", Dock=DockStyle.Bottom, Height=250, BackColor=Color.White };'
+$detailsNew='_axResultDetailsHost = new Panel { Name="asterMaxResultDetails", Dock=DockStyle.Bottom, Height=210, BackColor=Color.White, AutoScroll=true };'
+if($integratedText.Contains($detailsOld)){$integratedText=$integratedText.Replace($detailsOld,$detailsNew)}
+elseif(-not $integratedText.Contains('Height=210, BackColor=Color.White, AutoScroll=true')){ throw 'C10.33 integrated details host anchor missing.' }
+
+$showAnchor='                _axResultDetailsHost.Show();'
+$layoutCall='                AsterMaxApplyResponsiveWorkspaceLayout();'
+if(-not $integratedText.Contains($layoutCall)){
+    if(-not $integratedText.Contains($showAnchor)){ throw 'C10.33 integrated result show anchor missing.' }
+    $integratedText=$integratedText.Replace($showAnchor,$showAnchor+"`n"+$layoutCall)
 }
-[IO.File]::WriteAllText($integratedPath,$integratedMethodText,(New-Object System.Text.UTF8Encoding($true)))
+
+if(-not $integratedText.Contains('private void AsterMaxApplyResponsiveWorkspaceLayout()')){
+    $closeToken="`n    }`n}"
+    $classClose=$integratedText.LastIndexOf($closeToken,[StringComparison]::Ordinal)
+    if($classClose -lt 0){ throw 'C10.33 partial-class closing anchor missing.' }
+    $integratedText=$integratedText.Insert($classClose+1,$layoutMethod)
+}
+
+$integratedTmp=$integratedPath+'.c1033.tmp'
+[IO.File]::WriteAllText($integratedTmp,$integratedText,(New-Object System.Text.UTF8Encoding($true)))
+$tmpCheck=[IO.File]::ReadAllText($integratedTmp)
+if(-not $tmpCheck.Contains('AsterMaxApplyResponsiveWorkspaceLayout') -or -not $tmpCheck.Contains('Height=210')){ throw 'C10.33 temporary integrated source is incomplete.' }
+[IO.File]::Copy($integratedTmp,$integratedPath,$true)
+Remove-Item -LiteralPath $integratedTmp -Force
 $integratedDisk=[IO.File]::ReadAllText($integratedPath)
-if(-not $integratedDisk.Contains('AsterMaxApplyResponsiveWorkspaceLayout')){ throw 'C10.33 integrated responsive layout did not persist to disk.' }
+if(-not $integratedDisk.Contains('AsterMaxApplyResponsiveWorkspaceLayout') -or -not $integratedDisk.Contains('Height=210')){ throw 'C10.33 integrated responsive layout did not persist to disk.' }
 
 # ----------------------------------------------------------------------
 # 3. Ribbon uses less vertical space while preserving the 32 px icons.
