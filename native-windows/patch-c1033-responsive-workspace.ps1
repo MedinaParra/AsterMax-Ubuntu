@@ -62,12 +62,12 @@ $controlsNew=@'
             _autoRange.Text="Rango auto";
 
             var primary=new FlowLayoutPanel {
-                Dock=DockStyle.Fill, AutoSize=true, AutoSizeMode=AutSizeMode.GrowAndShrink,
+                Dock=DockStyle.Fill, AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink,
                 FlowDirection=FlowDirection.LeftToRight, WrapContents=true,
                 Margin=new Padding(0), Padding=new Padding(0,0,0,1), BackColor=Color.White
             };
             var secondary=new FlowLayoutPanel {
-                Dock=DockStyle.Fill, AutoSize=true, AutSizeMode=AutSizeMode.GrowAndShrink,
+                Dock=DockStyle.Fill, AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink,
                 FlowDirection=FlowDirection.LeftToRight, WrapContents=true,
                 Margin=new Padding(0), Padding=new Padding(0), BackColor=Color.White
             };
