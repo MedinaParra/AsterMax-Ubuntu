@@ -69,6 +69,22 @@ jobs:
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw 'C10.33 patch chain failed.' }
 
+      - name: Verify responsive source before build
+        shell: pwsh
+        run: |
+          $results=Get-Content .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Raw
+          $integrated=Get-Content .\upstream\PrePoMax\Forms\AsterMaxIntegratedResults.cs -Raw
+          $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          Write-Host "PREBUILD_TOOLBAR=$($results.Contains('asterMaxResultsToolbar'))"
+          Write-Host "PREBUILD_PRIMARY=$($results.Contains('var primary=new FlowLayoutPanel'))"
+          Write-Host "PREBUILD_UPDATE=$($results.Contains('Text="Actualizar"'))"
+          Write-Host "PREBUILD_LAYOUT_METHOD=$($integrated.Contains('AsterMaxApplyResponsiveWorkspaceLayout'))"
+          Write-Host "PREBUILD_RIBBON122=$($ui.Contains('Height = 122,'))"
+          if(-not $results.Contains('asterMaxResultsToolbar')){ throw 'C10.33 toolbar was not materialized before build.' }
+          if(-not $integrated.Contains('AsterMaxApplyResponsiveWorkspaceLayout')){ throw 'C10.33 workspace method was not materialized before build.' }
+          "C1033_PREBUILD_RESULTS_SHA=$((Get-FileHash .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Algorithm SHA256).Hash)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C1033_PREBUILD_INTEGRATED_SHA=$((Get-FileHash .\upstream\PrePoMax\Forms\AsterMaxIntegratedResults.cs -Algorithm SHA256).Hash)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Restore NuGet
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -86,11 +102,17 @@ jobs:
           $results=Get-Content .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Raw
           $integrated=Get-Content .\upstream\PrePoMax\Forms\AsterMaxIntegratedResults.cs -Raw
           $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          $postResults=(Get-FileHash .\upstream\PrePoMax\Forms\AsterMaxVtkResultsBinding.cs -Algorithm SHA256).Hash
+          $postIntegrated=(Get-FileHash .\upstream\PrePoMax\Forms\AsterMaxIntegratedResults.cs -Algorithm SHA256).Hash
+          Write-Host "POSTBUILD_RESULTS_SHA=$postResults PREBUILD=$env:C1033_PREBUILD_RESULTS_SHA"
+          Write-Host "POSTBUILD_INTEGRATED_SHA=$postIntegrated PREBUILD=$env:C1033_PREBUILD_INTEGRATED_SHA"
           foreach($token in @('asterMaxResultsToolbar','Text="Actualizar"','Text="Capturar PNG"','var primary=new FlowLayoutPanel','var secondary=new FlowLayoutPanel')){
-            if(-not $results.Contains($token)){ throw "Missing results-layout marker: $token" }
+            if(-not $results.Contains($token)){ throw "Missing results-layout marker after build: $token" }
           }
-          if(-not $integrated.Contains('AsterMaxApplyResponsiveWorkspaceLayout')){ throw 'Responsive workspace method missing.' }
-          if(-not $ui.Contains('Height = 122,')){ throw 'Compact ribbon marker missing.' }
+          if(-not $integrated.Contains('AsterMaxApplyResponsiveWorkspaceLayout')){ throw 'Responsive workspace method missing after build.' }
+          if(-not $ui.Contains('Height = 122,')){ throw 'Compact ribbon marker missing after build.' }
+          if($postResults -ne $env:C1033_PREBUILD_RESULTS_SHA){ throw 'MSBuild changed AsterMaxVtkResultsBinding.cs.' }
+          if($postIntegrated -ne $env:C1033_PREBUILD_INTEGRATED_SHA){ throw 'MSBuild changed AsterMaxIntegratedResults.cs.' }
 
       - name: Stage UI build
         shell: pwsh
@@ -100,6 +122,17 @@ jobs:
           New-Item -ItemType Directory -Force .\dist\ui-build | Out-Null
           Copy-Item "$($exe.Directory.FullName)\*" .\dist\ui-build\ -Recurse -Force
           Get-FileHash '.\dist\ui-build\AsterMax Mechanical.exe' -Algorithm SHA256 | Format-List
+
+      - name: Upload C10.33 patched source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.33-Patched-Sources
+          path: |
+            upstream/PrePoMax/Forms/AsterMaxVtkResultsBinding.cs
+            upstream/PrePoMax/Forms/AsterMaxIntegratedResults.cs
+            upstream/PrePoMax/Forms/AsterMaxNativeUi.cs
+          if-no-files-found: error
 
       - name: Upload C10.33 UI build
         uses: actions/upload-artifact@v4
