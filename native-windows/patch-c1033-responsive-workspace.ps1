@@ -156,6 +156,7 @@ if(-not $integratedText.Contains('AsterMaxApplyResponsiveWorkspaceLayout();')){
     if(-not $integratedText.Contains($showAnchor)){ throw 'C10.33 integrated result show anchor missing.' }
     $integratedText=$integratedText.Replace($showAnchor,$showAnchor+"`n                AsterMaxApplyResponsiveWorkspaceLayout();")
 }
+[IO.File]::WriteAllText($integratedPath,$integratedText,(New-Object System.Text.UTF8Encoding($true)))
 
 $disposeAnchor='        private void DisposeAsterMaxResultView()'
 $layoutMethod=@'
@@ -193,11 +194,13 @@ $layoutMethod=@'
         }
 
 '@
-if(-not $integratedText.Contains('private void AsterMaxApplyResponsiveWorkspaceLayout()')){
-    if(-not $integratedText.Contains($disposeAnchor)){ throw 'C10.33 layout insertion anchor missing.' }
-    $integratedText=$integratedText.Replace($disposeAnchor,$layoutMethod+$disposeAnchor)
+$integratedMethodText=[IO.File]::ReadAllText($integratedPath)
+if([string]::IsNullOrWhiteSpace($integratedMethodText)){ throw 'C10.33 integrated source vanished before method insertion.' }
+if(-not $integratedMethodText.Contains('private void AsterMaxApplyResponsiveWorkspaceLayout()')){
+    if(-not $integratedMethodText.Contains($disposeAnchor)){ throw 'C10.33 layout insertion anchor missing.' }
+    $integratedMethodText=$integratedMethodText.Replace($disposeAnchor,$layoutMethod+$disposeAnchor)
 }
-[IO.File]::WriteAllText($integratedPath,$integratedText,(New-Object System.Text.UTF8Encoding($true)))
+[IO.File]::WriteAllText($integratedPath,$integratedMethodText,(New-Object System.Text.UTF8Encoding($true)))
 
 # ----------------------------------------------------------------------
 # 3. Ribbon uses less vertical space while preserving the 32 px icons.
