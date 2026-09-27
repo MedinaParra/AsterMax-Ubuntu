@@ -158,7 +158,6 @@ if(-not $integratedText.Contains('AsterMaxApplyResponsiveWorkspaceLayout();')){
 }
 [IO.File]::WriteAllText($integratedPath,$integratedText,(New-Object System.Text.UTF8Encoding($true)))
 
-$layoutInsertAnchor='        private void ShowAsterMaxModelWorkspace()'
 $layoutMethod=@'
         private void AsterMaxApplyResponsiveWorkspaceLayout()
         {
@@ -197,8 +196,9 @@ $layoutMethod=@'
 $integratedMethodText=[IO.File]::ReadAllText($integratedPath)
 if([string]::IsNullOrWhiteSpace($integratedMethodText)){ throw 'C10.33 integrated source vanished before method insertion.' }
 if(-not $integratedMethodText.Contains('private void AsterMaxApplyResponsiveWorkspaceLayout()')){
-    if(-not $integratedMethodText.Contains($layoutInsertAnchor)){ throw 'C10.33 stable model-workspace insertion anchor missing.' }
-    $integratedMethodText=$integratedMethodText.Replace($layoutInsertAnchor,$layoutMethod+$layoutInsertAnchor)
+    $methodAnchor=[regex]::Match($integratedMethodText,'(?m)^\\s*private\\s+void\\s+(?:ShowAsterMaxModelWorkspace|DisposeAsterMaxResultView)\\s*\\(\\s*\\)')
+    if(-not $methodAnchor.Success){ throw 'C10.33 stable workspace method anchor missing.' }
+    $integratedMethodText=$integratedMethodText.Insert($methodAnchor.Index,$layoutMethod)
 }
 [IO.File]::WriteAllText($integratedPath,$integratedMethodText,(New-Object System.Text.UTF8Encoding($true)))
 
