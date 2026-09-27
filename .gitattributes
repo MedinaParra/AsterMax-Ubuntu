@@ -1,6 +1,4 @@
-# Patch anchors and generated C# use LF on every build host.
-*.ps1 text eol=lf
-*.cs text eol=lf
-*.py text eol=lf
-*.json text eol=lf
-*.yml text eol=lf
+# These patches normalize their C# inputs to LF before matching.
+native-windows/patch-c1030-fast-mesh-vtk-reentry.ps1 text eol=lf
+native-windows/patch-c1031-auto-contacts-viewer.ps1 text eol=lf
+native-windows/patch-c1032-default-material-assignment.ps1 text eol=lf
