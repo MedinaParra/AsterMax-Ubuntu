@@ -37,7 +37,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $patches=@(
-'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
             'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
             'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
             'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
