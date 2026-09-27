@@ -196,9 +196,10 @@ $layoutMethod=@'
 $integratedMethodText=[IO.File]::ReadAllText($integratedPath)
 if([string]::IsNullOrWhiteSpace($integratedMethodText)){ throw 'C10.33 integrated source vanished before method insertion.' }
 if(-not $integratedMethodText.Contains('private void AsterMaxApplyResponsiveWorkspaceLayout()')){
-    $methodAnchor=[regex]::Match($integratedMethodText,'(?m)^\\s*private\\s+void\\s+(?:ShowAsterMaxModelWorkspace|DisposeAsterMaxResultView)\\s*\\(\\s*\\)')
-    if(-not $methodAnchor.Success){ throw 'C10.33 stable workspace method anchor missing.' }
-    $integratedMethodText=$integratedMethodText.Insert($methodAnchor.Index,$layoutMethod)
+    $closeToken="`n    }`n}"
+    $classClose=$integratedMethodText.LastIndexOf($closeToken,[StringComparison]::Ordinal)
+    if($classClose -lt 0){ throw 'C10.33 partial-class closing anchor missing.' }
+    $integratedMethodText=$integratedMethodText.Insert($classClose+1,$layoutMethod)
 }
 [IO.File]::WriteAllText($integratedPath,$integratedMethodText,(New-Object System.Text.UTF8Encoding($true)))
 
