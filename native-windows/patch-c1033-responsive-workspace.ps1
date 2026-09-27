@@ -136,7 +136,9 @@ $v=$v.Replace('_integrityLabel=new Label { Dock=DockStyle.Bottom, Height=58, Tex
 foreach($token in @('asterMaxResultsToolbar','var primary=new FlowLayoutPanel','primary.Controls.Add(_displayUnit)','secondary.Controls.Add(_rangeMin)','Text="Actualizar"','Text="Capturar PNG"')){
     if(-not $v.Contains($token)){ throw "C10.33 viewport token missing: $token" }
 }
-Set-Content $viewPath $v -Encoding UTF8
+[IO.File]::WriteAllText($viewPath,$v,(New-Object System.Text.UTF8Encoding($true)))
+$viewDisk=[IO.File]::ReadAllText($viewPath)
+if(-not $viewDisk.Contains('asterMaxResultsToolbar') -or -not $viewDisk.Contains('Text="Actualizar"')){ throw 'C10.33 responsive viewport did not persist to disk.' }
 
 # -----------------------------------------------------------------------
 # 2. Integrated workspace proportions: narrower Outline, compact Details,
@@ -202,6 +204,8 @@ if(-not $integratedMethodText.Contains('private void AsterMaxApplyResponsiveWork
     $integratedMethodText=$integratedMethodText.Insert($classClose+1,$layoutMethod)
 }
 [IO.File]::WriteAllText($integratedPath,$integratedMethodText,(New-Object System.Text.UTF8Encoding($true)))
+$integratedDisk=[IO.File]::ReadAllText($integratedPath)
+if(-not $integratedDisk.Contains('AsterMaxApplyResponsiveWorkspaceLayout')){ throw 'C10.33 integrated responsive layout did not persist to disk.' }
 
 # ----------------------------------------------------------------------
 # 3. Ribbon uses less vertical space while preserving the 32 px icons.
