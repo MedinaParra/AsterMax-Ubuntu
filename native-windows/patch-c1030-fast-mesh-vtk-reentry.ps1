@@ -62,6 +62,8 @@ $renderNew=@'
             Invalidate();
         }
 '@
+$renderOld=[regex]::Replace($renderOld,"\r\n?","`n")
+$renderNew=[regex]::Replace($renderNew,"\r\n?","`n")
 if(-not $v.Contains('if (_asterMaxRenderRequestActive)')){
     if(-not $v.Contains($renderOld)){ throw 'C10.30 RenderSceene anchor missing.' }
     $v=$v.Replace($renderOld,$renderNew)

@@ -97,26 +97,13 @@ Set-Content $controllerPath $c -Encoding UTF8
 # ----------------------------------------------------------------------
 $m=[regex]::Replace((Get-Content $mainPath -Raw),"\r\n?","`n")
 
-$interactiveAnchor='                    SetFrontBackView(true, true);   // animate must be true in order for the scale bar to work correctly'
-$interactiveNew=@'
-                    _controller.AsterMaxEnsureDefaultMaterialAndSections();
-                    SetFrontBackView(true, true);   // animate must be true in order for the scale bar to work correctly
-'@
+# C10.23 replaces SetFrontBackView with centering on both import paths.
+$importAnchor='AsterMaxCenterImportedGeometry();'
 if(-not $m.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){
-  if(-not $m.Contains($interactiveAnchor)){ throw 'C10.32 interactive import anchor missing.' }
-  $m=$m.Replace($interactiveAnchor,$interactiveNew.TrimEnd())
-}
-
-# Startup/command-line import path has its own ImportFileAsync.
-$startupAnchor='                                await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                // Set to null, otherwise the previous OpenedFileName gets overwriten on Save'
-$startupNew=@'
-                                await _controller.ImportFileAsync(fileName, false);
-                                _controller.AsterMaxEnsureDefaultMaterialAndSections();
-                                // Set to null, otherwise the previous OpenedFileName gets overwriten on Save
-'@
-if(-not $m.Contains('await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                _controller.AsterMaxEnsureDefaultMaterialAndSections();')){
-  if(-not $m.Contains($startupAnchor)){ throw 'C10.32 startup import anchor missing.' }
-  $m=$m.Replace($startupAnchor,$startupNew.TrimEnd())
+  if(([regex]::Matches($m,[regex]::Escape($importAnchor))).Count -ne 2){
+    throw 'C10.32 expected exactly two post-import centering calls.'
+  }
+  $m=$m.Replace($importAnchor,'_controller.AsterMaxEnsureDefaultMaterialAndSections();'+"`n                    "+$importAnchor)
 }
 
 # After a batch mesh completes, assign sections to all newly-created solid parts.
