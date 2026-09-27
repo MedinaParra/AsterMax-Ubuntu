@@ -686,6 +686,22 @@
         "AsterMaxAutoContacts",
         "AsterMaxMechanicalOutline"
       ]
+    },
+    {
+      "id": "patch-c1033-responsive-workspace",
+      "file": "patch-c1033-responsive-workspace.ps1",
+      "depends": [
+        "patch-c1032-default-material-assignment"
+      ],
+      "declares": [
+        "AsterMaxResponsiveResultsLayout",
+        "AsterMaxAdaptiveWorkspace"
+      ],
+      "consumes": [
+        "AsterMaxDefaultMaterial",
+        "AsterMaxContactInspectionViewer",
+        "AsterMaxMechanicalOutline"
+      ]
     }
   ]
 }
