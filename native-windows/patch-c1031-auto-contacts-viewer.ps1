@@ -124,7 +124,7 @@ $contactMethods=@'
             }
 
             _modelTree.SetGeometryTab();
-            ModelTree_ViewEvent(ViewType.Geometry);
+            ModelTree_ViewEvent(UserControls.ViewType.Geometry);
             _controller.DrawGeometry(false);
 
             _vtk.SetAllActorOpacity(0.18);
@@ -195,7 +195,7 @@ $autoHelper=@'
 
             // FrmSearchContactPairs is created during FrmMain initialization, so its
             // native method-name table is already initialized here.
-            var pairs=new List<Forms.SearchContactPair>();
+            var pairs=new System.Collections.Generic.List<Forms.SearchContactPair>();
             foreach(var item in items)
             {
                 var p=new Forms.SearchContactPair(item.Name,false,distance);
@@ -206,7 +206,7 @@ $autoHelper=@'
                 pairs.Add(p);
             }
 
-            var before=new HashSet<string>(_controller.GetContactPairNames());
+            var before=new System.Collections.Generic.HashSet<string>(_controller.GetContactPairNames());
             _controller.AutoCreateContactPairs(pairs);
             int created=0;
             foreach(string name in _controller.GetContactPairNames())
