@@ -97,10 +97,10 @@ Set-Content $controllerPath $c -Encoding UTF8
 # ----------------------------------------------------------------------
 $m=[regex]::Replace((Get-Content $mainPath -Raw),"\r\n?","`n")
 
-$interactiveAnchor='                    SetFrontBackView(true, true);   // animate must be true in order for the scale bar to work correctly'
+$interactiveAnchor='                    AsterMaxCenterImportedGeometry();'
 $interactiveNew=@'
                     _controller.AsterMaxEnsureDefaultMaterialAndSections();
-                    SetFrontBackView(true, true);   // animate must be true in order for the scale bar to work correctly
+                    AsterMaxCenterImportedGeometry();
 '@
 if(-not $m.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){
   if(-not $m.Contains($interactiveAnchor)){ throw 'C10.32 interactive import anchor missing.' }
@@ -108,13 +108,14 @@ if(-not $m.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){
 }
 
 # Startup/command-line import path has its own ImportFileAsync.
-$startupAnchor='                                await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                // Set to null, otherwise the previous OpenedFileName gets overwriten on Save'
+$startupAnchor='                                await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                AsterMaxCenterImportedGeometry();'+"`n"+'                                // Set to null, otherwise the previous OpenedFileName gets overwriten on Save'
 $startupNew=@'
                                 await _controller.ImportFileAsync(fileName, false);
+                                AsterMaxCenterImportedGeometry();
                                 _controller.AsterMaxEnsureDefaultMaterialAndSections();
                                 // Set to null, otherwise the previous OpenedFileName gets overwriten on Save
 '@
-if(-not $m.Contains('await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                _controller.AsterMaxEnsureDefaultMaterialAndSections();')){
+if(-not $m.Contains('await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                AsterMaxCenterImportedGeometry();'+"`n"+'                                _controller.AsterMaxEnsureDefaultMaterialAndSections();')){
   if(-not $m.Contains($startupAnchor)){ throw 'C10.32 startup import anchor missing.' }
   $m=$m.Replace($startupAnchor,$startupNew.TrimEnd())
 }
