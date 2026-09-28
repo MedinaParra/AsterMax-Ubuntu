@@ -20,6 +20,7 @@ rows=[
  ('No ferrosos','Laton_C260_Referencia',110000,0.34,8530,'','Valores típicos editables; verificar composición y temple.'),
  ('No ferrosos','Bronce_SAE660_Referencia',100000,0.34,8800,'','Valores típicos editables para bronce de cojinete; verificar composición y condición real.'),
  ('Titanio','Titanio_Ti6Al4V_Recocido_Referencia',113800,0.342,4430,'https://www.aerospacemetals.com/wp-content/uploads/2023/07/Titanium-Ti-6Al-4V-Grade-5-Annealed.pdf','Grado 5 recocido; propiedades elásticas de referencia de la ficha.')
+]
 def item(name,tag=None): return dict(Name=name,Active=True,Visible=True,Valid=True,Internal=False,Expanded=True,Items=[],Tag=tag)
 root=item('AsterMax_Materiales_Referencia');groups={}
 for family,name,e,nu,rho,source,note in rows:
