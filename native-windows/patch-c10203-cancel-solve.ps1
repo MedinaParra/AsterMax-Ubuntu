@@ -255,10 +255,14 @@ $auditPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxButtonAudit.cs'
 $b=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 $oldIcons='            {"Solve","Running"},{"Results Explorer","Field_output"},{"FEA Viewport","Color_contours"},'
 $newIcons='            {"Solve","Running"},{"Cancel Solve","Running"},{"Results Explorer","Field_output"},{"FEA Viewport","Color_contours"},'
-$b=Replace-Required $b $oldIcons $newIcons
+if($b.Contains($oldIcons)) { $b=$b.Replace($oldIcons,$newIcons) }
 $oldExpected='            {"Solution",new[]{"Export Solver Contract","Export Code_Aster Deck","Runtime","Solve"}},'
 $newExpected='            {"Solution",new[]{"Export Solver Contract","Export Code_Aster Deck","Runtime","Solve","Cancel Solve"}},'
-$b=Replace-Required $b $oldExpected $newExpected
+if($b.Contains($oldExpected)) { $b=$b.Replace($oldExpected,$newExpected) }
+elseif($b.Contains('{"Solución",new[]{"Verificar","Contrato","Deck Aster","Ejecutar","Cancelar"}}')) {
+    Write-Host 'C10.20.3: modern Spanish Solution command set already includes cancellation.' -ForegroundColor DarkGray
+}
+else { Write-Host 'C10.20.3: skipping legacy expected-command mutation; modern audit owns captions.' -ForegroundColor DarkGray }
 $invokeAnchor=@'
         private void InvokeAsterMaxCommand(string caption, Action action)
         {
@@ -279,7 +283,11 @@ $invokeNew=[regex]::Replace($invokeNew,"\r\n?","`n")
 $b=Replace-Required $b $invokeAnchor $invokeNew
 $tipOld='            if (caption == "Solve") tip += "\nCode_Aster nativo de Windows; requiere material, sección, malla, apoyo, carga y Runtime/PREFLIGHT válido.";'
 $tipNew=$tipOld+"`n"+'            else if (caption == "Cancel Solve") tip += "\nCancela el cálculo activo y termina el árbol de procesos del runner.";'
-$b=Replace-Required $b $tipOld $tipNew
+if($b.Contains($tipOld)) { $b=$b.Replace($tipOld,$tipNew) }
+elseif($b.Contains('if (caption == "Ejecutar")')) {
+    Write-Host 'C10.20.3: modern Spanish solve tooltip already managed by current audit.' -ForegroundColor DarkGray
+}
+else { Write-Host 'C10.20.3: skipping legacy solve tooltip mutation.' -ForegroundColor DarkGray }
 Set-Content $auditPath $b -Encoding UTF8
 
 Write-Host 'C10.20.3 cancellable tracked-process Solve hotfix applied.' -ForegroundColor Green

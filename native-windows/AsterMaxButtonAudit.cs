@@ -24,44 +24,68 @@ namespace PrePoMax
             {"Auditoria","Query"}
         };
         private static readonly Dictionary<string,string[]> AxExpectedCommandsByTab = new Dictionary<string,string[]> {
-            {"Home",new[]{"New","Open","Import Geometry","Save","Fit","Isometric"}},
-            {"Geometry",new[]{"Import STEP","Analyze Geometry","Fit","Edges"}},
-            {"Model",new[]{"Model Properties","Materials"}},
-            {"Mesh",new[]{"Mesh Controls","Generate Mesh"}},
-            {"Environment",new[]{"Analysis Step","Supports","Loads"}},
-            {"Solution",new[]{"Export Solver Contract","Export Code_Aster Deck","Runtime","Solve"}},
-            {"Results",new[]{"Results Explorer","FEA Viewport","Contours","Deformed"}},
-            {"View",new[]{"Fit","Front","Top","Right","Isometric","Edges","Auditoria"}}
+            {"Inicio",new[]{"Nuevo","Abrir","Importar","Guardar","Deshacer","Rehacer","Ajustar","Isométrica"}},
+            {"Geometría",new[]{"Importar STEP","Analizar","Ajustar","Isométrica","Aristas"}},
+            {"Modelo",new[]{"Propiedades","Material","Sección"}},
+            {"Malla",new[]{"Controles","Refinamiento","Generar malla"}},
+            {"Entorno",new[]{"Paso","Apoyo","Carga"}},
+            {"Solución",new[]{"Verificar","Contrato","Deck Aster","Ejecutar","Cancelar"}},
+            {"Resultados",new[]{"Explorador","Viewport FEA","Contornos","Deformada","Original"}},
+            {"Vista",new[]{"Auditoría","Ajustar","Frontal","Superior","Derecha","Isométrica","Aristas"}}
         };
 
         private void ConfigureAsterMaxButton(Button button, string caption, string group, Action action)
         {
-            string key;
-            if (!AxCommandIcons.TryGetValue(caption, out key))
-                throw new InvalidOperationException("Command icon mapping missing: " + caption);
-            Image icon = Properties.Resources.ResourceManager.GetObject(key) as Image;
-            if (icon == null) throw new InvalidOperationException("Native icon missing: " + key);
-            button.Name = "axCommand_" + group + "_" + caption.Replace(" ", "_");
+            // C10.27: captions are presentation text, never runtime keys.
+            // C10.25 already assigns the original AsterMax engineering icon in CommandTile.
+            // Keep that image. Fall back to a native resource only when no generated icon exists.
+            if (button.Image == null)
+            {
+                string key;
+                Image icon = null;
+                if (AxCommandIcons.TryGetValue(caption, out key))
+                    icon = Properties.Resources.ResourceManager.GetObject(key) as Image;
+                if (icon == null)
+                    icon = Properties.Resources.ResourceManager.GetObject("Query") as Image;
+                if (icon != null)
+                    button.Image = CreateAsterMaxCommandIcon(icon, caption, group);
+            }
+
+            button.Name = "axCommand_" + AsterMaxSafeControlToken(group) + "_" + AsterMaxSafeControlToken(caption);
             button.Text = caption;
-            Image assignedImage = CreateAsterMaxCommandIcon(icon,caption,group);
-            button.Image = assignedImage;
-            button.Disposed += (s,e) => assignedImage.Dispose();
             button.ImageAlign = ContentAlignment.TopCenter;
             button.TextAlign = ContentAlignment.BottomCenter;
             button.TextImageRelation = TextImageRelation.ImageAboveText;
             button.Tag = action;
             button.AccessibleName = caption;
             button.AccessibleDescription = group + ": " + caption;
-            if (_axCommandTips == null) {
+
+            if (_axCommandTips == null)
+            {
                 _axCommandTips = new ToolTip { ShowAlways = true, AutoPopDelay = 15000 };
                 Disposed += (s,e) => _axCommandTips.Dispose();
             }
+
             string tip = group + " — " + caption;
-            if (caption == "Solve") tip += "\nCode_Aster nativo de Windows; requiere material, sección, malla, apoyo, carga y Runtime/PREFLIGHT válido.";
-            else if (caption == "Generate Mesh") tip += "\nSeleccione una pieza de Geometry; utiliza NetGen incluido.";
-            else if (caption == "Asignar seccion") tip += "\nAsigna el material a una región de la malla.";
-            else if (caption == "Supports" || caption == "Loads") tip += "\nRequiere un paso de análisis y una región válida.";
+            if (caption == "Ejecutar") tip += "\nCode_Aster nativo de Windows; requiere material, sección, malla, apoyo, carga y preflight válido.";
+            else if (caption == "Generar malla") tip += "\nSeleccione una pieza de Geometría; utiliza NetGen incluido.";
+            else if (caption == "Sección") tip += "\nAsigna material y propiedades de sección a una región válida.";
+            else if (caption == "Apoyo" || caption == "Carga") tip += "\nRequiere un paso de análisis y una región válida.";
             _axCommandTips.SetToolTip(button, tip);
+        }
+
+        private static string AsterMaxSafeControlToken(string value)
+        {
+            if (String.IsNullOrEmpty(value)) return "Command";
+            string normalized = value.Normalize(System.Text.NormalizationForm.FormD);
+            var sb = new System.Text.StringBuilder(normalized.Length);
+            foreach (char ch in normalized)
+            {
+                if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) ==
+                    System.Globalization.UnicodeCategory.NonSpacingMark) continue;
+                sb.Append(Char.IsLetterOrDigit(ch) ? ch : '_');
+            }
+            return sb.ToString();
         }
 
         private static Image CreateAsterMaxCommandIcon(Image source,string caption,string group)
