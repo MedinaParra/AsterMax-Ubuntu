@@ -686,6 +686,20 @@
         "AsterMaxAutoContacts",
         "AsterMaxMechanicalOutline"
       ]
+    },
+    {
+      "id": "patch-c1033-royal-blue-repair",
+      "file": "patch-c1033-royal-blue-repair.ps1",
+      "depends": [
+        "patch-c1032-default-material-assignment"
+      ],
+      "declares": [
+        "AsterMaxC1033Branding",
+        "AsterMaxCanonicalOperationState"
+      ],
+      "consumes": [
+        "AsterMaxDefaultMaterial"
+      ]
     }
   ]
 }
