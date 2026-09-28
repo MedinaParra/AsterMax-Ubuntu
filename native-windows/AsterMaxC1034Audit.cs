@@ -33,6 +33,8 @@ namespace PrePoMax
                 bool pass=false;
                 try {
                     if(!ready) throw new InvalidOperationException("Two-body STEP did not finish importing within 70 seconds.");
+                    WindowState=FormWindowState.Maximized; Application.DoEvents();
+                    AsterMaxFitView();
                     var report=JObject.FromObject(_modelTree.AuditAsterMaxMechanicalOutline());
                     report["caption"]=Text;report["release"]="C10.34";
                     report["cad_bodies"]=_controller.Model.Geometry.Parts.Count;

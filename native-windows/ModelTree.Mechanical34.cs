@@ -27,6 +27,7 @@ namespace UserControls
         {
             _axOutline.SelectionMode = TreeViewSelectionMode.MultiSelectSameParent;
             _axOutline.SelectionBackColor = Color.FromArgb(22,71,217);
+            _axOutline.ChangeHighlightOnFocusLost = false;
             _axOutline.ShowLines = false;
             _axOutline.ShowRootLines = false;
             _axOutline.FullRowSelect = true;

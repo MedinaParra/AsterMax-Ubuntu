@@ -18,6 +18,7 @@ def edit(path,fn):
 def outline(t):
  t=replace(t,'private TreeView _axOutline;','private CodersLabTreeView _axOutline;')
  t=replace(t,'_axOutline = new TreeView','_axOutline = new CodersLabTreeView')
+ t=replace(t,'ForeColor = source.ForeColor','ForeColor = source.Tag is CaeGlobals.NamedClass && !((CaeGlobals.NamedClass)source.Tag).Active ? Color.Gray : Color.FromArgb(34,42,53)')
  t=replace(t,'Name = source.TreeView.Name + "/" + source.FullPath','Name = AxStableSourceKey(source)')
  start=t.index('            _axOutline.AfterSelect +=');end=t.index('            _axOutlineTimer =',start)
  t=t[:start]+'''            AxInitializeMechanical34();
