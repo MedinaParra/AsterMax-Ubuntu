@@ -714,6 +714,22 @@
         "AsterMaxC1033Branding",
         "AsterMaxCanonicalOperationState"
       ]
+    },
+    {
+      "id": "patch-c1035-material-library-autocontact",
+      "file": "patch-c1035-material-library-autocontact.ps1",
+      "depends": [
+        "patch-c1034-mechanical-tree"
+      ],
+      "declares": [
+        "AsterMaxCanonicalMaterialLibrary",
+        "AsterMaxModelReadyDefaults"
+      ],
+      "consumes": [
+        "AsterMaxMechanicalTree34",
+        "AsterMaxDefaultMaterial",
+        "AsterMaxAutoContacts"
+      ]
     }
   ]
 }
