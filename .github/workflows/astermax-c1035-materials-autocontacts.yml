@@ -1,0 +1,177 @@
+name: AsterMax C10.35 Materials + Auto Contacts
+
+on:
+  push:
+    branches:
+      - agent/c1035-material-library-autocontact
+  workflow_dispatch:
+
+jobs:
+  windows-x64-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax C10.35 harness
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate patch chain
+        shell: pwsh
+        run: |
+          python .\native-windows\validate-patch-chain.py
+          if($LASTEXITCODE -ne 0){ throw 'Patch-chain validation failed.' }
+
+      - name: Apply complete AsterMax patch chain through C10.35
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $chain = Get-Content .\native-windows\patch-chain.json -Raw | ConvertFrom-Json
+          foreach($p in $chain.patches){
+            $script = Join-Path .\native-windows $p.file
+            if(-not (Test-Path $script)){ throw "Missing patch: $($p.file)" }
+            Write-Host "APPLY $($p.id)"
+            & $script -Root "$PWD\upstream"
+            if($LASTEXITCODE -ne 0){ throw "Patch failed: $($p.id)" }
+          }
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild AsterMax Mechanical C10.35 x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Locate executable and install canonical materials.lib
+        id: locate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe was not produced.' }
+          $bin=Split-Path $exe.FullName -Parent
+          $globals = Get-Content .\upstream\PrePoMax\Globals.cs -Raw
+          if(-not $globals.Contains('AsterMax Mechanical C10.35')){ throw 'C10.35 title not compiled into source.' }
+          python .\native-windows\build-c1010-materials.py --out "$bin"
+          if($LASTEXITCODE -ne 0){ throw 'Material library generation failed.' }
+          if(-not (Test-Path (Join-Path $bin 'materials.lib'))){ throw 'materials.lib was not installed next to the executable.' }
+          "exe=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "bin=$bin" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Audit C10.35 material library and automation contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import json, pathlib
+          p=pathlib.Path(r"${{ steps.locate.outputs.bin }}")/"materials.lib"
+          data=json.loads(p.read_text(encoding="utf-8"))
+          names=[]
+          def walk(node):
+              if isinstance(node,dict):
+                  tag=node.get("Tag")
+                  if isinstance(tag,dict) and tag.get("Name"):
+                      names.append(tag["Name"])
+                  for child in node.get("Items",[]) or []:
+                      walk(child)
+          walk(data)
+          required={
+              "Acero estructural",
+              "ASTM_A36_Referencia",
+              "ASTM_A572_Gr50_Referencia",
+              "SAE_1020_Referencia",
+              "SAE_1045_Referencia",
+              "AISI_4140_Referencia",
+              "SAE_4340_Referencia",
+              "Inoxidable_304_Referencia",
+              "Inoxidable_316_Referencia",
+              "Aluminio_6061_T6_Referencia",
+              "Aluminio_7075_T6_Referencia",
+              "Cobre_C110_Referencia",
+              "Laton_C260_Referencia",
+              "Bronce_SAE660_Referencia",
+              "Titanio_Ti6Al4V_Recocido_Referencia",
+          }
+          missing=sorted(required-set(names))
+          if missing:
+              raise SystemExit("Missing materials: "+", ".join(missing))
+          if len(names)<15:
+              raise SystemExit(f"Expected at least 15 materials, got {len(names)}")
+          print(json.dumps({"pass":True,"material_count":len(names),"default":"Acero estructural","materials":names},ensure_ascii=False))
+          '@ | Set-Content .\audit-c1035-library.py -Encoding UTF8
+          python .\audit-c1035-library.py
+          if($LASTEXITCODE -ne 0){ throw 'C10.35 material library audit failed.' }
+
+          $controller=Get-Content .\upstream\PrePoMax\Controller.cs -Raw
+          $main=Get-Content .\upstream\PrePoMax\Forms\FrmMain.cs -Raw
+          $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          if(-not $controller.Contains('AsterMaxDefaultMaterialName = "Acero estructural"')){ throw 'Default structural steel contract missing.' }
+          if(-not $main.Contains('BeginInvoke(new Action(AsterMaxAutoGenerateContacts))')){ throw 'Automatic contact post-mesh hook missing.' }
+          if(-not $main.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){ throw 'Automatic material assignment hook missing.' }
+          if(-not $ui.Contains('private void AsterMaxAutoGenerateContacts()')){ throw 'Automatic contact generator missing.' }
+
+      - name: Stage portable C10.35 package and audit report
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe='${{ steps.locate.outputs.exe }}'
+          $bin=Split-Path $exe -Parent
+          New-Item -ItemType Directory -Force .\dist | Out-Null
+          Copy-Item "$bin\*" .\dist\ -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          Copy-Item .\native-windows\*.py .\dist\AsterMaxTools\ -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force .\dist\CodeAsterRuntime | Out-Null
+          Copy-Item .\native-windows\runtime\CodeAster\* .\dist\CodeAsterRuntime\ -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.35 | Out-Null
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.35'
+            branch='agent/c1035-material-library-autocontact'
+            commit='${{ github.sha }}'
+            platform='Windows x64'
+            configuration='Release'
+            executable='AsterMax Mechanical.exe'
+            executable_sha256=$hash
+            solver_backend='Code_Aster'
+            default_material='Acero estructural'
+            automatic_material_assignment=$true
+            automatic_contact_detection=$true
+            contact_generation_trigger='successful multi-part mesh when no contact pairs already exist'
+            material_library_file='materials.lib'
+            material_reference_count=15
+            source_contract_audit='PASS'
+            runtime_contact_pair_e2e='NOT_EXERCISED'
+            fea_values_invented=$false
+            note='Material values are editable reference data; verify grade/certificate/condition before final engineering use.'
+          } | ConvertTo-Json | Set-Content .\dist\Audit\C10.35\audit-summary.json -Encoding UTF8
+          Copy-Item .\dist\Audit\C10.35\audit-summary.json .\dist\ASTERMAX_C1035_AUDIT.json -Force
+          [ordered]@{
+            release='C10.35'
+            branch='agent/c1035-material-library-autocontact'
+            commit='${{ github.sha }}'
+            platform='Windows x64'
+            configuration='Release'
+            executable='AsterMax Mechanical.exe'
+            executable_sha256=$hash
+            solver_backend='Code_Aster'
+            upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571'
+            material_library='materials.lib'
+            fea_values_invented=$false
+          } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
+
+      - name: Upload C10.35 Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.35-Windows-x64
+          path: dist
+          if-no-files-found: error
