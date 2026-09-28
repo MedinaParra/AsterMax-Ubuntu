@@ -7,7 +7,7 @@ $assemblyPath = Join-Path $Root 'PrePoMax/Properties/AssemblyInfo.cs'
 foreach($p in @($controllerPath,$globalsPath,$assemblyPath)){ if(!(Test-Path $p)){ throw "C10.35 missing: $p" } }
 
 # Canonical default material: use the same name and elastic reference as materials.lib.
-$c=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","\n")
+$c=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","`n")
 $old='public const string AsterMaxDefaultMaterialName = "Acero estructural - AsterMax";'
 $new='public const string AsterMaxDefaultMaterialName = "Acero estructural";'
 if($c.Contains($old)){ $c=$c.Replace($old,$new) }
@@ -22,12 +22,12 @@ elseif(-not $c.Contains('equivalente a la entrada canónica Acero estructural de
 if(-not $c.Contains('AsterMaxEnsureDefaultMaterialAndSections()')){ throw 'C10.35 default material routine missing after patch chain.' }
 Set-Content $controllerPath $c -Encoding UTF8
 
-$g=[regex]::Replace((Get-Content $globalsPath -Raw),"\r\n?","\n")
+$g=[regex]::Replace((Get-Content $globalsPath -Raw),"\r\n?","`n")
 if($g.Contains('AsterMax Mechanical C10.34')){ $g=$g.Replace('AsterMax Mechanical C10.34','AsterMax Mechanical C10.35') }
 elseif(-not $g.Contains('AsterMax Mechanical C10.35')){ throw 'C10.35 Globals version anchor missing.' }
 Set-Content $globalsPath $g -Encoding UTF8
 
-$a=[regex]::Replace((Get-Content $assemblyPath -Raw),"\r\n?","\n")
+$a=[regex]::Replace((Get-Content $assemblyPath -Raw),"\r\n?","`n")
 $a=$a.Replace('10.34.0.0','10.35.0.0').Replace('C10.34','C10.35')
 Set-Content $assemblyPath $a -Encoding UTF8
 
