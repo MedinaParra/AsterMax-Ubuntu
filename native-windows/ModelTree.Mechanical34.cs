@@ -18,6 +18,7 @@ namespace UserControls
         private ContextMenuStrip _axMechanicalMenu;
         private AxCommandMenu _axMeshMenu;
         private bool _axSyncingSelection;
+        private bool _axGeometryRevealed;
         private SplitContainer _axTreeDetails;
         public bool AsterMaxOutlineFocused { get { return _axOutline != null && _axOutline.ContainsFocus; } }
         public event Action AsterMaxGenerateMeshRequested;
@@ -25,7 +26,7 @@ namespace UserControls
         private void AxInitializeMechanical34()
         {
             _axOutline.SelectionMode = TreeViewSelectionMode.MultiSelectSameParent;
-            _axOutline.SelectionBackColor = Color.FromArgb(218,230,255);
+            _axOutline.SelectionBackColor = Color.FromArgb(22,71,217);
             _axOutline.ShowLines = false;
             _axOutline.ShowRootLines = false;
             _axOutline.FullRowSelect = true;
@@ -45,7 +46,7 @@ namespace UserControls
                 BackColor=Color.FromArgb(215,223,236), Size=new Size(300,600) };
             _axTreeDetails.Panel1MinSize=100;
             _axTreeDetails.Panel2MinSize=90;
-            _axTreeDetails.SplitterDistance=390;
+            _axTreeDetails.SplitterDistance=455;
             _axTreeDetails.Panel1.Controls.Add(_axOutline);
             var header = new Panel { Dock=DockStyle.Top, Height=59, Padding=new Padding(6), BackColor=Color.FromArgb(243,246,252) };
             var caption = new Label { Text="ÁRBOL DEL MODELO", Dock=DockStyle.Top, Height=20,

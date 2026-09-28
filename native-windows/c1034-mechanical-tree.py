@@ -69,7 +69,9 @@ def outline(t):
                     if(restored.Length>0) _axOutline.SelectedNodes.Add(restored[0]);
                 }
                 if(first) { project.Expand(); model.Expand(); }''')
- t=replace(t,'if (model.Nodes.Count > 0) model.Nodes[0].Expand();','if (first && model.Nodes.Count > 0) model.Nodes[0].Expand();')
+ t=replace(t,'if (model.Nodes.Count > 0) model.Nodes[0].Expand();','if (model.Nodes.Count>0 && model.Nodes[0].Nodes.Count>0 && !_axGeometryRevealed) { model.Nodes[0].ExpandAll(); _axGeometryRevealed=true; } else if(model.Nodes.Count>0 && model.Nodes[0].Nodes.Count==0) _axGeometryRevealed=false;')
+ for old,new in [('Geometry','Geometría'),('Materials','Materiales'),('Material Assignments','Asignación de materiales'),('Mesh Controls','Controles de malla'),('Refinements','Refinamientos'),('Mesh Bodies','Cuerpos de malla'),('Solution Jobs','Ejecuciones')]:
+  t=t.replace('"'+old+'"','"'+new+'"')
  # Status remains a compact badge; explanations live in Details, not dummy child nodes.
  start=t.index('                bool optional=key==');end=t.index('\n            }',start)
  t=t[:start]+t[end:]
@@ -87,3 +89,9 @@ edit('PrePoMax/Forms/FrmMain.cs',lambda t:replace(t,'if (this == ActiveForm)','i
 edit('PrePoMax/Globals.cs',lambda t:replace(t,'AsterMax Mechanical C10.33','AsterMax Mechanical C10.34'))
 edit('PrePoMax/Properties/AssemblyInfo.cs',lambda t:t.replace('10.33.0.0','10.34.0.0').replace('C10.33','C10.34'))
 print('C10.34 mechanical tree, native multiselection, vector icons and details integrated.')
+
+# Balance the existing native message-box hook before CLR teardown (real app and audits).
+def shutdown(t):
+ if 'MessageBoxManager.Unregister();' in t: return t
+ return replace(t,'            Application.Run(new FrmMain(args));','            try { Application.Run(new FrmMain(args)); }\n            finally { MessageBoxManager.Unregister(); }')
+edit('PrePoMax/Program.cs',shutdown)

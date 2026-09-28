@@ -9,6 +9,15 @@ namespace PrePoMax
 {
     public partial class FrmMain
     {
+        private void C1034CaptureScreen(string path)
+        {
+            Activate(); Application.DoEvents();
+            using(var bitmap=new Bitmap(Width,Height))
+            using(var graphics=Graphics.FromImage(bitmap)) {
+                graphics.CopyFromScreen(Location,Point.Empty,Size);
+                bitmap.Save(path,System.Drawing.Imaging.ImageFormat.Png);
+            }
+        }
         private void StartAsterMaxC1034OutlineAudit()
         {
             string directory=Environment.GetEnvironmentVariable("ASTERMAX_C1034_AUDIT_DIR");
@@ -31,7 +40,7 @@ namespace PrePoMax
                     pass=(bool)report["pass"] && (bool)report["caption_pass"];
                     report["pass"]=pass;
                     File.WriteAllText(Path.Combine(directory,"mechanical-tree-report.json"),report.ToString(Formatting.Indented));
-                    C1020CaptureWindow(Path.Combine(directory,"mechanical-tree-window.png"));
+                    C1034CaptureScreen(Path.Combine(directory,"mechanical-tree-window.png"));
                     using(var bmp=new Bitmap(_modelTree.Width,_modelTree.Height)) {
                         _modelTree.DrawToBitmap(bmp,new Rectangle(0,0,bmp.Width,bmp.Height));
                         bmp.Save(Path.Combine(directory,"mechanical-tree.png"),System.Drawing.Imaging.ImageFormat.Png);
@@ -39,7 +48,7 @@ namespace PrePoMax
                 } catch(Exception ex) {
                     File.WriteAllText(Path.Combine(directory,"mechanical-tree-report.json"),new JObject { ["pass"]=false,["error"]=ex.ToString() }.ToString());
                 }
-                try { C1020CaptureWindow(Path.Combine(directory,"mechanical-tree-window.png")); } catch { }
+                try { C1034CaptureScreen(Path.Combine(directory,"mechanical-tree-window.png")); } catch { }
                 Environment.ExitCode=pass?0:1;
                 _c10209AuditShutdownDirectory=directory;
                 if(_controller!=null) _controller.ModelChanged=false;
