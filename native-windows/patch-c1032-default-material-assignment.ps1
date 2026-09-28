@@ -108,16 +108,13 @@ if(-not $m.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){
 }
 
 # Startup/command-line import path has its own ImportFileAsync.
-$startupAnchor='                                await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                AsterMaxCenterImportedGeometry();'+"`n"+'                                // Set to null, otherwise the previous OpenedFileName gets overwriten on Save'
-$startupNew=@'
-                                await _controller.ImportFileAsync(fileName, false);
-                                AsterMaxCenterImportedGeometry();
-                                _controller.AsterMaxEnsureDefaultMaterialAndSections();
-                                // Set to null, otherwise the previous OpenedFileName gets overwriten on Save
-'@
-if(-not $m.Contains('await _controller.ImportFileAsync(fileName, false);'+"`n"+'                                AsterMaxCenterImportedGeometry();'+"`n"+'                                _controller.AsterMaxEnsureDefaultMaterialAndSections();')){
-  if(-not $m.Contains($startupAnchor)){ throw 'C10.32 startup import anchor missing.' }
-  $m=$m.Replace($startupAnchor,$startupNew.TrimEnd())
+$startupImport='                                await _controller.ImportFileAsync(fileName, false);'
+$startupMaterial='                                _controller.AsterMaxEnsureDefaultMaterialAndSections();'
+if(-not $m.Contains($startupImport+"`n"+$startupMaterial)){
+  $idx=$m.IndexOf($startupImport)
+  if($idx -lt 0){ throw 'C10.32 startup import anchor missing.' }
+  $insert=$idx+$startupImport.Length
+  $m=$m.Substring(0,$insert)+"`n"+$startupMaterial+$m.Substring($insert)
 }
 
 # After a batch mesh completes, assign sections to all newly-created solid parts.
