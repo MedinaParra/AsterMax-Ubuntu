@@ -1,0 +1,100 @@
+name: AsterMax C10.34 Windows Build
+
+on:
+  push:
+    branches:
+      - agent/c1034-mechanical-tree
+    paths:
+      - '.github/workflows/astermax-c1034-windows-build.yml'
+  workflow_dispatch:
+
+jobs:
+  windows-x64-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax C10.34 harness
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate patch chain
+        shell: pwsh
+        run: |
+          python .\native-windows\validate-patch-chain.py
+          if($LASTEXITCODE -ne 0){ throw 'Patch-chain validation failed.' }
+
+      - name: Apply complete AsterMax patch chain through C10.34
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $chain = Get-Content .\native-windows\patch-chain.json -Raw | ConvertFrom-Json
+          foreach($p in $chain.patches){
+            $script = Join-Path .\native-windows $p.file
+            if(-not (Test-Path $script)){ throw "Missing patch: $($p.file)" }
+            Write-Host "APPLY $($p.id)"
+            & $script -Root "$PWD\upstream"
+            if($LASTEXITCODE -ne 0){ throw "Patch failed: $($p.id)" }
+          }
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild AsterMax Mechanical C10.34 x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Locate executable and verify C10.34 identity
+        id: locate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe = Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe was not produced.' }
+          $globals = Get-Content .\upstream\PrePoMax\Globals.cs -Raw
+          if(-not $globals.Contains('AsterMax Mechanical C10.34')){ throw 'C10.34 title not compiled into source.' }
+          "exe=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "EXE=$($exe.FullName)"
+
+      - name: Stage portable C10.34 package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe='${{ steps.locate.outputs.exe }}'
+          $bin=Split-Path $exe -Parent
+          New-Item -ItemType Directory -Force .\dist | Out-Null
+          Copy-Item "$bin\*" .\dist\ -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          Copy-Item .\native-windows\*.py .\dist\AsterMaxTools\ -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force .\dist\CodeAsterRuntime | Out-Null
+          Copy-Item .\native-windows\runtime\CodeAster\* .\dist\CodeAsterRuntime\ -Recurse -Force -ErrorAction SilentlyContinue
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.34'
+            branch='agent/c1034-mechanical-tree'
+            commit='${{ github.sha }}'
+            platform='Windows x64'
+            configuration='Release'
+            executable='AsterMax Mechanical.exe'
+            executable_sha256=$hash
+            solver_backend='Code_Aster'
+            upstream_prepomax='3669e65581650e5d9d868aa761db9efd856f8571'
+            fea_values_invented=$false
+          } | ConvertTo-Json | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Get-FileHash .\dist\* -Algorithm SHA256 -ErrorAction SilentlyContinue | Format-Table -AutoSize | Out-String | Set-Content .\dist\SHA256.txt
+
+      - name: Upload C10.34 Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.34-Windows-x64
+          path: dist
+          if-no-files-found: error
