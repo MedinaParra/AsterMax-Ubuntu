@@ -101,7 +101,7 @@ namespace UserControls
         {
             if(_axRefreshing || _axSyncingSelection || _disableMouse) return;
             var projected=_axOutline.SelectedNode;
-            AxRefreshWorkflowHint(projected);
+
             if(projected==null) { AxUpdateMechanicalDetails(null); return; }
             if(_axOutline.SelectedNodes.Count==1 && projected.Name.StartsWith("ax-result/"))
                 AsterMaxResultRequested?.Invoke(projected.Name.Substring("ax-result/".Length));

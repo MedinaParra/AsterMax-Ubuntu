@@ -73,7 +73,7 @@ def outline(t):
  # Status remains a compact badge; explanations live in Details, not dummy child nodes.
  start=t.index('                bool optional=key==');end=t.index('\n            }',start)
  t=t[:start]+t[end:]
- t=replace(t,'            AxRefreshWorkflowHint(_axOutline.SelectedNode);','            AxRefreshWorkflowHint(_axOutline.SelectedNode);\n            AxUpdateMechanicalDetails(_axOutline.SelectedNode);')
+ t=replace(t,'            if (sourceChanged) AsterMaxModelTreeChanged?.Invoke();','            if (sourceChanged) AsterMaxModelTreeChanged?.Invoke();\n            AxUpdateMechanicalDetails(_axOutline.SelectedNode);')
  t=replace(t,'cmsTree.Visible ||','cmsTree.Visible || (_axMechanicalMenu != null && _axMechanicalMenu.Visible) || (_axMeshMenu != null && _axMeshMenu.Visible) ||')
  t=replace(t,".Append(node.ForeColor.ToArgb()).Append(';');",".Append(';');")
  return t
