@@ -27,7 +27,7 @@ edit('PrePoMax/Forms/AsterMaxSpanishChile.cs',lambda t:required(t,'private stati
 def main(t):
  # Operation identity must never depend on localized or informational UI text.
  t=required(t,'public void SetStateReady(string currentText)', 'private string _asterMaxOperationState = Globals.ReadyText;\n        public void SetStateReady(string currentText)')
- for old,new in [('tsslState.Text != Globals.ReadyText','_asterMaxOperationState != Globals.ReadyText'),('tsslState.Text == Globals.ReadyText','_asterMaxOperationState == Globals.ReadyText'),('tsslState.Text == currentText','_asterMaxOperationState == currentText'),('tsslState.Text == Globals.OpeningText','_asterMaxOperationState == Globals.OpeningText')]:
+ for old,new in [('tsslState.Text != Globals.RegeneratingText','_asterMaxOperationState != Globals.RegeneratingText'),('tsslState.Text != Globals.ReadyText','_asterMaxOperationState != Globals.ReadyText'),('tsslState.Text == Globals.ReadyText','_asterMaxOperationState == Globals.ReadyText'),('tsslState.Text == currentText','_asterMaxOperationState == currentText'),('tsslState.Text == Globals.OpeningText','_asterMaxOperationState == Globals.OpeningText')]:
   t=required(t,old,new)
  t=required(t,'tsslState.Text = text;', '_asterMaxOperationState = text;\n                tsslState.Text = AsterMaxSpanishChile.Translate(text);')
  return t
@@ -50,6 +50,7 @@ helper='''        private static string C1033CommandLabel(string text)
         }
 '''
 def audit(t):
+ t=required(t, 'new SolidSection("B01_Steel", "Steel",', 'new SolidSection("B01_Steel", model.Materials.Keys.First(),')
  t=required(t,'        private void C10208ClickRibbonButton(string tab,string caption)',helper+'        private void C10208ClickRibbonButton(string tab,string caption)')
  t=required(t,'String.Equals(x.Text,tab,StringComparison.Ordinal)','String.Equals(x.Text,AsterMaxSpanishChile.Translate(tab),StringComparison.Ordinal)')
  t=required(t,'String.Equals(x.Text,caption,StringComparison.Ordinal)','String.Equals(x.Text,C1033CommandLabel(caption),StringComparison.Ordinal)')
