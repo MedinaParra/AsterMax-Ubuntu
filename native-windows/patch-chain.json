@@ -700,6 +700,20 @@
       "consumes": [
         "AsterMaxDefaultMaterial"
       ]
+    },
+    {
+      "id": "patch-c1034-mechanical-tree",
+      "file": "patch-c1034-mechanical-tree.ps1",
+      "depends": [
+        "patch-c1033-royal-blue-repair"
+      ],
+      "declares": [
+        "AsterMaxMechanicalTree34"
+      ],
+      "consumes": [
+        "AsterMaxC1033Branding",
+        "AsterMaxCanonicalOperationState"
+      ]
     }
   ]
 }
