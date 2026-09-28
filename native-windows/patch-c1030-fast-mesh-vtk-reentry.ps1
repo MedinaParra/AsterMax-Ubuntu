@@ -39,12 +39,8 @@ if(-not $v.Contains('_asterMaxRenderRequestActive')){
 }
 
 # Coalesce render requests while a render/pipeline request is active.
-$renderOld=@'
-        private void RenderSceene()
-        {
-            if (_renderingOn) this.Invalidate();
-        }
-'@
+# Do not depend on the historical one-line body: earlier viewport patches may
+# legitimately add visibility/handle guards. Replace the method structurally.
 $renderNew=@'
         private void RenderSceene()
         {
@@ -63,8 +59,29 @@ $renderNew=@'
         }
 '@
 if(-not $v.Contains('if (_asterMaxRenderRequestActive)')){
-    if(-not $v.Contains($renderOld)){ throw 'C10.30 RenderSceene anchor missing.' }
-    $v=$v.Replace($renderOld,$renderNew)
+    $signature='        private void RenderSceene()'
+    $methodStart=$v.IndexOf($signature)
+    if($methodStart -lt 0){ throw 'C10.30 RenderSceene method missing.' }
+
+    $braceStart=$v.IndexOf('{',$methodStart)
+    if($braceStart -lt 0){ throw 'C10.30 RenderSceene opening brace missing.' }
+
+    $depth=0
+    $methodEnd=-1
+    for($n=$braceStart; $n -lt $v.Length; $n++){
+        if($v[$n] -eq '{'){ $depth++ }
+        elseif($v[$n] -eq '}'){
+            $depth--
+            if($depth -eq 0){ $methodEnd=$n+1; break }
+        }
+    }
+    if($methodEnd -lt 0){ throw 'C10.30 RenderSceene closing brace missing.' }
+
+    $existing=$v.Substring($methodStart,$methodEnd-$methodStart)
+    if(-not $existing.Contains('Invalidate') -and -not $existing.Contains('Render')){
+        throw 'C10.30 RenderSceene body is not a recognized render request path.'
+    }
+    $v=$v.Substring(0,$methodStart)+$renderNew.TrimEnd()+$v.Substring($methodEnd)
 }
 Set-Content $vtkPath $v -Encoding UTF8
 
