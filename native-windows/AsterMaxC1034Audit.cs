@@ -39,6 +39,7 @@ namespace PrePoMax
                 } catch(Exception ex) {
                     File.WriteAllText(Path.Combine(directory,"mechanical-tree-report.json"),new JObject { ["pass"]=false,["error"]=ex.ToString() }.ToString());
                 }
+                try { C1020CaptureWindow(Path.Combine(directory,"mechanical-tree-window.png")); } catch { }
                 Environment.ExitCode=pass?0:1;
                 _c10209AuditShutdownDirectory=directory;
                 if(_controller!=null) _controller.ModelChanged=false;

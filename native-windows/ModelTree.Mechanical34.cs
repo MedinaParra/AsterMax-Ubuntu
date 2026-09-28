@@ -304,8 +304,13 @@ namespace UserControls
         {
             RefreshAsterMaxOutline();var result=new Dictionary<string,object>();
             var all=new List<TreeNode>();AxCollectMechanicalNodes(_axOutline.Nodes,all);
-            var bodies=all.FindAll(n=>{var s=n.Tag as TreeNode;return s!=null && s.Parent==_geomParts;});
-            if(bodies.Count<2) throw new InvalidOperationException("C10.34 audit requires two real imported CAD bodies.");
+            var bodies=all.FindAll(n=>{var s=n.Tag as TreeNode;return s!=null && s.TreeView==cltvGeometry && s.Tag is CaeMesh.BasePart && s.Nodes.Count==0;});
+            result["cad_leaf_body_count"]=bodies.Count;
+            if(bodies.Count<2) {
+                result["pass"]=false;result["error"]="Two CAD leaf bodies are required for the multiselection audit.";
+                result["nodes"]=all.ConvertAll(n=>n.Name+" | "+n.Text+" | "+(n.Tag is TreeNode?(((TreeNode)n.Tag).Tag==null?"group":((TreeNode)n.Tag).Tag.GetType().FullName):"virtual"));
+                return result;
+            }
             _axOutline.SelectedNodes.Clear();_axOutline.SelectedNodes.Add(bodies[0]);_axOutline.SelectedNodes.Add(bodies[1]);
             AxMechanicalSelectionChanged();
             result["projected_multiselection"]= _axOutline.SelectedNodes.Count==2;
