@@ -74,14 +74,15 @@ def outline(t):
  start=t.index('                bool optional=key==');end=t.index('\n            }',start)
  t=t[:start]+t[end:]
  t=replace(t,'            AxRefreshWorkflowHint(_axOutline.SelectedNode);','            AxRefreshWorkflowHint(_axOutline.SelectedNode);\n            AxUpdateMechanicalDetails(_axOutline.SelectedNode);')
- t=replace(t,'cmsTree.Visible ||','cmsTree.Visible || (_axMechanicalMenu != null && _axMechanicalMenu.Visible) ||')
+ t=replace(t,'cmsTree.Visible ||','cmsTree.Visible || (_axMechanicalMenu != null && _axMechanicalMenu.Visible) || (_axMeshMenu != null && _axMeshMenu.Visible) ||')
+ t=replace(t,".Append(node.ForeColor.ToArgb()).Append(';');",".Append(';');")
  return t
 edit('UserControls/ModelTree.AsterMaxOutline.cs',outline)
 shutil.copyfile(here/'ModelTree.Mechanical34.cs',root/'UserControls/ModelTree.Mechanical34.cs')
 shutil.copyfile(here/'AsterMaxC1034Audit.cs',root/'PrePoMax/Forms/AsterMaxC1034Audit.cs')
 edit('UserControls/UserControls.csproj',lambda t:replace(t,'<Compile Include="ModelTree.AsterMaxOutline.cs" />','<Compile Include="ModelTree.AsterMaxOutline.cs" />\n    <Compile Include="ModelTree.Mechanical34.cs" />'))
 edit('PrePoMax/PrePoMax.csproj',lambda t:replace(t,'<Compile Include="Forms\\AsterMaxNativeUi.cs" />','<Compile Include="Forms\\AsterMaxNativeUi.cs" />\n    <Compile Include="Forms\\AsterMaxC1034Audit.cs" />'))
-edit('PrePoMax/Forms/AsterMaxNativeUi.cs',lambda t:replace(t,'_modelTree.EnableAsterMaxOutline();','_modelTree.EnableAsterMaxOutline();\n                StartAsterMaxC1034OutlineAudit();'))
+edit('PrePoMax/Forms/AsterMaxNativeUi.cs',lambda t:replace(t,'_modelTree.EnableAsterMaxOutline();','_modelTree.EnableAsterMaxOutline();\n                StartAsterMaxC1034OutlineAudit();\n                _modelTree.AsterMaxGenerateMeshRequested += () => tsmiCreateMesh_Click(null, EventArgs.Empty);'))
 edit('PrePoMax/Forms/FrmMain.cs',lambda t:replace(t,'if (this == ActiveForm)','if (this == ActiveForm && !_modelTree.AsterMaxOutlineFocused)'))
 edit('PrePoMax/Globals.cs',lambda t:replace(t,'AsterMax Mechanical C10.33','AsterMax Mechanical C10.34'))
 edit('PrePoMax/Properties/AssemblyInfo.cs',lambda t:t.replace('10.33.0.0','10.34.0.0').replace('C10.33','C10.34'))

@@ -16,6 +16,7 @@ namespace UserControls
         private Button _axEditSelection;
         private TextBox _axFindBox;
         private ContextMenuStrip _axMechanicalMenu;
+        private AxCommandMenu _axMeshMenu;
         private bool _axSyncingSelection;
         private SplitContainer _axTreeDetails;
         public bool AsterMaxOutlineFocused { get { return _axOutline != null && _axOutline.ContainsFocus; } }
@@ -78,6 +79,12 @@ namespace UserControls
             _axTreeDetails.Panel2.Controls.Add(_axDetailsCaption);
             _axDetailsGrid.BringToFront();
             Controls.Add(_axTreeDetails); _axTreeDetails.BringToFront();
+            _axMeshMenu=AxCreateCommandMenu("Generar malla…",()=>AsterMaxGenerateMeshRequested?.Invoke());
+            _axMeshMenu.Items.Add("Insertar control de malla…",null,(s,e)=> {
+                var nodes=new List<TreeNode>();AxCollectMechanicalNodes(_axOutline.Nodes,nodes);
+                var controls=nodes.Find(n=>Object.ReferenceEquals(n.Tag,_meshingParameters));
+                if(controls!=null) { _axOutline.SelectedNode=controls;AxEditMechanicalSelection(); }
+            });
             _axMechanicalMenu=new ContextMenuStrip(components);
             _axMechanicalMenu.Items.Add("Expandir rama",null,(s,e)=>{ if(_axOutline.SelectedNode!=null) _axOutline.SelectedNode.ExpandAll(); });
             _axMechanicalMenu.Items.Add("Contraer rama",null,(s,e)=>{ if(_axOutline.SelectedNode!=null) _axOutline.SelectedNode.Collapse(); });
@@ -182,6 +189,7 @@ namespace UserControls
         {
             if(_disableMouse || node==null) return;
             if(!_axOutline.SelectedNodes.Contains(node)) _axOutline.SelectedNode=node;
+            if(node.Name=="ax-mesh") { _axMeshMenu.Show(_axOutline,location); return; }
             if(node.Name=="ax-analysis") { _axAnalysisMenu.Show(_axOutline,location); return; }
             if(node.Name=="ax-solution") { _axSolutionMenu.Show(_axOutline,location); return; }
             if(!SelectAsterMaxSource(node)) { _axMechanicalMenu.Show(_axOutline,location); return; }
