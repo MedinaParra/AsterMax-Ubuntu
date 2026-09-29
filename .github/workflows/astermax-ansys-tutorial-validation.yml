@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/astermax-ansys-tutorial-validation.yml'
       - 'native-windows/ansys-tutorials/**'
+      - 'native-windows/bridge-c964-med-results.py'
   workflow_dispatch:
 
 concurrency:
