@@ -5,16 +5,21 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 GATE=ROOT/"qualify-mechanical-analysis.py"
 
-def run_case(bundle, analysis, expect_code, expected_status, mess_text="ARRET NORMAL\naucune alarme\n"):
+def run_case(bundle, analysis, expect_code, expected_status, mess_text="ARRET NORMAL\naucune alarme\n",
+             convergence=None):
     with tempfile.TemporaryDirectory() as td:
         td=Path(td)
         bp=td/"bundle.json"; ap=td/"analysis.json"; mp=td/"case.mess"; op=td/"out.json"
         bp.write_text(json.dumps(bundle),encoding="utf-8")
         ap.write_text(json.dumps(analysis),encoding="utf-8")
         mp.write_text(mess_text,encoding="utf-8")
-        p=subprocess.run([sys.executable,str(GATE),"--bundle",str(bp),"--analysis",str(ap),
-                          "--mess",str(mp),"--out",str(op)],
-                         text=True,capture_output=True)
+        cmd=[sys.executable,str(GATE),"--bundle",str(bp),"--analysis",str(ap),
+             "--mess",str(mp),"--out",str(op)]
+        if convergence is not None:
+            cp=td/"convergence.json"
+            cp.write_text(json.dumps(convergence),encoding="utf-8")
+            cmd += ["--convergence",str(cp)]
+        p=subprocess.run(cmd,text=True,capture_output=True)
         if p.returncode!=expect_code:
             raise AssertionError(f"return code {p.returncode} != {expect_code}\nSTDOUT={p.stdout}\nSTDERR={p.stderr}")
         out=json.loads(op.read_text(encoding="utf-8"))
@@ -42,9 +47,19 @@ analysis={
   "scope_binding":{"mode":"topology_fingerprint","verified":True},
   "expected_external_resultant_n":[0.0,0.0,1000.0]
 }
-out=run_case(base,analysis,0,"ENGINEERING_QUALIFIED")
+convergence_ok={
+  "rows":[
+    {"state":"SOLVED","mesh":"2mm","total_deformation_max_mm":0.1000,"von_mises_nodal_max_mpa":100.0},
+    {"state":"SOLVED","mesh":"1mm","total_deformation_max_mm":0.1020,"von_mises_nodal_max_mpa":105.0}
+  ]
+}
+out=run_case(base,analysis,0,"ENGINEERING_QUALIFIED",convergence=convergence_ok)
 eq=[x for x in out["findings"] if x["code"]=="GLOBAL_EQUILIBRIUM"][0]
 assert eq["level"]=="PASS" and abs(eq["residual_pct"])<1e-12
+assert any(x["code"]=="MESH_CONVERGENCE" and x["level"]=="PASS" for x in out["findings"])
+
+no_conv=run_case(base,analysis,0,"SOLVED_WITH_ENGINEERING_WARNINGS")
+assert any(x["code"]=="MESH_CONVERGENCE" and x["level"]=="WARN" for x in no_conv["findings"])
 
 warn=json.loads(json.dumps(base))
 warn["mesh"]["element_type"]="TETRA4"
@@ -72,6 +87,15 @@ assert entry[0]["file"]=="patch-c10212-mechanical-qualification.ps1"
 scope_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10213-scope-fingerprint"]
 assert len(scope_entry)==1
 assert scope_entry[0]["file"]=="patch-c10213-scope-fingerprint.ps1"
+defaults_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10214-tutorial1-defaults"]
+assert len(defaults_entry)==1
+assert defaults_entry[0]["file"]=="patch-c10214-tutorial1-defaults.ps1"
+defaults_patch=(ROOT/"patch-c10214-tutorial1-defaults.ps1").read_text(encoding="utf-8")
+assert "ASTERMAX_TUTORIAL1_DEFAULTS" in defaults_patch
+assert "_secondOrder = true;" in defaults_patch
+assert "_midsideNodesOnGeometry = false;" in defaults_patch
+assert "WARN:linear_structural_solid_elements=" in defaults_patch
+assert "readiness_warnings" in defaults_patch
 scope_patch=(ROOT/"patch-c10213-scope-fingerprint.ps1").read_text(encoding="utf-8")
 assert "mesh.nodesets=" in scope_patch
 assert "mesh.elementsets=" in scope_patch
@@ -87,5 +111,7 @@ bridge=(ROOT/"bridge-c964-med-results.py").read_text(encoding="utf-8")
 assert 'optional_med_field_path(h, "REAC_NODA"' in bridge
 assert '"reaction_resultant_from_real_reac_noda"' in bridge
 
-print(json.dumps({"status":"PASS","cases":4,"patch_chain":True,"ui_contract":True,
-                  "reaction_bridge_contract":True,"fea_values_invented":False},indent=2))
+print(json.dumps({"status":"PASS","cases":5,"patch_chain":True,"ui_contract":True,
+                  "reaction_bridge_contract":True,"tutorial1_defaults":True,
+                  "convergence_required_for_full_qualification":True,
+                  "fea_values_invented":False},indent=2))
