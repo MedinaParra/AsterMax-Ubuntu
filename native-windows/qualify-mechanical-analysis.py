@@ -67,8 +67,8 @@ else:
 
 scope=analysis.get("scope_binding") or {}
 mode=scope.get("mode")
-if mode=="topology_fingerprint" and scope.get("verified") is True:
-    f.append(finding("TOPOLOGY_STABLE_SCOPE","PASS","Loads/supports use verified topology fingerprints."))
+if mode in ("topology_fingerprint","exact_cad_sha256_plus_face_manifest") and scope.get("verified") is True:
+    f.append(finding("TOPOLOGY_STABLE_SCOPE","PASS","Loads/supports use verified topology-stable scoping.",mode=mode))
 elif mode in ("raw_face_index","raw_face_index_only"):
     f.append(finding("TOPOLOGY_STABLE_SCOPE","WARN","Raw CAD face indices are not persistent identity; use topology fingerprints."))
 elif scope:
@@ -100,6 +100,8 @@ if reaction_vec is not None and expected is not None:
     f.append(finding("GLOBAL_EQUILIBRIUM",lvl,f"Global force equilibrium residual = {residual_pct:.4g}%.",**equilibrium))
 elif expected is not None:
     f.append(finding("GLOBAL_EQUILIBRIUM","WARN","Applied-load resultant was supplied but reaction evidence is unavailable."))
+elif reaction_vec is not None:
+    f.append(finding("GLOBAL_EQUILIBRIUM","WARN","Reaction resultant is available, but no independently assembled applied-load resultant was supplied; equilibrium is not closed."))
 
 convergence=None
 if conv:
