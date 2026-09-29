@@ -1,0 +1,35 @@
+{
+  "schema": "astermax-mechanical-qualification-policy/v1",
+  "name": "AsterMax Mechanical Qualification",
+  "principles": [
+    "Solver success is necessary but not sufficient for engineering acceptance.",
+    "Benchmark equivalence is separate from physical/numerical validity.",
+    "Structural solid comparisons should prefer quadratic volume elements.",
+    "Geometric scopes must be topology-stable; raw CAD face indices are audit hints, not persistent identity.",
+    "Nodal equivalent stress is computed component-first from averaged tensor components.",
+    "Global reaction equilibrium is checked when the applied load resultant is known.",
+    "Mesh convergence is evaluated on physical observables, not by chasing a benchmark maximum."
+  ],
+  "thresholds": {
+    "equilibrium_pass_pct": 1.0,
+    "equilibrium_warn_pct": 5.0,
+    "convergence_deformation_pass_pct": 5.0,
+    "convergence_stress_pass_pct": 10.0,
+    "benchmark_default_tolerance_pct": 5.0
+  },
+  "structural_solid_policy": {
+    "preferred_order": 2,
+    "preferred_families": ["TETRA10"],
+    "linear_families": ["TETRA4", "HEXA8"],
+    "linear_element_behavior": "WARN_FOR_STRESS_COMPARISON"
+  },
+  "scope_policy": {
+    "preferred": "topology_fingerprint",
+    "raw_face_index_only": "WARN_NOT_PERSISTENT",
+    "ambiguous_or_missing_match": "BLOCK"
+  },
+  "postprocess_policy": {
+    "equivalent_stress": "average tensor components to node first, then evaluate von Mises invariant",
+    "scalar_first_von_mises_average": "REJECT_FOR_ANSYS_PARITY"
+  }
+}
