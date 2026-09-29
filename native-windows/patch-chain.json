@@ -525,6 +525,19 @@
       "consumes": [
         "C10208ExerciseRealGenerateMesh"
       ]
+    },
+    {
+      "id": "patch-c10212-mechanical-qualification",
+      "file": "patch-c10212-mechanical-qualification.ps1",
+      "depends": [
+        "patch-c10211-mesh-terminal-telemetry"
+      ],
+      "declares": [
+        "AsterMaxMechanicalQualification"
+      ],
+      "consumes": [
+        "AsterMaxIntegratedResults"
+      ]
     }
   ]
 }
