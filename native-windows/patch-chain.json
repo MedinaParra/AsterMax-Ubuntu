@@ -762,6 +762,21 @@
         "AsterMaxCodeAsterContactContract",
         "AsterMaxCodeAsterContactExporter"
       ]
+    },
+    {
+      "id": "patch-c1038-native-directional-bc",
+      "file": "patch-c1038-native-directional-bc.ps1",
+      "depends": [
+        "patch-c1037-codeaster-coulomb-friction"
+      ],
+      "declares": [
+        "AsterMaxDirectionalDisplacementContract",
+        "AsterMaxLiveMechanicalLoadsContract"
+      ],
+      "consumes": [
+        "AsterMaxCodeAsterCoulombContract",
+        "AsterMaxCodeAsterCoulombExporter"
+      ]
     }
   ]
 }
