@@ -463,8 +463,22 @@ with h5py.File(med_path, "r") as h:
         name: average_element_node_component(stress_by_family, families, i, n_nodes)
         for i, name in enumerate(scomp)
     }
+    required_stress = ("SIXX", "SIYY", "SIZZ", "SIXY", "SIXZ", "SIYZ")
+    missing_stress = [name for name in required_stress if name not in nodal_stress]
+    if missing_stress:
+        raise RuntimeError(
+            "SIGM_ELNO is missing components required for ANSYS-parity von Mises: "
+            + ",".join(missing_stress)
+        )
+    sxx, syy, szz, sxy, sxz, syz = (nodal_stress[name] for name in required_stress)
+    # ANSYS Mechanical parity: average the six tensor components to the node first,
+    # then evaluate the von Mises invariant. Averaging SIEQ/VMIS scalars first is
+    # not mathematically equivalent and can bias local extrema.
+    von_mises = np.sqrt(
+        0.5 * ((sxx - syy) ** 2 + (syy - szz) ** 2 + (szz - sxx) ** 2)
+        + 3.0 * (sxy ** 2 + sxz ** 2 + syz ** 2)
+    )
     vm_idx = qcomp.index("VMIS")
-    von_mises = average_element_node_component(equiv_by_family, families, vm_idx, n_nodes)
     vm_elno = np.concatenate([equiv_by_family[c][vm_idx] for c in sorted(equiv_by_family)])
 
 family_codes = sorted(families)
@@ -509,7 +523,7 @@ bundle = {
             "location": "NODE",
             "component": "VMIS",
             "derived": True,
-            "derivation": "arithmetic mean of real Code_Aster SIEQ_ELNO/VMIS values over incident element-local nodes",
+            "derivation": "ANSYS-parity component-first: arithmetic mean of real Code_Aster SIGM_ELNO tensor components over incident element-local nodes, then von Mises invariant",
             "raw_elno_min": float(vm_elno.min()),
             "raw_elno_max": float(vm_elno.max()),
             "nodal_min": float(von_mises.min()),
@@ -520,6 +534,7 @@ bundle = {
         "fea_values_invented": False,
         "solver_output_modified": False,
         "derived_nodal_stress_average_declared": True,
+        "von_mises_component_first_ansys_parity": True,
         "bridge_validation_mode": validation_mode,
         "supported_med_families": ["TE4", "T10", "HE8"],
     },
