@@ -16,10 +16,11 @@ elseif(-not $c.Contains($new)){ throw 'C10.35 default material anchor missing.' 
 $oldDesc='material.Description = "Material predeterminado AsterMax. Revise propiedades antes del cálculo final.";'
 $newDesc='material.Description = "Material predeterminado AsterMax, equivalente a la entrada canónica Acero_Estructural de materials.lib (etiqueta humana: Acero estructural). E=210 GPa, nu=0.30, rho=7850 kg/m^3. Revise grado, certificado y condición real antes del cálculo final.";'
 if($c.Contains($oldDesc)){ $c=$c.Replace($oldDesc,$newDesc) }
-elseif(-not $c.Contains('equivalente a la entrada canónica Acero estructural de materials.lib')){ throw 'C10.35 material description anchor missing.' }
+elseif(-not $c.Contains('equivalente a la entrada canónica Acero_Estructural de materials.lib')){ throw 'C10.35 material description anchor missing.' }
 
 # Keep automatic contact generation as a mandatory model-ready behavior.
-if(-not $c.Contains('AsterMaxEnsureDefaultMaterialAndSections()')){ throw 'C10.35 default material routine missing after patch chain.' }`n$c=$c.Replace('GetNextNumberedKey("AsterMax Auto Section")','GetNextNumberedKey("AsterMax_Auto_Section")')
+if(-not $c.Contains('AsterMaxEnsureDefaultMaterialAndSections()')){ throw 'C10.35 default material routine missing after patch chain.' }
+$c=$c.Replace('GetNextNumberedKey("AsterMax Auto Section")','GetNextNumberedKey("AsterMax_Auto_Section")')
 Set-Content $controllerPath $c -Encoding UTF8
 
 $g=[regex]::Replace((Get-Content $globalsPath -Raw),"\r\n?","`n")
