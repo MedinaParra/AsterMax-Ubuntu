@@ -167,7 +167,7 @@ $autoHelper=@'
             string[] interactionNames=_controller.GetSurfaceInteractionNames();
             if(interactionNames.Length==0)
             {
-                interactionName="AsterMax Auto Contact";
+                interactionName="AsterMax_Auto_Contact";
                 var interaction=new CaeModel.SurfaceInteraction(interactionName);
                 interaction.AddProperty(new CaeModel.SurfaceBehavior());
                 _controller.AddSurfaceInteractionCommand(interaction);
