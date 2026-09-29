@@ -120,6 +120,60 @@ if(-not $b.Contains('private static JObject BuildCodeAsterContactSurface(')){
 }
 Set-Content $bridgePath $b -Encoding UTF8
 
+
+# C10.36 boundary-condition coverage: FixedBC plus translational DisplacementRotation.
+$b=[regex]::Replace((Get-Content $bridgePath -Raw),"\r\n?","\n")
+$oldBc=@'
+                    FixedBC fixedBc = bcEntry.Value as FixedBC;
+                    if (fixedBc != null)
+                    {
+                        string group = RegionToNodeGroup(model, fixedBc.RegionName, fixedBc.RegionType, nodeGroups);
+                        supports.Add(new JObject { ["name"] = fixedBc.Name, ["type"] = "fixed", ["group"] = group, ["dx"] = 0.0, ["dy"] = 0.0, ["dz"] = 0.0 });
+                    }
+                    else supports.Add(new JObject { ["name"] = bcEntry.Value.Name, ["type"] = bcEntry.Value.GetType().Name, ["unsupported_for_code_aster_adapter_v0"] = true });
+'@
+$newBc=@'
+                    FixedBC fixedBc = bcEntry.Value as FixedBC;
+                    if (fixedBc != null)
+                    {
+                        string group = RegionToNodeGroup(model, fixedBc.RegionName, fixedBc.RegionType, nodeGroups);
+                        supports.Add(new JObject { ["name"] = fixedBc.Name, ["type"] = "fixed", ["group"] = group, ["dx"] = 0.0, ["dy"] = 0.0, ["dz"] = 0.0 });
+                    }
+                    else if (bcEntry.Value is DisplacementRotation dr)
+                    {
+                        if (!double.IsNaN(dr.UR1) || !double.IsNaN(dr.UR2) || !double.IsNaN(dr.UR3))
+                            throw new NotSupportedException("C10.36 solid Code_Aster bridge supports translational displacement constraints only.");
+                        string group = RegionToNodeGroup(model, dr.RegionName, dr.RegionType, nodeGroups);
+                        supports.Add(new JObject
+                        {
+                            ["name"] = dr.Name,
+                            ["type"] = "displacement",
+                            ["group"] = group,
+                            ["dx"] = BoundaryValue(dr.U1),
+                            ["dy"] = BoundaryValue(dr.U2),
+                            ["dz"] = BoundaryValue(dr.U3)
+                        });
+                    }
+                    else supports.Add(new JObject { ["name"] = bcEntry.Value.Name, ["type"] = bcEntry.Value.GetType().Name, ["unsupported_for_code_aster_adapter_v0"] = true });
+'@
+if($b.Contains($oldBc)){ $b=$b.Replace($oldBc,$newBc) }
+elseif(-not $b.Contains('BoundaryValue(dr.U1)')){ throw 'C10.36 DisplacementRotation bridge anchor missing.' }
+$helperAnchor2='        private static string GetElementType(FeElement e)'
+$boundaryHelper=@'
+        private static JToken BoundaryValue(double value)
+        {
+            if (double.IsNaN(value)) return JValue.CreateNull();
+            if (double.IsPositiveInfinity(value)) return new JValue(0.0);
+            if (double.IsNegativeInfinity(value)) throw new NotSupportedException("Negative infinity is not a valid displacement constraint.");
+            return new JValue(value);
+        }
+
+'@
+if(-not $b.Contains('private static JToken BoundaryValue(double value)')){
+    if(-not $b.Contains($helperAnchor2)){ throw 'C10.36 boundary helper insertion anchor missing.' }
+    $b=$b.Replace($helperAnchor2,$boundaryHelper+$helperAnchor2)
+}
+Set-Content $bridgePath $b -Encoding UTF8
 # ----------------------------------------------------------------------
 # 2) Native Code_Aster exporter: emit contact skins + GROUP_MA and use
 #    DEFI_CONTACT/STAT_NON_LINE whenever the contract contains contacts.
@@ -232,6 +286,41 @@ if(-not $e.Contains('["contact_pair_count"]')){
 }
 Set-Content $exporterPath $e -Encoding UTF8
 
+
+# Multiple support records: first support remains the primary fixed block;
+# later records become an auxiliary DDL_IMPO tuple with only defined DOFs.
+$e=[regex]::Replace((Get-Content $exporterPath -Raw),"\r\n?","\n")
+$e=$e.Replace('if(mats.Count!=1 || supports.Count!=1 || loads.Count!=1) throw new NotSupportedException("C9.61 native exporter v0 requires exactly one material, one support and one load.");',
+              'if(mats.Count!=1 || supports.Count<1 || loads.Count!=1) throw new NotSupportedException("C10.36 native exporter requires one material, at least one support and exactly one load.");')
+$writeAnchor='            File.WriteAllText(commPath,comm,new System.Text.UTF8Encoding(false));'
+$extra=@'
+            if(supports.Count>1)
+            {
+                var ddl=new List<string>();
+                for(int i=1;i<supports.Count;i++)
+                {
+                    JObject bc=(JObject)supports[i];
+                    string group=RequireMappedGroup(asterGroupNames,(string)bc["group"],"support");
+                    var terms=new List<string>();
+                    if(bc["dx"]!=null && bc["dx"].Type!=JTokenType.Null) terms.Add("DX="+F(bc["dx"]));
+                    if(bc["dy"]!=null && bc["dy"].Type!=JTokenType.Null) terms.Add("DY="+F(bc["dy"]));
+                    if(bc["dz"]!=null && bc["dz"].Type!=JTokenType.Null) terms.Add("DZ="+F(bc["dz"]));
+                    if(terms.Count==0) throw new InvalidOperationException("Directional support has no constrained translation: "+(string)bc["name"]);
+                    ddl.Add("_F(GROUP_NO='"+group+"', "+String.Join(", ",terms)+")");
+                }
+                string stabilizer="stabilize = AFFE_CHAR_MECA(\\n    MODELE=model,\\n    DDL_IMPO=(\\n        "+String.Join(",\\n        ",ddl)+",\\n    ),\\n)\\n\\n";
+                string loadAnchor="load = AFFE_CHAR_MECA(";
+                if(!comm.Contains(loadAnchor)) throw new InvalidOperationException("C10.36 load anchor missing while adding directional supports.");
+                comm=comm.Replace(loadAnchor,stabilizer+loadAnchor);
+                comm=comm.Replace("_F(CHARGE=fixed), _F(CHARGE=load)","_F(CHARGE=fixed), _F(CHARGE=stabilize), _F(CHARGE=load)");
+            }
+
+'@
+if(-not $e.Contains('Directional support has no constrained translation')){
+    if(-not $e.Contains($writeAnchor)){ throw 'C10.36 exporter write anchor missing for extra supports.' }
+    $e=$e.Replace($writeAnchor,$extra+$writeAnchor)
+}
+Set-Content $exporterPath $e -Encoding UTF8
 # ----------------------------------------------------------------------
 # 3) Extend the real C10.35 two-body runtime audit: once contacts exist,
 #    build the native solver contract and verify that contact skins survive.
