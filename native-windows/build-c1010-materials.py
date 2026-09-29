@@ -5,7 +5,7 @@ from pathlib import Path
 p=argparse.ArgumentParser();p.add_argument('--out',required=True);a=p.parse_args()
 out=Path(a.out);out.mkdir(parents=True,exist_ok=True)
 rows=[
- ('Aceros','Acero estructural',210000,0.30,7850,'','Material predeterminado AsterMax. Propiedades elásticas genéricas de referencia; verificar grado, certificado y condición real antes del cálculo final.'),
+ ('Aceros','Acero_Estructural',210000,0.30,7850,'','Acero estructural — material predeterminado AsterMax. Propiedades elásticas genéricas de referencia; verificar grado, certificado y condición real antes del cálculo final.'),
  ('Aceros','ASTM_A36_Referencia',200000,0.30,7850,'','Valores elásticos típicos de referencia; verificar certificado y especificación aplicable.'),
  ('Aceros','ASTM_A572_Gr50_Referencia',200000,0.30,7850,'','Valores elásticos típicos de referencia; verificar certificado y especificación aplicable.'),
  ('Aceros','SAE_1020_Referencia',205000,0.29,7870,'','Valores típicos editables para acero al carbono; verificar condición de suministro.'),
