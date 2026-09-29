@@ -1,0 +1,344 @@
+name: AsterMax C10.37 Native Code_Aster Coulomb Friction
+
+on:
+  push:
+    branches:
+      - agent/c1037-codeaster-coulomb-friction
+  pull_request:
+    branches:
+      - agent/c1036-codeaster-contact
+  workflow_dispatch:
+
+jobs:
+  windows-build-and-export:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout AsterMax C10.37
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v4
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate and apply complete patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python .\native-windows\validate-patch-chain.py
+          if($LASTEXITCODE -ne 0){ throw 'Patch-chain validation failed.' }
+          $chain=Get-Content .\native-windows\patch-chain.json -Raw | ConvertFrom-Json
+          foreach($p in $chain.patches){
+            $script=Join-Path .\native-windows $p.file
+            if(-not(Test-Path $script)){ throw "Missing patch: $($p.file)" }
+            Write-Host "APPLY $($p.id)"
+            & $script -Root "$PWD\upstream"
+            if(-not $?){ throw "Patch failed: $($p.id)" }
+          }
+
+      - name: Setup Python and Gmsh
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild C10.37 Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Locate executable and install materials library
+        id: locate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe was not produced.' }
+          $bin=$exe.Directory.FullName
+          $g=Get-Content .\upstream\PrePoMax\Globals.cs -Raw
+          if(-not $g.Contains('AsterMax Mechanical C10.37')){ throw 'C10.37 title missing from compiled source.' }
+          python .\native-windows\build-c1010-materials.py --out "$bin"
+          if($LASTEXITCODE -ne 0){ throw 'materials.lib generation failed.' }
+          "exe=$($exe.FullName)" | Out-File $env:GITHUB_OUTPUT -Append
+          "bin=$bin" | Out-File $env:GITHUB_OUTPUT -Append
+
+      - name: C10.37 source contact-export gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bridge=Get-Content .\upstream\PrePoMax\AsterMaxModelContractBridge.cs -Raw
+          $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
+          foreach($t in @('BuildCodeAsterContactSurface','codeaster_contact_contract_pass')){
+            if(-not $bridge.Contains($t) -and -not (Get-Content .\upstream\PrePoMax\Forms\AsterMaxC1035Audit.cs -Raw).Contains($t)){ throw "Bridge/audit token missing: $t" }
+          }
+          foreach($t in @('friction_coefficient','COULOMB')){ if(-not $bridge.Contains($t)){ throw "Bridge friction token missing: $t" } }
+          foreach($t in @('C10.37-native-codeaster-coulomb-v1','GROUP_MA NOM = AM_VOL','DEFI_CONTACT','STAT_NON_LINE','ORIE_PEAU_3D','contact_coulomb_coefficients','Directional support has no constrained translation')){
+            if(-not $exporter.Contains($t)){ throw "Exporter token missing: $t" }
+          }
+          if($bridge.Contains('supports frictionless contact only')){ throw 'Legacy frictionless-only solve block remains.' }
+
+      - name: Install pinned NetGen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin='${{ steps.locate.outputs.bin }}'
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $sha='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $url -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha){ throw 'Pinned CAD runtime digest mismatch.' }
+          Expand-Archive runtime.zip runtime -Force
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing.' }
+          Copy-Item $ng.Directory.FullName (Join-Path $bin 'NetGen') -Recurse -Force
+          New-Item -ItemType Directory -Force (Join-Path $bin 'Temp') | Out-Null
+
+      - name: Run real STEP mesh + automatic contact + solver-contract audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\native-windows\smoke-c1035-defaults.ps1 -Dist '${{ steps.locate.outputs.bin }}'
+          if($LASTEXITCODE -ne 0){ throw 'C10.37 inherited two-body runtime audit failed.' }
+          $report=Get-Content '${{ steps.locate.outputs.bin }}\Audit\C10.35-runtime\defaults-autocontact-report.json' -Raw | ConvertFrom-Json
+          if(-not $report.pass -or -not $report.codeaster_contact_contract_pass -or -not $report.codeaster_coulomb_contract_pass){ throw 'Real Coulomb contact contract gate failed.' }
+          if([math]::Abs([double]$report.codeaster_coulomb_mu-0.20) -gt 1e-12){ throw 'Runtime Coulomb coefficient mismatch.' }
+          if([int]$report.contact_pair_count -lt 1 -or [int]$report.codeaster_contact_skin_elements -lt 2){ throw 'Contact contract contains no usable skin elements.' }
+          $contract='${{ steps.locate.outputs.bin }}\Audit\C10.35-runtime\contact-solver-contract.json'
+          if(-not(Test-Path $contract)){ throw 'Contact solver contract missing.' }
+
+      - name: Add deterministic BC/load admission scope to real AsterMax contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import json, pathlib
+          p=pathlib.Path(r"${{ steps.locate.outputs.bin }}\Audit\C10.35-runtime\contact-solver-contract.json")
+          d=json.loads(p.read_text(encoding='utf-8-sig'))
+          nodes=d['mesh']['nodes']
+          xs=[float(n['x']) for n in nodes]
+          xmin,xmax=min(xs),max(xs)
+          tol=max(1e-8,(xmax-xmin)*1e-8)
+          fixed=[n['id'] for n in nodes if abs(float(n['x'])-xmin)<=tol]
+          load=[n['id'] for n in nodes if abs(float(n['x'])-xmax)<=tol]
+          if not fixed or not load: raise SystemExit('could not form deterministic end-face node groups')
+          d['mesh']['node_groups']['C1037_FIXED']=fixed
+          d['mesh']['node_groups']['C1037_LOAD']=load
+          d['supports']=[
+            {'name':'C1037_Fixed','type':'fixed','group':'C1037_FIXED','dx':0.0,'dy':0.0,'dz':0.0},
+            {'name':'C1037_Stabilize','type':'displacement','group':'C1037_LOAD','dx':None,'dy':0.0,'dz':0.0},
+          ]
+          d['loads']=[{'name':'C1037_Force','type':'nodal_force_total','group':'C1037_LOAD','fx_total_n':-1000.0,'fy_total_n':0.0,'fz_total_n':100.0}]
+          d['postprocess']={'displacement_probe_group':'C1037_LOAD'}
+          out=p.with_name('c1037-contact-admission-contract.json')
+          out.write_text(json.dumps(d,indent=2),encoding='utf-8')
+          print(out)
+          '@ | Set-Content .\prepare-c1037-contract.py -Encoding UTF8
+          python .\prepare-c1037-contract.py
+          if($LASTEXITCODE -ne 0){ throw 'Admission contract preparation failed.' }
+
+      - name: Execute compiled native exporter on the real contact contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin='${{ steps.locate.outputs.bin }}'
+          $exe='${{ steps.locate.outputs.exe }}'
+          $contract=Join-Path $bin 'Audit\C10.35-runtime\c1037-contact-admission-contract.json'
+          $deck=Join-Path $PWD 'c1037-exported-contact'
+          $script:AsterMaxAssemblyRoot=(Resolve-Path '.\upstream').Path
+          New-Item -ItemType Directory -Force $deck | Out-Null
+
+          function Find-AsterMaxAssembly([string]$fileName) {
+            $matches=Get-ChildItem $script:AsterMaxAssemblyRoot -Recurse -File -Filter $fileName -ErrorAction SilentlyContinue
+            $candidate=$matches | Where-Object { $_.FullName -match '\\bin\\x64\\Release\\' } | Select-Object -First 1
+            if(-not $candidate){ $candidate=$matches | Where-Object { $_.FullName -match '\\packages\\' } | Select-Object -First 1 }
+            return $candidate
+          }
+
+          # AsterMax is a .NET Framework application. Resolve its project and
+          # NuGet assemblies from the actual build tree instead of assuming
+          # CaeGlobals/CaeModel/etc. were copied beside the executable.
+          $resolver=[System.ResolveEventHandler]{
+            param($sender,$eventArgs)
+            $simple=(New-Object System.Reflection.AssemblyName($eventArgs.Name)).Name + '.dll'
+            $candidate=Find-AsterMaxAssembly $simple
+            if($candidate){ return [System.Reflection.Assembly]::LoadFrom($candidate.FullName) }
+            return $null
+          }
+          [AppDomain]::CurrentDomain.add_AssemblyResolve($resolver)
+          try {
+            $newton=Find-AsterMaxAssembly 'Newtonsoft.Json.dll'
+            if(-not $newton){ throw 'Newtonsoft.Json.dll not found in build/package tree.' }
+            [System.Reflection.Assembly]::LoadFrom($newton.FullName) | Out-Null
+            $asm=[System.Reflection.Assembly]::LoadFrom($exe)
+            $json=[Newtonsoft.Json.Linq.JObject]::Parse((Get-Content $contract -Raw))
+            $type=$asm.GetType('PrePoMax.AsterMaxCodeAsterNativeExporter',$true)
+            $method=$type.GetMethod('ExportContract',[System.Reflection.BindingFlags]'Public,Static')
+            if($null -eq $method){ throw 'Compiled ExportContract method missing.' }
+            try { $manifest=$method.Invoke($null,[object[]]@($json,[string]$deck,[string]'astermax-c1037-exported-contact')) }
+            catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+          }
+          finally {
+            [AppDomain]::CurrentDomain.remove_AssemblyResolve($resolver)
+          }
+          $comm=Get-Content (Join-Path $deck 'astermax-c1037-exported-contact.comm') -Raw
+          $mail=Get-Content (Join-Path $deck 'astermax-c1037-exported-contact.mail') -Raw
+          foreach($t in @('DEFI_CONTACT','STAT_NON_LINE','GROUP_MA_MAIT','GROUP_MA_ESCL','CONTACT_INIT','stabilize = AFFE_CHAR_MECA',"FROTTEMENT='COULOMB'",'COULOMB=0.2')){ if(-not $comm.Contains($t)){ throw "Generated .comm missing: $t" } }
+          foreach($t in @('GROUP_MA NOM = AM_VOL','GROUP_MA NOM = AM_M001','GROUP_MA NOM = AM_S001')){ if(-not $mail.Contains($t)){ throw "Generated .mail missing: $t" } }
+          @'
+          P actions make_etude
+          P version 15.2
+          P mode interactif
+          P time_limit 900
+          P memory_limit 4096
+          P ncpus 1
+          P mpi_nbcpu 1
+
+          F comm /analysis/astermax-c1037-exported-contact.comm D 1
+          F mail /analysis/astermax-c1037-exported-contact.mail D 20
+          F mess /analysis/astermax-c1037-exported-contact.mess R 6
+          F rmed /analysis/astermax-c1037-exported-contact.rmed R 81
+          F resu /analysis/astermax-c1037-exported-contact.resu R 80
+          '@ | Set-Content (Join-Path $deck 'astermax-c1037-exported-contact.export') -Encoding ASCII
+          Copy-Item $contract (Join-Path $deck 'c1037-contact-admission-contract.json') -Force
+
+      - name: Stage C10.37 candidate build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin='${{ steps.locate.outputs.bin }}'
+          New-Item -ItemType Directory -Force .\candidate | Out-Null
+          Copy-Item "$bin\*" .\candidate\ -Recurse -Force
+          New-Item -ItemType Directory -Force .\candidate\Validation\C10.37 | Out-Null
+          Copy-Item .\c1037-exported-contact\* .\candidate\Validation\C10.37\ -Force
+          Copy-Item "$bin\Audit\C10.35-runtime\defaults-autocontact-report.json" .\candidate\Validation\C10.37\ -Force
+          Copy-Item "$bin\Audit\C10.35-runtime\contact-solver-contract.json" .\candidate\Validation\C10.37\ -Force
+          New-Item -ItemType Directory -Force .\candidate\AsterMaxRuntime\CodeAster | Out-Null
+          Copy-Item .\native-windows\runtime\CodeAster\* .\candidate\AsterMaxRuntime\CodeAster\ -Recurse -Force
+          $hash=(Get-FileHash '.\candidate\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.37'; branch='agent/c1037-codeaster-coulomb-friction'; commit='${{ github.sha }}';
+            executable_sha256=$hash; platform='Windows x64'; solver_backend='Code_Aster';
+            automatic_contact_detection=$true; contact_contract_runtime='PASS'; compiled_contact_export='PASS';
+            genuine_solver_contact='PENDING_LINUX_ADMISSION'; coulomb_friction='PASS'; coulomb_mu=0.20; tangential_load_n=100.0;
+            directional_displacement_constraints='ADMISSION_CONTRACT_ONLY'; fea_values_invented=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content .\candidate\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Upload compiled candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.37-Candidate-Windows-x64
+          path: candidate
+          if-no-files-found: error
+
+      - name: Upload AsterMax-exported contact deck
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.37-Exported-Coulomb-Deck
+          path: c1037-exported-contact
+          if-no-files-found: error
+
+  genuine-codeaster-contact:
+    needs: windows-build-and-export
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout C10.37 validation scripts
+        uses: actions/checkout@v4
+      - name: Download AsterMax-exported contact deck
+        uses: actions/download-artifact@v4
+        with:
+          name: AsterMax-C10.37-Exported-Coulomb-Deck
+          path: contact-evidence
+      - name: Pull pinned genuine Code_Aster
+        shell: bash
+        run: |
+          set -euxo pipefail
+          docker pull scimulate/code_aster:15.2
+          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' | tee contact-evidence/CODE_ASTER_IMAGE_DIGEST.txt
+      - name: Execute genuine Code_Aster on AsterMax exported contact deck
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod -R 0777 contact-evidence
+          docker run --rm --volume "$PWD/contact-evidence:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/astermax-c1037-exported-contact.export | tee contact-evidence/CODE_ASTER_STDOUT.log
+          test -s contact-evidence/astermax-c1037-exported-contact.mess
+          test -s contact-evidence/astermax-c1037-exported-contact.rmed
+          if grep -q '<F>' contact-evidence/astermax-c1037-exported-contact.mess; then tail -n 200 contact-evidence/astermax-c1037-exported-contact.mess; exit 1; fi
+          grep -Ei 'CONTACT|FROTTEMENT|COULOMB|STAT_NON_LINE' contact-evidence/astermax-c1037-exported-contact.mess | tail -n 120 || true
+      - name: Seal genuine solver admission evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('contact-evidence')
+          mess=root/'astermax-c1037-exported-contact.mess'
+          rmed=root/'astermax-c1037-exported-contact.rmed'
+          text=mess.read_text(errors='ignore')
+          if '<F>' in text: raise SystemExit('fatal Code_Aster marker')
+          report={
+            'release':'C10.37','solver_execution':'RUN','export_source':'compiled_AsterMax_native_exporter',
+            'contact_solver':'DEFI_CONTACT_CONTINUE_COULOMB_STAT_NON_LINE','coulomb_mu':0.20,'tangential_load_n':100.0,
+            'mess_bytes':mess.stat().st_size,'rmed_bytes':rmed.stat().st_size,'fea_values_invented':False,'pass':True,
+          }
+          (root/'C10.37_GENUINE_CONTACT_VALIDATION.json').write_text(json.dumps(report,indent=2))
+          with (root/'OUTPUT_SHA256.txt').open('w') as f:
+            for p in sorted(root.iterdir()):
+              if p.is_file() and p.name!='OUTPUT_SHA256.txt':
+                f.write(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+      - name: Upload genuine contact evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.37-Genuine-CodeAster-Coulomb-Evidence
+          path: contact-evidence
+          if-no-files-found: error
+
+  finalize-c1037:
+    needs: genuine-codeaster-contact
+    runs-on: windows-latest
+    steps:
+      - name: Download compiled candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: AsterMax-C10.37-Candidate-Windows-x64
+          path: dist
+      - name: Download genuine solver evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: AsterMax-C10.37-Genuine-CodeAster-Coulomb-Evidence
+          path: genuine-contact
+      - name: Admit solver evidence and seal final build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $v=Get-Content .\genuine-contact\C10.37_GENUINE_CONTACT_VALIDATION.json -Raw | ConvertFrom-Json
+          if(-not $v.pass -or $v.solver_execution -ne 'RUN' -or $v.fea_values_invented){ throw 'Genuine Code_Aster contact evidence not admitted.' }
+          New-Item -ItemType Directory -Force .\dist\Validation\C10.37\Genuine-CodeAster | Out-Null
+          Copy-Item .\genuine-contact\* .\dist\Validation\C10.37\Genuine-CodeAster\ -Force
+          $m=Get-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Raw | ConvertFrom-Json
+          $m.genuine_solver_contact='PASS'
+          $m | Add-Member -NotePropertyName contact_solver_execution -NotePropertyValue 'RUN' -Force
+          $m | Add-Member -NotePropertyName contact_solver_path -NotePropertyValue 'DEFI_CONTACT_CONTINUE_COULOMB_STAT_NON_LINE' -Force
+          $m | ConvertTo-Json -Depth 8 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Get-ChildItem .\dist -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $rel=$_.FullName.Substring((Resolve-Path .\dist).Path.Length+1)
+            "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(),$rel
+          } | Set-Content .\dist\PACKAGE_SHA256.txt -Encoding UTF8
+      - name: Upload final C10.37 Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.37-Windows-x64-CodeAster-Coulomb
+          path: dist
+          if-no-files-found: error
