@@ -549,6 +549,17 @@
       "consumes": [
         "AsterMaxMechanicalQualification"
       ]
+    },
+    {
+      "id": "patch-c10214-tutorial1-defaults",
+      "file": "patch-c10214-tutorial1-defaults.ps1",
+      "depends": [
+        "patch-c10213-scope-fingerprint"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxMechanicalQualification"
+      ]
     }
   ]
 }
