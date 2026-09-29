@@ -3,7 +3,7 @@ name: AsterMax C10.37 Native Code_Aster Coulomb Friction
 on:
   push:
     branches:
-      - agent/c1037-codeaster-contact
+      - agent/c1037-codeaster-coulomb-friction
   pull_request:
     branches:
       - agent/c1036-codeaster-contact
@@ -225,7 +225,7 @@ jobs:
           Copy-Item .\native-windows\runtime\CodeAster\* .\candidate\AsterMaxRuntime\CodeAster\ -Recurse -Force
           $hash=(Get-FileHash '.\candidate\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.37'; branch='agent/c1037-codeaster-contact'; commit='${{ github.sha }}';
+            release='C10.37'; branch='agent/c1037-codeaster-coulomb-friction'; commit='${{ github.sha }}';
             executable_sha256=$hash; platform='Windows x64'; solver_backend='Code_Aster';
             automatic_contact_detection=$true; contact_contract_runtime='PASS'; compiled_contact_export='PASS';
             genuine_solver_contact='PENDING_LINUX_ADMISSION'; coulomb_friction='PASS'; coulomb_mu=0.20; tangential_load_n=100.0;
