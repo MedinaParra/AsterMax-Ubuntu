@@ -1,84 +1,129 @@
 #!/usr/bin/env python3
-"""Render genuine WS01.1 AsterMax/Code_Aster VTU results to PNG evidence.
+"""Headless renderer for genuine WS01.1 AsterMax/Code_Aster VTU results.
 
-The input VTU is produced by bridge-c964-med-results.py from the real Code_Aster
-MED result. This script does not synthesize FEA values.
+Reads the real VTU produced from Code_Aster MED and renders a sampled external
+surface with Matplotlib/Agg. No FEA values are synthesized and no OpenGL context
+is required on CI runners.
 """
-import argparse
+import argparse, json
 from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib import cm, colors
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+import numpy as np
 import vtk
+from vtk.util.numpy_support import vtk_to_numpy
 
 FIELDS = [
-    ("Total Deformation", "ws01-total-deformation.png"),
-    ("Equivalent Stress", "ws01-von-mises.png"),
+    ("Total Deformation", "ws01-total-deformation.png", "mm"),
+    ("Equivalent Stress", "ws01-von-mises.png", "MPa"),
 ]
 
-def render(grid, field_name, out_path):
-    point_data = grid.GetPointData()
-    arr = point_data.GetArray(field_name)
-    if arr is None:
-        raise RuntimeError(f"missing VTU point array: {field_name}")
+MAX_TRIANGLES = 70000
 
-    rng = arr.GetRange()
+def surface_triangles(grid, field_name):
     surface = vtk.vtkDataSetSurfaceFilter()
     surface.SetInputData(grid)
     surface.Update()
 
-    mapper = vtk.vtkPolyDataMapper()
-    mapper.SetInputConnection(surface.GetOutputPort())
-    mapper.SetScalarModeToUsePointFieldData()
-    mapper.SelectColorArray(field_name)
-    mapper.SetScalarRange(rng)
-    mapper.ScalarVisibilityOn()
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(surface.GetOutputPort())
+    tri.Update()
+    poly = tri.GetOutput()
 
-    actor = vtk.vtkActor()
-    actor.SetMapper(mapper)
-    actor.GetProperty().EdgeVisibilityOn()
-    actor.GetProperty().SetLineWidth(0.4)
+    points = vtk_to_numpy(poly.GetPoints().GetData()).astype(float, copy=False)
+    arr = poly.GetPointData().GetArray(field_name)
+    if arr is None:
+        raise RuntimeError(f"missing VTU point array: {field_name}")
+    values = vtk_to_numpy(arr).astype(float, copy=False).reshape(-1)
 
-    scalar_bar = vtk.vtkScalarBarActor()
-    scalar_bar.SetLookupTable(mapper.GetLookupTable())
-    scalar_bar.SetTitle(field_name)
-    scalar_bar.SetNumberOfLabels(7)
+    raw = vtk_to_numpy(poly.GetPolys().GetData()).astype(np.int64, copy=False)
+    if raw.size % 4:
+        raise RuntimeError("triangulated surface connectivity is malformed")
+    cells = raw.reshape(-1, 4)
+    if not np.all(cells[:, 0] == 3):
+        raise RuntimeError("surface triangulation contains non-triangles")
+    triangles = cells[:, 1:4]
 
-    title = vtk.vtkTextActor()
-    title.SetInput(f"AsterMax WS01.1 — {field_name}\nCode_Aster result / Cap_fillets.stp")
-    title.GetTextProperty().SetFontSize(22)
-    title.GetTextProperty().BoldOn()
-    title.SetPosition(30, 820)
+    original_count = len(triangles)
+    if original_count > MAX_TRIANGLES:
+        idx = np.linspace(0, original_count - 1, MAX_TRIANGLES, dtype=np.int64)
+        triangles = triangles[idx]
 
-    renderer = vtk.vtkRenderer()
-    renderer.AddActor(actor)
-    renderer.AddViewProp(scalar_bar)
-    renderer.AddViewProp(title)
-    renderer.SetBackground(0.96, 0.96, 0.96)
+    return points, triangles, values, original_count
 
-    window = vtk.vtkRenderWindow()
-    window.SetOffScreenRendering(1)
-    window.SetSize(1400, 900)
-    window.AddRenderer(renderer)
+def render(grid, field_name, out_path, unit):
+    points, triangles, values, original_triangles = surface_triangles(grid, field_name)
+    finite = np.isfinite(values)
+    if not finite.all():
+        raise RuntimeError(f"{field_name}: non-finite values in genuine VTU field")
 
-    camera = renderer.GetActiveCamera()
-    renderer.ResetCamera()
-    camera.Azimuth(35)
-    camera.Elevation(25)
-    renderer.ResetCameraClippingRange()
+    vmin = float(values.min())
+    vmax = float(values.max())
+    face_values = values[triangles].mean(axis=1)
 
-    window.Render()
-    w2i = vtk.vtkWindowToImageFilter()
-    w2i.SetInput(window)
-    w2i.SetInputBufferTypeToRGB()
-    w2i.ReadFrontBufferOff()
-    w2i.Update()
+    norm = colors.Normalize(vmin=vmin, vmax=vmax if vmax > vmin else vmin + 1.0)
+    cmap = cm.get_cmap("viridis")
 
-    writer = vtk.vtkPNGWriter()
-    writer.SetFileName(str(out_path))
-    writer.SetInputConnection(w2i.GetOutputPort())
-    writer.Write()
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection="3d")
+    verts = points[triangles]
+    coll = Poly3DCollection(
+        verts,
+        facecolors=cmap(norm(face_values)),
+        linewidths=0.02,
+        edgecolors="none",
+        antialiased=False,
+    )
+    ax.add_collection3d(coll)
+
+    mins = points.min(axis=0)
+    maxs = points.max(axis=0)
+    ctr = (mins + maxs) / 2.0
+    spans = np.maximum(maxs - mins, 1e-9)
+    radius = float(spans.max()) / 2.0
+    ax.set_xlim(ctr[0]-radius, ctr[0]+radius)
+    ax.set_ylim(ctr[1]-radius, ctr[1]+radius)
+    ax.set_zlim(ctr[2]-radius, ctr[2]+radius)
+    try:
+        ax.set_box_aspect((spans[0], spans[1], spans[2]))
+    except Exception:
+        pass
+    ax.view_init(elev=25, azim=-55)
+    ax.set_axis_off()
+    ax.set_title(
+        f"AsterMax / Code_Aster — WS01.1\n"
+        f"{field_name} max = {vmax:.6g} {unit}",
+        pad=18,
+    )
+
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax, shrink=0.72, pad=0.03)
+    cb.set_label(f"{field_name} [{unit}]")
+
+    fig.text(
+        0.01, 0.01,
+        f"Real VTU surface; displayed triangles: {len(triangles):,} / {original_triangles:,}",
+        fontsize=8,
+    )
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
 
     if not out_path.exists() or out_path.stat().st_size < 10_000:
         raise RuntimeError(f"render failed or PNG unexpectedly small: {out_path}")
-    return {"field": field_name, "range": [float(rng[0]), float(rng[1])], "png": str(out_path)}
+
+    return {
+        "field": field_name,
+        "range": [vmin, vmax],
+        "png": str(out_path),
+        "surface_triangles_total": int(original_triangles),
+        "surface_triangles_rendered": int(len(triangles)),
+        "fea_values_invented": False,
+    }
 
 def main():
     ap = argparse.ArgumentParser()
@@ -97,19 +142,21 @@ def main():
         raise RuntimeError("VTU contains no mesh")
 
     evidence = []
-    for field, name in FIELDS:
-        evidence.append(render(grid, field, out / name))
+    for field, name, unit in FIELDS:
+        evidence.append(render(grid, field, out / name, unit))
 
-    import json
     manifest = {
         "tutorial": "ANSYS Mechanical WS01.1 Mechanical Basics",
         "source": str(Path(args.vtu).name),
+        "renderer": "matplotlib-agg-headless",
         "mesh_points": int(grid.GetNumberOfPoints()),
         "mesh_cells": int(grid.GetNumberOfCells()),
         "renders": evidence,
         "fea_values_invented": False,
     }
-    (out / "ws01-render-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (out / "ws01-render-manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
     print(json.dumps(manifest, indent=2))
 
 if __name__ == "__main__":
