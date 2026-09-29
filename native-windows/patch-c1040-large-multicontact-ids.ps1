@@ -129,7 +129,9 @@ $stress=@'
                     report["codeaster_skin_id_boundary_face_10000"]=fixedFace10000;
 '@
 if($a.Contains($reportAnchor) -and -not $a.Contains('codeaster_skin_id_stress_pass')){
-    $a=$a.Replace($reportAnchor,$stress.TrimEnd())
+    $idx=$a.IndexOf($reportAnchor)
+    if($idx -lt 0){ throw 'C10.40 audit report anchor missing.' }
+    $a=$a.Substring(0,$idx)+$stress.TrimEnd()+$a.Substring($idx+$reportAnchor.Length)
 }
 elseif(-not $a.Contains('codeaster_skin_id_stress_pass')){ throw 'C10.40 audit report anchor missing.' }
 Set-Content $auditPath $a -Encoding UTF8
