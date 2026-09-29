@@ -6,7 +6,7 @@ on:
       - agent/c1035-material-library-autocontact
   pull_request:
     branches:
-      - main
+      - agent/c1034-mechanical-tree
   workflow_dispatch:
 
 jobs:
