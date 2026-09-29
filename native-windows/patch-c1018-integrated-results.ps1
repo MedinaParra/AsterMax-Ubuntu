@@ -15,7 +15,13 @@ foreach($name in @('AsterMaxIntegratedResults.cs','AsterMaxIntegratedResultsAudi
 $path=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 $s=Get-Content $path -Raw
 $s=Replace-Required $s '                _modelTree.EnableAsterMaxOutline();' ('                InitializeAsterMaxIntegratedResults();'+[Environment]::NewLine+'                _modelTree.EnableAsterMaxOutline();')
-$s=Replace-Required $s '                StartAsterMaxPortableCadSmoke();' ('                StartAsterMaxPortableCadSmoke();'+[Environment]::NewLine+'                StartAsterMaxIntegratedAudit();')
+if($s.Contains('                StartAsterMaxPortableCadSmoke();')){
+    $s=$s.Replace('                StartAsterMaxPortableCadSmoke();','                StartAsterMaxPortableCadSmoke();'+[Environment]::NewLine+'                StartAsterMaxIntegratedAudit();')
+}
+elseif($s.Contains('            StartAsterMaxPortableCadSmoke();')){
+    $s=$s.Replace('            StartAsterMaxPortableCadSmoke();','            StartAsterMaxPortableCadSmoke();'+[Environment]::NewLine+'            StartAsterMaxIntegratedAudit();')
+}
+elseif(-not $s.Contains('StartAsterMaxIntegratedAudit();')){ throw 'C10.18 portable CAD smoke/integrated audit anchor missing.' }
 Set-Content $path $s -Encoding UTF8
 
 $path=Join-Path $Root 'PrePoMax/Forms/AsterMaxButtonAudit.cs'
