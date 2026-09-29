@@ -10,7 +10,7 @@ foreach($p in @($bridgePath,$exporterPath,$auditPath,$globalsPath)){ if(!(Test-P
 # ----------------------------------------------------------------------
 # 1) Native FeModel -> solver contract: serialize real contact surfaces.
 # ----------------------------------------------------------------------
-$b=[regex]::Replace((Get-Content $bridgePath -Raw),"\r\n?","\n")
+$b=[regex]::Replace((Get-Content $bridgePath -Raw),"\r\n?","`n")
 $legacyGuard='            if (model.ContactPairs != null && model.ContactPairs.Count > 0) throw new NotSupportedException("C10.35: contact pairs are present, but native Code_Aster contact translation is not yet certified. Solve is blocked to prevent a false no-contact result.");'
 if($b.Contains($legacyGuard)){ $b=$b.Replace($legacyGuard,'') }
 
@@ -125,9 +125,10 @@ Set-Content $bridgePath $b -Encoding UTF8
 # 2) Native Code_Aster exporter: emit contact skins + GROUP_MA and use
 #    DEFI_CONTACT/STAT_NON_LINE whenever the contract contains contacts.
 # ----------------------------------------------------------------------
-$e=[regex]::Replace((Get-Content $exporterPath -Raw),"\r\n?","\n")
-$e=$e.Replace('public const string Version = "C10.08-native-codeaster-tetra-v2";',
-              'public const string Version = "C10.36-native-codeaster-contact-v1";')
+$e=[regex]::Replace((Get-Content $exporterPath -Raw),"\r\n?","`n")
+$versionLine=[regex]::Match($e,'public const string Version = "[^"]+";').Value
+if([string]::IsNullOrWhiteSpace($versionLine)){ throw 'C10.36 exporter version anchor missing.' }
+$e=$e.Replace($versionLine,'public const string Version = "C10.36-native-codeaster-contact-v1";')
 
 $contractAnchor='            JArray mats=(JArray)contract["materials"];'
 if(-not $e.Contains('JArray contacts=(JArray)contract["contacts"]')){
@@ -209,8 +210,7 @@ $commContact=@'
                         "_F(GROUP_MA_MAIT='{0}', GROUP_MA_ESCL='{1}', CONTACT_INIT='{2}')",
                         (string)master["group"],(string)slave["group"],(string)contact["contact_init"]));
                 }
-                string zones=String.Join(",
-        ",zoneLines);
+                string zones=String.Join(",\\n        ",zoneLines);
                 string linearSolve="result = MECA_STATIQUE(MODELE=model, CHAM_MATER=matfield, EXCIT=(_F(CHARGE=fixed), _F(CHARGE=load)))";
                 string nonlinear=String.Format(CultureInfo.InvariantCulture,@"times = DEFI_LIST_REEL(DEBUT=0.0, INTERVALLE=_F(JUSQU_A=1.0, NOMBRE=10))
 contact = DEFI_CONTACT(
@@ -258,7 +258,7 @@ Set-Content $exporterPath $e -Encoding UTF8
 
 # Multiple support records: first support remains the primary fixed block;
 # later records become an auxiliary DDL_IMPO tuple with only defined DOFs.
-$e=[regex]::Replace((Get-Content $exporterPath -Raw),"\r\n?","\n")
+$e=[regex]::Replace((Get-Content $exporterPath -Raw),"\r\n?","`n")
 $e=$e.Replace('if(mats.Count!=1 || supports.Count!=1 || loads.Count!=1) throw new NotSupportedException("C9.61 native exporter v0 requires exactly one material, one support and one load.");',
               'if(mats.Count!=1 || supports.Count<1 || loads.Count!=1) throw new NotSupportedException("C10.36 native exporter requires one material, at least one support and exactly one load.");')
 $writeAnchor='            File.WriteAllText(commPath,comm,new System.Text.UTF8Encoding(false));'
@@ -294,7 +294,7 @@ Set-Content $exporterPath $e -Encoding UTF8
 # 3) Extend the real C10.35 two-body runtime audit: once contacts exist,
 #    build the native solver contract and verify that contact skins survive.
 # ----------------------------------------------------------------------
-$a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","\n")
+$a=[regex]::Replace((Get-Content $auditPath -Raw),"\r\n?","`n")
 $auditAnchor='                    report["contact_generator_runtime_pass"]=contactsValid;'
 $auditInsert=@'
                     report["contact_generator_runtime_pass"]=contactsValid;
@@ -330,7 +330,7 @@ Set-Content $auditPath $a -Encoding UTF8
 # ----------------------------------------------------------------------
 # 4) Release identity.
 # ----------------------------------------------------------------------
-$g=[regex]::Replace((Get-Content $globalsPath -Raw),"\r\n?","\n")
+$g=[regex]::Replace((Get-Content $globalsPath -Raw),"\r\n?","`n")
 $g=$g.Replace('AsterMax Mechanical C10.35','AsterMax Mechanical C10.36')
 Set-Content $globalsPath $g -Encoding UTF8
 
