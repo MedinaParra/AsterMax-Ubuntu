@@ -129,7 +129,7 @@ jobs:
           $load=$d.loads | Where-Object { $_.name -eq 'C1038_Force' }
           if(-not $fixed -or $fixed.type -ne 'fixed' -or $fixed.group -ne 'C1038_FIXED'){ throw 'Live FixedBC contract mismatch.' }
           if(-not $dir -or $dir.type -ne 'displacement' -or $dir.group -ne 'C1038_LOAD'){ throw 'Live directional BC contract mismatch.' }
-          if($null -ne $dir.dx -or [double]$dir.dy -ne 0.0 -or $null -ne $dir.dz){ throw 'Directional BC DOF semantics mismatch.' }
+          if($null -ne $dir.dx -or [double]$dir.dy -ne 0.0 -or [double]$dir.dz -ne 0.0){ throw 'Directional BC DOF semantics mismatch.' }
           $loadNodes=@($d.mesh.node_groups.C1038_LOAD).Count
           if($loadNodes -lt 1){ throw 'Live CLoad node group is empty.' }
           if(-not $load -or $load.type -ne 'nodal_force_per_node'){ throw 'Live CLoad semantics mismatch.' }
@@ -180,7 +180,7 @@ jobs:
           }
           $comm=Get-Content (Join-Path $deck 'astermax-c1038-exported-contact.comm') -Raw
           $mail=Get-Content (Join-Path $deck 'astermax-c1038-exported-contact.mail') -Raw
-          foreach($t in @('DEFI_CONTACT','STAT_NON_LINE','GROUP_MA_MAIT','GROUP_MA_ESCL','CONTACT_INIT','stabilize = AFFE_CHAR_MECA',"FROTTEMENT='COULOMB'",'COULOMB=0.2',"GROUP_NO='C1038_LOAD'","DY=0","GROUP_NO='C1038_FIXED'")){ if(-not $comm.Contains($t)){ throw "Generated .comm missing: $t" } }
+          foreach($t in @('DEFI_CONTACT','STAT_NON_LINE','GROUP_MA_MAIT','GROUP_MA_ESCL','CONTACT_INIT','stabilize = AFFE_CHAR_MECA',"FROTTEMENT='COULOMB'",'COULOMB=0.2',"GROUP_NO='C1038_LOAD'","DY=0","DZ=0","GROUP_NO='C1038_FIXED'")){ if(-not $comm.Contains($t)){ throw "Generated .comm missing: $t" } }
           foreach($t in @('GROUP_MA NOM = AM_VOL','GROUP_MA NOM = AM_M001','GROUP_MA NOM = AM_S001')){ if(-not $mail.Contains($t)){ throw "Generated .mail missing: $t" } }
           @'
           P actions make_etude
@@ -218,7 +218,7 @@ jobs:
             executable_sha256=$hash; platform='Windows x64'; solver_backend='Code_Aster';
             automatic_contact_detection=$true; contact_contract_runtime='PASS'; compiled_contact_export='PASS';
             genuine_solver_contact='PENDING_LINUX_ADMISSION'; coulomb_friction='PASS'; coulomb_mu=0.20; tangential_load_n=100.0;
-            fixed_support_origin='LIVE_FEMODEL'; directional_displacement_constraints='LIVE_FEMODEL_PENDING_SOLVER'; directional_components=@('DY');
+            fixed_support_origin='LIVE_FEMODEL'; directional_displacement_constraints='LIVE_FEMODEL_PENDING_SOLVER'; directional_components=@('DY','DZ');
             mechanical_load_origin='LIVE_FEMODEL'; fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\candidate\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
@@ -278,7 +278,7 @@ jobs:
           report={
             'release':'C10.38','solver_execution':'RUN','export_source':'compiled_AsterMax_native_exporter',
             'contact_solver':'DEFI_CONTACT_CONTINUE_COULOMB_STAT_NON_LINE','coulomb_mu':0.20,'tangential_load_n':100.0,
-            'fixed_support_origin':'LIVE_FEMODEL','directional_bc_origin':'LIVE_FEMODEL','directional_components':['DY'],
+            'fixed_support_origin':'LIVE_FEMODEL','directional_bc_origin':'LIVE_FEMODEL','directional_components':['DY','DZ'],
             'load_origin':'LIVE_FEMODEL','mess_bytes':mess.stat().st_size,'rmed_bytes':rmed.stat().st_size,'fea_values_invented':False,'pass':True,
           }
           (root/'C10.38_GENUINE_CONTACT_VALIDATION.json').write_text(json.dumps(report,indent=2))
