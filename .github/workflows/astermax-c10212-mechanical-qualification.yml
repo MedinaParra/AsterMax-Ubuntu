@@ -1,8 +1,8 @@
-name: AsterMax C10.22 Engineering Fidelity Build
+name: AsterMax C10.23 Tutorial-1 Defaults Build
 
 on:
   push:
-    branches: [ codex/ansys-tutorial-validation-c10212 ]
+    branches: [ codex/ansys-tutorial-validation-c10212, agent/c10213-tutorial1-defaults ]
     paths:
       - '.github/workflows/astermax-c10212-mechanical-qualification.yml'
       - 'native-windows/AsterMaxMechanicalQualification.cs'
@@ -10,6 +10,7 @@ on:
       - 'native-windows/mechanical-qualification-policy.json'
       - 'native-windows/patch-c10212-mechanical-qualification.ps1'
       - 'native-windows/patch-c10213-scope-fingerprint.ps1'
+      - 'native-windows/patch-c10214-tutorial1-defaults.ps1'
       - 'native-windows/patch-chain.json'
       - 'native-windows/bridge-c964-med-results.py'
   workflow_dispatch:
@@ -36,7 +37,7 @@ jobs:
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
 
-      - name: Apply AsterMax chain through C10.22
+      - name: Apply AsterMax chain through C10.23
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -66,7 +67,8 @@ jobs:
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
             'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
-            'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1'
+            'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
+            'patch-c10214-tutorial1-defaults.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
 
@@ -80,6 +82,18 @@ jobs:
           $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxIntegratedResults.cs -Raw
           if(-not $ui.Contains('AsterMaxMechanicalQualification.Evaluate')){ throw 'qualification UI integration missing' }
 
+          $meshDefaults=Get-Content .\upstream\CaeMesh\Parts\MeshingParameters.cs -Raw
+          if(-not $meshDefaults.Contains('ASTERMAX_TUTORIAL1_DEFAULTS')){ throw 'Tutorial-1 mesh default marker missing' }
+          if(-not $meshDefaults.Contains('_secondOrder = true;')){ throw 'Quadratic structural mesh default missing' }
+          if(-not $meshDefaults.Contains('_midsideNodesOnGeometry = false;')){ throw 'Conservative midside-node default missing' }
+
+          $readiness=Get-Content .\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs -Raw
+          if(-not $readiness.Contains('WARN:linear_structural_solid_elements=')){ throw 'Linear-solid readiness warning missing' }
+          if(-not $readiness.Contains('QuadraticStructuralSolidElementCount')){ throw 'Quadratic-solid readiness telemetry missing' }
+
+          if(-not $solve.Contains('readiness_warnings')){ throw 'Readiness warnings are not persisted in solve evidence' }
+          if(-not $exporter.Contains('tutorial1_default_policy')){ throw 'Tutorial-1 default policy is not persisted in exporter evidence' }
+
       - name: Restore NuGet packages
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -90,7 +104,7 @@ jobs:
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
-      - name: Assemble C10.22 engineering fidelity package
+      - name: Assemble C10.23 Tutorial-1 defaults package
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -105,21 +119,21 @@ jobs:
           Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.22'
+            release='C10.23'
             commit='${{ github.sha }}'
             executable_sha256=$hash
             mechanical_qualification=$true
             persistent_mesh_scope_fingerprint=$true
             code_aster_mesh_alarm_gate=$true
             real_reaction_resultant=$true
-            component_first_von_mises=$true
+            component_first_von_mises=$true;quadratic_structural_default=$true;convergence_required_for_full_qualification=$true
             fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
       - name: Upload C10.22 build evidence
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.22-Engineering-Fidelity
+          name: AsterMax-C10.23-Tutorial1-Defaults
           path: |
             dist
             upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
