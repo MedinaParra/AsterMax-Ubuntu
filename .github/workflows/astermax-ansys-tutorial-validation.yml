@@ -27,7 +27,7 @@ jobs:
 
       - name: Install geometry probe dependencies
         shell: pwsh
-        run: python -m pip install --disable-pip-version-check gmsh numpy h5py
+        run: python -m pip install --disable-pip-version-check gmsh numpy h5py vtk
 
       - name: Download exact ANSYS training STEP fixtures
         shell: pwsh
@@ -112,6 +112,13 @@ jobs:
           python .\native-windows\ansys-tutorials\compare-ws01.py --bundle '.\tutorial-evidence\WS01.1\ws01.astermax-results.json' --input '.\tutorial-evidence\WS01.1\ws01-input.json' --out '.\tutorial-evidence\WS01.1\ws01-comparison.json'
           if($LASTEXITCODE -ne 0){ throw 'WS01.1 comparison integrity gate failed.' }
 
+      - name: Render WS01.1 genuine result screenshots
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python .\native-windows\ansys-tutorials\render-ws01.py --vtu '.\tutorial-evidence\WS01.1\ws01.astermax-results.vtu' --out '.\tutorial-evidence\WS01.1\screenshots'
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 genuine screenshot render failed.' }
+
       - name: Build source integrity manifest
         shell: pwsh
         run: |
@@ -130,7 +137,7 @@ jobs:
             commit='${{ github.sha }}'
             fixtures=$items
             fea_results_invented=$false
-            state='GEOMETRY_IMPORTED_AND_MESHED_ONLY'
+            state='WS01_1_SOLVED_AND_RENDERED_IF_REQUIRED_GATES_PASSED'
           } | ConvertTo-Json -Depth 8 | Set-Content .\tutorial-evidence\source-manifest.json -Encoding UTF8
 
       - name: Upload tutorial geometry evidence
