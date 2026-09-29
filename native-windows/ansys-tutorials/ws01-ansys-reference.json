@@ -1,0 +1,18 @@
+{
+  "schema": "astermax.benchmark.reference.v1",
+  "benchmark": "WS01",
+  "source_label": "ANSYS Mechanical WS01.1 tutorial reference",
+  "cad": "Cap_fillets.stp",
+  "cad_sha256": "4b98de09f4ff958974ebf92e298dde2210b6e2a5bbdddb82a22634ac1e8883c8",
+  "units": "mm-N-MPa",
+  "reference": {
+    "equivalent_stress_max_MPa": 235.96,
+    "total_deformation_max_mm": 0.064809,
+    "safety_factor_min": 1.1866
+  },
+  "acceptance": {
+    "tolerance_pct": 5.0
+  },
+  "classification": "PRE_REFINEMENT_TUTORIAL_SNAPSHOT",
+  "provenance_note": "Reference values recovered from the retained AsterMax WS01 benchmark evidence. The tutorial later asks for a 1.0 mm global element size, so this snapshot is not claimed to be mesh-converged."
+}
