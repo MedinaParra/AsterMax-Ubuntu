@@ -144,24 +144,49 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw 'Admission contract preparation failed.' }
 
       - name: Execute compiled native exporter on the real contact contract
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $bin='${{ steps.locate.outputs.bin }}'
           $exe='${{ steps.locate.outputs.exe }}'
           $contract=Join-Path $bin 'Audit\C10.35-runtime\c1036-contact-admission-contract.json'
           $deck=Join-Path $PWD 'c1036-exported-contact'
+          $script:AsterMaxAssemblyRoot=(Resolve-Path '.\upstream').Path
           New-Item -ItemType Directory -Force $deck | Out-Null
-          Push-Location $bin
+
+          function Find-AsterMaxAssembly([string]$fileName) {
+            $matches=Get-ChildItem $script:AsterMaxAssemblyRoot -Recurse -File -Filter $fileName -ErrorAction SilentlyContinue
+            $candidate=$matches | Where-Object { $_.FullName -match '\\bin\\x64\\Release\\' } | Select-Object -First 1
+            if(-not $candidate){ $candidate=$matches | Where-Object { $_.FullName -match '\\packages\\' } | Select-Object -First 1 }
+            return $candidate
+          }
+
+          # AsterMax is a .NET Framework application. Resolve its project and
+          # NuGet assemblies from the actual build tree instead of assuming
+          # CaeGlobals/CaeModel/etc. were copied beside the executable.
+          $resolver=[System.ResolveEventHandler]{
+            param($sender,$eventArgs)
+            $simple=(New-Object System.Reflection.AssemblyName($eventArgs.Name)).Name + '.dll'
+            $candidate=Find-AsterMaxAssembly $simple
+            if($candidate){ return [System.Reflection.Assembly]::LoadFrom($candidate.FullName) }
+            return $null
+          }
+          [AppDomain]::CurrentDomain.add_AssemblyResolve($resolver)
           try {
-            foreach($dll in @('CaeGlobals.dll','CaeMesh.dll','CaeModel.dll','Newtonsoft.Json.dll','UnitsNet.dll')){ [Reflection.Assembly]::LoadFrom((Join-Path $bin $dll)) | Out-Null }
-            $asm=[Reflection.Assembly]::LoadFrom($exe)
+            $newton=Find-AsterMaxAssembly 'Newtonsoft.Json.dll'
+            if(-not $newton){ throw 'Newtonsoft.Json.dll not found in build/package tree.' }
+            [System.Reflection.Assembly]::LoadFrom($newton.FullName) | Out-Null
+            $asm=[System.Reflection.Assembly]::LoadFrom($exe)
             $json=[Newtonsoft.Json.Linq.JObject]::Parse((Get-Content $contract -Raw))
             $type=$asm.GetType('PrePoMax.AsterMaxCodeAsterNativeExporter',$true)
-            $method=$type.GetMethod('ExportContract',[Reflection.BindingFlags]'Public,Static')
+            $method=$type.GetMethod('ExportContract',[System.Reflection.BindingFlags]'Public,Static')
             if($null -eq $method){ throw 'Compiled ExportContract method missing.' }
-            try { $manifest=$method.Invoke($null,[object[]]@($json,[string]$deck,[string]'astermax-c1036-exported-contact')) } catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
-          } finally { Pop-Location }
+            try { $manifest=$method.Invoke($null,[object[]]@($json,[string]$deck,[string]'astermax-c1036-exported-contact')) }
+            catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+          }
+          finally {
+            [AppDomain]::CurrentDomain.remove_AssemblyResolve($resolver)
+          }
           $comm=Get-Content (Join-Path $deck 'astermax-c1036-exported-contact.comm') -Raw
           $mail=Get-Content (Join-Path $deck 'astermax-c1036-exported-contact.mail') -Raw
           foreach($t in @('DEFI_CONTACT','STAT_NON_LINE','GROUP_MA_MAIT','GROUP_MA_ESCL','CONTACT_INIT','stabilize = AFFE_CHAR_MECA')){ if(-not $comm.Contains($t)){ throw "Generated .comm missing: $t" } }
