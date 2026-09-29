@@ -124,6 +124,7 @@ $realBc=@'
                     {
                         DisplacementRotation directional=new DisplacementRotation("C1038_Directional","C1038_LOAD",RegionTypeEnum.NodeSetName,false,false,0);
                         directional.U2=0.0;
+                        directional.U3=0.0;
                         if(!liveStep.AddBoundaryCondition(directional))
                             throw new InvalidOperationException("C10.38 DisplacementRotation was rejected by StaticStep.");
                     }
@@ -155,7 +156,7 @@ $reportNew=@'
                         String.Equals((string)directionalContract["type"],"displacement",StringComparison.OrdinalIgnoreCase) &&
                         directionalContract["dx"]!=null && directionalContract["dx"].Type==JTokenType.Null &&
                         Math.Abs(((double?)directionalContract["dy"] ?? Double.NaN)-0.0)<1e-12 &&
-                        directionalContract["dz"]!=null && directionalContract["dz"].Type==JTokenType.Null;
+                        Math.Abs(((double?)directionalContract["dz"] ?? Double.NaN)-0.0)<1e-12;
                     JObject realLoad=solverLoads==null ? null : solverLoads.Cast<JObject>()
                         .FirstOrDefault(x=>String.Equals((string)x["name"],"C1038_Force",StringComparison.Ordinal));
                     double expectedFxPerNode=-1000.0/loadIds.Length;
@@ -168,7 +169,7 @@ $reportNew=@'
                     report["codeaster_contact_contract_pass"]=contractOk;
                     report["codeaster_directional_bc_contract_pass"]=directionalBcContract;
                     report["codeaster_directional_bc_group"]="C1038_LOAD";
-                    report["codeaster_directional_bc_components"]=new JArray("DY");
+                    report["codeaster_directional_bc_components"]=new JArray("DY","DZ");
                     report["codeaster_live_load_contract_pass"]=realLoadContract;
                     report["codeaster_live_fixed_bc_group"]="C1038_FIXED";
                     report["codeaster_live_load_group"]="C1038_LOAD";
