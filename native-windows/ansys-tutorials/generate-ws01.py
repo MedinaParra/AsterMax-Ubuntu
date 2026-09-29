@@ -10,7 +10,7 @@ from pathlib import Path
 import gmsh
 
 PRESS = [39,11,176,174,6,2,7,12,175,170,10,8,172,9,169,171,173]
-CBSUP = [1,17,18,19]
+CBSUP = [22,66,68,70]
 INSUP = [41,76,74,78,35,43,75,77]
 LIPSUP = [13]
 
@@ -59,8 +59,8 @@ def main():
         # scope pressure/supports to the wrong geometry.
         require_surface(surfaces,39,"Plane",3640.457747946257,1e-4,[40.0,25.0,0.0],1e-5)
         require_surface(surfaces,13,"Plane",247.19281793413893,1e-4,[40.0,25.0,15.0],1e-5)
-        for tag,center in [(1,[8,42,2]),(17,[72,8,2]),(18,[8,8,2]),(19,[72,42,2])]:
-            require_surface(surfaces,tag,None,31.415926535897935,1e-5,center,1e-5)
+        for tag,center in [(22,[72,42,1]),(66,[8,42,1]),(68,[72,8,1]),(70,[8,8,1])]:
+            require_surface(surfaces,tag,"Plane",25.929255619605982,1e-5,center,1e-5)
         for tag in PRESS+CBSUP+INSUP+LIPSUP:
             if tag not in surfaces: raise RuntimeError(f"scoped face missing: {tag}")
         if len(set(PRESS))!=17 or len(set(INSUP))!=8 or len(set(CBSUP))!=4:
