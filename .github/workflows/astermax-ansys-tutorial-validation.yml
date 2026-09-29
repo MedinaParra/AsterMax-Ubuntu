@@ -138,7 +138,7 @@ jobs:
             }
             mesh_sizes_mm=@(3.0,2.0,1.0)
             element_order=2
-            high_order_optimization=2
+            high_order_optimization='2 for 3mm/1mm; 1 for 2mm'
             fea_results_invented=$false
             state='WS01_1_TETRA10_CONVERGENCE'
           } | ConvertTo-Json -Depth 8 | Set-Content '.\tutorial-evidence\source-manifest.json' -Encoding UTF8
