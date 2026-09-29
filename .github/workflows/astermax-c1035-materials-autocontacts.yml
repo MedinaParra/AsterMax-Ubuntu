@@ -40,7 +40,7 @@ jobs:
             if(-not (Test-Path $script)){ throw "Missing patch: $($p.file)" }
             Write-Host "APPLY $($p.id)"
             & $script -Root "$PWD\upstream"
-            if($LASTEXITCODE -ne 0){ throw "Patch failed: $($p.id)" }
+            if(-not $?){ throw "Patch failed: $($p.id)" }
           }
 
       - name: Restore NuGet packages
