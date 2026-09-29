@@ -130,7 +130,10 @@ jobs:
           if(-not $fixed -or $fixed.type -ne 'fixed' -or $fixed.group -ne 'C1038_FIXED'){ throw 'Live FixedBC contract mismatch.' }
           if(-not $dir -or $dir.type -ne 'displacement' -or $dir.group -ne 'C1038_LOAD'){ throw 'Live directional BC contract mismatch.' }
           if($null -ne $dir.dx -or [double]$dir.dy -ne 0.0 -or $null -ne $dir.dz){ throw 'Directional BC DOF semantics mismatch.' }
-          if(-not $load -or [math]::Abs([double]$load.fx_total_n+1000.0) -gt 1e-12 -or [math]::Abs([double]$load.fz_total_n-100.0) -gt 1e-12){ throw 'Live CLoad contract mismatch.' }
+          $loadNodes=@($d.mesh.node_groups.C1038_LOAD).Count
+          if($loadNodes -lt 1){ throw 'Live CLoad node group is empty.' }
+          if(-not $load -or $load.type -ne 'nodal_force_per_node'){ throw 'Live CLoad semantics mismatch.' }
+          if([math]::Abs(([double]$load.fx_per_node_n*$loadNodes)+1000.0) -gt 1e-8 -or [math]::Abs(([double]$load.fz_per_node_n*$loadNodes)-100.0) -gt 1e-8){ throw 'Live CLoad resultant mismatch.' }
       - name: Execute compiled native exporter on the real contact contract
         shell: powershell
         run: |
