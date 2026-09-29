@@ -4,12 +4,12 @@ $path = Join-Path $Root 'PrePoMax/AsterMaxModelContractBridge.cs'
 if(!(Test-Path $path)){ throw 'C9.60 bridge source missing.' }
 $t = Get-Content $path -Raw
 if($t.Contains('ExportDeterministicSmoke')) { Write-Host 'C9.60 smoke hook already present.'; exit 0 }
-$anchor = '        public static string Export(FeModel model, string fileName)'
+$anchor = '        public static void Export(FeModel model, string fileName)'
 if(-not $t.Contains($anchor)){ throw 'C9.60 Export anchor missing.' }
 $method = @'
         // CI proof path: constructs a real FeModel using the same CaeModel/CaeMesh classes used by the GUI,
         // then passes it through Build(). The returned JSON is a model-definition artifact, never an FEA result.
-        public static string ExportDeterministicSmoke(string fileName)
+        public static void ExportDeterministicSmoke(string fileName)
         {
             FeModel model = new FeModel("C9.60 Native Bridge Smoke");
             model.UnitSystem = new UnitSystem(UnitSystemType.MM_TON_S_C);
@@ -37,7 +37,7 @@ $method = @'
                 throw new InvalidOperationException("StaticStep rejected CLoad in C9.60 smoke model.");
             model.StepCollection.AddStep(step, false);
 
-            return Export(model, fileName);
+            Export(model, fileName);
         }
 
 '@
