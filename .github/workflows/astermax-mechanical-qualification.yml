@@ -1,0 +1,42 @@
+name: AsterMax Mechanical Qualification CI
+
+on:
+  push:
+    branches: [ codex/ansys-tutorial-validation-c10212 ]
+    paths:
+      - '.github/workflows/astermax-mechanical-qualification.yml'
+      - 'native-windows/AsterMaxMechanicalQualification.cs'
+      - 'native-windows/ASTERMAX-MECHANICAL-QUALIFICATION-LESSONS.md'
+      - 'native-windows/mechanical-qualification-policy.json'
+      - 'native-windows/qualify-mechanical-analysis.py'
+      - 'native-windows/test-c10212-mechanical-qualification.py'
+      - 'native-windows/patch-c10212-mechanical-qualification.ps1'
+      - 'native-windows/patch-chain.json'
+      - 'native-windows/bridge-c964-med-results.py'
+  workflow_dispatch:
+
+jobs:
+  qualification-contract:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Python syntax gates
+        shell: pwsh
+        run: |
+          python -m py_compile .\native-windows\bridge-c964-med-results.py
+          python -m py_compile .\native-windows\qualify-mechanical-analysis.py
+          python -m py_compile .\native-windows\test-c10212-mechanical-qualification.py
+
+      - name: Mechanical qualification regression
+        shell: pwsh
+        run: python .\native-windows\test-c10212-mechanical-qualification.py
+
+      - name: Patch chain validation
+        shell: pwsh
+        run: python .\native-windows\validate-patch-chain.py
