@@ -129,7 +129,9 @@ $realBc=@'
                     }
                     if(!liveStep.Loads.ContainsKey("C1038_Force"))
                     {
-                        CLoad liveLoad=new CLoad("C1038_Force","C1038_LOAD",RegionTypeEnum.NodeSetName,-1000.0,0.0,100.0,false,false,0);
+                        double fxPerNode=-1000.0/loadIds.Length;
+                        double fzPerNode=100.0/loadIds.Length;
+                        CLoad liveLoad=new CLoad("C1038_Force","C1038_LOAD",RegionTypeEnum.NodeSetName,fxPerNode,0.0,fzPerNode,false,false,0);
                         if(!liveStep.AddLoad(liveLoad))
                             throw new InvalidOperationException("C10.38 CLoad was rejected by StaticStep.");
                     }
@@ -156,9 +158,12 @@ $reportNew=@'
                         directionalContract["dz"]!=null && directionalContract["dz"].Type==JTokenType.Null;
                     JObject realLoad=solverLoads==null ? null : solverLoads.Cast<JObject>()
                         .FirstOrDefault(x=>String.Equals((string)x["name"],"C1038_Force",StringComparison.Ordinal));
+                    double expectedFxPerNode=-1000.0/loadIds.Length;
+                    double expectedFzPerNode=100.0/loadIds.Length;
                     bool realLoadContract=realLoad!=null &&
-                        Math.Abs(((double?)realLoad["fx_total_n"] ?? 0.0)+1000.0)<1e-12 &&
-                        Math.Abs(((double?)realLoad["fz_total_n"] ?? 0.0)-100.0)<1e-12;
+                        String.Equals((string)realLoad["type"],"nodal_force_per_node",StringComparison.OrdinalIgnoreCase) &&
+                        Math.Abs(((double?)realLoad["fx_per_node_n"] ?? 0.0)-expectedFxPerNode)<1e-12 &&
+                        Math.Abs(((double?)realLoad["fz_per_node_n"] ?? 0.0)-expectedFzPerNode)<1e-12;
                     contractOk &= directionalBcContract && realLoadContract;
                     report["codeaster_contact_contract_pass"]=contractOk;
                     report["codeaster_directional_bc_contract_pass"]=directionalBcContract;
@@ -167,6 +172,9 @@ $reportNew=@'
                     report["codeaster_live_load_contract_pass"]=realLoadContract;
                     report["codeaster_live_fixed_bc_group"]="C1038_FIXED";
                     report["codeaster_live_load_group"]="C1038_LOAD";
+                    report["codeaster_live_load_node_count"]=loadIds.Length;
+                    report["codeaster_live_load_fx_total_n"]=-1000.0;
+                    report["codeaster_live_load_fz_total_n"]=100.0;
 '@
 if($a.Contains($reportAnchor) -and -not $a.Contains('codeaster_directional_bc_contract_pass')){
     $a=$a.Replace($reportAnchor,$reportNew.TrimEnd())
