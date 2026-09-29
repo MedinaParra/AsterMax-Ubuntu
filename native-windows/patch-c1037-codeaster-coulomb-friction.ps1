@@ -11,22 +11,18 @@ foreach($p in @($bridgePath,$exporterPath,$auditPath,$globalsPath)){ if(!(Test-P
 # 1) Preserve PrePoMax Friction in the native solver contract.
 # ----------------------------------------------------------------------
 $b=[regex]::Replace((Get-Content $bridgePath -Raw),"\r\n?","`n")
-$oldFriction=@'
-                if (interaction.Properties != null && interaction.Properties.Any(x => x is Friction))
-                    throw new NotSupportedException("C10.36 supports frictionless contact only. Remove friction or keep Solve blocked.");
-
-                string suffix = contactIndex.ToString("000");
-'@
-$newFriction=@'
+$legacyFrictionPattern='(?ms)^\s*if \(interaction\.Properties != null && interaction\.Properties\.Any\(x => x is Friction\)\)\s*\r?\n\s*throw new NotSupportedException\("C10\.36 supports frictionless contact only\. Remove friction or keep Solve blocked\."\);\s*'
+if([regex]::IsMatch($b,$legacyFrictionPattern)){
+    $replacement=@'
                 Friction friction = interaction.Properties == null
                     ? null
                     : interaction.Properties.OfType<Friction>().FirstOrDefault();
                 if (friction != null && (!(friction.Coefficient > 0) || Double.IsInfinity(friction.Coefficient) || Double.IsNaN(friction.Coefficient)))
                     throw new InvalidOperationException("C10.37 Coulomb friction coefficient must be finite and greater than zero.");
 
-                string suffix = contactIndex.ToString("000");
 '@
-if($b.Contains($oldFriction)){ $b=$b.Replace($oldFriction,$newFriction) }
+    $b=[regex]::Replace($b,$legacyFrictionPattern,$replacement,1)
+}
 elseif(-not $b.Contains('C10.37 Coulomb friction coefficient')){ throw 'C10.37 friction bridge anchor missing.' }
 
 $oldContract=@'
