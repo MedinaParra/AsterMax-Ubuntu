@@ -133,7 +133,7 @@ $e=$e.Replace($versionLine,'public const string Version = "C10.36-native-codeast
 $contractAnchor='            JArray mats=(JArray)contract["materials"];'
 if(-not $e.Contains('JArray contacts=(JArray)contract["contacts"]')){
     if(-not $e.Contains($contractAnchor)){ throw 'C10.36 exporter contract anchor missing.' }
-    $e=$e.Replace($contractAnchor,'            JArray contacts=(JArray)contract["contacts"] ?? new JArray();'+"\n"+$contractAnchor)
+    $e=$e.Replace($contractAnchor,'            JArray contacts=(JArray)contract["contacts"] ?? new JArray();'+"`n"+$contractAnchor)
 }
 
 $mailAnchor='            JObject groups=(JObject)mesh["node_groups"];'
@@ -210,7 +210,7 @@ $commContact=@'
                         "_F(GROUP_MA_MAIT='{0}', GROUP_MA_ESCL='{1}', CONTACT_INIT='{2}')",
                         (string)master["group"],(string)slave["group"],(string)contact["contact_init"]));
                 }
-                string zones=String.Join(",\\n        ",zoneLines);
+                string zones=String.Join(",\n        ",zoneLines);
                 string linearSolve="result = MECA_STATIQUE(MODELE=model, CHAM_MATER=matfield, EXCIT=(_F(CHARGE=fixed), _F(CHARGE=load)))";
                 string nonlinear=String.Format(CultureInfo.InvariantCulture,@"times = DEFI_LIST_REEL(DEBUT=0.0, INTERVALLE=_F(JUSQU_A=1.0, NOMBRE=10))
 contact = DEFI_CONTACT(
@@ -277,7 +277,7 @@ $extra=@'
                     if(terms.Count==0) throw new InvalidOperationException("Directional support has no constrained translation: "+(string)bc["name"]);
                     ddl.Add("_F(GROUP_NO='"+group+"', "+String.Join(", ",terms)+")");
                 }
-                string stabilizer="stabilize = AFFE_CHAR_MECA(\\n    MODELE=model,\\n    DDL_IMPO=(\\n        "+String.Join(",\\n        ",ddl)+",\\n    ),\\n)\\n\\n";
+                string stabilizer="stabilize = AFFE_CHAR_MECA(\n    MODELE=model,\n    DDL_IMPO=(\n        "+String.Join(",\n        ",ddl)+",\n    ),\n)\n\n";
                 string loadAnchor="load = AFFE_CHAR_MECA(";
                 if(!comm.Contains(loadAnchor)) throw new InvalidOperationException("C10.36 load anchor missing while adding directional supports.");
                 comm=comm.Replace(loadAnchor,stabilizer+loadAnchor);
