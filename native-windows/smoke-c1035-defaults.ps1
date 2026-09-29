@@ -4,9 +4,7 @@ $Dist=(Resolve-Path $Dist).Path
 $out=Join-Path $Dist 'Audit/C10.35-runtime'
 New-Item -ItemType Directory -Force $out | Out-Null
 $step=Join-Path $out 'two-touching-solids.step'
-$python=Join-Path $Dist 'AsterMaxRuntime/Python/python.exe'
-if(-not (Test-Path $python)){ throw "AsterMax packaged Python runtime not found: $python" }
-
+$python=(Get-Command python -ErrorAction Stop).Source
 & $python -c "import gmsh; gmsh.initialize(); gmsh.model.add('C1035'); gmsh.model.occ.addBox(0,0,0,50,20,20,1); gmsh.model.occ.addBox(50,0,0,50,20,20,2); gmsh.model.occ.synchronize(); gmsh.write(r'$step'); gmsh.finalize()"
 if($LASTEXITCODE -ne 0){ throw 'C10.35 CAD fixture generation failed.' }
 if(-not (Test-Path $step)){ throw 'C10.35 STEP fixture was not produced.' }
