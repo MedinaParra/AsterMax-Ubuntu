@@ -41,6 +41,30 @@ if(-not $m.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){
 if(-not $u.Contains('private void AsterMaxAutoGenerateContacts()')){ throw 'C10.35 automatic contact generator missing.' }
 
 
+# Make auto-contact independent of whether the user meshes all bodies in one batch.
+# Once the FE model contains 2+ mesh parts and the current meshing operation succeeded,
+# generate contacts when none exist.
+$mainPath = Join-Path $Root 'PrePoMax/Forms/FrmMain.cs'
+$fm=[regex]::Replace((Get-Content $mainPath -Raw),"\r\n?","`n")
+$oldHook='if(errors.Count==0 && partNames.Length>1 && _controller.GetContactPairNames().Length==0)'
+$newHook='if(errors.Count==0 && _controller.Model != null && _controller.Model.Mesh != null && _controller.Model.Mesh.Parts.Count>1 && _controller.GetContactPairNames().Length==0)'
+if($fm.Contains($oldHook)){ $fm=$fm.Replace($oldHook,$newHook) }
+elseif(-not $fm.Contains($newHook)){ throw 'C10.35 post-mesh automatic contact condition anchor missing.' }
+Set-Content $mainPath $fm -Encoding UTF8
+
+# Engineering-integrity guard: the current native Code_Aster exporter does not yet
+# translate AsterMax ContactPair objects. Never silently solve a detected-contact
+# assembly as a no-contact linear static model.
+$bridgePath = Join-Path $Root 'PrePoMax/AsterMaxModelContractBridge.cs'
+if(!(Test-Path $bridgePath)){ throw 'C10.35 native model contract bridge missing.' }
+$b=[regex]::Replace((Get-Content $bridgePath -Raw),"\r\n?","`n")
+$guardAnchor='            if (model.Mesh.Elements == null || model.Mesh.Elements.Count == 0) throw new InvalidOperationException("Model mesh contains no elements.");'
+$guardNew=$guardAnchor+"`n"+'            if (model.ContactPairs != null && model.ContactPairs.Count > 0) throw new NotSupportedException("C10.35: contact pairs are present, but native Code_Aster contact translation is not yet certified. Solve is blocked to prevent a false no-contact result.");'
+if(-not $b.Contains('native Code_Aster contact translation is not yet certified')){
+    if(-not $b.Contains($guardAnchor)){ throw 'C10.35 contact fail-closed bridge anchor missing.' }
+    $b=$b.Replace($guardAnchor,$guardNew)
+}
+Set-Content $bridgePath $b -Encoding UTF8
 # Runtime audit integration: copy the C10.35 audit partial class, compile it, and
 # arm it only when ASTERMAX_C1035_AUDIT_DIR is present.
 $auditSource = Join-Path $PSScriptRoot 'AsterMaxC1035Audit.cs'
