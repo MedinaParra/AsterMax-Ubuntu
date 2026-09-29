@@ -49,8 +49,8 @@ def render(grid, field_name, out_path):
 
     renderer = vtk.vtkRenderer()
     renderer.AddActor(actor)
-    renderer.AddActor2D(scalar_bar)
-    renderer.AddActor2D(title)
+    renderer.AddViewProp(scalar_bar)
+    renderer.AddViewProp(title)
     renderer.SetBackground(0.96, 0.96, 0.96)
 
     window = vtk.vtkRenderWindow()
