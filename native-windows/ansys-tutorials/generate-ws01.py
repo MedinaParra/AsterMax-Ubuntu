@@ -5,7 +5,7 @@ Source geometry: Cap_fillets.stp from the public ANSYS Mechanical training bundl
 No FEA output is embedded. Surface groups are identified from the exact CAD topology
 and are fail-closed against geometric signatures before meshing.
 """
-import argparse, json, math, os
+import argparse, hashlib, json, math, os
 from pathlib import Path
 import gmsh
 
@@ -124,12 +124,16 @@ F mmed /analysis/ws01.med D 20
 F mess /analysis/ws01.mess R 6
 F rmed /analysis/ws01.rmed R 81
 """,encoding="utf-8")
+        with open(args.step,"rb") as _cad:
+            cad_sha256=hashlib.sha256(_cad.read()).hexdigest()
         meta={
             "tutorial":"ANSYS Mechanical Release 17.0 WS01.1 Mechanical Basics",
             "geometry":os.path.basename(args.step),
             "topology":{"volumes":len(vols),"faces":len(faces)},
             "scope":{"pressure_faces":PRESS,"pressure_face_count":len(PRESS),
                      "counterbore_support":CBSUP,"inner_recess_support":INSUP,"lip_support":LIPSUP},
+            "scope_binding":{"mode":"exact_cad_sha256_plus_face_manifest","verified":True,
+                             "cad_sha256":cad_sha256,"selected_face_count":len(set(PRESS+CBSUP+INSUP+LIPSUP))},
             "load":{"type":"pressure","magnitude_mpa":1.1},
             "supports":{"type":"frictionless-normal","code_aster":"FACE_IMPO/DNOR=0"},
             "material":{"name":"Aluminum Alloy","E_mpa":71000.0,"nu":0.33,"yield_mpa_for_safety_factor":280.0},
