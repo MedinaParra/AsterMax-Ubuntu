@@ -25,21 +25,18 @@ if([regex]::IsMatch($b,$legacyFrictionPattern)){
 }
 elseif(-not $b.Contains('C10.37 Coulomb friction coefficient')){ throw 'C10.37 friction bridge anchor missing.' }
 
-$oldContract=@'
-                    ["formulation"] = "CONTINUE",
-                    ["friction"] = "SANS",
-                    ["contact_init"] = "INTERPENETRE",
-'@
-$newContract=@'
-                    ["formulation"] = "CONTINUE",
-                    ["friction"] = friction == null ? "SANS" : "COULOMB",
-                    ["friction_coefficient"] = friction == null ? 0.0 : friction.Coefficient,
-                    ["friction_stick_slope"] = friction == null || Double.IsNaN(friction.StickSlope)
-                        ? JValue.CreateNull()
-                        : new JValue(friction.StickSlope),
-                    ["contact_init"] = "INTERPENETRE",
-'@
-if($b.Contains($oldContract)){ $b=$b.Replace($oldContract,$newContract) }
+$frictionLinePattern='(?m)^(\s*)\["friction"\]\s*=\s*"SANS",\s*$'
+if([regex]::IsMatch($b,$frictionLinePattern)){
+    $b=[regex]::Replace($b,$frictionLinePattern,{
+        param($m)
+        $i=$m.Groups[1].Value
+        return $i+'["friction"] = friction == null ? "SANS" : "COULOMB",'+``n+
+               $i+'["friction_coefficient"] = friction == null ? 0.0 : friction.Coefficient,'+``n+
+               $i+'["friction_stick_slope"] = friction == null || Double.IsNaN(friction.StickSlope)'+``n+
+               $i+'    ? JValue.CreateNull()'+``n+
+               $i+'    : new JValue(friction.StickSlope),'
+    },1)
+}
 elseif(-not $b.Contains('["friction_coefficient"]')){ throw 'C10.37 contact contract friction anchor missing.' }
 Set-Content $bridgePath $b -Encoding UTF8
 
