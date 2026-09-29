@@ -10,9 +10,9 @@ if(-not(Test-Path $uiPath)){ throw 'AsterMaxNativeUi.cs is required for the port
 $ui=Get-Content $uiPath -Raw
 
 if(-not $ui.Contains('StartAsterMaxPortableCadSmoke();')){
-  $anchor='                ThemeRecursive(this);'
+  $anchor='            ThemeRecursive(this);'
   if(-not $ui.Contains($anchor)){ throw 'C10.08.1 UI smoke-call anchor missing.' }
-  $ui=$ui.Replace($anchor,'                StartAsterMaxPortableCadSmoke();'+[Environment]::NewLine+$anchor)
+  $ui=$ui.Replace($anchor,'            StartAsterMaxPortableCadSmoke();'+[Environment]::NewLine+$anchor)
 }
 
 if(-not $ui.Contains('private void StartAsterMaxPortableCadSmoke()')){

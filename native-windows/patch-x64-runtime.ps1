@@ -12,15 +12,19 @@ $replacements = @{
   "$guid.Release|x64.Build.0 = Release|Any CPU" = "$guid.Release|x64.Build.0 = Release|x64"
 }
 foreach($old in $replacements.Keys){
-  if(-not $sln.Contains($old)){ throw "UserControls x64 mapping anchor missing: $old" }
-  $sln = $sln.Replace($old,$replacements[$old])
+  $new=$replacements[$old]
+  if($sln.Contains($old)){ $sln = $sln.Replace($old,$new) }
+  elseif($sln.Contains($new)){ Write-Host "UserControls x64 mapping already applied: $new" }
+  else { throw "UserControls x64 mapping anchor missing: $old" }
 }
 Set-Content $slnPath $sln -Encoding UTF8
 
 $projectPath = Join-Path $Root 'UserControls/UserControls.csproj'
 $p = Get-Content $projectPath -Raw
 # Ensure runtime cannot prefer 32 bit even if project metadata is interpreted differently by a future VS/MSBuild.
-$p = $p.Replace('<PlatformTarget>x64</PlatformTarget>', '<PlatformTarget>x64</PlatformTarget>' + [Environment]::NewLine + '    <Prefer32Bit>false</Prefer32Bit>')
+if(-not $p.Contains('<Prefer32Bit>false</Prefer32Bit>')){
+  $p = $p.Replace('<PlatformTarget>x64</PlatformTarget>', '<PlatformTarget>x64</PlatformTarget>' + [Environment]::NewLine + '    <Prefer32Bit>false</Prefer32Bit>')
+}
 Set-Content $projectPath $p -Encoding UTF8
 
 Write-Host 'UserControls solution mapping forced to native x64.' -ForegroundColor Green
