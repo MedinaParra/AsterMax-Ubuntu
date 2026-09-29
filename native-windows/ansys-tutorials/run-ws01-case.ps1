@@ -37,7 +37,7 @@ python .\native-windows\ansys-tutorials\compare-ws01.py --bundle (Join-Path $out
 if($LASTEXITCODE -ne 0){ throw "WS01.1 comparison failed for $Label." }
 
 Write-Host "=== QUALIFY WS01.1 $Label ==="
-python .\native-windows\qualify-mechanical-analysis.py --bundle (Join-Path $out 'ws01.astermax-results.json') --analysis (Join-Path $out 'ws01-input.json') --reference $reference --out (Join-Path $out 'mechanical-qualification.json')
+python .\native-windows\qualify-mechanical-analysis.py --bundle (Join-Path $out 'ws01.astermax-results.json') --analysis (Join-Path $out 'ws01-input.json') --mess (Join-Path $out 'ws01.mess') --reference $reference --out (Join-Path $out 'mechanical-qualification.json')
 if($LASTEXITCODE -eq 2){ throw "WS01.1 mechanical qualification BLOCKED for $Label." }
 if($LASTEXITCODE -ne 0){ throw "WS01.1 mechanical qualification failed for $Label." }
 
