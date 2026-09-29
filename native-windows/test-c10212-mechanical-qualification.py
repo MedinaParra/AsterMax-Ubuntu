@@ -57,4 +57,19 @@ bad["units"]["length"]="m"
 out=run_case(bad,analysis,2,"BLOCKED")
 assert any(x["code"]=="UNIT_CONTRACT" and x["level"]=="BLOCK" for x in out["findings"])
 
-print(json.dumps({"status":"PASS","cases":3,"fea_values_invented":False},indent=2))
+manifest=json.loads((ROOT/"patch-chain.json").read_text(encoding="utf-8"))
+entry=[x for x in manifest["patches"] if x["id"]=="patch-c10212-mechanical-qualification"]
+assert len(entry)==1
+assert entry[0]["file"]=="patch-c10212-mechanical-qualification.ps1"
+
+ui=(ROOT/"AsterMaxMechanicalQualification.cs").read_text(encoding="utf-8")
+assert "REAL_CODE_ASTER_MED" in ui
+assert "von_mises_component_first_ansys_parity" in ui
+assert "REAC_NODA resultant" in ui
+
+bridge=(ROOT/"bridge-c964-med-results.py").read_text(encoding="utf-8")
+assert 'optional_med_field_path(h, "REAC_NODA"' in bridge
+assert '"reaction_resultant_from_real_reac_noda"' in bridge
+
+print(json.dumps({"status":"PASS","cases":3,"patch_chain":True,"ui_contract":True,
+                  "reaction_bridge_contract":True,"fea_values_invented":False},indent=2))
