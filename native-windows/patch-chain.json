@@ -777,6 +777,21 @@
         "AsterMaxCodeAsterCoulombContract",
         "AsterMaxCodeAsterCoulombExporter"
       ]
+    },
+    {
+      "id": "patch-c1039-native-gravity",
+      "file": "patch-c1039-native-gravity.ps1",
+      "depends": [
+        "patch-c1038-native-directional-bc"
+      ],
+      "declares": [
+        "AsterMaxNativeGravityContract",
+        "AsterMaxMaterialDensityContract"
+      ],
+      "consumes": [
+        "AsterMaxDirectionalDisplacementContract",
+        "AsterMaxLiveMechanicalLoadsContract"
+      ]
     }
   ]
 }
