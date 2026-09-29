@@ -78,7 +78,10 @@ def main():
 
         gmsh.option.setNumber("Mesh.ElementOrder",2)
         gmsh.option.setNumber("Mesh.Optimize",1)
-        high_order_opt = 1 if abs(args.size - 2.0) < 1e-9 else 2
+        is_2mm = abs(args.size - 2.0) < 1e-9
+        if is_2mm:
+            gmsh.option.setNumber("Mesh.Algorithm3D",10)  # HXT: alternate tetrahedralization for the 2 mm convergence point
+        high_order_opt = 2
         gmsh.option.setNumber("Mesh.HighOrderOptimize",high_order_opt)
         gmsh.option.setNumber("Mesh.MeshSizeMin",max(args.size/2.0,0.6))
         gmsh.option.setNumber("Mesh.MeshSizeMax",args.size)
@@ -131,7 +134,7 @@ F rmed /analysis/ws01.rmed R 81
             "supports":{"type":"frictionless-normal","code_aster":"FACE_IMPO/DNOR=0"},
             "material":{"name":"Aluminum Alloy","E_mpa":71000.0,"nu":0.33,"yield_mpa_for_safety_factor":280.0},
             "mesh":{"target_max_size_mm":args.size,"nodes":len(node_tags),"volume_elements":nelem,"order":2,
-                    "gmsh_optimize":True,"gmsh_high_order_optimize":high_order_opt},
+                    "gmsh_optimize":True,"gmsh_high_order_optimize":high_order_opt,"gmsh_algorithm3d":10 if is_2mm else "default"},
             "solver":"native Windows Code_Aster through AsterMax runner",
             "fea_values_invented":False,
         }
