@@ -24,11 +24,19 @@ namespace PrePoMax
             timer.Tick += (s,e) =>
             {
                 ticks++;
-                bool ready=_controller!=null && _controller.Model!=null &&
-                           _controller.Model.Geometry!=null &&
-                           _controller.Model.Geometry.Parts.Count>=2 &&
-                           !IsStateWorking();
-                if(!ready && ticks<90) return;
+                bool geometryReady=_controller!=null && _controller.Model!=null &&
+                                   _controller.Model.Geometry!=null &&
+                                   _controller.Model.Geometry.Parts.Count>=2 &&
+                                   !IsStateWorking();
+                bool automaticMaterialReady=geometryReady &&
+                    _controller.Model.Materials.ContainsKey(Controller.AsterMaxDefaultMaterialName);
+
+                // The command-line import continuation assigns the default material
+                // after ImportFileAsync returns. Give that continuation a bounded
+                // grace window, but never manufacture the PASS inside the audit.
+                if((!geometryReady || !automaticMaterialReady) && ticks<15) return;
+                bool ready=geometryReady && automaticMaterialReady;
+                if(!ready && ticks<90 && !geometryReady) return;
 
                 timer.Stop();
                 timer.Dispose();
@@ -41,12 +49,14 @@ namespace PrePoMax
 
                 try
                 {
-                    if(!ready) throw new InvalidOperationException("Two-body STEP import did not complete within the audit window.");
+                    if(!geometryReady) throw new InvalidOperationException("Two-body STEP import did not complete within the audit window.");
+                    if(!automaticMaterialReady) throw new InvalidOperationException("Default structural steel was not assigned automatically after STEP import.");
 
                     FeModel model=_controller.Model;
                     report["geometry_parts_before_mesh"]=model.Geometry.Parts.Count;
                     report["materials_after_import"]=new JArray(model.Materials.Keys);
                     report["default_material_after_import"]=model.Materials.ContainsKey(Controller.AsterMaxDefaultMaterialName);
+                    report["automatic_material_import_gate"]="PASS";
 
                     var candidates=_controller.GetGeometryPartsWithoutSubParts();
                     string[] partNames=candidates==null ? new string[0] : candidates.Select(x=>x.Name).ToArray();
