@@ -538,6 +538,17 @@
       "consumes": [
         "AsterMaxIntegratedResults"
       ]
+    },
+    {
+      "id": "patch-c10213-scope-fingerprint",
+      "file": "patch-c10213-scope-fingerprint.ps1",
+      "depends": [
+        "patch-c10212-mechanical-qualification"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxMechanicalQualification"
+      ]
     }
   ]
 }
