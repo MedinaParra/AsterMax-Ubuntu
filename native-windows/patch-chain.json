@@ -732,6 +732,21 @@
         "AsterMaxDefaultMaterial",
         "AsterMaxAutoContacts"
       ]
+    },
+    {
+      "id": "patch-c1036-codeaster-contact",
+      "file": "patch-c1036-codeaster-contact.ps1",
+      "depends": [
+        "patch-c1035-material-library-autocontact"
+      ],
+      "declares": [
+        "AsterMaxCodeAsterContactContract",
+        "AsterMaxCodeAsterContactExporter"
+      ],
+      "consumes": [
+        "AsterMaxAutoContacts",
+        "AsterMaxModelReadyDefaults"
+      ]
     }
   ]
 }
