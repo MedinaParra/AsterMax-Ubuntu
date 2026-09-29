@@ -43,6 +43,14 @@ jobs:
             if(-not $?){ throw "Patch failed: $($p.id)" }
           }
 
+      - name: Setup Python for C10.35 fixture
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Gmsh fixture dependency
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh
       - name: Restore NuGet packages
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -125,6 +133,21 @@ jobs:
           if(-not $ui.Contains('private void AsterMaxAutoGenerateContacts()')){ throw 'Automatic contact generator missing.' }
           if(-not $bridge.Contains('native Code_Aster contact translation is not yet certified')){ throw 'Contact fail-closed solver guard missing.' }
 
+      - name: Install pinned NetGen runtime for C10.35 audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin='${{ steps.locate.outputs.bin }}'
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){ throw 'Pinned CAD runtime digest mismatch.' }
+          Expand-Archive runtime.zip runtime -Force
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing from pinned runtime.' }
+          if(Test-Path (Join-Path $bin 'NetGen')){ Remove-Item (Join-Path $bin 'NetGen') -Recurse -Force }
+          Copy-Item $ng.Directory.FullName (Join-Path $bin 'NetGen') -Recurse -Force
+          New-Item -ItemType Directory -Force (Join-Path $bin 'Temp') | Out-Null
       - name: Run C10.35 native two-body defaults/contact audit
         shell: pwsh
         run: |
