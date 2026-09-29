@@ -14,6 +14,26 @@ $b=[regex]::Replace((Get-Content $bridgePath -Raw),"\r\n?","`n")
 $legacyGuard='            if (model.ContactPairs != null && model.ContactPairs.Count > 0) throw new NotSupportedException("C10.35: contact pairs are present, but native Code_Aster contact translation is not yet certified. Solve is blocked to prevent a false no-contact result.");'
 if($b.Contains($legacyGuard)){ $b=$b.Replace($legacyGuard,'') }
 
+$oldFeatureGuard=@'
+            if (model.Constraints.Values.Any(x => x.Active) || model.ContactPairs.Values.Any(x => x.Active) ||
+                model.InitialConditions.Values.Any(x => x.Active) ||
+                model.StepCollection.StepsList.Any(s => s.DefinedFields.Values.Any(x => x.Active)))
+                throw new NotSupportedException("Active contacts, constraints, initial conditions or defined fields are not supported by this Code_Aster bridge.");
+'@
+$newFeatureGuard=@'
+            if (model.Constraints.Values.Any(x => x.Active) ||
+                model.InitialConditions.Values.Any(x => x.Active) ||
+                model.StepCollection.StepsList.Any(s => s.DefinedFields.Values.Any(x => x.Active)))
+                throw new NotSupportedException("Active constraints, initial conditions or defined fields are not supported by the C10.36 Code_Aster bridge.");
+'@
+if($b.Contains($oldFeatureGuard)){ $b=$b.Replace($oldFeatureGuard,$newFeatureGuard) }
+elseif($b.Contains('Active contacts, constraints, initial conditions or defined fields are not supported by this Code_Aster bridge.')){
+    throw 'C10.36 failed to remove legacy broad contact guard.'
+}
+elseif(-not $b.Contains('Active constraints, initial conditions or defined fields are not supported by the C10.36 Code_Aster bridge.')){
+    throw 'C10.36 feature guard anchor missing.'
+}
+
 $contactAnchor='            root["postprocess"] = new JObject { ["displacement_probe_group"] = loads.Count > 0 ? (string)loads[0]["group"] : null };'
 $contactBlock=@'
             JArray contacts = new JArray();
