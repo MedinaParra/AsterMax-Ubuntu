@@ -148,6 +148,9 @@ if conv:
             f"Last mesh change: deformation {du:.3g}%, equivalent stress {ds:.3g}%.",**convergence))
     else:
         f.append(finding("MESH_CONVERGENCE","WARN","Fewer than two solved mesh levels are available."))
+else:
+    f.append(finding("MESH_CONVERGENCE","WARN",
+        "No mesh-convergence evidence was supplied. Results remain usable for review, but are not engineering-qualified by default."))
 
 benchmark=None
 if ref:
