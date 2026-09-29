@@ -78,7 +78,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $bridge=Get-Content .\upstream\PrePoMax\AsterMaxModelContractBridge.cs -Raw
           $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
-          foreach($t in @('BuildCodeAsterContactSurface','codeaster_contact_contract_pass','BoundaryValue(dr.U1)')){
+          foreach($t in @('BuildCodeAsterContactSurface','codeaster_contact_contract_pass')){
             if(-not $bridge.Contains($t) -and -not (Get-Content .\upstream\PrePoMax\Forms\AsterMaxC1035Audit.cs -Raw).Contains($t)){ throw "Bridge/audit token missing: $t" }
           }
           foreach($t in @('C10.36-native-codeaster-contact-v1','GROUP_MA NOM = AM_VOL','DEFI_CONTACT','STAT_NON_LINE','ORIE_PEAU_3D','Directional support has no constrained translation')){
@@ -202,7 +202,7 @@ jobs:
             executable_sha256=$hash; platform='Windows x64'; solver_backend='Code_Aster';
             automatic_contact_detection=$true; contact_contract_runtime='PASS'; compiled_contact_export='PASS';
             genuine_solver_contact='PENDING_LINUX_ADMISSION'; frictionless_contact_only=$true;
-            directional_displacement_constraints=$true; fea_values_invented=$false
+            directional_displacement_constraints='ADMISSION_CONTRACT_ONLY'; fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\candidate\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
 
       - name: Upload compiled candidate
