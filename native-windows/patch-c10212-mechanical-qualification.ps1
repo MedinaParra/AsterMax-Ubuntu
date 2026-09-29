@@ -16,7 +16,7 @@ Copy-Item (Join-Path $PSScriptRoot 'AsterMaxMechanicalQualification.cs') (Join-P
 # Solution Information: patch the lifecycle-aware C10.20.4 block, not the pre-C10.20 single line.
 $integrated=Join-Path $Root 'PrePoMax/Forms/AsterMaxIntegratedResults.cs'
 if(!(Test-Path $integrated)){throw 'C10.21 integrated results source missing.'}
-$s=Get-Content $integrated -Raw
+$s=[regex]::Replace((Get-Content $integrated -Raw),"\r\n?","`n")
 $infoOld=@'
             if (_asterMaxLoadedResults != null)
             {
@@ -41,6 +41,8 @@ $infoNew=@'
                 }
             }
 '@
+$infoOld=[regex]::Replace($infoOld,"\r\n?","`n").TrimEnd()
+$infoNew=[regex]::Replace($infoNew,"\r\n?","`n").TrimEnd()
 if($s.Contains($infoOld)){$s=$s.Replace($infoOld,$infoNew)}
 elseif(-not $s.Contains('AsterMaxMechanicalQualification.Evaluate(_asterMaxLoadedResults)')){
     throw 'C10.21 Solution Information lifecycle anchor missing.'
@@ -71,7 +73,7 @@ Set-Content $exporter $e -Encoding UTF8
 # Qualify every native solve after the real MED bridge and current-model fingerprint binding.
 $solve=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs'
 if(!(Test-Path $solve)){throw 'C10.21 native solve transaction missing.'}
-$t=Get-Content $solve -Raw
+$t=[regex]::Replace((Get-Content $solve -Raw),"\r\n?","`n")
 $handoffAnchor=@'
             var bundle=AsterMaxResultsBundle.Load(ResultBundleFile);
             bundle.RequireCurrentModel(liveModel);
@@ -98,6 +100,8 @@ $handoffInsert=@'
             if(!File.Exists(qualificationFile) || new FileInfo(qualificationFile).Length==0)
                 Fail("Mechanical Qualification did not produce its evidence report.");
 '@
+$handoffAnchor=[regex]::Replace($handoffAnchor,"\r\n?","`n").TrimEnd()
+$handoffInsert=[regex]::Replace($handoffInsert,"\r\n?","`n").TrimEnd()
 if($t.Contains($handoffAnchor) -and -not $t.Contains('ASTERMAX_MECHANICAL_QUALIFICATION')){
     $t=$t.Replace($handoffAnchor,$handoffInsert)
 }
