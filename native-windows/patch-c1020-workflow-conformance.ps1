@@ -187,8 +187,15 @@ Set-Content $project $p -Encoding UTF8
 
 $ui=Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 $u=Get-Content $ui -Raw
-$anchor='                StartAsterMaxIntegratedAudit();'
-$u=Replace-Required $u $anchor ($anchor+[Environment]::NewLine+'                StartAsterMaxC1020WorkflowConformanceAudit();')
+$anchor16='                StartAsterMaxIntegratedAudit();'
+$anchor12='            StartAsterMaxIntegratedAudit();'
+if($u.Contains($anchor16)){
+    $u=$u.Replace($anchor16,$anchor16+[Environment]::NewLine+'                StartAsterMaxC1020WorkflowConformanceAudit();')
+}
+elseif($u.Contains($anchor12)){
+    $u=$u.Replace($anchor12,$anchor12+[Environment]::NewLine+'            StartAsterMaxC1020WorkflowConformanceAudit();')
+}
+elseif(-not $u.Contains('StartAsterMaxC1020WorkflowConformanceAudit();')){ throw 'C10.20 integrated audit startup anchor missing.' }
 Set-Content $ui $u -Encoding UTF8
 
 Write-Host 'C10.20 native Windows workflow-conformance audit + cross-cutting checks applied.'
