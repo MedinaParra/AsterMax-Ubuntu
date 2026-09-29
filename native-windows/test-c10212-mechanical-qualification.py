@@ -5,13 +5,15 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent
 GATE=ROOT/"qualify-mechanical-analysis.py"
 
-def run_case(bundle, analysis, expect_code, expected_status):
+def run_case(bundle, analysis, expect_code, expected_status, mess_text="ARRET NORMAL\naucune alarme\n"):
     with tempfile.TemporaryDirectory() as td:
         td=Path(td)
-        bp=td/"bundle.json"; ap=td/"analysis.json"; op=td/"out.json"
+        bp=td/"bundle.json"; ap=td/"analysis.json"; mp=td/"case.mess"; op=td/"out.json"
         bp.write_text(json.dumps(bundle),encoding="utf-8")
         ap.write_text(json.dumps(analysis),encoding="utf-8")
-        p=subprocess.run([sys.executable,str(GATE),"--bundle",str(bp),"--analysis",str(ap),"--out",str(op)],
+        mp.write_text(mess_text,encoding="utf-8")
+        p=subprocess.run([sys.executable,str(GATE),"--bundle",str(bp),"--analysis",str(ap),
+                          "--mess",str(mp),"--out",str(op)],
                          text=True,capture_output=True)
         if p.returncode!=expect_code:
             raise AssertionError(f"return code {p.returncode} != {expect_code}\nSTDOUT={p.stdout}\nSTDERR={p.stderr}")
@@ -57,6 +59,12 @@ bad["units"]["length"]="m"
 out=run_case(bad,analysis,2,"BLOCKED")
 assert any(x["code"]=="UNIT_CONTRACT" and x["level"]=="BLOCK" for x in out["findings"])
 
+mesh_bad=run_case(
+    base, analysis, 2, "BLOCKED",
+    mess_text="ALARME: la maille T10 est trop distordue\nLe jacobien change de signe.\n"
+)
+assert any(x["code"]=="SOLVER_MESH_QUALITY" and x["level"]=="BLOCK" for x in mesh_bad["findings"])
+
 manifest=json.loads((ROOT/"patch-chain.json").read_text(encoding="utf-8"))
 entry=[x for x in manifest["patches"] if x["id"]=="patch-c10212-mechanical-qualification"]
 assert len(entry)==1
@@ -71,5 +79,5 @@ bridge=(ROOT/"bridge-c964-med-results.py").read_text(encoding="utf-8")
 assert 'optional_med_field_path(h, "REAC_NODA"' in bridge
 assert '"reaction_resultant_from_real_reac_noda"' in bridge
 
-print(json.dumps({"status":"PASS","cases":3,"patch_chain":True,"ui_contract":True,
+print(json.dumps({"status":"PASS","cases":4,"patch_chain":True,"ui_contract":True,
                   "reaction_bridge_contract":True,"fea_values_invented":False},indent=2))
