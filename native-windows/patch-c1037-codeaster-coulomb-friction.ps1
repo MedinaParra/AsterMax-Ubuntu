@@ -49,19 +49,9 @@ $version=[regex]::Match($e,'public const string Version = "[^"]+";').Value
 if([string]::IsNullOrWhiteSpace($version)){ throw 'C10.37 exporter version anchor missing.' }
 $e=$e.Replace($version,'public const string Version = "C10.37-native-codeaster-coulomb-v1";')
 
-$oldZones=@'
-                var zoneLines=new List<string>();
-                foreach(JObject contact in contacts.Cast<JObject>())
-                {
-                    JObject master=(JObject)contact["master"];
-                    JObject slave=(JObject)contact["slave"];
-                    zoneLines.Add(String.Format(CultureInfo.InvariantCulture,
-                        "_F(GROUP_MA_MAIT='{0}', GROUP_MA_ESCL='{1}', CONTACT_INIT='{2}')",
-                        (string)master["group"],(string)slave["group"],(string)contact["contact_init"]));
-                }
-                string zones=String.Join(",\n        ",zoneLines);
-'@
-$newZones=@'
+$zonePattern='(?ms)\s*var zoneLines=new List<string>\(\);.*?string zones=String\.Join\(",\\n        ",zoneLines\);'
+if([regex]::IsMatch($e,$zonePattern)){
+    $newZones=@'
                 bool hasCoulomb=contacts.Cast<JObject>().Any(x =>
                     String.Equals((string)x["friction"],"COULOMB",StringComparison.OrdinalIgnoreCase));
                 string frictionMode=hasCoulomb ? "COULOMB" : "SANS";
@@ -77,9 +67,9 @@ $newZones=@'
                 }
                 string zones=String.Join(",\n        ",zoneLines);
 '@
-if($e.Contains($oldZones)){ $e=$e.Replace($oldZones,$newZones) }
+    $e=[regex]::Replace($e,$zonePattern,"`n"+$newZones.TrimEnd(),1)
+}
 elseif(-not $e.Contains('string frictionMode=hasCoulomb ? "COULOMB" : "SANS";')){ throw 'C10.37 exporter zone anchor missing.' }
-
 $oldMode="    FROTTEMENT='SANS',"
 $newMode="    FROTTEMENT='{1}',"
 if($e.Contains($oldMode)){ $e=$e.Replace($oldMode,$newMode) }
