@@ -105,6 +105,21 @@ jobs:
             if($LASTEXITCODE -ne 0){ throw "WS01.1 genuine Code_Aster solve failed for $label." }
           }
 
+      - name: Reject invalid or distorted TETRA10 elements
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($label in @('3mm','2mm','1mm')){
+            $mess=".\\tutorial-evidence\\WS01.1\\mesh-$label\\ws01.mess"
+            if(-not (Test-Path $mess)){ throw "Missing Code_Aster message file for $label." }
+            $bad=Select-String -Path $mess -Pattern 'trop distordue','jacobien.*signe' -CaseSensitive:$false
+            if($bad){
+              $bad | ForEach-Object { Write-Host $_.Line }
+              throw "WS01.1 $label contains invalid/distorted quadratic elements."
+            }
+            Write-Host "MESH_QUALITY_$label=PASS_NO_DISTORTED_TETRA10_ALARM"
+          }
+
       - name: Import and compare WS01.1 convergence results
         shell: pwsh
         run: |
