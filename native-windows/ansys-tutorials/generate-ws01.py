@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the exact ANSYS Mechanical WS01.1 cover case for AsterMax/Code_Aster.
+"""Build the exact ANSYS Mechanical WS01.1 cover case for AsterMax/Code_Aster.\n\nUses quadratic tetrahedral volume elements to align the structural discretization\nwith the higher-order solid formulation expected for a fair Mechanical comparison.
 
 Source geometry: Cap_fillets.stp from the public ANSYS Mechanical training bundle.
 No FEA output is embedded. Surface groups are identified from the exact CAD topology
@@ -76,7 +76,7 @@ def main():
         physical(2,INSUP,"INSUP")
         physical(2,LIPSUP,"LIPSUP")
 
-        gmsh.option.setNumber("Mesh.ElementOrder",1)
+        gmsh.option.setNumber("Mesh.ElementOrder",2)
         gmsh.option.setNumber("Mesh.MeshSizeMin",max(args.size/2.0,0.6))
         gmsh.option.setNumber("Mesh.MeshSizeMax",args.size)
         gmsh.option.setNumber("Mesh.MeshSizeFromCurvature",10)
@@ -127,7 +127,7 @@ F rmed /analysis/ws01.rmed R 81
             "load":{"type":"pressure","magnitude_mpa":1.1},
             "supports":{"type":"frictionless-normal","code_aster":"FACE_IMPO/DNOR=0"},
             "material":{"name":"Aluminum Alloy","E_mpa":71000.0,"nu":0.33,"yield_mpa_for_safety_factor":280.0},
-            "mesh":{"target_max_size_mm":args.size,"nodes":len(node_tags),"volume_elements":nelem,"order":1},
+            "mesh":{"target_max_size_mm":args.size,"nodes":len(node_tags),"volume_elements":nelem,"order":2},
             "solver":"native Windows Code_Aster through AsterMax runner",
             "fea_values_invented":False,
         }
