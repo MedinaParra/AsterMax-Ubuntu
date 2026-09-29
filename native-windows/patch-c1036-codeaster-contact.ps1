@@ -190,6 +190,14 @@ if(-not $e.Contains('JArray contacts=(JArray)contract["contacts"]')){
 
 $mailAnchor='            JObject groups=(JObject)mesh["node_groups"];'
 $mailBlock=@'
+            // Keep volume and skin element roles explicit for Code_Aster.
+            mail.Add("GROUP_MA NOM = AM_VOL");
+            string[] volumeIds=elements.Cast<JObject>().Select(x=>(string)x["id"]).ToArray();
+            const int volumeIdsPerRecord=8;
+            for(int start=0;start<volumeIds.Length;start+=volumeIdsPerRecord)
+                mail.Add(String.Join(" ",volumeIds.Skip(start).Take(volumeIdsPerRecord)));
+            mail.Add("FINSF");
+
             // Contact skins are explicit 2D mesh elements derived from the real
             // PrePoMax master/slave surfaces. Synthetic IDs are solver-only.
             foreach (JObject contact in contacts.Cast<JObject>())
@@ -231,6 +239,20 @@ $commWriteAnchor='            File.WriteAllText(commPath,comm,new System.Text.UT
 $commContact=@'
             if(contacts.Count>0)
             {
+                var orientationLines=new List<string>();
+                foreach(JObject contact in contacts.Cast<JObject>())
+                {
+                    orientationLines.Add("_F(GROUP_MA='"+(string)contact["master"]["group"]+"')");
+                    orientationLines.Add("_F(GROUP_MA='"+(string)contact["slave"]["group"]+"')");
+                }
+                string orientation=String.Join(",\n        ",orientationLines);
+                string oldModel="model = AFFE_MODELE(MAILLAGE=mesh, AFFE=_F(TOUT='OUI', PHENOMENE='MECANIQUE', MODELISATION='3D'))";
+                string newModel="mesh = MODI_MAILLAGE(reuse=mesh, MAILLAGE=mesh, ORIE_PEAU_3D=(\n        "+orientation+",\n    ))\nmodel = AFFE_MODELE(MAILLAGE=mesh, AFFE=_F(GROUP_MA='AM_VOL', PHENOMENE='MECANIQUE', MODELISATION='3D'))";
+                if(!comm.Contains(oldModel)) throw new InvalidOperationException("C10.36 modelisation anchor missing.");
+                comm=comm.Replace(oldModel,newModel);
+                comm=comm.Replace("matfield = AFFE_MATERIAU(MAILLAGE=mesh, AFFE=_F(TOUT='OUI', MATER=steel))",
+                                  "matfield = AFFE_MATERIAU(MAILLAGE=mesh, AFFE=_F(GROUP_MA='AM_VOL', MATER=steel))");
+
                 var zoneLines=new List<string>();
                 foreach(JObject contact in contacts.Cast<JObject>())
                 {
