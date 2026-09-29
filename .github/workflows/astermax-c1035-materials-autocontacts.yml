@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/c1035-material-library-autocontact
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -119,6 +122,12 @@ jobs:
           if(-not $main.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){ throw 'Automatic material assignment hook missing.' }
           if(-not $ui.Contains('private void AsterMaxAutoGenerateContacts()')){ throw 'Automatic contact generator missing.' }
 
+      - name: Run C10.35 native two-body defaults/contact audit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\native-windows\smoke-c1035-defaults.ps1 -Dist '${{ steps.locate.outputs.bin }}'
+          if($LASTEXITCODE -ne 0){ throw 'C10.35 native runtime audit failed.' }
       - name: Stage portable C10.35 package and audit report
         shell: pwsh
         run: |
@@ -132,6 +141,7 @@ jobs:
           New-Item -ItemType Directory -Force .\dist\CodeAsterRuntime | Out-Null
           Copy-Item .\native-windows\runtime\CodeAster\* .\dist\CodeAsterRuntime\ -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force .\dist\Audit\C10.35 | Out-Null
+          Copy-Item "$bin\Audit\C10.35-runtime\defaults-autocontact-report.json" .\dist\Audit\C10.35\defaults-autocontact-report.json -Force
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
             release='C10.35'
@@ -149,7 +159,7 @@ jobs:
             material_library_file='materials.lib'
             material_reference_count=15
             source_contract_audit='PASS'
-            runtime_contact_pair_e2e='NOT_EXERCISED'
+            runtime_contact_pair_e2e='EXECUTED_BY_smoke-c1035-defaults.ps1'
             fea_values_invented=$false
             note='Material values are editable reference data; verify grade/certificate/condition before final engineering use.'
           } | ConvertTo-Json | Set-Content .\dist\Audit\C10.35\audit-summary.json -Encoding UTF8
