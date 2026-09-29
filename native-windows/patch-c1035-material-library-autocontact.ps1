@@ -40,4 +40,32 @@ if(-not $m.Contains('BeginInvoke(new Action(AsterMaxAutoGenerateContacts))')){ t
 if(-not $m.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){ throw 'C10.35 automatic material assignment hook missing.' }
 if(-not $u.Contains('private void AsterMaxAutoGenerateContacts()')){ throw 'C10.35 automatic contact generator missing.' }
 
+
+# Runtime audit integration: copy the C10.35 audit partial class, compile it, and
+# arm it only when ASTERMAX_C1035_AUDIT_DIR is present.
+$auditSource = Join-Path $PSScriptRoot 'AsterMaxC1035Audit.cs'
+$auditTarget = Join-Path $Root 'PrePoMax/Forms/AsterMaxC1035Audit.cs'
+if(!(Test-Path $auditSource)){ throw 'C10.35 audit source is missing.' }
+Copy-Item $auditSource $auditTarget -Force
+
+$projectPath = Join-Path $Root 'PrePoMax/PrePoMax.csproj'
+$p=[regex]::Replace((Get-Content $projectPath -Raw),"\r\n?","`n")
+$compileAnchor='<Compile Include="Forms\AsterMaxC1034Audit.cs" />'
+$compileNew=$compileAnchor+"`n    "+'<Compile Include="Forms\AsterMaxC1035Audit.cs" />'
+if(-not $p.Contains('Forms\AsterMaxC1035Audit.cs')){
+    if(-not $p.Contains($compileAnchor)){ throw 'C10.35 project audit include anchor missing.' }
+    $p=$p.Replace($compileAnchor,$compileNew)
+}
+Set-Content $projectPath $p -Encoding UTF8
+
+$nativeUiPath = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
+$n=[regex]::Replace((Get-Content $nativeUiPath -Raw),"\r\n?","`n")
+$hookAnchor='                StartAsterMaxC1034OutlineAudit();'
+$hookNew=$hookAnchor+"`n"+'                StartAsterMaxC1035DefaultsAudit();'
+if(-not $n.Contains('StartAsterMaxC1035DefaultsAudit();')){
+    if(-not $n.Contains($hookAnchor)){ throw 'C10.35 audit startup hook anchor missing.' }
+    $n=$n.Replace($hookAnchor,$hookNew)
+}
+Set-Content $nativeUiPath $n -Encoding UTF8
+
 Write-Host 'C10.35: canonical structural steel + automatic contacts/material contract verified.' -ForegroundColor Green
