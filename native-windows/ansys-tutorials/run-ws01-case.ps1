@@ -36,6 +36,26 @@ $reference=(Resolve-Path '.\native-windows\ansys-tutorials\ws01-ansys-reference.
 python .\native-windows\ansys-tutorials\compare-ws01.py --bundle (Join-Path $out 'ws01.astermax-results.json') --input (Join-Path $out 'ws01-input.json') --reference $reference --out (Join-Path $out 'ws01-comparison.json')
 if($LASTEXITCODE -ne 0){ throw "WS01.1 comparison failed for $Label." }
 
+$hashItems=@()
+foreach($name in @('ws01.med','ws01.rmed','ws01.mess','ws01.astermax-results.vtu','ws01-comparison.json','ws01-input.json')){
+  $p=Join-Path $out $name
+  if(Test-Path $p){
+    $hashItems += [ordered]@{
+      file=$name
+      bytes=(Get-Item $p).Length
+      sha256=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+  }
+}
+[ordered]@{
+  tutorial='WS01.1'
+  label=$Label
+  mesh_size_mm=$Size
+  generated_utc=(Get-Date).ToUniversalTime().ToString('O')
+  artifacts=$hashItems
+  fea_values_invented=$false
+} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'ws01-evidence-manifest.json') -Encoding UTF8
+
 Write-Host "=== RENDER WS01.1 $Label ==="
 python .\native-windows\ansys-tutorials\render-ws01.py --vtu (Join-Path $out 'ws01.astermax-results.vtu') --out (Join-Path $out 'screenshots')
 if($LASTEXITCODE -ne 0){ throw "WS01.1 screenshot render failed for $Label." }
