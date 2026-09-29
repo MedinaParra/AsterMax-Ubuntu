@@ -91,6 +91,8 @@ $handoffInsert=@'
                                  " --out "+Quote(qualificationFile);
             if(File.Exists(analysisManifest))
                 qualifierArgs+=" --analysis "+Quote(analysisManifest);
+            if(File.Exists(MessFile))
+                qualifierArgs+=" --mess "+Quote(MessFile);
             var qualificationPsi=CreatePythonProcess(PostprocessorExecutable,qualifierArgs);
             int qualificationExit=RunCaptured(qualificationPsi,"ASTERMAX_MECHANICAL_QUALIFICATION");
             if(qualificationExit==2)
