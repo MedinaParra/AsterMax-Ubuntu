@@ -39,16 +39,18 @@
       "consumes": []
     },
     {
-      "id": "patch-c960-compile-fixes",
-      "file": "patch-c960-compile-fixes.ps1",
+      "id": "patch-c960-native-bridge",
+      "file": "patch-c960-native-bridge.ps1",
       "depends": [],
       "declares": [],
       "consumes": []
     },
     {
-      "id": "patch-c960-native-bridge",
-      "file": "patch-c960-native-bridge.ps1",
-      "depends": [],
+      "id": "patch-c960-compile-fixes",
+      "file": "patch-c960-compile-fixes.ps1",
+      "depends": [
+        "patch-c960-native-bridge"
+      ],
       "declares": [],
       "consumes": []
     },
