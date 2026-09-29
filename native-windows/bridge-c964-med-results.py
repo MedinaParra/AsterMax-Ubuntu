@@ -96,6 +96,22 @@ def med_field_path(h, token, mesh_name):
     return "CHA/" + names[0]
 
 
+def optional_med_field_path(h, token, mesh_name):
+    names = [name for name in h["CHA"] if name == token or name.endswith("__" + token)
+             or re.fullmatch(r"[0-9a-fA-F]{8}" + re.escape(token), name)]
+    if not names:
+        return None
+    if len(names) != 1:
+        raise RuntimeError(f"{token}: expected at most one unambiguous MED field, found {names}")
+    root = h["CHA/" + names[0]]
+    mesh = root.attrs.get("MAI", b"")
+    if isinstance(mesh, bytes):
+        mesh = mesh.decode("ascii")
+    if str(mesh) != mesh_name:
+        raise RuntimeError(f"{token}: field belongs to a different MED mesh: {mesh}")
+    return "CHA/" + names[0]
+
+
 def select_single_field_step(h, root_path, token):
     root = h[root_path]
     steps = []
@@ -430,6 +446,9 @@ with h5py.File(med_path, "r") as h:
         token: med_field_path(h, token, mesh_name)
         for token in ("DEPL", "SIGM_ELNO", "SIEQ_ELNO")
     }
+    reaction_path = optional_med_field_path(h, "REAC_NODA", mesh_name)
+    if reaction_path is not None:
+        field_paths["REAC_NODA"] = reaction_path
     field_steps = {
         token: select_single_field_step(h, path, token)
         for token, path in field_paths.items()
@@ -449,6 +468,19 @@ with h5py.File(med_path, "r") as h:
         raise RuntimeError("DEPL nodal count does not match mesh node count")
     displacement = displacement_blocks[:3].T
     total = np.linalg.norm(displacement, axis=1)
+
+    reaction = None
+    reaction_resultant = None
+    if reaction_path is not None:
+        rcomp, reaction_blocks = nodal_field(
+            h, "REAC_NODA", reaction_path, result_step
+        )
+        if rcomp[:3] != ["DX", "DY", "DZ"]:
+            raise RuntimeError(f"unexpected REAC_NODA components: {rcomp}")
+        if reaction_blocks.shape[1] != n_nodes:
+            raise RuntimeError("REAC_NODA nodal count does not match mesh node count")
+        reaction = reaction_blocks[:3].T
+        reaction_resultant = reaction.sum(axis=0)
 
     scomp, stress_by_family = discover_element_node_field(
         h, "SIGM_ELNO", field_paths["SIGM_ELNO"], result_step, families
@@ -529,12 +561,21 @@ bundle = {
             "nodal_min": float(von_mises.min()),
             "nodal_max": float(von_mises.max()),
         },
+        "reaction": None if reaction is None else {
+            "location": "NODE",
+            "components": ["DX", "DY", "DZ"],
+            "derived": False,
+            "resultant_n": [float(x) for x in reaction_resultant],
+            "resultant_magnitude_n": float(np.linalg.norm(reaction_resultant)),
+            "source": "real Code_Aster REAC_NODA",
+        },
     },
     "integrity": {
         "fea_values_invented": False,
         "solver_output_modified": False,
         "derived_nodal_stress_average_declared": True,
         "von_mises_component_first_ansys_parity": True,
+        "reaction_resultant_from_real_reac_noda": reaction is not None,
         "bridge_validation_mode": validation_mode,
         "supported_med_families": ["TE4", "T10", "HE8"],
     },
@@ -551,6 +592,7 @@ production_checks = {
         len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
     ),
     "von_mises_present_finite": bool(len(von_mises) == n_nodes and np.isfinite(von_mises).all()),
+    "reaction_finite_if_present": bool(reaction is None or (reaction.shape == (n_nodes, 3) and np.isfinite(reaction).all())),
     "no_invented_results": bool(bundle["integrity"]["fea_values_invented"] is False),
 }
 if validation_mode == "regression":
@@ -638,6 +680,8 @@ summary = {
     "total_deformation_max_mm": float(total.max()),
     "von_mises_nodal_max_mpa": float(von_mises.max()),
     "von_mises_raw_elno_max_mpa": float(vm_elno.max()),
+    "reaction_resultant_n": None if reaction_resultant is None else [float(x) for x in reaction_resultant],
+    "reaction_resultant_magnitude_n": None if reaction_resultant is None else float(np.linalg.norm(reaction_resultant)),
     "fea_values_invented": False,
 }
 print(json.dumps(summary, indent=2))
