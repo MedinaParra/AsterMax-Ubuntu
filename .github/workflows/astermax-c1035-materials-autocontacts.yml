@@ -117,10 +117,13 @@ jobs:
           $controller=Get-Content .\upstream\PrePoMax\Controller.cs -Raw
           $main=Get-Content .\upstream\PrePoMax\Forms\FrmMain.cs -Raw
           $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
+          $bridge=Get-Content .\upstream\PrePoMax\AsterMaxModelContractBridge.cs -Raw
           if(-not $controller.Contains('AsterMaxDefaultMaterialName = "Acero estructural"')){ throw 'Default structural steel contract missing.' }
           if(-not $main.Contains('BeginInvoke(new Action(AsterMaxAutoGenerateContacts))')){ throw 'Automatic contact post-mesh hook missing.' }
+          if(-not $main.Contains('_controller.Model.Mesh.Parts.Count>1')){ throw 'Automatic contact trigger does not cover sequentially meshed assemblies.' }
           if(-not $main.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){ throw 'Automatic material assignment hook missing.' }
           if(-not $ui.Contains('private void AsterMaxAutoGenerateContacts()')){ throw 'Automatic contact generator missing.' }
+          if(-not $bridge.Contains('native Code_Aster contact translation is not yet certified')){ throw 'Contact fail-closed solver guard missing.' }
 
       - name: Run C10.35 native two-body defaults/contact audit
         shell: pwsh
@@ -160,6 +163,7 @@ jobs:
             material_reference_count=15
             source_contract_audit='PASS'
             runtime_contact_pair_e2e='EXECUTED_BY_smoke-c1035-defaults.ps1'
+            solver_contact_translation='BLOCKED_FAIL_CLOSED'
             fea_values_invented=$false
             note='Material values are editable reference data; verify grade/certificate/condition before final engineering use.'
           } | ConvertTo-Json | Set-Content .\dist\Audit\C10.35\audit-summary.json -Encoding UTF8
