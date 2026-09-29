@@ -18,10 +18,12 @@ if(-not $p.Contains('Forms\AsterMaxSpanishChile.cs')){
 
 $ui = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 $u = [regex]::Replace((Get-Content $ui -Raw), "\r\n?", "`n")
-$hook = '                ThemeRecursive(this);'
+$hook16 = '                ThemeRecursive(this);'
+$hook12 = '            ThemeRecursive(this);'
 if(-not $u.Contains('AsterMaxSpanishChile.Start(this);')){
-    if(-not $u.Contains($hook)){ throw 'C10.21 localization hook anchor missing.' }
-    $u = $u.Replace($hook, $hook + "`n                AsterMaxSpanishChile.Start(this);")
+    if($u.Contains($hook16)){ $u = $u.Replace($hook16, $hook16 + "`n                AsterMaxSpanishChile.Start(this);") }
+    elseif($u.Contains($hook12)){ $u = $u.Replace($hook12, $hook12 + "`n            AsterMaxSpanishChile.Start(this);") }
+    else { throw 'C10.21 localization hook anchor missing.' }
 }
 Set-Content $ui $u -Encoding UTF8
 
