@@ -26,6 +26,7 @@ ap.add_argument("--bundle",required=True)
 ap.add_argument("--analysis")
 ap.add_argument("--convergence")
 ap.add_argument("--reference")
+ap.add_argument("--mess")
 ap.add_argument("--out",required=True)
 args=ap.parse_args()
 
@@ -33,6 +34,13 @@ bundle=json.loads(Path(args.bundle).read_text(encoding="utf-8-sig"))
 analysis=json.loads(Path(args.analysis).read_text(encoding="utf-8-sig")) if args.analysis else {}
 conv=json.loads(Path(args.convergence).read_text(encoding="utf-8-sig")) if args.convergence else None
 ref=json.loads(Path(args.reference).read_text(encoding="utf-8-sig")) if args.reference else None
+
+mess_text=None
+if args.mess:
+    mess_path=Path(args.mess)
+    if not mess_path.exists():
+        raise SystemExit("Code_Aster .mess evidence file is missing: "+str(mess_path))
+    mess_text=mess_path.read_text(encoding="utf-8",errors="replace")
 
 f=[]
 integrity=bundle.get("integrity",{})
@@ -56,6 +64,29 @@ if integrity.get("von_mises_component_first_ansys_parity") is True:
 else:
     f.append(finding("VMIS_COMPONENT_FIRST","WARN","Equivalent stress provenance does not prove component-first nodal averaging."))
 
+if mess_text is not None:
+    import re
+    mesh_alarm_patterns=[
+        r"trop\s+distordue",
+        r"jacobien[^\n]*(?:signe|n[ée]gatif)",
+        r"jacobian[^\n]*(?:sign|negative)",
+        r"maille[^\n]*invers",
+    ]
+    matched=[]
+    for pattern in mesh_alarm_patterns:
+        if re.search(pattern,mess_text,re.IGNORECASE):
+            matched.append(pattern)
+    if matched:
+        f.append(finding("SOLVER_MESH_QUALITY","BLOCK",
+            "Code_Aster message file contains distorted/inverted-element or Jacobian alarm evidence.",
+            matched_patterns=matched))
+    else:
+        f.append(finding("SOLVER_MESH_QUALITY","PASS",
+            "Code_Aster message file contains no recognized distorted/inverted-element or Jacobian alarms."))
+else:
+    f.append(finding("SOLVER_MESH_QUALITY","WARN",
+        "No Code_Aster .mess file was supplied to the mechanical qualification gate."))
+
 types=mesh.get("element_types") or ([mesh.get("element_type")] if mesh.get("element_type") else [])
 types=[x for x in types if x]
 if types and all(t=="TETRA10" for t in types):
@@ -67,7 +98,7 @@ else:
 
 scope=analysis.get("scope_binding") or {}
 mode=scope.get("mode")
-if mode in ("topology_fingerprint","exact_cad_sha256_plus_face_manifest") and scope.get("verified") is True:
+if mode in ("topology_fingerprint","exact_cad_sha256_plus_face_manifest","model_fingerprint_mesh_scope") and scope.get("verified") is True:
     f.append(finding("TOPOLOGY_STABLE_SCOPE","PASS","Loads/supports use verified topology-stable scoping.",mode=mode))
 elif mode in ("raw_face_index","raw_face_index_only"):
     f.append(finding("TOPOLOGY_STABLE_SCOPE","WARN","Raw CAD face indices are not persistent identity; use topology fingerprints."))
