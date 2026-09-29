@@ -1,0 +1,152 @@
+{
+  "schema": "astermax-ws01-validation-history/v1",
+  "benchmark": "WS01.1 Mechanical Basics",
+  "cad": "Cap_fillets.stp",
+  "cad_sha256": "4b98de09f4ff958974ebf92e298dde2210b6e2a5bbdddb82a22634ac1e8883c8",
+  "reference": {
+    "source": "ANSYS tutorial snapshot",
+    "equivalent_stress_max_MPa": 235.96,
+    "total_deformation_max_mm": 0.064809,
+    "safety_factor_min": 1.1866,
+    "classification": "PRE_REFINEMENT_TUTORIAL_SNAPSHOT"
+  },
+  "timeline": [
+    {
+      "date": "2026-09-07",
+      "stage": "C9.01 visual workflow comparison",
+      "status": "GUI_SIMILARITY_ONLY",
+      "solve_validated": false,
+      "evidence": "AsterMax_Comparativa_Primer_Tutorial.docx/pdf",
+      "notes": [
+        "1 solid / 176 faces",
+        "pressure workflow represented for 17 faces at 1.1 MPa",
+        "frictionless support workflow represented",
+        "document explicitly states no fresh solve and mockup-style visual evidence"
+      ],
+      "eligible_for_numeric_regression": false
+    },
+    {
+      "stage": "C9.13 independent PoC",
+      "status": "NO_VALID_PRODUCT_RESULT",
+      "solve_validated": false,
+      "evidence": "C9.13_WS01_STRESS_COMPARISON.json",
+      "runs": [
+        {
+          "mesh": "structured HEX8 voxel PoC",
+          "nodes": 1445,
+          "elements": 660,
+          "max_vm_MPa": 15.908631062113134,
+          "max_u_mm": 0.016237160883852696,
+          "classification": "NOT_CODE_ASTER_PRODUCT_NATIVE"
+        },
+        {
+          "mesh": "CAD-surface-seeded unconstrained TET4 PoC",
+          "nodes": 10706,
+          "elements": 50066,
+          "max_vm_MPa": 49774.16719888641,
+          "max_u_mm": 42920.58849555629,
+          "classification": "INVALID_POC_NOT_PRODUCT_NATIVE"
+        }
+      ],
+      "eligible_for_numeric_regression": false
+    },
+    {
+      "date": "2026-09-23",
+      "stage": "historical real Code_Aster run recovered from prior conversation",
+      "status": "SOLVER_REPORTED_REAL_ARTIFACT_NOT_RECOVERED",
+      "solver": "Code_Aster",
+      "mesh": "TETRA4",
+      "nodes": 3659,
+      "elements": 11176,
+      "pressure_MPa": 1.1,
+      "total_deformation_max_mm": 0.025956,
+      "von_mises_nodal_max_MPa": 81.751,
+      "von_mises_raw_elno_max_MPa": 131.221,
+      "safety_factor_nodal": 3.425,
+      "safety_factor_raw_elno": 2.134,
+      "reported_solver_end": "ARRET NORMAL",
+      "artifact_recovery": "No matching .comm/.med/.rmed/.mess or screenshot currently recovered from Library",
+      "eligible_for_numeric_regression": false,
+      "reason": "Retained for diagnostic history only until hashes/artifacts are recovered"
+    },
+    {
+      "date": "2026-09-29",
+      "stage": "real Code_Aster TETRA4 baseline recovered from GitHub Actions artifact",
+      "status": "AUTHENTIC_HISTORICAL_BASELINE",
+      "mesh": "TETRA4",
+      "nodes": 9649,
+      "elements": 33407,
+      "total_deformation_max_mm": 0.0396917,
+      "von_mises_nodal_max_MPa": 147.99,
+      "von_mises_raw_elno_max_MPa": 163.80,
+      "eligible_for_numeric_regression": true,
+      "limitations": [
+        "linear tetrahedral structural mesh",
+        "pre-final WS01 scoping corrections"
+      ]
+    },
+    {
+      "date": "2026-09-29",
+      "stage": "TETRA10 before counterbore scoping correction",
+      "status": "AUTHENTIC_DIAGNOSTIC_ONLY",
+      "mesh": "TETRA10",
+      "cases": [
+        {
+          "size_mm": 3.0,
+          "total_deformation_max_mm": 0.054854,
+          "von_mises_nodal_max_MPa": 326.08
+        },
+        {
+          "size_mm": 1.0,
+          "total_deformation_max_mm": 0.056051,
+          "von_mises_nodal_max_MPa": 300.40
+        }
+      ],
+      "eligible_for_numeric_regression": false,
+      "reason": "Counterbore frictionless support used incorrect CAD faces"
+    },
+    {
+      "date": "2026-09-29",
+      "stage": "TETRA10 after attested 30-face scoping correction",
+      "status": "CURRENT_AUTHENTIC_QUALIFICATION_LINE",
+      "scope": {
+        "pressure_faces": 17,
+        "frictionless_faces": 13,
+        "counterbore_faces": [22, 66, 68, 70],
+        "inner_recess_faces": [35, 41, 43, 74, 75, 76, 77, 78],
+        "lip_face": [13]
+      },
+      "cases": [
+        {
+          "size_mm": 3.0,
+          "total_deformation_max_mm": 0.052285,
+          "von_mises_nodal_max_MPa": 296.02,
+          "safety_factor": 0.9459
+        },
+        {
+          "size_mm": 1.0,
+          "total_deformation_max_mm": 0.053353,
+          "von_mises_nodal_max_MPa": 274.77,
+          "safety_factor": 1.0190
+        }
+      ],
+      "eligible_for_numeric_regression": true,
+      "notes": [
+        "global pressure/reaction equilibrium closes near 4139.146 N",
+        "component-first nodal von Mises is the required comparison method",
+        "ANSYS tutorial reference is pre-refinement and must not be treated as mesh-converged truth"
+      ]
+    }
+  ],
+  "salome_meca_recovery": {
+    "user_recollection": "Same WS01.1 tutorial was previously run in Salome-Meca/Code_Aster with results remembered as similar to ANSYS.",
+    "artifact_status": "NOT_RECOVERED",
+    "searched": [
+      "conversation history",
+      "Library",
+      "Gmail context"
+    ],
+    "rule": "Do not promote the recollection to numerical evidence until a Salome-Meca project, .comm, .med/.rmed, .mess, screenshot, or numeric report is recovered."
+  },
+  "product_rule": "Historical evidence is append-only. AsterMax must never overwrite or silently promote a result whose provenance class is weaker than the current qualification line."
+}
