@@ -96,7 +96,7 @@ jobs:
                       walk(child)
           walk(data)
           required={
-              "Acero estructural",
+              "Acero_Estructural",
               "ASTM_A36_Referencia",
               "ASTM_A572_Gr50_Referencia",
               "SAE_1020_Referencia",
@@ -117,7 +117,7 @@ jobs:
               raise SystemExit("Missing materials: "+", ".join(missing))
           if len(names)<15:
               raise SystemExit(f"Expected at least 15 materials, got {len(names)}")
-          print(json.dumps({"pass":True,"material_count":len(names),"default":"Acero estructural","materials":names},ensure_ascii=False))
+          print(json.dumps({"pass":True,"material_count":len(names),"default":"Acero_Estructural","materials":names},ensure_ascii=False))
           '@ | Set-Content .\audit-c1035-library.py -Encoding UTF8
           python .\audit-c1035-library.py
           if($LASTEXITCODE -ne 0){ throw 'C10.35 material library audit failed.' }
@@ -126,7 +126,7 @@ jobs:
           $main=Get-Content .\upstream\PrePoMax\Forms\FrmMain.cs -Raw
           $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs -Raw
           $bridge=Get-Content .\upstream\PrePoMax\AsterMaxModelContractBridge.cs -Raw
-          if(-not $controller.Contains('AsterMaxDefaultMaterialName = "Acero estructural"')){ throw 'Default structural steel contract missing.' }
+          if(-not $controller.Contains('AsterMaxDefaultMaterialName = "Acero_Estructural"')){ throw 'Default structural steel contract missing.' }
           if(-not $main.Contains('BeginInvoke(new Action(AsterMaxAutoGenerateContacts))')){ throw 'Automatic contact post-mesh hook missing.' }
           if(-not $main.Contains('_controller.Model.Mesh.Parts.Count>1')){ throw 'Automatic contact trigger does not cover sequentially meshed assemblies.' }
           if(-not $main.Contains('_controller.AsterMaxEnsureDefaultMaterialAndSections();')){ throw 'Automatic material assignment hook missing.' }
@@ -178,7 +178,7 @@ jobs:
             executable='AsterMax Mechanical.exe'
             executable_sha256=$hash
             solver_backend='Code_Aster'
-            default_material='Acero estructural'
+            default_material='Acero_Estructural'
             automatic_material_assignment=$true
             automatic_contact_detection=$true
             contact_generation_trigger='successful multi-part mesh when no contact pairs already exist'
