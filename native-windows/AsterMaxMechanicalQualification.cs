@@ -28,6 +28,25 @@ namespace PrePoMax
                 return q;
             }
 
+            string sidecar = Path.Combine(Path.GetDirectoryName(bundle.SourceFile) ?? "", "mechanical-qualification.json");
+            if (File.Exists(sidecar))
+            {
+                JObject report = JObject.Parse(File.ReadAllText(sidecar));
+                q.Status = (string)report["status"] ?? "SOLVED_WITH_ENGINEERING_WARNINGS";
+                JArray findings = report["findings"] as JArray;
+                if (findings != null)
+                {
+                    foreach (JObject item in findings.OfType<JObject>())
+                    {
+                        string level=(string)item["level"] ?? "INFO";
+                        string message=(string)item["message"] ?? "";
+                        q.Findings.Add(level+" · "+message);
+                    }
+                }
+                if (q.Findings.Count == 0) q.Findings.Add("INFO · Mechanical qualification sidecar is present.");
+                return q;
+            }
+
             JObject root = JObject.Parse(File.ReadAllText(bundle.SourceFile));
             JObject source = root["source"] as JObject;
             JObject integrity = root["integrity"] as JObject;
@@ -66,7 +85,7 @@ namespace PrePoMax
                 double rx=(double)rv[0], ry=(double)rv[1], rz=(double)rv[2];
                 q.Findings.Add(String.Format(CultureInfo.InvariantCulture,
                     "PASS · REAC_NODA resultant captured: [{0:G7}, {1:G7}, {2:G7}] N.", rx, ry, rz));
-                q.Findings.Add("INFO · Compare this resultant with the applied-load resultant before engineering release.");
+                q.Findings.Add("WARN · No qualification sidecar is present, so the independently assembled load resultant has not been compared here.");
             }
             else
             {
