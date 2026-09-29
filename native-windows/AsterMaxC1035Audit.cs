@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using CaeModel;
+using CaeGlobals;
 using CaeMesh;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
