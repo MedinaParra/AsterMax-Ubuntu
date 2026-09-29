@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  exact-training-geometry:
+  ws01-tetra10-convergence:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Checkout tutorial validation branch
         uses: actions/checkout@v5
@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install geometry probe dependencies
+      - name: Install validation dependencies
         shell: pwsh
         run: python -m pip install --disable-pip-version-check gmsh numpy h5py vtk
 
@@ -36,18 +36,16 @@ jobs:
           $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force .\tutorial-input | Out-Null
           $base='https://ecampus.paris-saclay.fr/pluginfile.php/2561407/mod_folder/content/0/Formation%20Polytech/Mechanical_Introduction_16.0_v1/Mechanical_Introduction_16.0_v1/workshop_input_files'
-          $files=[ordered]@{
-            'Cap_fillets.stp'='Cap_fillets.stp'
-          }
-          foreach($entry in $files.GetEnumerator()){
-            $url="$base/$($entry.Value)?forcedownload=1"
-            $out=Join-Path $PWD ('tutorial-input\'+$entry.Key)
-            Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 10
-            if((Get-Item $out).Length -lt 1024){ throw "Downloaded fixture is unexpectedly small: $($entry.Key)" }
-            $head=[System.IO.File]::ReadAllText($out).Substring(0,[Math]::Min(256,(Get-Item $out).Length))
-            if($head -notmatch 'ISO-10303-21'){ throw "Downloaded file is not STEP: $($entry.Key)" }
-            $hash=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
-            Write-Host "TUTORIAL_FIXTURE=$($entry.Key) bytes=$((Get-Item $out).Length) sha256=$hash"
+          $url="$base/Cap_fillets.stp?forcedownload=1"
+          $out=Join-Path $PWD 'tutorial-input\Cap_fillets.stp'
+          Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 10
+          if((Get-Item $out).Length -lt 1024){ throw 'Downloaded WS01 fixture is unexpectedly small.' }
+          $head=[System.IO.File]::ReadAllText($out).Substring(0,[Math]::Min(256,(Get-Item $out).Length))
+          if($head -notmatch 'ISO-10303-21'){ throw 'Downloaded WS01 fixture is not STEP.' }
+          $hash=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "TUTORIAL_FIXTURE=Cap_fillets.stp bytes=$((Get-Item $out).Length) sha256=$hash"
+          if($hash -ne '4b98de09f4ff958974ebf92e298dde2210b6e2a5bbdddb82a22634ac1e8883c8'){
+            throw "WS01 CAD SHA256 mismatch: $hash"
           }
 
       - name: Import and inspect exact WS01.1 geometry
@@ -55,14 +53,23 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force .\tutorial-evidence | Out-Null
           python .\native-windows\ansys-tutorials\inventory-step.py .\tutorial-evidence '.\tutorial-input\Cap_fillets.stp'
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 geometry inventory failed.' }
 
-      - name: Build exact WS01.1 AsterMax Code_Aster case
+      - name: Build WS01.1 TETRA10 convergence meshes
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          New-Item -ItemType Directory -Force .\tutorial-evidence\WS01.1 | Out-Null
-          python .\native-windows\ansys-tutorials\generate-ws01.py --step '.\tutorial-input\Cap_fillets.stp' --out '.\tutorial-evidence\WS01.1' --size 3.0
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 exact model generation failed.' }
+          $cases=[ordered]@{
+            '3mm'=3.0
+            '2mm'=2.0
+            '1mm'=1.0
+          }
+          foreach($entry in $cases.GetEnumerator()){
+            $dir=".\tutorial-evidence\WS01.1\mesh-$($entry.Key)"
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            python .\native-windows\ansys-tutorials\generate-ws01.py --step '.\tutorial-input\Cap_fillets.stp' --out $dir --size $entry.Value
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 mesh generation failed for $($entry.Key)." }
+          }
 
       - name: Install and probe native Windows Code_Aster
         shell: pwsh
@@ -86,65 +93,73 @@ jobs:
             if($LASTEXITCODE -ne 0){ throw 'Native Windows Code_Aster probe failed after installation.' }
           }
 
-      - name: Solve WS01.1 with AsterMax native Code_Aster runner
+      - name: Solve WS01.1 convergence meshes with Code_Aster
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $runner=(Resolve-Path '.\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1').Path
-          $ws=(Resolve-Path '.\tutorial-evidence\WS01.1').Path
-          & $runner (Join-Path $ws 'ws01.export') $ws | Tee-Object (Join-Path $ws 'ASTERMAX_CODE_ASTER_STDOUT.log')
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 genuine Code_Aster solve failed.' }
+          foreach($label in @('3mm','2mm','1mm')){
+            $ws=(Resolve-Path ".\tutorial-evidence\WS01.1\mesh-$label").Path
+            Write-Host "=== SOLVE WS01.1 $label TETRA10 ==="
+            & $runner (Join-Path $ws 'ws01.export') $ws | Tee-Object (Join-Path $ws 'ASTERMAX_CODE_ASTER_STDOUT.log')
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 genuine Code_Aster solve failed for $label." }
+          }
 
-      - name: Import WS01.1 genuine MED into AsterMax results format
+      - name: Import and compare WS01.1 convergence results
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $env:ASTERMAX_MED_BRIDGE_MODE='production'
-          $ws=(Resolve-Path '.\tutorial-evidence\WS01.1').Path
-          python .\native-windows\bridge-c964-med-results.py (Join-Path $ws 'ws01.rmed') (Join-Path $ws 'ws01.astermax-results.json') (Join-Path $ws 'ws01.astermax-results.vtu') | Tee-Object (Join-Path $ws 'ASTERMAX_MED_BRIDGE.log')
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 AsterMax MED result admission failed.' }
+          $reference=(Resolve-Path '.\native-windows\ansys-tutorials\ws01-ansys-reference.json').Path
+          foreach($label in @('3mm','2mm','1mm')){
+            $ws=(Resolve-Path ".\tutorial-evidence\WS01.1\mesh-$label").Path
+            python .\native-windows\bridge-c964-med-results.py (Join-Path $ws 'ws01.rmed') (Join-Path $ws 'ws01.astermax-results.json') (Join-Path $ws 'ws01.astermax-results.vtu') | Tee-Object (Join-Path $ws 'ASTERMAX_MED_BRIDGE.log')
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 MED result admission failed for $label." }
+            python .\native-windows\ansys-tutorials\compare-ws01.py --bundle (Join-Path $ws 'ws01.astermax-results.json') --input (Join-Path $ws 'ws01-input.json') --reference $reference --out (Join-Path $ws 'ws01-comparison.json')
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 comparison failed for $label." }
+          }
 
-      - name: Compare WS01.1 AsterMax results with ANSYS reference
+      - name: Render genuine WS01.1 convergence screenshots
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          python .\native-windows\ansys-tutorials\compare-ws01.py --bundle '.\tutorial-evidence\WS01.1\ws01.astermax-results.json' --input '.\tutorial-evidence\WS01.1\ws01-input.json' --out '.\tutorial-evidence\WS01.1\ws01-comparison.json'
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 comparison integrity gate failed.' }
+          foreach($label in @('3mm','2mm','1mm')){
+            $ws=(Resolve-Path ".\tutorial-evidence\WS01.1\mesh-$label").Path
+            python .\native-windows\ansys-tutorials\render-ws01.py --vtu (Join-Path $ws 'ws01.astermax-results.vtu') --out (Join-Path $ws 'screenshots')
+            if($LASTEXITCODE -ne 0){ throw "WS01.1 screenshot render failed for $label." }
+          }
 
-      - name: Render WS01.1 genuine result screenshots
+      - name: Summarize WS01.1 convergence
         shell: pwsh
         run: |
-          $ErrorActionPreference='Stop'
-          python .\native-windows\ansys-tutorials\render-ws01.py --vtu '.\tutorial-evidence\WS01.1\ws01.astermax-results.vtu' --out '.\tutorial-evidence\WS01.1\screenshots'
-          if($LASTEXITCODE -ne 0){ throw 'WS01.1 genuine screenshot render failed.' }
+          python .\native-windows\ansys-tutorials\summarize-ws01-convergence.py --root '.\tutorial-evidence\WS01.1' --out '.\tutorial-evidence\WS01.1\ws01-convergence-summary.json'
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 convergence summary failed.' }
 
       - name: Build source integrity manifest
         shell: pwsh
         run: |
-          $items=@()
-          Get-ChildItem .\tutorial-input -Filter *.stp | ForEach-Object {
-            $items += [ordered]@{
-              file=$_.Name
-              bytes=$_.Length
-              sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              source='Paris-Saclay public ANSYS Mechanical training folder'
-            }
-          }
+          $cad='.\tutorial-input\Cap_fillets.stp'
           [ordered]@{
             generated_utc=(Get-Date).ToUniversalTime().ToString('O')
             branch='codex/ansys-tutorial-validation-c10212'
             commit='${{ github.sha }}'
-            fixtures=$items
+            cad=[ordered]@{
+              file='Cap_fillets.stp'
+              bytes=(Get-Item $cad).Length
+              sha256=(Get-FileHash $cad -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            mesh_sizes_mm=@(3.0,2.0,1.0)
+            element_order=2
             fea_results_invented=$false
-            state='WS01_1_SOLVED_AND_RENDERED_IF_REQUIRED_GATES_PASSED'
-          } | ConvertTo-Json -Depth 8 | Set-Content .\tutorial-evidence\source-manifest.json -Encoding UTF8
+            state='WS01_1_TETRA10_CONVERGENCE'
+          } | ConvertTo-Json -Depth 8 | Set-Content '.\tutorial-evidence\source-manifest.json' -Encoding UTF8
 
-      - name: Upload tutorial geometry evidence
+      - name: Upload WS01.1 convergence evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-ANSYS-Tutorial-Geometry-Evidence
+          name: AsterMax-WS01-TETRA10-Convergence
           path: |
             tutorial-evidence
-            tutorial-input/*.stp
+            tutorial-input/Cap_fillets.stp
           if-no-files-found: error
