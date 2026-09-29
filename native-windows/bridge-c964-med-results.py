@@ -43,6 +43,11 @@ SUPPORTED_FAMILIES = {
     "T10": (10, "TETRA10", 24),
 }
 
+# Physical surface groups used for pressure/support scoping are intentionally
+# written into the MED mesh alongside the 3D volume. They are not volume
+# families and must not make the 3D results bridge fail closed.
+SKIN_FAMILIES = {"TR3", "TR6"}
+
 
 def decode_components(raw, width=16):
     if isinstance(raw, bytes):
@@ -131,6 +136,8 @@ def discover_mesh_families(h, mesh_root):
     for code in sorted(h[mai_path].keys()):
         group = h[f"{mai_path}/{code}"]
         if "NOD" not in group or "NUM" not in group:
+            continue
+        if code in SKIN_FAMILIES:
             continue
         if code not in SUPPORTED_FAMILIES:
             unsupported.append(code)
