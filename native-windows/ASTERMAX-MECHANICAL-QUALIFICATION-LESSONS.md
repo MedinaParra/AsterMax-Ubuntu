@@ -147,19 +147,35 @@ No result is promoted if its provenance cannot be tied to the current model.
 
 - Component-first Equivalent Stress: implemented in `bridge-c964-med-results.py`.
 - Real `REAC_NODA` resultant: implemented in the MED bridge.
+- Native static exporter requests `REAC_NODA` and persists an independently assembled nodal-load resultant.
 - Mechanical qualification policy: `mechanical-qualification-policy.json`.
 - Reusable qualification gate: `qualify-mechanical-analysis.py`.
-- In-app summary: `AsterMaxMechanicalQualification.cs` via C10.21 patch.
-- Qualification regression tests: `test-c10212-mechanical-qualification.py`.
+- The qualification gate consumes the real Code_Aster `.mess` file and blocks recognized
+  inverted/distorted-element or Jacobian alarm evidence.
+- In-app summary: `AsterMaxMechanicalQualification.cs` via C10.21.
+- Native Solve executes the qualification gate before promoting the result to Solution Current.
+- C10.22 extends the frozen FeModel SHA-256 identity with NodeSet, ElementSet and Surface membership,
+  so a scope-membership change invalidates old results even when the group name is unchanged.
+- Qualification regression tests include an explicit distorted-mesh blocking case.
+- Fast qualification CI passes independently of the long solver workflow.
+- C10.21 and C10.22 both compile successfully on the pinned PrePoMax Windows x64 Release build.
 - WS01 exact-CAD + face-manifest scope evidence: implemented.
-- WS01 TETRA10 convergence workflow: implemented and remains an evidence benchmark, not product logic.
+- WS01 TETRA10 convergence workflow remains an evidence benchmark, not product logic.
+- PrePoMax already requests second-order meshing by default; AsterMax therefore verifies the actual
+  emitted element family rather than duplicating or overriding that default.
 
 ## Next product-level items
 
-1. Have the exporter assemble and persist the applied-load resultant for every static structural job.
-2. Store topology fingerprints in the native project model, not only benchmark fixtures.
-3. Add actual high-order Jacobian/quality metrics to the native mesh model and pre-solve readiness.
-4. Make second-order structural solids the native default/preset while retaining explicit user control.
-5. Surface qualification state in the Solution tree and solver status bar.
+1. Persist geometric/topological CAD face fingerprints in the native project model for arbitrary
+   geometry-scoped loads/supports; current C10.22 scope identity is strongest after mesh groups exist.
+2. Add independent high-order Jacobian/quality metrics to the native mesh model and pre-solve
+   readiness. The current `.mess` alarm gate is authoritative post-solve evidence but not a
+   substitute for a pre-solve high-order metric.
+3. Generalize independent load-resultant assembly beyond the current native nodal-force route to
+   pressure, gravity, centrifugal and distributed loads.
+4. Surface qualification state as a dedicated Solution-tree/status badge in addition to
+   Solution Information.
+5. Generalize convergence service/UI so each result observable can carry its own convergence history
+   and local-peak/singularity warning.
 6. Extend the same qualification contract to contact, shells, beams, thermal and nonlinear cases with
    formulation-specific gates.
