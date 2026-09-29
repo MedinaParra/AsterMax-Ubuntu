@@ -69,6 +69,14 @@ manifest=json.loads((ROOT/"patch-chain.json").read_text(encoding="utf-8"))
 entry=[x for x in manifest["patches"] if x["id"]=="patch-c10212-mechanical-qualification"]
 assert len(entry)==1
 assert entry[0]["file"]=="patch-c10212-mechanical-qualification.ps1"
+scope_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10213-scope-fingerprint"]
+assert len(scope_entry)==1
+assert scope_entry[0]["file"]=="patch-c10213-scope-fingerprint.ps1"
+scope_patch=(ROOT/"patch-c10213-scope-fingerprint.ps1").read_text(encoding="utf-8")
+assert "mesh.nodesets=" in scope_patch
+assert "mesh.elementsets=" in scope_patch
+assert "mesh.surfaces=" in scope_patch
+assert "model_fingerprint_mesh_scope" in scope_patch
 
 ui=(ROOT/"AsterMaxMechanicalQualification.cs").read_text(encoding="utf-8")
 assert "REAL_CODE_ASTER_MED" in ui
