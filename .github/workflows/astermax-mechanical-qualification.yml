@@ -11,6 +11,7 @@ on:
       - 'native-windows/qualify-mechanical-analysis.py'
       - 'native-windows/test-c10212-mechanical-qualification.py'
       - 'native-windows/patch-c10212-mechanical-qualification.ps1'
+      - 'native-windows/patch-c10213-scope-fingerprint.ps1'
       - 'native-windows/patch-chain.json'
       - 'native-windows/bridge-c964-med-results.py'
   workflow_dispatch:
