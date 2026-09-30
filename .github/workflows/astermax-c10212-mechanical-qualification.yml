@@ -13,6 +13,7 @@ on:
       - 'native-windows/patch-c10214-tutorial1-defaults.ps1'
       - 'native-windows/patch-c10215-surface-mechanics.ps1'
       - 'native-windows/c1024/**'
+      - 'native-windows/test-c1024-surface-exporter.ps1'
       - 'native-windows/patch-chain.json'
       - 'native-windows/bridge-c964-med-results.py'
   workflow_dispatch:
@@ -137,6 +138,10 @@ jobs:
             component_first_von_mises=$true;quadratic_structural_default=$true;convergence_required_for_full_qualification=$true
             fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Exercise compiled C10.24 surface exporter
+        shell: pwsh
+        run: .\native-windows\test-c1024-surface-exporter.ps1 -Dist "$PWD\dist"
 
       - name: Upload C10.22 build evidence
         uses: actions/upload-artifact@v4
