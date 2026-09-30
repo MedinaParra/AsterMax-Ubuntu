@@ -1,0 +1,150 @@
+{
+  "schema": "astermax-model-contract/v0",
+  "bridge": "C10.25-regression-fixture",
+  "name": "C10.25 Gravity Rotation Cube",
+  "unit_system": "MM_N_S_MPA",
+  "source": {
+    "kind": "regression_fixture",
+    "fea_results_included": false,
+    "solver_execution_claimed": false
+  },
+  "mesh": {
+    "nodes": [
+      {
+        "id": "N1",
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N2",
+        "x": 10,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N3",
+        "x": 10,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N4",
+        "x": 0,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N5",
+        "x": 0,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N6",
+        "x": 10,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N7",
+        "x": 10,
+        "y": 10,
+        "z": 10
+      },
+      {
+        "id": "N8",
+        "x": 0,
+        "y": 10,
+        "z": 10
+      }
+    ],
+    "element_type": "HEXA8",
+    "elements": [
+      {
+        "id": "E1",
+        "type": "HEXA8",
+        "nodes": [
+          "N1",
+          "N2",
+          "N3",
+          "N4",
+          "N5",
+          "N6",
+          "N7",
+          "N8"
+        ]
+      }
+    ],
+    "node_groups": {
+      "FIXED_X": [
+        "N1",
+        "N4",
+        "N5",
+        "N8"
+      ]
+    },
+    "surface_groups": {},
+    "volume_groups": {
+      "PART::Cube": [
+        "E1"
+      ]
+    }
+  },
+  "materials": [
+    {
+      "name": "Structural Steel",
+      "young_modulus_mpa": 210000,
+      "poisson": 0.3,
+      "density_tonne_per_mm3": 7.85e-9,
+      "density_source": "regression_fixture",
+      "constitutive_model": "isotropic_linear_elastic"
+    }
+  ],
+  "analysis": {
+    "type": "static_structural",
+    "step_count": 1
+  },
+  "supports": [
+    {
+      "name": "Fixed Support",
+      "type": "fixed",
+      "group": "FIXED_X",
+      "dx": 0,
+      "dy": 0,
+      "dz": 0
+    }
+  ],
+  "loads": [
+    {
+      "name": "Gravity",
+      "type": "gravity",
+      "volume_group": "PART::Cube",
+      "gravity_mm_s2": 9810,
+      "direction": [
+        0,
+        0,
+        -1
+      ]
+    },
+    {
+      "name": "Centrifugal",
+      "type": "rotation",
+      "volume_group": "PART::Cube",
+      "omega_rad_s": 100,
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "center_mm": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "postprocess": {
+    "displacement_probe_group": "FIXED_X"
+  }
+}
