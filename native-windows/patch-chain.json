@@ -574,6 +574,17 @@
       "consumes": [
         "AsterMaxMechanicalQualification"
       ]
+    },
+    {
+      "id": "patch-c10216-body-loads",
+      "file": "patch-c10216-body-loads.ps1",
+      "depends": [
+        "patch-c10215-surface-mechanics"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxSurfaceMechanicsContract"
+      ]
     }
   ]
 }
