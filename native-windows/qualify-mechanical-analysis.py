@@ -110,13 +110,19 @@ else:
 reaction=(fields.get("reaction") or {})
 reaction_vec=reaction.get("resultant_n")
 expected=analysis.get("expected_external_resultant_n")
+external_resultant_complete=analysis.get("external_resultant_complete", True)
 if reaction_vec is not None:
     f.append(finding("REACTION_EVIDENCE","PASS","Real REAC_NODA resultant is present.",reaction_resultant_n=reaction_vec))
 else:
     f.append(finding("REACTION_EVIDENCE","WARN","No REAC_NODA resultant is present in the result bundle."))
 
 equilibrium=None
-if reaction_vec is not None and expected is not None:
+if expected is not None and external_resultant_complete is False:
+    f.append(finding("GLOBAL_EQUILIBRIUM","WARN",
+        "The applied-load resultant is intentionally incomplete (for example gravity/rotation body loads are present); global equilibrium is not declared closed.",
+        partial_expected_external_resultant_n=expected,
+        external_resultant_note=analysis.get("external_resultant_note")))
+elif reaction_vec is not None and expected is not None:
     residual=[float(reaction_vec[i])+float(expected[i]) for i in range(3)]
     denom=max(norm3(expected),1e-12)
     residual_pct=100.0*norm3(residual)/denom
