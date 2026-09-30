@@ -1,0 +1,227 @@
+{
+  "schema": "astermax-model-contract/v0",
+  "bridge": "C10.27-regression-fixture",
+  "name": "C10.27 Multi Material Blocks",
+  "unit_system": "MM_N_S_MPA",
+  "source": {
+    "kind": "regression_fixture",
+    "fea_results_included": false,
+    "solver_execution_claimed": false
+  },
+  "mesh": {
+    "nodes": [
+      {
+        "id": "N1",
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N2",
+        "x": 10,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N3",
+        "x": 10,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N4",
+        "x": 0,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N5",
+        "x": 0,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N6",
+        "x": 10,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N7",
+        "x": 10,
+        "y": 10,
+        "z": 10
+      },
+      {
+        "id": "N8",
+        "x": 0,
+        "y": 10,
+        "z": 10
+      },
+      {
+        "id": "N9",
+        "x": 20,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N10",
+        "x": 30,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N11",
+        "x": 30,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N12",
+        "x": 20,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N13",
+        "x": 20,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N14",
+        "x": 30,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N15",
+        "x": 30,
+        "y": 10,
+        "z": 10
+      },
+      {
+        "id": "N16",
+        "x": 20,
+        "y": 10,
+        "z": 10
+      }
+    ],
+    "element_type": "HEXA8",
+    "elements": [
+      {
+        "id": "E1",
+        "type": "HEXA8",
+        "nodes": [
+          "N1",
+          "N2",
+          "N3",
+          "N4",
+          "N5",
+          "N6",
+          "N7",
+          "N8"
+        ]
+      },
+      {
+        "id": "E2",
+        "type": "HEXA8",
+        "nodes": [
+          "N9",
+          "N10",
+          "N11",
+          "N12",
+          "N13",
+          "N14",
+          "N15",
+          "N16"
+        ]
+      }
+    ],
+    "node_groups": {
+      "FIXED_ALL": [
+        "N1",
+        "N2",
+        "N3",
+        "N4",
+        "N5",
+        "N6",
+        "N7",
+        "N8",
+        "N9",
+        "N10",
+        "N11",
+        "N12",
+        "N13",
+        "N14",
+        "N15",
+        "N16"
+      ],
+      "LOAD_NODE": [
+        "N10"
+      ]
+    },
+    "surface_groups": {},
+    "volume_groups": {
+      "PART::SteelBlock": [
+        "E1"
+      ],
+      "PART::AluminumBlock": [
+        "E2"
+      ]
+    }
+  },
+  "materials": [
+    {
+      "name": "Structural Steel",
+      "young_modulus_mpa": 210000,
+      "poisson": 0.3,
+      "density_tonne_per_mm3": 7.85e-9
+    },
+    {
+      "name": "Aluminum Alloy",
+      "young_modulus_mpa": 71000,
+      "poisson": 0.33,
+      "density_tonne_per_mm3": 2.77e-9
+    }
+  ],
+  "material_assignments": [
+    {
+      "section": "Steel Section",
+      "material": "Structural Steel",
+      "volume_group": "PART::SteelBlock"
+    },
+    {
+      "section": "Aluminum Section",
+      "material": "Aluminum Alloy",
+      "volume_group": "PART::AluminumBlock"
+    }
+  ],
+  "analysis": {
+    "type": "static_structural",
+    "step_count": 1
+  },
+  "supports": [
+    {
+      "name": "Fixed",
+      "type": "fixed",
+      "group": "FIXED_ALL",
+      "dx": 0,
+      "dy": 0,
+      "dz": 0
+    }
+  ],
+  "loads": [
+    {
+      "name": "Probe Force",
+      "type": "nodal_force_per_node",
+      "group": "LOAD_NODE",
+      "fx_per_node_n": 1,
+      "fy_per_node_n": 0,
+      "fz_per_node_n": 0
+    }
+  ],
+  "postprocess": {
+    "displacement_probe_group": "LOAD_NODE"
+  }
+}
