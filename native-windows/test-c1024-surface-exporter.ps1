@@ -8,8 +8,21 @@ if([string]::IsNullOrWhiteSpace($OutDir)){ $OutDir=Join-Path $Dist 'Validation\C
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $fixture=(Resolve-Path (Join-Path $PSScriptRoot 'c1024\pressure-frictionless-contract.json')).Path
 $exe=(Resolve-Path (Join-Path $Dist 'AsterMax Mechanical.exe')).Path
-$jsonDll=(Resolve-Path (Join-Path $Dist 'Newtonsoft.Json.dll')).Path
+$jsonFile=Get-ChildItem -Path $Dist -Recurse -File -Filter 'Newtonsoft.Json.dll' | Select-Object -First 1
+if($null -eq $jsonFile){ throw 'Newtonsoft.Json.dll was not found in the assembled distribution.' }
+$jsonDll=$jsonFile.FullName
 
+$script:assemblyRoots=@((Resolve-Path $Dist).Path)
+$script:assemblyRoots += Get-ChildItem -Path $Dist -Recurse -Directory | Select-Object -ExpandProperty FullName
+[System.AppDomain]::CurrentDomain.add_AssemblyResolve({
+    param($sender,$args)
+    $simple=(New-Object System.Reflection.AssemblyName($args.Name)).Name+'.dll'
+    foreach($root in $script:assemblyRoots){
+        $candidate=Join-Path $root $simple
+        if(Test-Path $candidate){ return [System.Reflection.Assembly]::LoadFrom($candidate) }
+    }
+    return $null
+})
 [System.Reflection.Assembly]::LoadFrom($jsonDll) | Out-Null
 $assembly=[System.Reflection.Assembly]::LoadFrom($exe)
 $jobjectType=[Type]::GetType('Newtonsoft.Json.Linq.JObject, Newtonsoft.Json', $true)
