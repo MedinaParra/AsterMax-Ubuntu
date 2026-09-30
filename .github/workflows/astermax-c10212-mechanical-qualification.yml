@@ -1,4 +1,4 @@
-name: AsterMax C10.24 Surface Mechanics Build
+name: AsterMax C10.25 Body Loads Build
 
 on:
   push:
@@ -12,6 +12,9 @@ on:
       - 'native-windows/patch-c10213-scope-fingerprint.ps1'
       - 'native-windows/patch-c10214-tutorial1-defaults.ps1'
       - 'native-windows/patch-c10215-surface-mechanics.ps1'
+      - 'native-windows/patch-c10216-body-loads.ps1'
+      - 'native-windows/c1025/**'
+      - 'native-windows/test-c1025-body-load-exporter.ps1'
       - 'native-windows/c1024/**'
       - 'native-windows/test-c1024-surface-exporter.ps1'
       - 'native-windows/patch-chain.json'
@@ -40,7 +43,7 @@ jobs:
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
 
-      - name: Apply AsterMax chain through C10.24
+      - name: Apply AsterMax chain through C10.25
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -71,7 +74,8 @@ jobs:
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
             'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
             'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
-            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1'
+            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
+            'patch-c10216-body-loads.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
 
@@ -103,6 +107,13 @@ jobs:
           if(-not $surfaceContract.Contains('DLoad pressure')){ throw 'Pressure model contract mapping missing' }
           if(-not $surfaceContract.Contains('AsterMaxFrictionlessBC frictionless')){ throw 'Frictionless model contract mapping missing' }
 
+          if(-not $exporter.Contains('PESANTEUR')){ throw 'Native gravity PESANTEUR export missing' }
+          if(-not $exporter.Contains('ROTATION')){ throw 'Native centrifugal ROTATION export missing' }
+          if(-not $exporter.Contains('RHO=')){ throw 'Material density RHO export missing' }
+          if(-not $surfaceContract.Contains('GravityLoad gravity')){ throw 'Gravity model contract mapping missing' }
+          if(-not $surfaceContract.Contains('CentrifLoad rotation')){ throw 'Rotation model contract mapping missing' }
+          if(-not $surfaceContract.Contains('density_tonne_per_mm3')){ throw 'Material density contract evidence missing' }
+
       - name: Restore NuGet packages
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -113,7 +124,7 @@ jobs:
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
-      - name: Assemble C10.24 surface mechanics package
+      - name: Assemble C10.25 body loads package
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -128,7 +139,7 @@ jobs:
           Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.24'
+            release='C10.25'
             commit='${{ github.sha }}'
             executable_sha256=$hash
             mechanical_qualification=$true
@@ -143,10 +154,14 @@ jobs:
         shell: pwsh
         run: .\native-windows\test-c1024-surface-exporter.ps1 -Dist "$PWD\dist"
 
+      - name: Exercise compiled C10.25 body-load exporter
+        shell: pwsh
+        run: .\native-windows\test-c1025-body-load-exporter.ps1 -Dist "$PWD\dist"
+
       - name: Upload C10.22 build evidence
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.24-Surface-Mechanics
+          name: AsterMax-C10.25-Body-Loads
           path: |
             dist
             upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
