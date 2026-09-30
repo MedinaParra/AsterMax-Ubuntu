@@ -105,6 +105,9 @@ assert body_entry[0]["file"]=="patch-c10216-body-loads.ps1"
 traction_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10217-surface-traction"]
 assert len(traction_entry)==1
 assert traction_entry[0]["file"]=="patch-c10217-surface-traction.ps1"
+multi_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10218-multi-material"]
+assert len(multi_entry)==1
+assert multi_entry[0]["file"]=="patch-c10218-multi-material.ps1"
 defaults_patch=(ROOT/"patch-c10214-tutorial1-defaults.ps1").read_text(encoding="utf-8")
 assert "ASTERMAX_TUTORIAL1_DEFAULTS" in defaults_patch
 assert "_secondOrder = true;" in defaults_patch
