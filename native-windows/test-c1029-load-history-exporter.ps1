@@ -38,6 +38,12 @@ if($m.load_history_amplitude -ne 'Ramp'){ throw 'Wrong load history amplitude.' 
 if([Math]::Abs([double]$m.load_history_final_multiplier-1.0) -gt 1e-12){ throw 'Wrong final multiplier.' }
 $times=@($m.analysis_times)
 if($times.Count -ne 3 -or [double]$times[0] -ne 0 -or [double]$times[1] -ne 0.5 -or [double]$times[2] -ne 1){ throw 'Analysis time list mismatch.' }
+$bridge=Join-Path $Dist 'AsterMaxTools\bridge-c964-med-results.py'
+if(-not(Test-Path $bridge)){ throw 'Packaged MED bridge missing.' }
+$bridgeText=Get-Content $bridge -Raw
+if(-not $bridgeText.Contains('ASTERMAX_MED_STEP_SELECTION')){ throw 'Packaged MED bridge lacks multi-instant selection.' }
+if(-not $bridgeText.Contains('select_field_step')){ throw 'Packaged MED bridge lacks last-instant selector.' }
+
 $r=@($m.expected_external_resultant_n)
 if([Math]::Abs([double]$r[0]-200) -gt 1e-8 -or [Math]::Abs([double]$r[1]-50) -gt 1e-8 -or [Math]::Abs([double]$r[2]+100) -gt 1e-8){ throw 'Final resultant mismatch.' }
 [ordered]@{status='PASS';compiled_exporter=$true;amplitude='Ramp';analysis_times=$times;final_resultant_n=$r;solver_execution='NOT_RUN_IN_THIS_GATE';fea_values_invented=$false} |
