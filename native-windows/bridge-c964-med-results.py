@@ -112,23 +112,54 @@ def optional_med_field_path(h, token, mesh_name):
     return "CHA/" + names[0]
 
 
-def select_single_field_step(h, root_path, token):
+def field_step_candidates(h, root_path, token):
     root = h[root_path]
     steps = []
     for name, obj in root.items():
         if not isinstance(obj, h5py.Group):
             continue
         locations = list(obj.keys())
-        if any(location == "NOE" or location.startswith("NOE.") for location in locations):
-            steps.append(name)
-    steps = sorted(steps)
+        if not any(location == "NOE" or location.startswith("NOE.") for location in locations):
+            continue
+        def attr_number(key, default=None):
+            raw = obj.attrs.get(key, default)
+            try:
+                if isinstance(raw, np.ndarray):
+                    raw = raw.reshape(-1)[0]
+                return float(raw)
+            except (TypeError, ValueError, IndexError):
+                return default
+        steps.append({
+            "name": name,
+            "time": attr_number("PDT"),
+            "order": attr_number("NDT"),
+            "suborder": attr_number("NOR"),
+        })
     if not steps:
         raise RuntimeError(f"{token}: no MED result steps found")
-    if len(steps) > 1:
+    return steps
+
+
+def select_field_step(h, root_path, token):
+    candidates = field_step_candidates(h, root_path, token)
+    mode = os.environ.get("ASTERMAX_MED_STEP_SELECTION", "single").strip().lower()
+    if mode not in {"single", "last"}:
+        raise RuntimeError("ASTERMAX_MED_STEP_SELECTION must be single or last")
+    if len(candidates) == 1:
+        return candidates[0]["name"]
+    if mode == "single":
         raise RuntimeError(
-            f"{token}: multiple MED result steps found: {steps}; explicit step selection is required"
+            f"{token}: multiple MED result steps found: "
+            f"{[x['name'] for x in candidates]}; set ASTERMAX_MED_STEP_SELECTION=last"
         )
-    return steps[0]
+    def key(item):
+        return (
+            float("-inf") if item["time"] is None else item["time"],
+            float("-inf") if item["order"] is None else item["order"],
+            float("-inf") if item["suborder"] is None else item["suborder"],
+            item["name"],
+        )
+    return max(candidates, key=key)["name"]
 
 
 def nodal_field(h, token, root_path, step):
@@ -450,7 +481,7 @@ with h5py.File(med_path, "r") as h:
     if reaction_path is not None:
         field_paths["REAC_NODA"] = reaction_path
     field_steps = {
-        token: select_single_field_step(h, path, token)
+        token: select_field_step(h, path, token)
         for token, path in field_paths.items()
     }
     distinct_steps = sorted(set(field_steps.values()))
@@ -460,6 +491,13 @@ with h5py.File(med_path, "r") as h:
             + ", ".join(f"{token}={step}" for token, step in sorted(field_steps.items()))
         )
     result_step = distinct_steps[0]
+    displacement_step_candidates = field_step_candidates(
+        h, field_paths["DEPL"], "DEPL"
+    )
+    selected_step_info = next(
+        (x for x in displacement_step_candidates if x["name"] == result_step),
+        {"name": result_step, "time": None, "order": None, "suborder": None},
+    )
 
     dcomp, displacement_blocks = nodal_field(h, "DEPL", field_paths["DEPL"], result_step)
     if dcomp[:3] != ["DX", "DY", "DZ"]:
@@ -525,6 +563,9 @@ bundle = {
         "file": os.path.basename(med_path),
         "size_bytes": os.path.getsize(med_path),
         "med_result_step": result_step,
+        "med_step_selection": os.environ.get("ASTERMAX_MED_STEP_SELECTION", "single").strip().lower(),
+        "med_result_time": selected_step_info["time"],
+        "available_result_steps": displacement_step_candidates,
     },
     "units": {"length": "mm", "force": "N", "stress": "MPa"},
     "mesh": {
@@ -673,6 +714,8 @@ summary = {
     "pass": bool(all(checks.values())),
     "med_mesh_name": mesh_name,
     "med_result_step": result_step,
+    "med_result_time": selected_step_info["time"],
+    "available_result_step_count": len(displacement_step_candidates),
     "node_count": int(n_nodes),
     "element_count": int(n_elem),
     "element_types": semantic_types,
