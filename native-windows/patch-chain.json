@@ -596,6 +596,17 @@
       "consumes": [
         "AsterMaxSurfaceMechanicsContract"
       ]
+    },
+    {
+      "id": "patch-c10218-multi-material",
+      "file": "patch-c10218-multi-material.ps1",
+      "depends": [
+        "patch-c10217-surface-traction"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxSurfaceMechanicsContract"
+      ]
     }
   ]
 }
