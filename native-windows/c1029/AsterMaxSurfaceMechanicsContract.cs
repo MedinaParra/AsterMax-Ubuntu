@@ -44,6 +44,8 @@ namespace PrePoMax
                     }
                     else if(bc is DisplacementRotation disp)
                     {
+                        if(!String.IsNullOrWhiteSpace(disp.AmplitudeName) && disp.AmplitudeName!=BoundaryCondition.DefaultAmplitudeName)
+                            throw new NotSupportedException("C10.29 load-history v1 does not yet support time-varying imposed displacement: "+disp.Name);
                         if(!double.IsNaN(disp.UR1) || !double.IsNaN(disp.UR2) || !double.IsNaN(disp.UR3))
                             throw new NotSupportedException("Rotational displacement is not supported for the current 3D solid backend.");
                         string group=RegionToNodeGroup(model,disp.RegionName,disp.RegionType,nodeGroups);
