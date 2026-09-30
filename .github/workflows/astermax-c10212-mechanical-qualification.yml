@@ -1,4 +1,4 @@
-name: AsterMax C10.26 Surface Traction Build
+name: AsterMax C10.27 Multi Material Build
 
 on:
   push:
@@ -14,6 +14,9 @@ on:
       - 'native-windows/patch-c10215-surface-mechanics.ps1'
       - 'native-windows/patch-c10216-body-loads.ps1'
       - 'native-windows/patch-c10217-surface-traction.ps1'
+      - 'native-windows/patch-c10218-multi-material.ps1'
+      - 'native-windows/c1027/**'
+      - 'native-windows/test-c1027-multi-material-exporter.ps1'
       - 'native-windows/c1026/**'
       - 'native-windows/test-c1026-surface-traction-exporter.ps1'
       - 'native-windows/c1025/**'
@@ -46,7 +49,7 @@ jobs:
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
 
-      - name: Apply AsterMax chain through C10.26
+      - name: Apply AsterMax chain through C10.27
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -78,7 +81,8 @@ jobs:
             'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
             'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
             'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
-            'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1'
+            'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1',
+            'patch-c10218-multi-material.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
 
@@ -120,6 +124,10 @@ jobs:
           if(-not $exporter.Contains('FORCE_FACE')){ throw 'Native surface traction FORCE_FACE export missing' }
           if(-not $surfaceContract.Contains('STLoad traction')){ throw 'Surface traction model contract mapping missing' }
 
+          if(-not $surfaceContract.Contains('BuildMaterialAssignments')){ throw 'SolidSection material-assignment contract missing' }
+          if(-not $exporter.Contains('materialAssignments')){ throw 'Multi-material exporter assignment logic missing' }
+          if(-not $exporter.Contains('AFFE_MATERIAU')){ throw 'Code_Aster AFFE_MATERIAU export missing' }
+
       - name: Restore NuGet packages
         shell: pwsh
         run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
@@ -130,7 +138,7 @@ jobs:
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
-      - name: Assemble C10.26 surface traction package
+      - name: Assemble C10.27 multi material package
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -145,7 +153,7 @@ jobs:
           Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.26'
+            release='C10.27'
             commit='${{ github.sha }}'
             executable_sha256=$hash
             mechanical_qualification=$true
@@ -168,10 +176,14 @@ jobs:
         shell: pwsh
         run: .\native-windows\test-c1026-surface-traction-exporter.ps1 -Dist "$PWD\dist"
 
+      - name: Exercise compiled C10.27 multi-material exporter
+        shell: pwsh
+        run: .\native-windows\test-c1027-multi-material-exporter.ps1 -Dist "$PWD\dist"
+
       - name: Upload C10.22 build evidence
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.26-Surface-Traction
+          name: AsterMax-C10.27-Multi-Material
           path: |
             dist
             upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
