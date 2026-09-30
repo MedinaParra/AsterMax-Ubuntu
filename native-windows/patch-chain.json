@@ -560,6 +560,20 @@
       "consumes": [
         "AsterMaxMechanicalQualification"
       ]
+    },
+    {
+      "id": "patch-c10215-surface-mechanics",
+      "file": "patch-c10215-surface-mechanics.ps1",
+      "depends": [
+        "patch-c10214-tutorial1-defaults"
+      ],
+      "declares": [
+        "AsterMaxFrictionlessBC",
+        "AsterMaxSurfaceMechanicsContract"
+      ],
+      "consumes": [
+        "AsterMaxMechanicalQualification"
+      ]
     }
   ]
 }
