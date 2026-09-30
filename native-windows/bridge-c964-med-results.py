@@ -46,7 +46,7 @@ SUPPORTED_FAMILIES = {
 # Physical surface groups used for pressure/support scoping are intentionally
 # written into the MED mesh alongside the 3D volume. They are not volume
 # families and must not make the 3D results bridge fail closed.
-SKIN_FAMILIES = {"TR3", "TR6"}
+SKIN_FAMILIES = {"TR3", "TR6", "QU4"}
 
 
 def decode_components(raw, width=16):
