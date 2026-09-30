@@ -10,7 +10,7 @@ using Newtonsoft.Json.Linq;
 
 namespace PrePoMax
 {
-    internal static class AsterMaxCodeAsterSurfaceExporter
+    internal static class AsterMaxCodeAsterBodyLoadExporter
     {
         public const string Version="C10.25-body-loads-v1";
 
