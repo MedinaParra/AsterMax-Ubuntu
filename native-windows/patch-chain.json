@@ -585,6 +585,17 @@
       "consumes": [
         "AsterMaxSurfaceMechanicsContract"
       ]
+    },
+    {
+      "id": "patch-c10217-surface-traction",
+      "file": "patch-c10217-surface-traction.ps1",
+      "depends": [
+        "patch-c10216-body-loads"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxSurfaceMechanicsContract"
+      ]
     }
   ]
 }
