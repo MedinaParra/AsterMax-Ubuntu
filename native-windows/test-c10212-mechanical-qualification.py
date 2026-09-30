@@ -58,6 +58,13 @@ eq=[x for x in out["findings"] if x["code"]=="GLOBAL_EQUILIBRIUM"][0]
 assert eq["level"]=="PASS" and abs(eq["residual_pct"])<1e-12
 assert any(x["code"]=="MESH_CONVERGENCE" and x["level"]=="PASS" for x in out["findings"])
 
+body_analysis=json.loads(json.dumps(analysis))
+body_analysis["external_resultant_complete"]=False
+body_analysis["external_resultant_note"]="gravity/rotation body loads not independently integrated"
+body=run_case(base,body_analysis,0,"SOLVED_WITH_ENGINEERING_WARNINGS",convergence=convergence_ok)
+assert any(x["code"]=="GLOBAL_EQUILIBRIUM" and x["level"]=="WARN" for x in body["findings"])
+assert body["equilibrium"] is None
+
 no_conv=run_case(base,analysis,0,"SOLVED_WITH_ENGINEERING_WARNINGS")
 assert any(x["code"]=="MESH_CONVERGENCE" and x["level"]=="WARN" for x in no_conv["findings"])
 
@@ -90,6 +97,11 @@ assert scope_entry[0]["file"]=="patch-c10213-scope-fingerprint.ps1"
 defaults_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10214-tutorial1-defaults"]
 assert len(defaults_entry)==1
 assert defaults_entry[0]["file"]=="patch-c10214-tutorial1-defaults.ps1"
+surface_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10215-surface-mechanics"]
+assert len(surface_entry)==1
+body_entry=[x for x in manifest["patches"] if x["id"]=="patch-c10216-body-loads"]
+assert len(body_entry)==1
+assert body_entry[0]["file"]=="patch-c10216-body-loads.ps1"
 defaults_patch=(ROOT/"patch-c10214-tutorial1-defaults.ps1").read_text(encoding="utf-8")
 assert "ASTERMAX_TUTORIAL1_DEFAULTS" in defaults_patch
 assert "_secondOrder = true;" in defaults_patch
@@ -111,7 +123,7 @@ bridge=(ROOT/"bridge-c964-med-results.py").read_text(encoding="utf-8")
 assert 'optional_med_field_path(h, "REAC_NODA"' in bridge
 assert '"reaction_resultant_from_real_reac_noda"' in bridge
 
-print(json.dumps({"status":"PASS","cases":5,"patch_chain":True,"ui_contract":True,
+print(json.dumps({"status":"PASS","cases":6,"patch_chain":True,"ui_contract":True,
                   "reaction_bridge_contract":True,"tutorial1_defaults":True,
                   "convergence_required_for_full_qualification":True,
                   "fea_values_invented":False},indent=2))
