@@ -225,16 +225,27 @@ jobs:
             (Join-Path $env:LOCALAPPDATA 'code_aster'),
             (Join-Path $env:LOCALAPPDATA 'Programs\code_aster'),
             (Join-Path $env:ProgramFiles 'code_aster'),
+            $env:LOCALAPPDATA,
+            (Join-Path $env:LOCALAPPDATA 'Programs'),
             'C:\code_aster'
           )
           if(${env:ProgramFiles(x86)}){ $roots += (Join-Path ${env:ProgramFiles(x86)} 'code_aster') }
           $asrun=$null
-          foreach($root in $roots){
-            if(-not(Test-Path $root)){ continue }
+          foreach($root in ($roots | Select-Object -Unique)){
+            if([string]::IsNullOrWhiteSpace($root) -or -not(Test-Path $root)){ continue }
             $asrun=Get-ChildItem -LiteralPath $root -Recurse -File -Filter as_run.bat -ErrorAction SilentlyContinue | Select-Object -First 1
             if($asrun){ break }
           }
-          if(-not $asrun){ throw 'as_run.bat was not found after Code_Aster installation.' }
+          if(-not $asrun){
+            $log=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+            if(Test-Path $log){
+              Write-Host 'MSI installation path clues:'
+              Select-String -Path $log -Pattern 'INSTALLDIR|InstallLocation|TARGETDIR|code_aster|Simulease' |
+                Select-Object -Last 160 | ForEach-Object { Write-Host $_.Line }
+            }
+            throw 'as_run.bat was not found after Code_Aster installation.'
+          }
+          Write-Host "ASTER_AS_RUN=$($asrun.FullName)"
           "ASTERMAX_WINDOWS_CODE_ASTER_COMMAND=$($asrun.FullName)" | Out-File $env:GITHUB_ENV -Append
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 probe
           if($LASTEXITCODE -ne 0){ throw 'AsterMax Code_Aster native probe failed.' }
@@ -253,4 +264,5 @@ jobs:
             upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
             upstream/PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs
             upstream/PrePoMax/AsterMaxCodeAsterNativeExporter.cs
+            ${{ runner.temp }}/aster-install.log
           if-no-files-found: error
