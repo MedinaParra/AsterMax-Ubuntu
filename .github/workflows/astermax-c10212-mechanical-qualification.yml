@@ -1,4 +1,4 @@
-name: AsterMax C10.23 Tutorial-1 Defaults Build
+name: AsterMax C10.24 Surface Mechanics Build
 
 on:
   push:
@@ -11,6 +11,8 @@ on:
       - 'native-windows/patch-c10212-mechanical-qualification.ps1'
       - 'native-windows/patch-c10213-scope-fingerprint.ps1'
       - 'native-windows/patch-c10214-tutorial1-defaults.ps1'
+      - 'native-windows/patch-c10215-surface-mechanics.ps1'
+      - 'native-windows/c1024/**'
       - 'native-windows/patch-chain.json'
       - 'native-windows/bridge-c964-med-results.py'
   workflow_dispatch:
@@ -37,7 +39,7 @@ jobs:
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
 
-      - name: Apply AsterMax chain through C10.23
+      - name: Apply AsterMax chain through C10.24
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -68,7 +70,7 @@ jobs:
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
             'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
             'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
-            'patch-c10214-tutorial1-defaults.ps1'
+            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
 
@@ -92,7 +94,13 @@ jobs:
           if(-not $readiness.Contains('QuadraticStructuralSolidElementCount')){ throw 'Quadratic-solid readiness telemetry missing' }
 
           if(-not $solve.Contains('readiness_warnings')){ throw 'Readiness warnings are not persisted in solve evidence' }
-          if(-not $exporter.Contains('tutorial1_default_policy')){ throw 'Tutorial-1 default policy is not persisted in exporter evidence' }
+          if(-not $exporter.Contains('PRES_REP')){ throw 'Native pressure PRES_REP export missing' }
+          if(-not $exporter.Contains('FACE_IMPO')){ throw 'Native frictionless FACE_IMPO export missing' }
+          if(-not $exporter.Contains('DNOR')){ throw 'Native frictionless DNOR export missing' }
+          if(-not $exporter.Contains('expected_external_resultant_n')){ throw 'Independent external resultant evidence missing' }
+          $surfaceContract=Get-Content .\upstream\PrePoMax\AsterMaxSurfaceMechanicsContract.cs -Raw
+          if(-not $surfaceContract.Contains('DLoad pressure')){ throw 'Pressure model contract mapping missing' }
+          if(-not $surfaceContract.Contains('AsterMaxFrictionlessBC frictionless')){ throw 'Frictionless model contract mapping missing' }
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -104,7 +112,7 @@ jobs:
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
-      - name: Assemble C10.23 Tutorial-1 defaults package
+      - name: Assemble C10.24 surface mechanics package
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -119,7 +127,7 @@ jobs:
           Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.23'
+            release='C10.24'
             commit='${{ github.sha }}'
             executable_sha256=$hash
             mechanical_qualification=$true
@@ -133,7 +141,7 @@ jobs:
       - name: Upload C10.22 build evidence
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.23-Tutorial1-Defaults
+          name: AsterMax-C10.24-Surface-Mechanics
           path: |
             dist
             upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
