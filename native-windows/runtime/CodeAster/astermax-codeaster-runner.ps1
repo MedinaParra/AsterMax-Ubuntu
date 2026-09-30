@@ -92,6 +92,19 @@ function Find-WindowsBackend {
     if (${env:ProgramFiles(x86)}) { Add-Root $roots (Join-Path ${env:ProgramFiles(x86)} 'code_aster') }
     Add-Root $roots 'C:\code_aster'
 
+    # Standalone Windows installers have used several vendor/version layouts.
+    # Discover only directories whose names mention aster instead of recursively
+    # scanning all Program Files on every application preflight.
+    foreach ($parent in @($env:LOCALAPPDATA,(Join-Path $env:LOCALAPPDATA 'Programs'),
+                           $env:ProgramFiles,${env:ProgramFiles(x86)},$env:USERPROFILE)) {
+        if ([String]::IsNullOrWhiteSpace($parent) -or -not(Test-Path -LiteralPath $parent -PathType Container)) { continue }
+        try {
+            Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match '(?i)aster|simulease' } |
+                ForEach-Object { Add-Root $roots $_.FullName }
+        } catch { }
+    }
+
     $relativeCandidates = @(
         'install\bin\run_aster.bat','install\bin\run_aster.cmd','install\bin\run_aster.exe',
         'install\bin\as_run.bat','install\bin\as_run.cmd','install\bin\as_run.exe',
