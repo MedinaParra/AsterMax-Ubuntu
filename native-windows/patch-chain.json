@@ -607,6 +607,17 @@
       "consumes": [
         "AsterMaxSurfaceMechanicsContract"
       ]
+    },
+    {
+      "id": "patch-c10219-load-history",
+      "file": "patch-c10219-load-history.ps1",
+      "depends": [
+        "patch-c10218-multi-material"
+      ],
+      "declares": [],
+      "consumes": [
+        "AsterMaxSurfaceMechanicsContract"
+      ]
     }
   ]
 }
