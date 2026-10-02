@@ -60,6 +60,8 @@ for($i=0;$i -lt $expectedTimes.Count;$i++){
 }
 $r=@($m.expected_external_resultant_n)
 if([Math]::Abs($r[0]-540) -gt 1e-8 -or [Math]::Abs($r[1]-50) -gt 1e-8 -or [Math]::Abs($r[2]+100) -gt 1e-8){ throw 'Independent resultant is incorrect.' }
+$moment=@($m.expected_external_moment_n_mm)
+if($moment.Count -ne 3 -or [Math]::Abs([double]$moment[0]+750) -gt 1e-8 -or [Math]::Abs([double]$moment[1]-3700) -gt 1e-8 -or [Math]::Abs([double]$moment[2]+2200) -gt 1e-8){ throw "Independent moment is incorrect: $($moment -join ',')." }
 if($m.load_history_groups.Count -ne 3){ throw 'Expected three load concepts.' }
 
 # Displacement-driven analysis needs no external force concept.
