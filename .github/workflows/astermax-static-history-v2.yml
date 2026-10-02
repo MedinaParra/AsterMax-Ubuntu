@@ -5,13 +5,21 @@ on:
     branches: [ agent/static-structural-independent-histories, agent/ws01-stabilization-20261002 ]
   workflow_dispatch:
 
+concurrency:
+  group: astermax-static-history-v2-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - run: python3 -m pip install --disable-pip-version-check numpy h5py
       - run: python3 native-windows/validate-patch-chain.py
       - run: python3 native-windows/test-c10212-mechanical-qualification.py
+      - run: python3 native-windows/test-c1019-med-selection.py
+      - run: python3 native-windows/test-c1019-vectorized-average.py
+      - run: python3 native-windows/test-c1017-result-publication.py
 
   build:
     needs: validate
@@ -187,8 +195,20 @@ jobs:
           $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
           $expectedSha256='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
           $expectedSize=398012592
-          & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
-          if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){ throw 'Provider MSI download failed.' }
+          $url='https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+          $downloadOk=$false
+          for($attempt=1;$attempt -le 12 -and -not $downloadOk;$attempt++){
+            Write-Host "Code_Aster MSI download attempt $attempt; existing bytes=$((Test-Path $msi) ? (Get-Item $msi).Length : 0)"
+            $args=@('-L','--fail','--retry','3','--retry-all-errors','--retry-delay','3','--connect-timeout','30','--continue-at','-','--output',$msi,$url)
+            & curl.exe @args
+            $curlExit=$LASTEXITCODE
+            if($curlExit -eq 0 -and (Test-Path $msi) -and (Get-Item $msi).Length -eq $expectedSize){ $downloadOk=$true; break }
+            if((Test-Path $msi) -and (Get-Item $msi).Length -gt $expectedSize){
+              Remove-Item $msi -Force
+            }
+            Start-Sleep -Seconds 3
+          }
+          if(-not $downloadOk){ throw "Provider MSI download failed or remained incomplete after resumable retries. bytes=$((Test-Path $msi) ? (Get-Item $msi).Length : 0)" }
           $sha=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
           $size=(Get-Item $msi).Length
           if($size -ne $expectedSize){ throw "Provider MSI size mismatch: $size" }
