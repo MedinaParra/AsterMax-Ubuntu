@@ -220,38 +220,21 @@ jobs:
               Write-Host '--- MSI install log tail ---'
               Get-Content -LiteralPath $installLog -Tail 160 -ErrorAction SilentlyContinue
             }
-            foreach($parent in @($env:LOCALAPPDATA,(Join-Path $env:LOCALAPPDATA 'Programs'),
-                                 $env:ProgramFiles,${env:ProgramFiles(x86)},$env:USERPROFILE)){
+            $parents=@($env:LOCALAPPDATA,(Join-Path $env:LOCALAPPDATA 'Programs'),$env:ProgramFiles,${env:ProgramFiles(x86)},$env:USERPROFILE)
+            foreach($parent in $parents){
               if([string]::IsNullOrWhiteSpace($parent) -or -not(Test-Path -LiteralPath $parent)){ continue }
-              Write-Host "--- Candidate roots under $parent ---"
+              Write-Host ("--- Candidate roots under {0} ---" -f $parent)
               Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -match '(?i)aster|simulease' } |
                 ForEach-Object {
                   Write-Host $_.FullName
                   Get-ChildItem -LiteralPath $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -match '(?i)^(as_run|run_aster).*\.(bat|cmd|exe|py)$|aster.*\.(bat|cmd|exe|py)
-      - name: Solve independent histories and displacement-only case in native Code_Aster
-        shell: pwsh
-        run: .\native-windows\test-static-history-v2-physics.ps1 -Dist "$PWD\dist"
-
-      - name: Upload Static Structural history v2 build evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: AsterMax-Static-Structural-History-v2
-          path: |
-            dist
-            upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
-            upstream/PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs
-            upstream/PrePoMax/AsterMaxCodeAsterNativeExporter.cs
-          if-no-files-found: error
- } |
+                    Where-Object { $_.Name -match '(?i)aster|as_run|run_aster' } |
                     Select-Object -First 30 -ExpandProperty FullName
                 }
             }
-            throw "AsterMax Code_Aster native probe failed with exit code $probeExit."
+            throw ("AsterMax Code_Aster native probe failed with exit code {0}." -f $probeExit)
           }
-
       - name: Solve independent histories and displacement-only case in native Code_Aster
         shell: pwsh
         run: .\native-windows\test-static-history-v2-physics.ps1 -Dist "$PWD\dist"
