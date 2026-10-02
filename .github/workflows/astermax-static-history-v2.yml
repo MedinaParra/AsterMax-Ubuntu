@@ -169,7 +169,7 @@ jobs:
         run: .\native-windows\test-c1029-load-history-exporter.ps1 -Dist "$PWD\dist"
 
       - name: Exercise compiled independent load and displacement histories
-        shell: pwsh
+        shell: powershell
         run: .\native-windows\test-static-history-v2.ps1 -Dist "$PWD\dist"
 
       - uses: actions/setup-python@v6
