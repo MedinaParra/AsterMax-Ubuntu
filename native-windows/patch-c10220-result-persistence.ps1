@@ -141,10 +141,12 @@ if(Test-Path $auditPath)
     $a=Get-Content $auditPath -Raw
     if(-not $a.Contains('C10230ExerciseResultPmxReopen('))
     {
-        $finalWrite='            File.WriteAllText(Path.Combine(directory, "workflow-conformance-session.json"),'
-        $idx=$a.LastIndexOf($finalWrite)
-        if($idx -lt 0){ throw 'C10.30 final workflow session write not found.' }
+        $resultMarker='                "A real result field is rendered in the integrated native viewport without stale/skipped render state.");'
+        $markerIndex=$a.IndexOf($resultMarker,[StringComparison]::Ordinal)
+        if($markerIndex -lt 0){ throw 'C10.30 result-stage insertion anchor not found.' }
+        $idx=$markerIndex+$resultMarker.Length
 $invoke=@'
+
             JObject resultPmx = C10230ExerciseResultPmxReopen(
                 Path.Combine(directory, "B01-C10.30-with-results.pmx"), resultField);
             File.WriteAllText(Path.Combine(directory, "pmx-result-reopen.json"), resultPmx.ToString(Formatting.Indented));
