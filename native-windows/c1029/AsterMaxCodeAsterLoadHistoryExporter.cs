@@ -182,6 +182,8 @@ namespace PrePoMax
 
             double[] external=new double[]{0,0,0};
             double[] finalExternal=new double[]{0,0,0};
+            double[] externalMoment=new double[]{0,0,0};
+            double[] finalExternalMoment=new double[]{0,0,0};
             bool hasBodyLoad=false;
             var loadConcepts=new StringBuilder();
             var loadHistoryGroups=new JArray();
@@ -195,6 +197,7 @@ namespace PrePoMax
             string gravityTerm=null;
             string rotationTerm=null;
             double[] batchExternal=new double[]{0,0,0};
+            double[] batchMoment=new double[]{0,0,0};
             foreach(JObject l in batch)
             {
                 string type=(string)l["type"];
@@ -205,13 +208,19 @@ namespace PrePoMax
                     double fx=GetDouble(l,"fx_per_node_n"),fy=GetDouble(l,"fy_per_node_n"),fz=GetDouble(l,"fz_per_node_n");
                     nodalForces.Add(String.Format(CultureInfo.InvariantCulture,"_F(GROUP_NO='{0}',FX={1},FY={2},FZ={3})",group,F(fx),F(fy),F(fz)));
                     batchExternal[0]+=fx*ids.Count; batchExternal[1]+=fy*ids.Count; batchExternal[2]+=fz*ids.Count;
+                    foreach(JToken id in ids)
+                    {
+                        double[] m=Cross(Point(nodesById,(string)id),new double[]{fx,fy,fz});
+                        for(int i=0;i<3;i++) batchMoment[i]+=m[i];
+                    }
                 }
                 else if(type=="pressure")
                 {
                     string original=(string)l["surface"]; string group=RequireMapped(surfaceNameMap,original,"pressure surface");
                     double p=GetDouble(l,"pressure_mpa"); pressures.Add("_F(GROUP_MA='"+group+"',PRES="+F(p)+")");
                     double[] r=PressureResultant((JObject)surfaces[original],nodesById,p);
-                    batchExternal[0]+=r[0]; batchExternal[1]+=r[1]; batchExternal[2]+=r[2];
+                    double[] m=PressureMoment((JObject)surfaces[original],nodesById,p);
+                    for(int i=0;i<3;i++) { batchExternal[i]+=r[i]; batchMoment[i]+=m[i]; }
                 }
                 else if(type=="surface_traction")
                 {
@@ -219,7 +228,9 @@ namespace PrePoMax
                     double fx=GetDouble(l,"fx_n_per_mm2"),fy=GetDouble(l,"fy_n_per_mm2"),fz=GetDouble(l,"fz_n_per_mm2");
                     surfaceForces.Add("_F(GROUP_MA='"+group+"',FX="+F(fx)+",FY="+F(fy)+",FZ="+F(fz)+")");
                     double area=SurfaceArea((JObject)surfaces[original],nodesById);
+                    double[] m=SurfaceTractionMoment((JObject)surfaces[original],nodesById,new double[]{fx,fy,fz});
                     batchExternal[0]+=fx*area; batchExternal[1]+=fy*area; batchExternal[2]+=fz*area;
+                    for(int i=0;i<3;i++) batchMoment[i]+=m[i];
                 }
                 else if(type=="gravity")
                 {
@@ -256,9 +267,14 @@ namespace PrePoMax
             bool constant=String.IsNullOrWhiteSpace(batch.Key);
             excitations.Add("_F(CHARGE="+symbol+(constant?"":",FONC_MULT="+amplitudeSymbols[batch.Key])+")");
             double multiplier=constant?1.0:AmplitudeValue((JArray)amplitudes[batch.Key]["points"],finalTime);
-            for(int i=0;i<3;i++) { external[i]+=batchExternal[i]; finalExternal[i]+=batchExternal[i]*multiplier; }
+            for(int i=0;i<3;i++)
+            {
+                external[i]+=batchExternal[i]; finalExternal[i]+=batchExternal[i]*multiplier;
+                externalMoment[i]+=batchMoment[i]; finalExternalMoment[i]+=batchMoment[i]*multiplier;
+            }
             loadHistoryGroups.Add(new JObject { ["amplitude"]=constant?(JToken)JValue.CreateNull():batch.Key,
-                ["final_multiplier"]=multiplier,["base_external_resultant_n"]=new JArray(batchExternal) });
+                ["final_multiplier"]=multiplier,["base_external_resultant_n"]=new JArray(batchExternal),
+                ["base_external_moment_n_mm"]=new JArray(batchMoment) });
             }
             var materialsByName=new Dictionary<string,JObject>(StringComparer.Ordinal);
             int materialIndex=0;
@@ -378,7 +394,9 @@ namespace PrePoMax
                     ((JObject)materials[0])["density_tonne_per_mm3"]:null,
                 ["material_assignment_mode"]=materialAssignments.Count>0?"SOLID_SECTION_GROUPS":"SINGLE_MATERIAL_ALL_VOLUME",
                 ["expected_external_resultant_n"]=new JArray(finalExternal),
+                ["expected_external_moment_n_mm"]=new JArray(finalExternalMoment),
                 ["base_external_resultant_n"]=new JArray(external[0],external[1],external[2]),
+                ["base_external_moment_n_mm"]=new JArray(externalMoment),
                 ["load_history_enabled"]=historyEnabled,
                 ["displacement_history_count"]=variableSupports.Count,
                 ["load_history_groups"]=loadHistoryGroups,
@@ -388,8 +406,8 @@ namespace PrePoMax
                 ["result_selection"]="LAST_AVAILABLE_INSTANT",
                 ["external_resultant_complete"]=!hasBodyLoad,
                 ["external_resultant_note"]=hasBodyLoad?
-                    "Nodal-force/pressure/surface-traction resultant only; gravity/rotation body-force resultant is intentionally not inferred.":
-                    "Independent resultant includes all supported applied loads.",
+                    "Nodal-force/pressure/surface-traction force and moment resultants only; gravity/rotation body-load resultants are intentionally not inferred.":
+                    "Independent force and moment resultants include all supported applied loads; moments are about the global origin.",
                 ["volume_group_name_map"]=JObject.FromObject(volumeNameMap),
                 ["scope_binding"]=new JObject { ["mode"]="model_fingerprint_mesh_scope",["verified"]=true,["mesh_scope_membership_in_fingerprint"]=true },
                 ["generated_mail"]=Path.GetFileName(mailPath),["generated_comm"]=Path.GetFileName(commPath),
@@ -476,6 +494,47 @@ namespace PrePoMax
                 sum[0]-=pressure*area[0]; sum[1]-=pressure*area[1]; sum[2]-=pressure*area[2];
             }
             return sum;
+        }
+
+        private static double[] PressureMoment(JObject surface,JObject nodes,double pressure)
+        {
+            if(surface==null) throw new InvalidOperationException("Pressure surface metadata missing.");
+            JArray skin=(JArray)surface["elements"]; double[] sum=new double[]{0,0,0};
+            foreach(JObject e in skin.Cast<JObject>())
+            {
+                JArray ids=(JArray)e["nodes"]; double[][] p=ids.Select(x=>Point(nodes,(string)x)).ToArray();
+                foreach(int[] tri in SurfaceTriangles((string)e["type"]))
+                {
+                    double[] area=Scale(Cross(Sub(p[tri[1]],p[tri[0]]),Sub(p[tri[2]],p[tri[0]])),0.5);
+                    double[] force=Scale(area,-pressure);
+                    double[] center=Scale(Add(Add(p[tri[0]],p[tri[1]]),p[tri[2]]),1.0/3.0);
+                    sum=Add(sum,Cross(center,force));
+                }
+            }
+            return sum;
+        }
+        private static double[] SurfaceTractionMoment(JObject surface,JObject nodes,double[] traction)
+        {
+            if(surface==null) throw new InvalidOperationException("Surface traction metadata missing.");
+            JArray skin=(JArray)surface["elements"]; double[] sum=new double[]{0,0,0};
+            foreach(JObject e in skin.Cast<JObject>())
+            {
+                JArray ids=(JArray)e["nodes"]; double[][] p=ids.Select(x=>Point(nodes,(string)x)).ToArray();
+                foreach(int[] tri in SurfaceTriangles((string)e["type"]))
+                {
+                    double area=0.5*Norm(Cross(Sub(p[tri[1]],p[tri[0]]),Sub(p[tri[2]],p[tri[0]])));
+                    double[] force=Scale(traction,area);
+                    double[] center=Scale(Add(Add(p[tri[0]],p[tri[1]]),p[tri[2]]),1.0/3.0);
+                    sum=Add(sum,Cross(center,force));
+                }
+            }
+            return sum;
+        }
+        private static IEnumerable<int[]> SurfaceTriangles(string type)
+        {
+            if(type=="TRIA3" || type=="TRIA6") return new[]{new[]{0,1,2}};
+            if(type=="QUAD4") return new[]{new[]{0,1,2},new[]{0,2,3}};
+            throw new NotSupportedException("Unsupported surface skin: "+type);
         }
         private static double[] Point(JObject nodes,string id){JObject n=(JObject)nodes[id]; if(n==null) throw new InvalidOperationException("Missing node: "+id); return new double[]{GetDouble(n,"x"),GetDouble(n,"y"),GetDouble(n,"z")};}
         private static double[] Sub(double[] a,double[] b){return new double[]{a[0]-b[0],a[1]-b[1],a[2]-b[2]};}
