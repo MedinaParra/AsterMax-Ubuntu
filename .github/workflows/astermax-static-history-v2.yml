@@ -2,7 +2,7 @@ name: AsterMax Static Structural History v2 Build
 
 on:
   push:
-    branches: [ agent/static-structural-independent-histories ]
+    branches: [ agent/static-structural-independent-histories, agent/ws01-stabilization-20261002 ]
   workflow_dispatch:
 
 jobs:
