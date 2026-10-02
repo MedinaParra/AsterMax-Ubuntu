@@ -31,4 +31,35 @@ if(-not $u.Contains('Load History')) {
     }
 }
 
-Write-Host 'C10.29 tabular load histories + last-instant MED selection applied.' -ForegroundColor Green
+
+
+# Static Structural history v2: expose existing native editors, preserving undo/redo.
+$u=Get-Content $ui -Raw
+if(-not $u.Contains('CommandTile("Tablas de carga"')) {
+    $anchor='                CommandTile("Pressure", "LOAD", () => CreateAsterMaxPressure()),'
+    if(-not $u.Contains($anchor)){ throw 'Static history UI anchor missing.' }
+    $insert=@'
+                CommandTile("Tablas de carga", "AMPLITUDE", () => tsmiCreateAmplitude_Click(null, EventArgs.Empty)),
+                CommandTile("Desplazamiento", "SUPPORT", () => tsmiCreateBC_Click(null, new CaeGlobals.EventArgs<int>(1))),
+'@
+    $u=$u.Replace($anchor,$anchor+[Environment]::NewLine+$insert.TrimEnd())
+    Set-Content $ui $u -Encoding UTF8
+}
+
+# A nonzero prescribed displacement is an excitation even without force objects.
+$workspace=Join-Path $Root 'PrePoMax/Forms/AsterMaxResultsWorkspace.cs'
+$w=Get-Content $workspace -Raw
+$old='            if (r.LoadCount == 0) r.Issues.Add("BLOCK:no_loads");'
+$new=@'
+            bool imposedExcitation=model.StepCollection.StepsList
+                .Where(step=>!(step is CaeModel.InitialStep) && step.Active && step.Valid)
+                .SelectMany(step=>step.BoundaryConditions.Values).OfType<CaeModel.DisplacementRotation>()
+                .Any(bc=>bc.Active && bc.Valid && new[]{bc.U1,bc.U2,bc.U3}.Any(value=>!Double.IsNaN(value) && !Double.IsInfinity(value) && value!=0));
+            if (r.LoadCount == 0 && !imposedExcitation) r.Issues.Add("BLOCK:no_loads");
+'@
+if($w.Contains($old)){ $w=$w.Replace($old,$new.TrimEnd()); Set-Content $workspace $w -Encoding UTF8 }
+elseif(-not $w.Contains('bool imposedExcitation=')){ throw 'Static history readiness anchor missing.' }
+
+Write-Host 'Static Structural history v2: independent load/displacement histories and native editor shortcuts applied.' -ForegroundColor Green
+
+Copy-Item (Join-Path $src 'AsterMaxStaticHistoryWorkflowStates.cs') (Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowStates.cs') -Force
