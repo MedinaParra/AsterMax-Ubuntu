@@ -1,0 +1,87 @@
+param([Parameter(Mandatory=$true)][string]$Dist,[string]$OutDir)
+$ErrorActionPreference='Stop'
+if([string]::IsNullOrWhiteSpace($OutDir)){ $OutDir=Join-Path $Dist 'Validation\Static-History-v2' }
+New-Item -ItemType Directory -Force $OutDir | Out-Null
+$fixture=(Resolve-Path (Join-Path $PSScriptRoot 'c1029\load-history-contract.json')).Path
+$exe=(Resolve-Path (Join-Path $Dist 'AsterMax Mechanical.exe')).Path
+$jsonFile=Get-ChildItem -Path $Dist -Recurse -File -Filter 'Newtonsoft.Json.dll' | Select-Object -First 1
+if($null -eq $jsonFile){ throw 'Newtonsoft.Json.dll missing.' }
+$script:assemblyRoots=@((Resolve-Path $Dist).Path)
+$script:assemblyRoots += Get-ChildItem -Path $Dist -Recurse -Directory | Select-Object -ExpandProperty FullName
+[System.AppDomain]::CurrentDomain.add_AssemblyResolve({
+ param($sender,$args)
+ $simple=(New-Object System.Reflection.AssemblyName($args.Name)).Name+'.dll'
+ foreach($root in $script:assemblyRoots){ $candidate=Join-Path $root $simple; if(Test-Path $candidate){ return [System.Reflection.Assembly]::LoadFrom($candidate) } }
+ return $null
+})
+[System.Reflection.Assembly]::LoadFrom($jsonFile.FullName) | Out-Null
+$assembly=[System.Reflection.Assembly]::LoadFrom($exe)
+$jt=[Type]::GetType('Newtonsoft.Json.Linq.JObject, Newtonsoft.Json',$true)
+$contract=$jt.GetMethod('Parse',[Type[]]@([string])).Invoke($null,@([IO.File]::ReadAllText($fixture)))
+$type=$assembly.GetType('PrePoMax.AsterMaxCodeAsterNativeExporter',$true)
+$flags=[System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static
+$method=$type.GetMethod('ExportContract',$flags)
+if($null -eq $method){ throw 'Compiled exporter does not expose ExportContract.' }
+
+function Read-Fixture { return (Get-Content $fixture -Raw | ConvertFrom-Json) }
+function Export-Case($data,[string]$name) {
+    $json=$data | ConvertTo-Json -Depth 50
+    $c=$jt.GetMethod('Parse',[Type[]]@([string])).Invoke($null,@($json))
+    $null=$method.Invoke($null,@($c,$OutDir,$name))
+    return (Get-Content (Join-Path $OutDir ($name+'.native-export.json')) -Raw | ConvertFrom-Json)
+}
+function Require-Rejected($data,[string]$name,[string]$reason) {
+    try { $null=Export-Case $data $name }
+    catch {
+        if($_.Exception.ToString() -notmatch $reason){ throw "Unexpected rejection for ${name}: $_" }
+        return
+    }
+    throw "Invalid case was accepted: $name"
+}
+
+# One ramp, another curve with a longer time range, and a constant nodal load.
+$data=Read-Fixture
+$data.amplitudes | Add-Member -NotePropertyName Other -NotePropertyValue ([pscustomobject]@{points=@(@(0,1),@(0.25,2),@(2,3))})
+$data.loads+= [pscustomobject]@{name='Other traction';type='surface_traction';surface='TRACTION_X';fx_n_per_mm2=1;fy_n_per_mm2=0;fz_n_per_mm2=0;amplitude='Other'}
+$data.loads+= [pscustomobject]@{name='Constant force';type='nodal_force_per_node';group='TRACTION_X_NODES';fx_per_node_n=10;fy_per_node_n=0;fz_per_node_n=0}
+$m=Export-Case $data 'independent-loads'
+$txt=Get-Content (Join-Path $OutDir 'independent-loads.comm') -Raw
+foreach($token in @('_F(CHARGE=load0,FONC_MULT=amp0)','_F(CHARGE=load1,FONC_MULT=amp1)','_F(CHARGE=load2)')) {
+    if(-not $txt.Contains($token)){ throw "Missing independent excitation: $token" }
+}
+if(($m.analysis_times -join ',') -ne '0,0.25,0.5,1,2'){ throw 'Merged instant list is incorrect.' }
+$r=@($m.expected_external_resultant_n)
+if([Math]::Abs($r[0]-540) -gt 1e-8 -or [Math]::Abs($r[1]-50) -gt 1e-8 -or [Math]::Abs($r[2]+100) -gt 1e-8){ throw 'Independent resultant is incorrect.' }
+if($m.load_history_groups.Count -ne 3){ throw 'Expected three load concepts.' }
+
+# Displacement-driven analysis needs no external force concept.
+$data=Read-Fixture
+$data.loads=@()
+$data.supports+= [pscustomobject]@{name='Travel';type='displacement';group='TRACTION_X_NODES';dx=0.5;amplitude='Ramp'}
+$m=Export-Case $data 'displacement-only'
+$txt=Get-Content (Join-Path $OutDir 'displacement-only.comm') -Raw
+if(-not $txt.Contains('_F(CHARGE=bct0,FONC_MULT=amp0)')){ throw 'Displacement multiplier missing.' }
+if($txt.Contains('load0=AFFE_CHAR_MECA')){ throw 'Empty load concept emitted.' }
+if($m.displacement_history_count -ne 1 -or $m.load_count -ne 0){ throw 'Wrong displacement-only manifest.' }
+
+# Another displacement curve can coexist with a constant directional constraint.
+$data.supports+= [pscustomobject]@{name='Guide';type='displacement';group='TRACTION_X_NODES';dy=0}
+$null=Export-Case $data 'displacement-guide'
+$data.supports+= [pscustomobject]@{name='Conflict';type='displacement';group='TRACTION_X_NODES';dx=0}
+Require-Rejected $data 'overlap' 'Overlapping displacement'
+
+foreach($kind in @('duplicate','decreasing','missing','nonnumeric','interpolation','infinite')) {
+    $data=Read-Fixture
+    switch($kind) {
+        'duplicate' { $data.amplitudes.Ramp.points=@(@(0,0),@(0,1)) }
+        'decreasing' { $data.amplitudes.Ramp.points=@(@(1,0),@(0,1)) }
+        'missing' { $data.loads[0].amplitude='Absent' }
+        'nonnumeric' { $data.amplitudes.Ramp.points=@(@(0,0),@(1,'bad')) }
+        'interpolation' { $data.amplitudes.Ramp.interpolation='SPLINE' }
+        'infinite' { $data.amplitudes.Ramp.points=@(@(0,0),@(1,[double]::PositiveInfinity)) }
+    }
+    Require-Rejected $data $kind 'amplitude|Amplitude'
+}
+[ordered]@{status='PASS';compiled_exporter=$true;cases=10;solver_execution='NOT_RUN';fea_results_included=$false} |
+    ConvertTo-Json | Set-Content (Join-Path $OutDir 'STATIC_HISTORY_V2_TEST.json') -Encoding UTF8
+Write-Host 'Static Structural independent load/displacement history tests PASS.'

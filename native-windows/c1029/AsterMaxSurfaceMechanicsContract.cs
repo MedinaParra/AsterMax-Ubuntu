@@ -44,14 +44,13 @@ namespace PrePoMax
                     }
                     else if(bc is DisplacementRotation disp)
                     {
-                        if(!String.IsNullOrWhiteSpace(disp.AmplitudeName) && disp.AmplitudeName!=BoundaryCondition.DefaultAmplitudeName)
-                            throw new NotSupportedException("C10.29 load-history v1 does not yet support time-varying imposed displacement: "+disp.Name);
                         if(!double.IsNaN(disp.UR1) || !double.IsNaN(disp.UR2) || !double.IsNaN(disp.UR3))
                             throw new NotSupportedException("Rotational displacement is not supported for the current 3D solid backend.");
                         string group=RegionToNodeGroup(model,disp.RegionName,disp.RegionType,nodeGroups);
                         JObject item=new JObject { ["name"]=disp.Name,["type"]="displacement",["group"]=group };
                         AddDof(item,"dx",disp.U1); AddDof(item,"dy",disp.U2); AddDof(item,"dz",disp.U3);
                         if(item.Count<=3) throw new InvalidOperationException("Displacement support has no constrained translational DOF: "+disp.Name);
+                        item["amplitude"]=disp.AmplitudeName==BoundaryCondition.DefaultAmplitudeName?null:ResolveAmplitude(model,disp.AmplitudeName);
                         supports.Add(item);
                     }
                     else if(bc is AsterMaxFrictionlessBC frictionless)
