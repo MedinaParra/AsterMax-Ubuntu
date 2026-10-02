@@ -211,8 +211,10 @@ $helper=@'
         }
 
 '@
-        $tail='    }'+[Environment]::NewLine+'}'
-        $tailIdx=$a.LastIndexOf($tail)
+        # The namespace closing brace is unindented; the class closing brace is
+        # the last indented "    }" in this generated file. Use that structural
+        # distinction instead of assuming a specific newline sequence.
+        $tailIdx=$a.LastIndexOf('    }')
         if($tailIdx -lt 0){ throw 'C10.30 audit class tail not found.' }
         $a=$a.Insert($tailIdx,$helper)
     }
