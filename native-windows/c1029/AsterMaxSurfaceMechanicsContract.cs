@@ -138,7 +138,13 @@ namespace PrePoMax
             }
             if(stepCount!=1) throw new NotSupportedException("Native static structural backend currently requires exactly one non-initial step.");
             if(supports.Count==0) throw new InvalidOperationException("At least one support is required.");
-            if(loads.Count==0) throw new InvalidOperationException("At least one load is required.");
+            if(loads.Count==0)
+            {
+                JObject imposed=supports.Cast<JObject>().FirstOrDefault(x=>(string)x["type"]=="displacement" &&
+                    new[]{"dx","dy","dz"}.Any(d=>x[d]!=null && x[d].Type!=JTokenType.Null && x[d].Value<double>()!=0));
+                if(imposed==null) throw new InvalidOperationException("At least one load or nonzero prescribed displacement is required.");
+                probeGroup=(string)imposed["group"];
+            }
             root["supports"]=supports;
             root["loads"]=loads;
             root["postprocess"]=new JObject { ["displacement_probe_group"]=probeGroup };
