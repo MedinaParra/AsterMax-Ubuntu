@@ -50,7 +50,14 @@ $txt=Get-Content (Join-Path $OutDir 'independent-loads.comm') -Raw
 foreach($token in @('_F(CHARGE=load0,FONC_MULT=amp0)','_F(CHARGE=load1,FONC_MULT=amp1)','_F(CHARGE=load2)')) {
     if(-not $txt.Contains($token)){ throw "Missing independent excitation: $token" }
 }
-if(($m.analysis_times -join ',') -ne '0,0.25,0.5,1,2'){ throw 'Merged instant list is incorrect.' }
+$expectedTimes=@(0.0,0.25,0.5,1.0,2.0)
+$actualTimes=@($m.analysis_times)
+if($actualTimes.Count -ne $expectedTimes.Count){ throw "Merged instant list count is incorrect. Actual=$($actualTimes -join ';')" }
+for($i=0;$i -lt $expectedTimes.Count;$i++){
+    if([Math]::Abs([double]$actualTimes[$i]-[double]$expectedTimes[$i]) -gt 1e-12){
+        throw "Merged instant list is incorrect at index $i. Actual=$($actualTimes -join ';')"
+    }
+}
 $r=@($m.expected_external_resultant_n)
 if([Math]::Abs($r[0]-540) -gt 1e-8 -or [Math]::Abs($r[1]-50) -gt 1e-8 -or [Math]::Abs($r[2]+100) -gt 1e-8){ throw 'Independent resultant is incorrect.' }
 if($m.load_history_groups.Count -ne 3){ throw 'Expected three load concepts.' }
