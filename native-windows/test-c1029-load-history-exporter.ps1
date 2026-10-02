@@ -46,6 +46,8 @@ if(-not $bridgeText.Contains('select_field_step')){ throw 'Packaged MED bridge l
 
 $r=@($m.expected_external_resultant_n)
 if([Math]::Abs([double]$r[0]-200) -gt 1e-8 -or [Math]::Abs([double]$r[1]-50) -gt 1e-8 -or [Math]::Abs([double]$r[2]+100) -gt 1e-8){ throw 'Final resultant mismatch.' }
-[ordered]@{status='PASS';compiled_exporter=$true;amplitude='Ramp';analysis_times=$times;final_resultant_n=$r;solver_execution='NOT_RUN_IN_THIS_GATE';fea_values_invented=$false} |
+$moment=@($m.expected_external_moment_n_mm)
+if($moment.Count -ne 3 -or [Math]::Abs([double]$moment[0]+750) -gt 1e-8 -or [Math]::Abs([double]$moment[1]-2000) -gt 1e-8 -or [Math]::Abs([double]$moment[2]+500) -gt 1e-8){ throw "Final moment mismatch: $($moment -join ',')." }
+[ordered]@{status='PASS';compiled_exporter=$true;amplitude='Ramp';analysis_times=$times;final_resultant_n=$r;final_moment_n_mm=$moment;solver_execution='NOT_RUN_IN_THIS_GATE';fea_values_invented=$false} |
  ConvertTo-Json -Depth 6 | Set-Content (Join-Path $OutDir 'C10.29_LOAD_HISTORY_TEST.json') -Encoding UTF8
 Write-Host 'C10.29 compiled load-history exporter regression PASS.' -ForegroundColor Green
