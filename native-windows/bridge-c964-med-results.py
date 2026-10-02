@@ -150,7 +150,8 @@ def select_field_step(h, root_path, token):
     if mode == "single":
         raise RuntimeError(
             f"{token}: multiple MED result steps found: "
-            f"{[x['name'] for x in candidates]}; set ASTERMAX_MED_STEP_SELECTION=last"
+            f"{[x['name'] for x in candidates]}; explicit step selection is required; "
+            "set ASTERMAX_MED_STEP_SELECTION=last to select the latest instant"
         )
     def key(item):
         return (
