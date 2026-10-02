@@ -91,6 +91,12 @@ foreach($kind in @('duplicate','decreasing','missing','nonnumeric','interpolatio
     Require-Rejected $data $kind 'amplitude|Amplitude'
 }
 # Exercise a live FeModel -> contract -> compiled exporter, not just JSON fixtures.
+# The application itself probes dist\lib via AsterMax Mechanical.exe.config. This
+# reflection host is PowerShell.exe, so it must explicitly load UI dependencies
+# from the assembled distribution before resolving FrmMain.
+$userControls=Get-ChildItem -Path $Dist -Recurse -File -Filter 'UserControls.dll' | Select-Object -First 1
+if($null -eq $userControls){ throw 'Packaged UserControls.dll missing.' }
+[System.Reflection.Assembly]::LoadFrom($userControls.FullName) | Out-Null
 $mainType=$assembly.GetType('PrePoMax.FrmMain',$true)
 $privateStatic=[Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
 $model=$mainType.GetMethod('CreateAsterMaxStatusFixture',$privateStatic).Invoke($null,@())
