@@ -25,7 +25,7 @@ if($null -eq $method){ throw 'Compiled exporter does not expose ExportContract.'
 
 function Read-Fixture { return (Get-Content $fixture -Raw | ConvertFrom-Json) }
 function Export-Case($data,[string]$name) {
-    $json=$data | ConvertTo-Json -Depth 50
+    $json=[string]($data | ConvertTo-Json -Depth 50)
     $c=$jt.GetMethod('Parse',[Type[]]@([string])).Invoke($null,@($json))
     $null=$method.Invoke($null,@($c,$OutDir,$name))
     return (Get-Content (Join-Path $OutDir ($name+'.native-export.json')) -Raw | ConvertFrom-Json)
@@ -82,6 +82,29 @@ foreach($kind in @('duplicate','decreasing','missing','nonnumeric','interpolatio
     }
     Require-Rejected $data $kind 'amplitude|Amplitude'
 }
-[ordered]@{status='PASS';compiled_exporter=$true;cases=10;solver_execution='NOT_RUN';fea_results_included=$false} |
+# Exercise a live FeModel -> contract -> compiled exporter, not just JSON fixtures.
+$mainType=$assembly.GetType('PrePoMax.FrmMain',$true)
+$privateStatic=[Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
+$model=$mainType.GetMethod('CreateAsterMaxStatusFixture',$privateStatic).Invoke($null,@())
+$step=$model.StepCollection.StepsList[0]
+$step.Loads.Clear()
+$disp=New-Object CaeModel.DisplacementRotation -ArgumentList @('Travel','LOAD',[CaeGlobals.RegionTypeEnum]::NodeSetName,$false,$false,0.0)
+$disp.U1=0.5
+$disp.AmplitudeName='TravelRamp'
+$points=[double[][]]@([double[]]@(0,0),[double[]]@(1,1))
+$amp=New-Object CaeModel.AmplitudeTabular -ArgumentList @('TravelRamp',$points)
+$model.Amplitudes.Add('TravelRamp',$amp)
+$step.AddBoundaryCondition($disp)
+$buildMethod=$assembly.GetType('PrePoMax.AsterMaxSurfaceMechanicsContract',$true).GetMethod('Build',$flags)
+$live=$buildMethod.Invoke($null,@($model))
+$liveText=$live.ToString() | ConvertFrom-Json
+if($liveText.supports[1].amplitude -ne 'TravelRamp'){ throw 'Live displacement amplitude was lost.' }
+$null=$method.Invoke($null,@($live,$OutDir,'live-displacement'))
+$ready=$assembly.GetType('PrePoMax.AsterMaxPreSolveReadiness',$true).GetMethod('Evaluate',$flags).Invoke($null,@($model))
+if($ready.Issues -contains 'BLOCK:no_loads'){ throw 'Displacement-only live model is still blocked by readiness.' }
+$states=$mainType.GetMethod('EvaluateAsterMaxSectionStates',$privateStatic).Invoke($null,@($model))
+if($states['loads'].State -ne 2 -or $states['supports'].State -ne 2){ throw 'Live displacement workflow indicators are incorrect.' }
+
+[ordered]@{status='PASS';compiled_exporter=$true;cases=11;solver_execution='NOT_RUN';fea_results_included=$false} |
     ConvertTo-Json | Set-Content (Join-Path $OutDir 'STATIC_HISTORY_V2_TEST.json') -Encoding UTF8
 Write-Host 'Static Structural independent load/displacement history tests PASS.'

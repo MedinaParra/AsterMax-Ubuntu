@@ -61,3 +61,5 @@ if($w.Contains($old)){ $w=$w.Replace($old,$new.TrimEnd()); Set-Content $workspac
 elseif(-not $w.Contains('bool imposedExcitation=')){ throw 'Static history readiness anchor missing.' }
 
 Write-Host 'Static Structural history v2: independent load/displacement histories and native editor shortcuts applied.' -ForegroundColor Green
+
+Copy-Item (Join-Path $src 'AsterMaxStaticHistoryWorkflowStates.cs') (Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowStates.cs') -Force
