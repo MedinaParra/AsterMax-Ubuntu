@@ -20,6 +20,7 @@ jobs:
       - run: python3 native-windows/test-c1019-med-selection.py
       - run: python3 native-windows/test-c1019-vectorized-average.py
       - run: python3 native-windows/test-c1017-result-publication.py
+      - run: python3 native-windows/test-c10220-result-persistence.py
 
   build:
     needs: validate
@@ -68,7 +69,8 @@ jobs:
             'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
             'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
             'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1',
-            'patch-c10218-multi-material.ps1','patch-c10219-load-history.ps1'
+            'patch-c10218-multi-material.ps1','patch-c10219-load-history.ps1',
+            'patch-c10220-result-persistence.ps1'
           )
           foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
 
