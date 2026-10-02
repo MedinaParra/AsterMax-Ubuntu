@@ -642,7 +642,9 @@ production_checks = {
         len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
     ),
     "von_mises_present_finite": bool(len(von_mises) == n_nodes and np.isfinite(von_mises).all()),
+    "raw_von_mises_elno_finite": bool(vm_elno.size > 0 and np.isfinite(vm_elno).all()),
     "reaction_finite_if_present": bool(reaction is None or (reaction.shape == (n_nodes, 3) and np.isfinite(reaction).all())),
+    "reaction_moment_finite_if_present": bool(reaction_moment is None or np.isfinite(reaction_moment).all()),
     "no_invented_results": bool(bundle["integrity"]["fea_values_invented"] is False),
 }
 if validation_mode == "regression":
