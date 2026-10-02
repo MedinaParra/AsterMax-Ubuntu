@@ -109,25 +109,32 @@ else:
 
 reaction=(fields.get("reaction") or {})
 reaction_vec=reaction.get("resultant_n")
+reaction_moment=reaction.get("moment_about_origin_n_mm")
 expected=analysis.get("expected_external_resultant_n")
+expected_moment=analysis.get("expected_external_moment_n_mm")
 external_resultant_complete=analysis.get("external_resultant_complete", True)
 if reaction_vec is not None:
-    f.append(finding("REACTION_EVIDENCE","PASS","Real REAC_NODA resultant is present.",reaction_resultant_n=reaction_vec))
+    f.append(finding("REACTION_EVIDENCE","PASS","Real REAC_NODA resultant is present.",
+                     reaction_resultant_n=reaction_vec,
+                     reaction_moment_about_origin_n_mm=reaction_moment))
 else:
     f.append(finding("REACTION_EVIDENCE","WARN","No REAC_NODA resultant is present in the result bundle."))
 
 equilibrium=None
+moment_equilibrium=None
 if expected is not None and external_resultant_complete is False:
     f.append(finding("GLOBAL_EQUILIBRIUM","WARN",
-        "The applied-load resultant is intentionally incomplete (for example gravity/rotation body loads are present); global equilibrium is not declared closed.",
+        "The applied-load force/moment resultant is intentionally incomplete (for example gravity/rotation body loads are present); global equilibrium is not declared closed.",
         partial_expected_external_resultant_n=expected,
+        partial_expected_external_moment_n_mm=expected_moment,
         external_resultant_note=analysis.get("external_resultant_note")))
 elif reaction_vec is not None and expected is not None:
     residual=[float(reaction_vec[i])+float(expected[i]) for i in range(3)]
     denom=max(norm3(expected),1e-12)
     residual_pct=100.0*norm3(residual)/denom
     equilibrium={"expected_external_resultant_n":expected,"reaction_resultant_n":reaction_vec,
-                 "residual_n":residual,"residual_pct":residual_pct}
+                 "residual_n":residual,"residual_pct":residual_pct,
+                 "acceptance":{"pass_pct":1.0,"warn_pct":5.0}}
     if residual_pct <= 1.0:
         lvl="PASS"
     elif residual_pct <= 5.0:
@@ -135,6 +142,38 @@ elif reaction_vec is not None and expected is not None:
     else:
         lvl="BLOCK"
     f.append(finding("GLOBAL_EQUILIBRIUM",lvl,f"Global force equilibrium residual = {residual_pct:.4g}%.",**equilibrium))
+
+    if reaction_moment is not None and expected_moment is not None:
+        moment_residual=[float(reaction_moment[i])+float(expected_moment[i]) for i in range(3)]
+        # Relative moment residual is normalized by the expected applied moment,
+        # with a 1 N*mm floor so a nominal zero-moment case still has a finite,
+        # documented absolute scale instead of division by zero.
+        moment_denom=max(norm3(expected_moment),1.0)
+        moment_residual_pct=100.0*norm3(moment_residual)/moment_denom
+        moment_equilibrium={
+            "origin_mm":[0.0,0.0,0.0],
+            "expected_external_moment_n_mm":expected_moment,
+            "reaction_moment_n_mm":reaction_moment,
+            "residual_n_mm":moment_residual,
+            "residual_pct":moment_residual_pct,
+            "normalization_floor_n_mm":1.0,
+            "acceptance":{"pass_pct":1.0,"warn_pct":5.0}
+        }
+        if moment_residual_pct <= 1.0:
+            moment_lvl="PASS"
+        elif moment_residual_pct <= 5.0:
+            moment_lvl="WARN"
+        else:
+            moment_lvl="BLOCK"
+        f.append(finding("GLOBAL_MOMENT_EQUILIBRIUM",moment_lvl,
+                         f"Global moment equilibrium residual = {moment_residual_pct:.4g}% about the global origin.",
+                         **moment_equilibrium))
+    elif expected_moment is not None:
+        f.append(finding("GLOBAL_MOMENT_EQUILIBRIUM","WARN",
+                         "Applied-load moment was supplied but REAC_NODA moment evidence is unavailable."))
+    elif reaction_moment is not None:
+        f.append(finding("GLOBAL_MOMENT_EQUILIBRIUM","WARN",
+                         "Reaction moment is available, but no independently assembled applied-load moment was supplied; moment equilibrium is not closed."))
 elif expected is not None:
     f.append(finding("GLOBAL_EQUILIBRIUM","WARN","Applied-load resultant was supplied but reaction evidence is unavailable."))
 elif reaction_vec is not None:
@@ -189,6 +228,7 @@ report={
     "benchmark_equivalence":"SEPARATE_NOT_INFERRED",
     "findings":f,
     "equilibrium":equilibrium,
+    "moment_equilibrium":moment_equilibrium,
     "convergence":convergence,
     "benchmark":benchmark,
     "integrity":{"fea_values_invented":False}
