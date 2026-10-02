@@ -509,6 +509,7 @@ with h5py.File(med_path, "r") as h:
 
     reaction = None
     reaction_resultant = None
+    reaction_moment = None
     if reaction_path is not None:
         rcomp, reaction_blocks = nodal_field(
             h, "REAC_NODA", reaction_path, result_step
@@ -519,6 +520,10 @@ with h5py.File(med_path, "r") as h:
             raise RuntimeError("REAC_NODA nodal count does not match mesh node count")
         reaction = reaction_blocks[:3].T
         reaction_resultant = reaction.sum(axis=0)
+        # Global reaction moment about the study/global origin, in N*mm for the
+        # enforced MM_N_S_MPA solver contract. This is derived directly from
+        # real REAC_NODA and MED nodal coordinates, not from synthetic values.
+        reaction_moment = np.cross(coords, reaction).sum(axis=0)
 
     scomp, stress_by_family = discover_element_node_field(
         h, "SIGM_ELNO", field_paths["SIGM_ELNO"], result_step, families
@@ -608,6 +613,9 @@ bundle = {
             "derived": False,
             "resultant_n": [float(x) for x in reaction_resultant],
             "resultant_magnitude_n": float(np.linalg.norm(reaction_resultant)),
+            "moment_about_origin_n_mm": [float(x) for x in reaction_moment],
+            "moment_magnitude_n_mm": float(np.linalg.norm(reaction_moment)),
+            "moment_origin_mm": [0.0, 0.0, 0.0],
             "source": "real Code_Aster REAC_NODA",
         },
     },
