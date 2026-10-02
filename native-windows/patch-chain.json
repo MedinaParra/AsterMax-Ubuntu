@@ -618,6 +618,21 @@
       "consumes": [
         "AsterMaxSurfaceMechanicsContract"
       ]
+    },
+    {
+      "id": "patch-c10220-result-persistence",
+      "file": "patch-c10220-result-persistence.ps1",
+      "depends": [
+        "patch-c10219-load-history"
+      ],
+      "declares": [
+        "CaptureAsterMaxResultsForPmx",
+        "RestoreAsterMaxResultsFromPmx"
+      ],
+      "consumes": [
+        "AsterMaxResultsBundle",
+        "AsterMaxWorkflowConformanceAudit"
+      ]
     }
   ]
 }
