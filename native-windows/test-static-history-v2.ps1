@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$Dist,[string]$OutDir)
 $ErrorActionPreference='Stop'
+trap { Write-Host $_.ScriptStackTrace; Write-Host $_.Exception.ToString(); throw }
 if([string]::IsNullOrWhiteSpace($OutDir)){ $OutDir=Join-Path $Dist 'Validation\Static-History-v2' }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $fixture=(Resolve-Path (Join-Path $PSScriptRoot 'c1029\load-history-contract.json')).Path
@@ -14,9 +15,9 @@ $script:assemblyRoots += Get-ChildItem -Path $Dist -Recurse -Directory | Select-
  foreach($root in $script:assemblyRoots){ $candidate=Join-Path $root $simple; if(Test-Path $candidate){ return [System.Reflection.Assembly]::LoadFrom($candidate) } }
  return $null
 })
-[System.Reflection.Assembly]::LoadFrom($jsonFile.FullName) | Out-Null
+$jsonAssembly=[System.Reflection.Assembly]::LoadFrom($jsonFile.FullName)
 $assembly=[System.Reflection.Assembly]::LoadFrom($exe)
-$jt=[Type]::GetType('Newtonsoft.Json.Linq.JObject, Newtonsoft.Json',$true)
+$jt=$jsonAssembly.GetType('Newtonsoft.Json.Linq.JObject',$true)
 $contract=$jt.GetMethod('Parse',[Type[]]@([string])).Invoke($null,@([IO.File]::ReadAllText($fixture)))
 $type=$assembly.GetType('PrePoMax.AsterMaxCodeAsterNativeExporter',$true)
 $flags=[System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static
