@@ -8,11 +8,12 @@ and are fail-closed against geometric signatures before meshing.
 import argparse, hashlib, json, math, os
 from pathlib import Path
 import gmsh
+from ws01_contract import CAD_SHA256, SCOPES
 
-PRESS = [39,11,176,174,6,2,7,12,175,170,10,8,172,9,169,171,173]
-CBSUP = [22,66,68,70]
-INSUP = [41,76,74,78,35,43,75,77]
-LIPSUP = [13]
+PRESS = SCOPES["pressure_faces"]
+CBSUP = SCOPES["counterbore_support"]
+INSUP = SCOPES["inner_recess_support"]
+LIPSUP = SCOPES["lip_support"]
 
 def close(a,b,tol): return abs(a-b) <= tol
 
@@ -35,6 +36,11 @@ def main():
     ap.add_argument("--out",required=True)
     ap.add_argument("--size",type=float,default=3.0)
     args=ap.parse_args()
+    cad_sha256=hashlib.sha256(Path(args.step).read_bytes()).hexdigest()
+    if cad_sha256 != CAD_SHA256:
+        raise RuntimeError("WS01 CAD hash mismatch; fixed face manifest cannot be reused on another STEP")
+    if not math.isfinite(args.size) or args.size <= 0:
+        raise ValueError("mesh size must be finite and positive")
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
     gmsh.initialize()
     try:
@@ -124,8 +130,6 @@ F mmed /analysis/ws01.med D 20
 F mess /analysis/ws01.mess R 6
 F rmed /analysis/ws01.rmed R 81
 """,encoding="utf-8")
-        with open(args.step,"rb") as _cad:
-            cad_sha256=hashlib.sha256(_cad.read()).hexdigest()
         meta={
             "tutorial":"ANSYS Mechanical Release 17.0 WS01.1 Mechanical Basics",
             "geometry":os.path.basename(args.step),

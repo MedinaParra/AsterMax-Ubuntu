@@ -15,6 +15,9 @@ for label in ("3mm","2mm","1mm"):
         rows.append({"mesh":label,"state":"MISSING"})
         continue
     d=json.loads(p.read_text(encoding="utf-8"))
+    if d.get("comparison", {}).get("evidence_status") != "PASS":
+        rows.append({"mesh":label,"state":"BLOCKED","reason":"Comparison evidence missing or rejected"})
+        continue
     a=d["astermax_code_aster"]
     c=d["comparison"]
     rows.append({

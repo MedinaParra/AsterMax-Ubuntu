@@ -1,0 +1,25 @@
+name: AsterMax WS01 evidence regression
+on:
+  push:
+    branches: [agent/ws01-evidence-validation]
+  pull_request:
+    paths:
+      - 'native-windows/ansys-tutorials/**'
+      - '.github/workflows/astermax-ws01-evidence.yml'
+  workflow_dispatch:
+jobs:
+  contract:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: WS01 evidence contract (synthetic fixtures, no FEA solve)
+        run: python native-windows/ansys-tutorials/test-ws01-comparison.py
+      - name: Existing mechanical qualification regression
+        run: python native-windows/test-c10212-mechanical-qualification.py
