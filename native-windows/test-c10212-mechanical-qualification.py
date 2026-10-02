@@ -35,7 +35,9 @@ base={
   "fields":{
     "displacement":{"total_max":0.1},
     "von_mises":{"nodal_max":100.0},
-    "reaction":{"resultant_n":[0.0,0.0,-1000.0],"resultant_magnitude_n":1000.0}
+    "reaction":{"resultant_n":[0.0,0.0,-1000.0],"resultant_magnitude_n":1000.0,
+                "moment_about_origin_n_mm":[0.0,-2000.0,0.0],"moment_magnitude_n_mm":2000.0,
+                "moment_origin_mm":[0.0,0.0,0.0]}
   },
   "integrity":{
     "fea_values_invented":False,
@@ -45,7 +47,8 @@ base={
 }
 analysis={
   "scope_binding":{"mode":"topology_fingerprint","verified":True},
-  "expected_external_resultant_n":[0.0,0.0,1000.0]
+  "expected_external_resultant_n":[0.0,0.0,1000.0],
+  "expected_external_moment_n_mm":[0.0,2000.0,0.0]
 }
 convergence_ok={
   "rows":[
@@ -56,7 +59,14 @@ convergence_ok={
 out=run_case(base,analysis,0,"ENGINEERING_QUALIFIED",convergence=convergence_ok)
 eq=[x for x in out["findings"] if x["code"]=="GLOBAL_EQUILIBRIUM"][0]
 assert eq["level"]=="PASS" and abs(eq["residual_pct"])<1e-12
+meq=[x for x in out["findings"] if x["code"]=="GLOBAL_MOMENT_EQUILIBRIUM"][0]
+assert meq["level"]=="PASS" and abs(meq["residual_pct"])<1e-12
 assert any(x["code"]=="MESH_CONVERGENCE" and x["level"]=="PASS" for x in out["findings"])
+
+moment_bad=json.loads(json.dumps(base))
+moment_bad["fields"]["reaction"]["moment_about_origin_n_mm"]=[0.0,-1800.0,0.0]
+moment_block=run_case(moment_bad,analysis,2,"BLOCKED",convergence=convergence_ok)
+assert any(x["code"]=="GLOBAL_MOMENT_EQUILIBRIUM" and x["level"]=="BLOCK" for x in moment_block["findings"])
 
 body_analysis=json.loads(json.dumps(analysis))
 body_analysis["external_resultant_complete"]=False
@@ -129,7 +139,7 @@ bridge=(ROOT/"bridge-c964-med-results.py").read_text(encoding="utf-8")
 assert 'optional_med_field_path(h, "REAC_NODA"' in bridge
 assert '"reaction_resultant_from_real_reac_noda"' in bridge
 
-print(json.dumps({"status":"PASS","cases":6,"patch_chain":True,"ui_contract":True,
+print(json.dumps({"status":"PASS","cases":7,"patch_chain":True,"ui_contract":True,
                   "reaction_bridge_contract":True,"tutorial1_defaults":True,
                   "convergence_required_for_full_qualification":True,
                   "fea_values_invented":False},indent=2))
