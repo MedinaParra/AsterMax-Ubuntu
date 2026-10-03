@@ -314,7 +314,13 @@ namespace PrePoMax
             comm.AppendLine("DEBUT()");
             comm.Append(historyFunctions);
             comm.AppendLine("mesh=LIRE_MAILLAGE(FORMAT='ASTER',UNITE=20)");
-            comm.AppendLine("model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(GROUP_MA='"+volumeGroup+"',PHENOMENE='MECANIQUE',MODELISATION='3D'))");
+            // Code_Aster surface loads/supports (PRES_REP, FORCE_FACE, FACE_IMPO) require
+            // the generated skin elements to belong to the mechanical model as 3D faces.
+            // Keeping only the volume group in AFFE_MODELE leads to MODELISA6_96 at solve time.
+            var modeledGroups=new List<string>{volumeGroup};
+            modeledGroups.AddRange(surfaceNameMap.Values.OrderBy(x=>x,StringComparer.Ordinal));
+            string modeledGroupTuple="("+String.Join(",",modeledGroups.Select(x=>"'"+x+"'"))+",)";
+            comm.AppendLine("model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(GROUP_MA="+modeledGroupTuple+",PHENOMENE='MECANIQUE',MODELISATION='3D'))");
 
             var matSymbols=new Dictionary<string,string>(StringComparer.Ordinal);
             materialIndex=0;

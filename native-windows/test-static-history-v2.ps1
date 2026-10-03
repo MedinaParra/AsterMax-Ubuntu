@@ -47,6 +47,7 @@ $data.loads+= [pscustomobject]@{name='Other traction';type='surface_traction';su
 $data.loads+= [pscustomobject]@{name='Constant force';type='nodal_force_per_node';group='TRACTION_X_NODES';fx_per_node_n=10;fy_per_node_n=0;fz_per_node_n=0}
 $m=Export-Case $data 'independent-loads'
 $txt=Get-Content (Join-Path $OutDir 'independent-loads.comm') -Raw
+if(-not $txt.Contains("model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(GROUP_MA=('ASTERMAX_VOLUME','S_TRACTION_X',),PHENOMENE='MECANIQUE',MODELISATION='3D'))")){ throw 'Independent-history surface skin is absent from AFFE_MODELE.' }
 foreach($token in @('_F(CHARGE=load0,FONC_MULT=amp0)','_F(CHARGE=load1,FONC_MULT=amp1)','_F(CHARGE=load2)')) {
     if(-not $txt.Contains($token)){ throw "Missing independent excitation: $token" }
 }

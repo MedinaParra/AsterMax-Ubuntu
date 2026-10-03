@@ -41,6 +41,7 @@ if(-not $commText.Contains('FORCE_FACE=(')){ throw 'FORCE_FACE missing from comp
 if(-not $commText.Contains('FX=2')){ throw 'Surface traction FX missing.' }
 if(-not $commText.Contains('FY=0.5')){ throw 'Surface traction FY missing.' }
 if(-not $commText.Contains('FZ=-1')){ throw 'Surface traction FZ missing.' }
+if(-not $commText.Contains("model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(GROUP_MA=('ASTERMAX_VOLUME','S_TRACTION_X',),PHENOMENE='MECANIQUE',MODELISATION='3D'))")){ throw 'Surface traction skin group is not assigned to AFFE_MODELE; FORCE_FACE would fail in native Code_Aster.' }
 
 $evidence=Get-Content $manifest -Raw | ConvertFrom-Json
 if($evidence.surface_traction_uses_force_face -ne $true){ throw 'Surface traction manifest flag is false.' }

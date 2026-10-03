@@ -44,6 +44,7 @@ $mailText=Get-Content $mail -Raw
 if(-not $commText.Contains('PRES_REP')){ throw 'PRES_REP missing from compiled exporter output.' }
 if(-not $commText.Contains('FACE_IMPO')){ throw 'FACE_IMPO missing from compiled exporter output.' }
 if(-not $commText.Contains('DNOR=0')){ throw 'DNOR=0 missing from compiled exporter output.' }
+if(-not $commText.Contains("model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(GROUP_MA=('ASTERMAX_VOLUME','S_FRIC_Y','S_PRESS_X',),PHENOMENE='MECANIQUE',MODELISATION='3D'))")){ throw 'Surface skin groups are not assigned to AFFE_MODELE; PRES_REP/FACE_IMPO would fail in native Code_Aster.' }
 if(-not $commText.Contains('MECA_STATIQUE')){ throw 'MECA_STATIQUE missing from compiled exporter output.' }
 if(-not $commText.Contains("FORCE=('REAC_NODA',)")){ throw 'REAC_NODA missing from compiled exporter output.' }
 if(-not $mailText.Contains('QUAD4')){ throw 'Surface skin QUAD4 elements missing from .mail.' }
