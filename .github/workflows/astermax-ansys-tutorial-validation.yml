@@ -2,7 +2,7 @@ name: AsterMax ANSYS Tutorial Validation
 
 on:
   push:
-    branches: [ codex/ansys-tutorial-validation-c10212 ]
+    branches: [ codex/ansys-tutorial-validation-c10212, agent/ws01-physics-validation-20261003 ]
     paths:
       - '.github/workflows/astermax-ansys-tutorial-validation.yml'
       - 'native-windows/ansys-tutorials/**'
