@@ -5,7 +5,7 @@ This gate evaluates whether a real solver result is trustworthy for engineering
 review. It deliberately separates numerical/physical qualification from
 cross-solver benchmark equivalence.
 """
-import argparse, json, math
+import argparse, json, math, re
 from pathlib import Path
 
 def pct_delta(a,b):
@@ -65,7 +65,12 @@ else:
     f.append(finding("VMIS_COMPONENT_FIRST","WARN","Equivalent stress provenance does not prove component-first nodal averaging."))
 
 if mess_text is not None:
-    import re
+    if re.search(r"\bARRET\s+NORMAL\b", mess_text, re.IGNORECASE):
+        f.append(finding("SOLVER_TERMINATION","PASS",
+                         "Code_Aster .mess attests ARRET NORMAL."))
+    else:
+        f.append(finding("SOLVER_TERMINATION","BLOCK",
+                         "Code_Aster .mess does not attest ARRET NORMAL; solver output is not admissible as a completed analysis."))
     mesh_alarm_patterns=[
         r"trop\s+distordue",
         r"jacobien[^\n]*(?:signe|n[ée]gatif)",
@@ -84,6 +89,8 @@ if mess_text is not None:
         f.append(finding("SOLVER_MESH_QUALITY","PASS",
             "Code_Aster message file contains no recognized distorted/inverted-element or Jacobian alarms."))
 else:
+    f.append(finding("SOLVER_TERMINATION","WARN",
+        "No Code_Aster .mess file was supplied; normal solver termination cannot be attested."))
     f.append(finding("SOLVER_MESH_QUALITY","WARN",
         "No Code_Aster .mess file was supplied to the mechanical qualification gate."))
 

@@ -198,6 +198,13 @@ function Get-ExpectedOutputs([string]$Content, [string]$Stage) {
     return $outputs
 }
 
+function Test-CodeAsterNormalTermination([string]$MessPath) {
+    if (-not (Test-Path -LiteralPath $MessPath -PathType Leaf)) { return $false }
+    if ((Get-Item -LiteralPath $MessPath).Length -le 0) { return $false }
+    $messText = Get-Content -LiteralPath $MessPath -Raw -ErrorAction Stop
+    return ($messText -match '(?im)\bARRET\s+NORMAL\b')
+}
+
 function Probe-CodeAster([string]$Backend) {
     $stage = New-SafeStageDirectory 'probe'
     try {
@@ -220,16 +227,18 @@ function Probe-CodeAster([string]$Backend) {
         [IO.File]::WriteAllText($export, $exportText + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
         $run = Invoke-WindowsBackend $Backend $export $stage 120000
         $messReady = (Test-Path -LiteralPath $mess -PathType Leaf) -and ((Get-Item -LiteralPath $mess).Length -gt 0)
+        $messNormal = $messReady -and (Test-CodeAsterNormalTermination $mess)
         return [pscustomobject]@{
-            Ready = ($run.ExitCode -eq 0 -and $messReady)
+            Ready = ($run.ExitCode -eq 0 -and $messReady -and $messNormal)
             ExitCode = $run.ExitCode
             Stdout = $run.Stdout
             Stderr = $run.Stderr
             MessReady = $messReady
+            MessNormalTermination = $messNormal
         }
     }
     catch {
-        return [pscustomobject]@{ Ready=$false; ExitCode=124; Stdout=''; Stderr=$_.Exception.Message; MessReady=$false }
+        return [pscustomobject]@{ Ready=$false; ExitCode=124; Stdout=''; Stderr=$_.Exception.Message; MessReady=$false; MessNormalTermination=$false }
     }
     finally {
         Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
@@ -254,6 +263,7 @@ if ($ExportFile -eq 'probe') {
         configured_home = $env:ASTERMAX_CODE_ASTER_HOME
         solver_probe_exit_code = $(if ($probe) { $probe.ExitCode } else { $null })
         solver_probe_mess_ready = $(if ($probe) { $probe.MessReady } else { $false })
+        solver_probe_normal_termination = $(if ($probe) { $probe.MessNormalTermination } else { $false })
         message = $(if ($nativeError) { $nativeError } elseif ($probe -and $probe.Stderr) { $probe.Stderr.Trim() } elseif (-not $native) { 'No native Windows Code_Aster launcher found.' } else { '' })
         wsl_required = $false
         synthetic_results_allowed = $false
@@ -301,6 +311,10 @@ try {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
             Fail "Native solver did not produce the declared non-empty $kind output: $path" 30
         }
+    }
+
+    if (-not (Test-CodeAsterNormalTermination $expectedOutputs['mess'])) {
+        Fail "Native solver .mess does not attest ARRET NORMAL; refusing to publish solver outputs." 31
     }
 
     Copy-Workspace $stage $resolvedWorkspace

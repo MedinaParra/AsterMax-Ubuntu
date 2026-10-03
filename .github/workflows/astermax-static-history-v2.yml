@@ -17,6 +17,7 @@ jobs:
       - run: python3 -m pip install --disable-pip-version-check numpy h5py
       - run: python3 native-windows/validate-patch-chain.py
       - run: python3 native-windows/test-c10212-mechanical-qualification.py
+      - run: python3 native-windows/test-codeaster-runner-integrity.py
       - run: python3 native-windows/test-c1019-med-selection.py
       - run: python3 native-windows/test-c1019-vectorized-average.py
       - run: python3 native-windows/test-c1017-result-publication.py

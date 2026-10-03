@@ -97,6 +97,13 @@ mesh_bad=run_case(
 )
 assert any(x["code"]=="SOLVER_MESH_QUALITY" and x["level"]=="BLOCK" for x in mesh_bad["findings"])
 
+abnormal=run_case(
+    base, analysis, 2, "BLOCKED",
+    mess_text="DIAGNOSTIC JOB : OK\nNo fatal process exit was reported, but normal analysis termination is absent.\n",
+    convergence=convergence_ok
+)
+assert any(x["code"]=="SOLVER_TERMINATION" and x["level"]=="BLOCK" for x in abnormal["findings"])
+
 manifest=json.loads((ROOT/"patch-chain.json").read_text(encoding="utf-8"))
 entry=[x for x in manifest["patches"] if x["id"]=="patch-c10212-mechanical-qualification"]
 assert len(entry)==1
@@ -139,7 +146,7 @@ bridge=(ROOT/"bridge-c964-med-results.py").read_text(encoding="utf-8")
 assert 'optional_med_field_path(h, "REAC_NODA"' in bridge
 assert '"reaction_resultant_from_real_reac_noda"' in bridge
 
-print(json.dumps({"status":"PASS","cases":7,"patch_chain":True,"ui_contract":True,
+print(json.dumps({"status":"PASS","cases":8,"patch_chain":True,"ui_contract":True,
                   "reaction_bridge_contract":True,"tutorial1_defaults":True,
                   "convergence_required_for_full_qualification":True,
                   "fea_values_invented":False},indent=2))
