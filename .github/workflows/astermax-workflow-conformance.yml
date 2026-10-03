@@ -2,7 +2,7 @@ name: AsterMax C10.20.8 Windows Workflow Conformance
 
 on:
   push:
-    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair ]
+    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair, agent/ws01-gui-validation-20261003 ]
     paths:
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
@@ -46,6 +46,16 @@ jobs:
         run: python3 native-windows/test-c10208-functional-command-smoke.py
       - name: Guard patch error harness and structural anchor repair
         run: python3 native-windows/test-c10208a-error-harness.py
+      - name: Guard mechanical qualification
+        run: python3 native-windows/test-c10212-mechanical-qualification.py
+      - name: Guard MED step selection
+        run: python3 native-windows/test-c1019-med-selection.py
+      - name: Guard vectorized stress averaging
+        run: python3 native-windows/test-c1019-vectorized-average.py
+      - name: Guard atomic result publication
+        run: python3 native-windows/test-c1017-result-publication.py
+      - name: Guard PMX result persistence
+        run: python3 native-windows/test-c10220-result-persistence.py
 
   windows-workflow-conformance:
     needs: validate-patch-chain
@@ -95,7 +105,12 @@ jobs:
             'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
-            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1'
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
+            'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
+            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
+            'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1',
+            'patch-c10218-multi-material.ps1','patch-c10219-load-history.ps1',
+            'patch-c10220-result-persistence.ps1'
           )
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw "Patch-chain harness failed; inspect dist/Audit/PatchChain." }
@@ -133,6 +148,8 @@ jobs:
           Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
           Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\qualify-mechanical-analysis.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
           Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
           $pythonRoot=Split-Path (Get-Command python).Source -Parent
