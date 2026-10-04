@@ -1,0 +1,77 @@
+name: Windows Banco Pruebas FEM
+
+on:
+  push:
+    branches: [agent/banco-pruebas-fem-20261004]
+    paths:
+      - 'cases/banco_pruebas/**'
+      - '.github/workflows/windows-banco-pruebas-fem.yml'
+      - 'pyproject.toml'
+  workflow_dispatch:
+
+jobs:
+  banco-pruebas-mesh:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install AsterMax dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Compile bank mesh harness
+        shell: pwsh
+        run: python -W error -m py_compile cases/banco_pruebas/mesh_structure.py
+
+      - name: Check structural STEP payload
+        id: geometry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts\banco_pruebas | Out-Null
+          $p='cases\banco_pruebas\MAX_CIM_structure_base.step.xz'
+          if(Test-Path $p){
+            'present=true' >> $env:GITHUB_OUTPUT
+          } else {
+            'present=false' >> $env:GITHUB_OUTPUT
+            $e=@{
+              status='BLOCKED'
+              environment='GitHub Actions windows-latest'
+              commit='${{ github.sha }}'
+              reason='STRUCTURAL_STEP_PAYLOAD_NOT_COMMITTED'
+              expected_path='cases/banco_pruebas/MAX_CIM_structure_base.step.xz'
+              next_gate='Commit the simplified 106-solid structural STEP payload; then rerun this workflow.'
+            } | ConvertTo-Json -Depth 5
+            $e | Set-Content -Encoding UTF8 artifacts\banco_pruebas\mesh_evidence.json
+          }
+
+      - name: Expand structural STEP
+        if: steps.geometry.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          python -c "import lzma,pathlib; src=pathlib.Path(r'cases/banco_pruebas/MAX_CIM_structure_base.step.xz'); dst=src.with_suffix(''); dst.write_bytes(lzma.decompress(src.read_bytes())); print(dst)"
+
+      - name: Generate curvature-bounded TET10 mesh
+        if: steps.geometry.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          python cases/banco_pruebas/mesh_structure.py cases/banco_pruebas/MAX_CIM_structure_base.step --min-mm 30 --max-mm 110 --curvature-elements 20 --out artifacts/banco_pruebas
+          if($LASTEXITCODE -ne 0){throw "Banco mesh harness failed: $LASTEXITCODE"}
+
+      - name: Show mesh evidence
+        if: always()
+        shell: pwsh
+        run: Get-Content artifacts\banco_pruebas\mesh_evidence.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: banco-pruebas-fem-evidence
+          path: artifacts/banco_pruebas/
+          if-no-files-found: error
