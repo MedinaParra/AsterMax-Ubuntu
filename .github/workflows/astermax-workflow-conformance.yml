@@ -1,8 +1,8 @@
-name: AsterMax C10.20.8 Windows Workflow Conformance
+name: AsterMax WS01 R1 Windows Repair
 
 on:
   push:
-    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair ]
+    branches: [ codex/c1020-workflow-conformance, codex/c10201-cload-semantics-hotfix, codex/c10202-async-solve-ui, codex/c10203-cancel-solve, codex/c10204-result-lifecycle, codex/c10205-close-safe-solve, codex/c10206-solve-state-coherence, codex/c10207-model-session-identity, codex/c10208-functional-command-smoke, codex/c10208a-error-harness, codex/c10212-async-mesh-repair, agent/ws01-gui-validation-20261003, agent/windows-repair-20261005 ]
     paths:
       - '.github/workflows/astermax-workflow-conformance.yml'
       - 'native-windows/**'
@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout current branch
         uses: actions/checkout@v5
+      - name: Install validation dependencies
+        run: python3 -m pip install --disable-pip-version-check numpy h5py
       - name: Validate patch dependencies before build
         run: python3 native-windows/validate-patch-chain.py
       - name: Verify failure and incomplete-session reporting
@@ -46,6 +48,16 @@ jobs:
         run: python3 native-windows/test-c10208-functional-command-smoke.py
       - name: Guard patch error harness and structural anchor repair
         run: python3 native-windows/test-c10208a-error-harness.py
+      - name: Guard mechanical qualification
+        run: python3 native-windows/test-c10212-mechanical-qualification.py
+      - name: Guard MED step selection
+        run: python3 native-windows/test-c1019-med-selection.py
+      - name: Guard vectorized stress averaging
+        run: python3 native-windows/test-c1019-vectorized-average.py
+      - name: Guard atomic result publication
+        run: python3 native-windows/test-c1017-result-publication.py
+      - name: Guard PMX result persistence
+        run: python3 native-windows/test-c10220-result-persistence.py
 
   windows-workflow-conformance:
     needs: validate-patch-chain
@@ -95,7 +107,12 @@ jobs:
             'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
             'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
             'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
-            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1'
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
+            'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
+            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
+            'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1',
+            'patch-c10218-multi-material.ps1','patch-c10219-load-history.ps1',
+            'patch-c10220-result-persistence.ps1'
           )
           & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\dist\Audit\PatchChain"
           if($LASTEXITCODE -ne 0){ throw "Patch-chain harness failed; inspect dist/Audit/PatchChain." }
@@ -108,6 +125,14 @@ jobs:
       - name: Install MED and B01 reconstruction dependencies
         shell: pwsh
         run: python -m pip install --disable-pip-version-check numpy h5py gmsh
+
+      - name: Stamp repaired application version
+        shell: pwsh
+        run: |
+          $p='.\upstream\PrePoMax\Globals.cs'
+          $s=Get-Content $p -Raw
+          $s=[regex]::Replace($s,'public static string ProgramName = "[^"]*";', 'public static string ProgramName = "AsterMax Mechanical WS01 R1 (2026-10-05)";')
+          Set-Content $p $s -Encoding UTF8
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -133,6 +158,8 @@ jobs:
           Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
           Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\qualify-mechanical-analysis.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
           Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.cmd .\dist\AsterMaxRuntime\CodeAster\ -Force
           Copy-Item .\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1 .\dist\AsterMaxRuntime\CodeAster\ -Force
           $pythonRoot=Split-Path (Get-Command python).Source -Parent
@@ -155,9 +182,13 @@ jobs:
           python .\native-windows\build-c1010-materials.py --out .\dist
           $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
           [ordered]@{
-            release='C10.20.8';commit='${{ github.sha }}';executable_sha256=$hash;
+            release='WS01-R1-20261005';commit='${{ github.sha }}';executable_sha256=$hash;
             workflow_conformance='PENDING_RUNTIME_EVIDENCE';ansys_equivalence='NOT_CLAIMED';fea_values_invented=$false
           } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Validate compiled ribbon icons before GUI startup
+        shell: powershell
+        run: ./native-windows/test-ribbon-icons.ps1 -Dist "$PWD/dist" -Source "$PWD/upstream/PrePoMax/Forms/AsterMaxNativeUi.cs"
 
       - name: Install and exercise native Windows Code_Aster
         shell: pwsh
@@ -196,7 +227,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.20.8-Workflow-Conformance
+          name: AsterMax-WS01-R1-Evidence
           path: |
             dist/Audit/C10.20
             dist/Audit/PatchChain
@@ -209,6 +240,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.20.8-Windows-Test-Distribution
+          name: AsterMax-WS01-R1-Windows-x64
           path: dist
           if-no-files-found: error

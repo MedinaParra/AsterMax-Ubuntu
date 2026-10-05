@@ -66,7 +66,7 @@ def render(grid, field_name, out_path, unit):
     face_values = values[triangles].mean(axis=1)
 
     norm = colors.Normalize(vmin=vmin, vmax=vmax if vmax > vmin else vmin + 1.0)
-    cmap = cm.get_cmap("viridis")
+    cmap = matplotlib.colormaps["viridis"]
 
     fig = plt.figure(figsize=(12, 8))
     ax = fig.add_subplot(111, projection="3d")

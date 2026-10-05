@@ -21,6 +21,8 @@ namespace PrePoMax
             {"Export Solver Contract","Export"},{"Export Code_Aster Deck","Export"},{"Runtime","Query"},
             {"Solve","Running"},{"Results Explorer","Field_output"},{"FEA Viewport","Color_contours"},
             {"Contours","Color_contours"},{"Deformed","Deformed"},{"Front","Front"},{"Top","Top"},{"Right","Right"},
+            {"Pressure","Load"},{"Frictionless","Bc"},{"Gravity","Load"},
+            {"Surface Traction","Load"},{"Tablas de carga","Step"},{"Desplazamiento","Bc"},
             {"Auditoria","Query"}
         };
         private static readonly Dictionary<string,string[]> AxExpectedCommandsByTab = new Dictionary<string,string[]> {
