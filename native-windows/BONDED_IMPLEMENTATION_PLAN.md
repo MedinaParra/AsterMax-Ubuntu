@@ -1,1 +1,0 @@
-Bonded contact implementation staging marker.
