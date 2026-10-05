@@ -45,13 +45,13 @@ jobs:
       - name: Remove sub-mesh CAD sliver faces
         shell: pwsh
         run: |
-          python cases/banco_pruebas/defeature_geometry.py cases/banco_pruebas/MAX_CIM_structure_base.brep cases/banco_pruebas/MAX_CIM_structure_defeature50.brep --threshold-mm2 50 --evidence artifacts/banco_pruebas/defeature_evidence.json 2>&1 | Tee-Object -FilePath artifacts\banco_pruebas\defeature.log
+          python cases/banco_pruebas/defeature_geometry.py cases/banco_pruebas/MAX_CIM_structure_base.brep cases/banco_pruebas/MAX_CIM_structure_defeature100.brep --threshold-mm2 100 --evidence artifacts/banco_pruebas/defeature_evidence.json 2>&1 | Tee-Object -FilePath artifacts\banco_pruebas\defeature.log
           if($LASTEXITCODE -ne 0){throw "Controlled defeaturing failed: $LASTEXITCODE"}
 
       - name: Generate curvature-bounded TET10 mesh
         shell: pwsh
         run: |
-          python cases/banco_pruebas/mesh_structure.py cases/banco_pruebas/MAX_CIM_structure_defeature50.brep --min-mm 30 --max-mm 110 --curvature-elements 20 --out artifacts/banco_pruebas
+          python cases/banco_pruebas/mesh_structure.py cases/banco_pruebas/MAX_CIM_structure_defeature100.brep --min-mm 30 --max-mm 110 --curvature-elements 20 --out artifacts/banco_pruebas
           if($LASTEXITCODE -ne 0){throw "Banco mesh harness failed: $LASTEXITCODE"}
 
       - name: Show FEM preparation evidence
