@@ -1,0 +1,17 @@
+name: AsterMax workflow upstream pin audit
+
+on:
+  push:
+    branches: [ codex/c1020-workflow-conformance ]
+    paths:
+      - '.github/workflows/**'
+      - 'native-windows/validate-workflow-pins.py'
+  workflow_dispatch:
+
+jobs:
+  upstream-pin-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require the approved immutable PrePoMax commit in every workflow
+        run: python3 native-windows/validate-workflow-pins.py

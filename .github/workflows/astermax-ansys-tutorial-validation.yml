@@ -1,0 +1,183 @@
+name: AsterMax ANSYS Tutorial Validation
+
+on:
+  push:
+    branches: [ codex/ansys-tutorial-validation-c10212 ]
+    paths:
+      - '.github/workflows/astermax-ansys-tutorial-validation.yml'
+      - 'native-windows/ansys-tutorials/**'
+      - 'native-windows/bridge-c964-med-results.py'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-ansys-tutorials-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ws01-tetra10-convergence:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout tutorial validation branch
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install validation dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh numpy h5py vtk matplotlib
+
+      - name: Mechanical qualification regression
+        shell: pwsh
+        run: python .\native-windows\test-c10212-mechanical-qualification.py
+
+      - name: Download exact WS01.1 ANSYS training STEP fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\tutorial-input | Out-Null
+          $base='https://ecampus.paris-saclay.fr/pluginfile.php/2561407/mod_folder/content/0/Formation%20Polytech/Mechanical_Introduction_16.0_v1/Mechanical_Introduction_16.0_v1/workshop_input_files'
+          $url="$base/Cap_fillets.stp?forcedownload=1"
+          $out=Join-Path $PWD 'tutorial-input\Cap_fillets.stp'
+          Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 10
+          if((Get-Item $out).Length -lt 1024){ throw 'Downloaded WS01 fixture is unexpectedly small.' }
+          $head=[System.IO.File]::ReadAllText($out).Substring(0,[Math]::Min(256,(Get-Item $out).Length))
+          if($head -notmatch 'ISO-10303-21'){ throw 'Downloaded WS01 fixture is not STEP.' }
+          $hash=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "TUTORIAL_FIXTURE=Cap_fillets.stp bytes=$((Get-Item $out).Length) sha256=$hash"
+          if($hash -ne '4b98de09f4ff958974ebf92e298dde2210b6e2a5bbdddb82a22634ac1e8883c8'){
+            throw "WS01 CAD SHA256 mismatch: $hash"
+          }
+
+      - name: Import and inspect exact WS01.1 geometry
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\tutorial-evidence | Out-Null
+          python .\native-windows\ansys-tutorials\inventory-step.py .\tutorial-evidence '.\tutorial-input\Cap_fillets.stp'
+          if($LASTEXITCODE -ne 0){ throw 'WS01.1 geometry inventory failed.' }
+
+      - name: Install and probe native Windows Code_Aster
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=(Resolve-Path '.\native-windows\runtime\CodeAster\astermax-codeaster-runner.ps1').Path
+          & $runner probe
+          if($LASTEXITCODE -ne 0){
+            $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+            $url='https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+            $expected='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
+            curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi $url
+            if($LASTEXITCODE -ne 0){ throw 'Code_Aster provider MSI download failed.' }
+            $actual=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+            if($actual -ne $expected){ throw "Code_Aster MSI digest mismatch: $actual" }
+            $log=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+            $p=Start-Process msiexec.exe -ArgumentList @('/i',('"'+$msi+'"'),'/qn','/norestart','/l*v',('"'+$log+'"')) -PassThru
+            if(-not $p.WaitForExit(600000)){ Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; throw 'Code_Aster install timed out.' }
+            if($p.ExitCode -notin @(0,3010)){ throw "Code_Aster MSI failed: $($p.ExitCode)" }
+            & $runner probe
+            if($LASTEXITCODE -ne 0){ throw 'Native Windows Code_Aster probe failed after installation.' }
+          }
+
+      - name: Run WS01.1 TETRA10 3 mm
+        shell: pwsh
+        run: .\native-windows\ansys-tutorials\run-ws01-case.ps1 -Label 3mm -Size 3.0
+
+      - name: Upload WS01.1 3 mm evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-WS01-TETRA10-3mm
+          path: |
+            tutorial-evidence/WS01.1/mesh-3mm/ws01-input.json
+            tutorial-evidence/WS01.1/mesh-3mm/ws01-comparison.json
+            tutorial-evidence/WS01.1/mesh-3mm/mechanical-qualification.json
+            tutorial-evidence/WS01.1/mesh-3mm/ws01-evidence-manifest.json
+            tutorial-evidence/WS01.1/mesh-3mm/ASTERMAX_CODE_ASTER_STDOUT.log
+            tutorial-evidence/WS01.1/mesh-3mm/ASTERMAX_MED_BRIDGE.log
+            tutorial-evidence/WS01.1/mesh-3mm/ws01.mess
+            tutorial-evidence/WS01.1/mesh-3mm/screenshots/**
+          if-no-files-found: warn
+
+      - name: Run WS01.1 TETRA10 2 mm
+        if: always()
+        shell: pwsh
+        run: .\native-windows\ansys-tutorials\run-ws01-case.ps1 -Label 2mm -Size 2.0
+
+      - name: Upload WS01.1 2 mm evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-WS01-TETRA10-2mm
+          path: |
+            tutorial-evidence/WS01.1/mesh-2mm/ws01-input.json
+            tutorial-evidence/WS01.1/mesh-2mm/ws01-comparison.json
+            tutorial-evidence/WS01.1/mesh-2mm/mechanical-qualification.json
+            tutorial-evidence/WS01.1/mesh-2mm/ws01-evidence-manifest.json
+            tutorial-evidence/WS01.1/mesh-2mm/ASTERMAX_CODE_ASTER_STDOUT.log
+            tutorial-evidence/WS01.1/mesh-2mm/ASTERMAX_MED_BRIDGE.log
+            tutorial-evidence/WS01.1/mesh-2mm/ws01.mess
+            tutorial-evidence/WS01.1/mesh-2mm/screenshots/**
+          if-no-files-found: warn
+
+      - name: Run WS01.1 TETRA10 1 mm
+        if: always()
+        shell: pwsh
+        run: .\native-windows\ansys-tutorials\run-ws01-case.ps1 -Label 1mm -Size 1.0
+
+      - name: Upload WS01.1 1 mm evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-WS01-TETRA10-1mm
+          path: |
+            tutorial-evidence/WS01.1/mesh-1mm/ws01-input.json
+            tutorial-evidence/WS01.1/mesh-1mm/ws01-comparison.json
+            tutorial-evidence/WS01.1/mesh-1mm/mechanical-qualification.json
+            tutorial-evidence/WS01.1/mesh-1mm/ws01-evidence-manifest.json
+            tutorial-evidence/WS01.1/mesh-1mm/ASTERMAX_CODE_ASTER_STDOUT.log
+            tutorial-evidence/WS01.1/mesh-1mm/ASTERMAX_MED_BRIDGE.log
+            tutorial-evidence/WS01.1/mesh-1mm/ws01.mess
+            tutorial-evidence/WS01.1/mesh-1mm/screenshots/**
+          if-no-files-found: warn
+
+      - name: Summarize WS01.1 convergence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force '.\tutorial-evidence\WS01.1' | Out-Null
+          python .\native-windows\ansys-tutorials\summarize-ws01-convergence.py --root '.\tutorial-evidence\WS01.1' --out '.\tutorial-evidence\WS01.1\ws01-convergence-summary.json'
+
+      - name: Build source integrity manifest
+        if: always()
+        shell: pwsh
+        run: |
+          $cad='.\tutorial-input\Cap_fillets.stp'
+          [ordered]@{
+            generated_utc=(Get-Date).ToUniversalTime().ToString('O')
+            branch='codex/ansys-tutorial-validation-c10212'
+            commit='${{ github.sha }}'
+            cad=[ordered]@{
+              file='Cap_fillets.stp'
+              bytes=(Get-Item $cad).Length
+              sha256=(Get-FileHash $cad -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            mesh_sizes_mm=@(3.0,2.0,1.0)
+            element_order=2
+            high_order_optimization='2 for all levels; HXT volumetric tetrahedralization at 2mm'
+            fea_results_invented=$false
+            state='WS01_1_TETRA10_CONVERGENCE'
+          } | ConvertTo-Json -Depth 8 | Set-Content '.\tutorial-evidence\source-manifest.json' -Encoding UTF8
+
+      - name: Upload WS01.1 convergence summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-WS01-TETRA10-Convergence-Summary
+          path: |
+            tutorial-evidence/WS01.1/ws01-convergence-summary.json
+            tutorial-evidence/source-manifest.json
+            tutorial-input/Cap_fillets.stp
+          if-no-files-found: warn

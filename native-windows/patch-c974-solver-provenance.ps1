@@ -46,8 +46,8 @@ if(-not $s.Contains('SourceKind != "REAL_CODE_ASTER_MED"')){
                 throw new InvalidDataException("C9.74 provenance gate requires source.kind=REAL_CODE_ASTER_MED.");
             if (String.IsNullOrWhiteSpace(SourceName))
                 throw new InvalidDataException("C9.74 provenance gate requires the original MED source filename.");
-            if (ElementType != "HEXA8")
-                throw new InvalidDataException("C9.74 PMV currently validates the proven HEXA8 result route only.");
+            if (ElementType != "HEXA8" && ElementType != "TETRA4" && ElementType != "TETRA10" && ElementType != "MIXED")
+                throw new InvalidDataException("C10.10.1 provenance gate supports TETRA4, TETRA10, HEXA8 and validated mixed result meshes only.");
             if (!DerivedNodalStressDeclared)
                 throw new InvalidDataException("C9.74 requires explicit declaration of nodal stress averaging provenance.");
             if (String.IsNullOrWhiteSpace(BundleSha256) || BundleSha256.Length != 64)
@@ -84,4 +84,4 @@ $newStatus='_status.Text=_scene.Field+" ["+_scene.Unit+"] • "+_bundle.NodeCoun
 if($v.Contains($oldStatus)){$v=$v.Replace($oldStatus,$newStatus)}
 Set-Content $viewport $v -Encoding UTF8
 
-Write-Host 'C9.74 solver provenance + SHA256 audit trail injected.' -ForegroundColor Green
+Write-Host 'C9.74/C10.10.1 solver provenance + SHA256 audit trail supports validated TETRA4/TETRA10/HEXA8 results.' -ForegroundColor Green

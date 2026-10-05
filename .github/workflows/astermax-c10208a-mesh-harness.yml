@@ -1,0 +1,277 @@
+name: AsterMax C10.20.8a Native Mesh Harness
+
+on:
+  push:
+    branches: [ codex/c10208a-error-harness ]
+    paths:
+      - '.github/workflows/astermax-c10208a-mesh-harness.yml'
+      - 'native-windows/**'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-c10208a-mesh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-mesh-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply audited AsterMax patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
+            'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
+            'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1'
+          )
+          & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\mesh-harness\patch-chain"
+          if($LASTEXITCODE -ne 0){ throw 'Patch-chain harness failed.' }
+
+      - name: Restore and build Windows x64
+        shell: pwsh
+        run: |
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          if($LASTEXITCODE -ne 0){ throw 'NuGet restore failed.' }
+      - uses: microsoft/setup-msbuild@v2
+      - name: Compile AsterMax
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Stage native GUI and pinned NetGen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing.' }
+          New-Item -ItemType Directory -Force .\mesh-dist | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\mesh-dist\ -Recurse -Force
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){ throw 'Pinned CAD runtime digest mismatch.' }
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){ throw 'NetGenMesher.exe missing from pinned runtime.' }
+          Copy-Item $ng.Directory.FullName .\mesh-dist\NetGen -Recurse -Force
+          python .\native-windows\build-c1010-materials.py --out .\mesh-dist
+          if(-not(Test-Path .\mesh-dist\AsterMaxReferenceMaterials.lib)){ throw 'AsterMax reference material library staging failed.' }
+
+      - name: Generate B01 STEP
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check gmsh
+          python native-windows/workflow-conformance/generate-b01-step.py --out "$PWD/mesh-dist/B01-100x10x10.step"
+
+      - name: Execute direct native STEP-NetGen mesh smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD\mesh-harness\runtime"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $env:ASTERMAX_C1020_AUDIT_DIR=$out
+          $report=Join-Path $out 'portable-cad-smoke.json'
+          $step="$PWD\mesh-dist\B01-100x10x10.step"
+          $exe="$PWD\mesh-dist\AsterMax Mechanical.exe"
+          $args=@($step,'-US','MM_TON_S_C',"--ASTERMAX-SMOKE=$report")
+          $p=Start-Process -FilePath $exe -WorkingDirectory "$PWD\mesh-dist" -ArgumentList $args -PassThru
+          $timedOut=$false
+          if(-not $p.WaitForExit(300000)){
+            $timedOut=$true
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            try { $p.WaitForExit(10000) | Out-Null } catch {}
+          }
+          $work=Join-Path $env:LOCALAPPDATA 'AsterMax\Work'
+          if(Test-Path $work){
+            $copy=Join-Path $out 'workdir'
+            New-Item -ItemType Directory -Force $copy | Out-Null
+            Copy-Item (Join-Path $work '*') $copy -Recurse -Force -ErrorAction Continue
+          }
+          if(Test-Path ($report+'.stages.log')){ Get-Content ($report+'.stages.log') | Write-Host }
+          $meshLog=Join-Path $out 'netgen-mesh-output.log'
+          if(Test-Path $meshLog){ Get-Content $meshLog | Write-Host }
+          if($timedOut){ throw 'Native mesh smoke timed out after 300 seconds.' }
+          if(-not(Test-Path $report)){ throw 'Portable CAD smoke report was not produced.' }
+          $j=Get-Content $report -Raw | ConvertFrom-Json
+          $j | ConvertTo-Json -Depth 10 | Write-Host
+          if(-not $j.pass){
+            Write-Warning "Native GUI workflow audit failed after/around meshing: $($j.reason)"
+          }
+
+          $meshText=$(if(Test-Path $meshLog){Get-Content $meshLog -Raw}else{''})
+          $exitMatches=[regex]::Matches($meshText,'NetGen process exit code:\s*(-?\d+)')
+          $pointMatches=[regex]::Matches($meshText,'(?m)^\s*Points:\s*(\d+)\s*$')
+          $elementMatches=[regex]::Matches($meshText,'(?m)^\s*Elements:\s*(\d+)\s*$')
+          $lastExit=$null
+          $lastPoints=0
+          $lastElements=0
+          if($exitMatches.Count -gt 0){ $lastExit=[int]$exitMatches[$exitMatches.Count-1].Groups[1].Value }
+          if($pointMatches.Count -gt 0){ $lastPoints=[int]$pointMatches[$pointMatches.Count-1].Groups[1].Value }
+          if($elementMatches.Count -gt 0){ $lastElements=[int]$elementMatches[$elementMatches.Count-1].Groups[1].Value }
+          $volPath=Join-Path $work 'geometry.vol'
+          $volPresent=Test-Path $volPath
+          $volBytes=$(if($volPresent){(Get-Item $volPath).Length}else{0})
+          $meshPass=($lastExit -eq 0 -and $volPresent -and $volBytes -gt 0 -and $lastPoints -gt 0 -and $lastElements -gt 0)
+          [ordered]@{
+            pass=$meshPass
+            netgen_last_exit_code=$lastExit
+            mesh_points=$lastPoints
+            mesh_elements=$lastElements
+            vol_path=$volPath
+            vol_present=$volPresent
+            vol_bytes=$volBytes
+            brep_access_violation=($meshText -match 'NetGen process exit code:\s*-1073741819')
+            stl_fallback_used=($meshText -match 'STL_MESH')
+            portable_workflow_pass=[bool]$j.pass
+            portable_workflow_reason=[string]$j.reason
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $out 'native-mesh-evidence.json') -Encoding UTF8
+
+      - name: Probe NetGen runtime generations
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD\mesh-harness\runtime"
+          $work=Join-Path $env:LOCALAPPDATA 'AsterMax\Work'
+          $report=Join-Path $out 'netgen-runtime-probe.json'
+          if(-not(Test-Path (Join-Path $work 'geometry.brep'))){ throw 'geometry.brep missing; cannot compare NetGen runtimes.' }
+          function Invoke-NetGenProbe([string]$label,[string]$exePath) {
+            $probeWork=Join-Path $out ($label+'-work')
+            Remove-Item $probeWork -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Force $probeWork | Out-Null
+            Copy-Item (Join-Path $work 'meshParameters') $probeWork -Force
+            Copy-Item (Join-Path $work 'meshRefinement') $probeWork -Force
+
+            $step="$PWD\mesh-dist\B01-100x10x10.step"
+            $brepBase=Join-Path $probeWork 'probe.brep'
+            $importStdout=Join-Path $out ($label+'.import.stdout.log')
+            $importStderr=Join-Path $out ($label+'.import.stderr.log')
+            $importArgs='STEP_ASSEMBLY_SPLIT_TO_COMPOUNDS "{0}" "{1}"' -f $step,$brepBase
+            $import=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $importArgs -RedirectStandardOutput $importStdout -RedirectStandardError $importStderr -PassThru
+            $importTimedOut=-not $import.WaitForExit(120000)
+            if($importTimedOut){
+              Stop-Process -Id $import.Id -Force -ErrorAction SilentlyContinue
+              try { $import.WaitForExit(10000) | Out-Null } catch {}
+            }
+            $importExit=$null
+            try { $importExit=$import.ExitCode } catch {}
+            $generatedBrep=Get-ChildItem $probeWork -Filter 'probe*.brep' | Where-Object {$_.Length -gt 0} | Sort-Object Length -Descending | Select-Object -First 1
+
+            $vol=Join-Path $probeWork 'geometry.vol'
+            $stdout=Join-Path $out ($label+'.mesh.stdout.log')
+            $stderr=Join-Path $out ($label+'.mesh.stderr.log')
+            $meshExit=$null
+            $meshTimedOut=$false
+            if($generatedBrep){
+              $meshArgs='BREP_MESH "{0}" "{1}" "{2}" "{3}"' -f $generatedBrep.FullName,$vol,(Join-Path $probeWork 'meshParameters'),(Join-Path $probeWork 'meshRefinement')
+              $mesh=Start-Process -FilePath $exePath -WorkingDirectory $probeWork -ArgumentList $meshArgs -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+              $meshTimedOut=-not $mesh.WaitForExit(120000)
+              if($meshTimedOut){
+                Stop-Process -Id $mesh.Id -Force -ErrorAction SilentlyContinue
+                try { $mesh.WaitForExit(10000) | Out-Null } catch {}
+              }
+              try { $meshExit=$mesh.ExitCode } catch {}
+            }
+            [ordered]@{
+              label=$label
+              exe=$exePath
+              exe_sha256=(Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+              import_exit_code=$importExit
+              import_timed_out=$importTimedOut
+              brep_present=[bool]$generatedBrep
+              brep_bytes=$(if($generatedBrep){$generatedBrep.Length}else{0})
+              mesh_exit_code=$meshExit
+              mesh_timed_out=$meshTimedOut
+              vol_present=(Test-Path $vol)
+              vol_bytes=$(if(Test-Path $vol){(Get-Item $vol).Length}else{0})
+              import_stdout=$importStdout
+              import_stderr=$importStderr
+              mesh_stdout=$stdout
+              mesh_stderr=$stderr
+              work_directory=$probeWork
+            }
+          }
+
+          $probes=@()
+          $probes += Invoke-NetGenProbe 'v140-direct' "$PWD\mesh-dist\NetGen\NetGenMesher.exe"
+
+          $v260Url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.6.0.zip'
+          $v260Zip=Join-Path $out 'PrePoMax-v2.6.0.zip'
+          Invoke-WebRequest $v260Url -OutFile $v260Zip
+          $v260ZipSha=(Get-FileHash $v260Zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $v260Dir=Join-Path $out 'runtime-v260'
+          Remove-Item $v260Dir -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive $v260Zip $v260Dir
+          $v260Exe=Get-ChildItem $v260Dir -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $v260Exe){ throw 'PrePoMax v2.6.0 NetGenMesher.exe missing.' }
+          $probes += Invoke-NetGenProbe 'v260-direct' $v260Exe.FullName
+
+          [ordered]@{
+            generated_utc=[DateTime]::UtcNow.ToString('o')
+            source_model='B01-100x10x10.step'
+            v260_zip_url=$v260Url
+            v260_zip_sha256=$v260ZipSha
+            probes=$probes
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 10 | Set-Content $report -Encoding UTF8
+          Get-Content $report | Write-Host
+
+      - name: Enforce real native mesh
+        if: always()
+        shell: pwsh
+        run: |
+          $mesh="$PWD\mesh-harness\runtime\native-mesh-evidence.json"
+          if(-not(Test-Path $mesh)){ throw 'Native mesh evidence was not produced.' }
+          $m=Get-Content $mesh -Raw | ConvertFrom-Json
+          $m | ConvertTo-Json -Depth 10 | Write-Host
+          if($m.pass -and [int]$m.netgen_last_exit_code -eq 0 -and
+             [int64]$m.vol_bytes -gt 0 -and [int]$m.mesh_points -gt 0 -and [int]$m.mesh_elements -gt 0){
+            Write-Host "ASTERMAX_REAL_NATIVE_MESH_PASS points=$($m.mesh_points) elements=$($m.mesh_elements) vol_bytes=$($m.vol_bytes) stl_fallback=$($m.stl_fallback_used)"
+            exit 0
+          }
+          throw "Real native mesh gate failed: exit=$($m.netgen_last_exit_code) vol=$($m.vol_bytes) points=$($m.mesh_points) elements=$($m.mesh_elements)"
+
+      - name: Upload native mesh evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.20.8a-Native-Mesh-Harness
+          path: |
+            mesh-harness
+            mesh-dist/B01-100x10x10.step
+          if-no-files-found: warn

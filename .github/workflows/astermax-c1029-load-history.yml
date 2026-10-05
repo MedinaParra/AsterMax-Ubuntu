@@ -1,0 +1,206 @@
+name: AsterMax C10.29 Load History Build
+
+on:
+  push:
+    branches: [ agent/c1029-load-histories ]
+    paths:
+      - '.github/workflows/astermax-c10212-mechanical-qualification.yml'
+      - 'native-windows/AsterMaxMechanicalQualification.cs'
+      - 'native-windows/qualify-mechanical-analysis.py'
+      - 'native-windows/mechanical-qualification-policy.json'
+      - 'native-windows/patch-c10212-mechanical-qualification.ps1'
+      - 'native-windows/patch-c10213-scope-fingerprint.ps1'
+      - 'native-windows/patch-c10214-tutorial1-defaults.ps1'
+      - 'native-windows/patch-c10215-surface-mechanics.ps1'
+      - 'native-windows/patch-c10216-body-loads.ps1'
+      - 'native-windows/patch-c10217-surface-traction.ps1'
+      - 'native-windows/patch-c10218-multi-material.ps1'
+      - 'native-windows/c1027/**'
+      - 'native-windows/test-c1027-multi-material-exporter.ps1'
+      - 'native-windows/patch-c10219-load-history.ps1'
+      - 'native-windows/c1029/**'
+      - 'native-windows/test-c1029-load-history-exporter.ps1'
+      - 'native-windows/c1026/**'
+      - 'native-windows/test-c1026-surface-traction-exporter.ps1'
+      - 'native-windows/c1025/**'
+      - 'native-windows/test-c1025-body-load-exporter.ps1'
+      - 'native-windows/c1024/**'
+      - 'native-windows/test-c1024-surface-exporter.ps1'
+      - 'native-windows/patch-chain.json'
+      - 'native-windows/bridge-c964-med-results.py'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 native-windows/validate-patch-chain.py
+      - run: python3 native-windows/test-c10212-mechanical-qualification.py
+
+  build:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply AsterMax chain through C10.29
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
+            'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
+            'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
+            'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
+            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
+            'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1',
+            'patch-c10218-multi-material.ps1','patch-c10219-load-history.ps1'
+          )
+          foreach($p in $patches){ Write-Host "Applying $p"; & ".\native-windows\$p" -Root "$PWD\upstream" }
+
+          $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
+          if(-not $exporter.Contains("FORCE=('REAC_NODA',)")){ throw 'REAC_NODA exporter gate missing' }
+          if(-not $exporter.Contains('expected_external_resultant_n')){ throw 'load resultant evidence gate missing' }
+
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          if(-not $solve.Contains('ASTERMAX_MECHANICAL_QUALIFICATION')){ throw 'qualification solve handoff missing' }
+
+          $ui=Get-Content .\upstream\PrePoMax\Forms\AsterMaxIntegratedResults.cs -Raw
+          if(-not $ui.Contains('AsterMaxMechanicalQualification.Evaluate')){ throw 'qualification UI integration missing' }
+
+          $meshDefaults=Get-Content .\upstream\CaeMesh\Parts\MeshingParameters.cs -Raw
+          if(-not $meshDefaults.Contains('ASTERMAX_TUTORIAL1_DEFAULTS')){ throw 'Tutorial-1 mesh default marker missing' }
+          if(-not $meshDefaults.Contains('_secondOrder = true;')){ throw 'Quadratic structural mesh default missing' }
+          if(-not $meshDefaults.Contains('_midsideNodesOnGeometry = false;')){ throw 'Conservative midside-node default missing' }
+
+          $readiness=Get-Content .\upstream\PrePoMax\Forms\AsterMaxResultsWorkspace.cs -Raw
+          if(-not $readiness.Contains('WARN:linear_structural_solid_elements=')){ throw 'Linear-solid readiness warning missing' }
+          if(-not $readiness.Contains('QuadraticStructuralSolidElementCount')){ throw 'Quadratic-solid readiness telemetry missing' }
+
+          if(-not $solve.Contains('readiness_warnings')){ throw 'Readiness warnings are not persisted in solve evidence' }
+          if(-not $exporter.Contains('PRES_REP')){ throw 'Native pressure PRES_REP export missing' }
+          if(-not $exporter.Contains('FACE_IMPO')){ throw 'Native frictionless FACE_IMPO export missing' }
+          if(-not $exporter.Contains('DNOR')){ throw 'Native frictionless DNOR export missing' }
+          if(-not $exporter.Contains('expected_external_resultant_n')){ throw 'Independent external resultant evidence missing' }
+          $surfaceContract=Get-Content .\upstream\PrePoMax\AsterMaxSurfaceMechanicsContract.cs -Raw
+          if(-not $surfaceContract.Contains('DLoad pressure')){ throw 'Pressure model contract mapping missing' }
+          if(-not $surfaceContract.Contains('AsterMaxFrictionlessBC frictionless')){ throw 'Frictionless model contract mapping missing' }
+
+          if(-not $exporter.Contains('PESANTEUR')){ throw 'Native gravity PESANTEUR export missing' }
+          if(-not $exporter.Contains('ROTATION')){ throw 'Native centrifugal ROTATION export missing' }
+          if(-not $exporter.Contains('RHO=')){ throw 'Material density RHO export missing' }
+          if(-not $surfaceContract.Contains('GravityLoad gravity')){ throw 'Gravity model contract mapping missing' }
+          if(-not $surfaceContract.Contains('CentrifLoad rotation')){ throw 'Rotation model contract mapping missing' }
+          if(-not $surfaceContract.Contains('density_tonne_per_mm3')){ throw 'Material density contract evidence missing' }
+
+          if(-not $exporter.Contains('FORCE_FACE')){ throw 'Native surface traction FORCE_FACE export missing' }
+          if(-not $surfaceContract.Contains('STLoad traction')){ throw 'Surface traction model contract mapping missing' }
+
+          if(-not $surfaceContract.Contains('BuildMaterialAssignments')){ throw 'SolidSection material-assignment contract missing' }
+          if(-not $exporter.Contains('materialAssignments')){ throw 'Multi-material exporter assignment logic missing' }
+          if(-not $exporter.Contains('AFFE_MATERIAU')){ throw 'Code_Aster AFFE_MATERIAU export missing' }
+
+          if(-not $exporter.Contains('DEFI_FONCTION')){ throw 'Load-history DEFI_FONCTION export missing' }
+          if(-not $exporter.Contains('FONC_MULT')){ throw 'Load-history FONC_MULT export missing' }
+          if(-not $exporter.Contains('LIST_INST')){ throw 'Load-history LIST_INST export missing' }
+          if(-not $surfaceContract.Contains('BuildAmplitudes')){ throw 'AmplitudeTabular contract mapping missing' }
+          if(-not $solve.Contains('ASTERMAX_MED_STEP_SELECTION')){ throw 'Last-instant MED selection handoff missing' }
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Assemble C10.29 load history package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' |
+            Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing' }
+          New-Item -ItemType Directory -Force .\dist\AsterMaxTools | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          Copy-Item .\native-windows\bridge-c964-med-results.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\bind-c998-results-fingerprint.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\qualify-mechanical-analysis.py .\dist\AsterMaxTools\ -Force
+          Copy-Item .\native-windows\mechanical-qualification-policy.json .\dist\AsterMaxTools\ -Force
+          $hash=(Get-FileHash '.\dist\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{
+            release='C10.29'
+            commit='${{ github.sha }}'
+            executable_sha256=$hash
+            mechanical_qualification=$true
+            persistent_mesh_scope_fingerprint=$true
+            code_aster_mesh_alarm_gate=$true
+            real_reaction_resultant=$true
+            component_first_von_mises=$true;quadratic_structural_default=$true;convergence_required_for_full_qualification=$true
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+
+      - name: Exercise compiled C10.24 surface exporter
+        shell: pwsh
+        run: .\native-windows\test-c1024-surface-exporter.ps1 -Dist "$PWD\dist"
+
+      - name: Exercise compiled C10.25 body-load exporter
+        shell: pwsh
+        run: .\native-windows\test-c1025-body-load-exporter.ps1 -Dist "$PWD\dist"
+
+      - name: Exercise compiled C10.26 surface-traction exporter
+        shell: pwsh
+        run: .\native-windows\test-c1026-surface-traction-exporter.ps1 -Dist "$PWD\dist"
+
+      - name: Exercise compiled C10.27 multi-material exporter
+        shell: pwsh
+        run: .\native-windows\test-c1027-multi-material-exporter.ps1 -Dist "$PWD\dist"
+
+      - name: Exercise compiled C10.29 load-history exporter
+        shell: pwsh
+        run: .\native-windows\test-c1029-load-history-exporter.ps1 -Dist "$PWD\dist"
+
+      - name: Upload C10.29 build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.29-Load-History
+          path: |
+            dist
+            upstream/PrePoMax/Forms/AsterMaxMechanicalQualification.cs
+            upstream/PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs
+            upstream/PrePoMax/AsterMaxCodeAsterNativeExporter.cs
+          if-no-files-found: error

@@ -1,0 +1,21 @@
+name: LEGACY - AsterMax C10.05 Code_Aster WSL Runner (manual only)
+
+# Historical C10.05 qualification workflow.
+# C10.10.1 uses Code_Aster natively on Windows and is validated by
+# astermax-c1008-real-tetra-e2e.yml. Keep this workflow only for explicit
+# archaeology/regression work; it must never run automatically for production
+# native-runner changes.
+on:
+  workflow_dispatch:
+
+jobs:
+  legacy-c1005-wsl-reference:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Historical workflow notice
+        shell: pwsh
+        run: |
+          Write-Host 'C10.05 WSL qualification is legacy and is not a C10.10.1 production gate.'
+          Write-Host 'Production solver transport: WINDOWS_NATIVE.'
+          Write-Host 'Use AsterMax C10.10.1 Real Tetra + Native Windows Runtime for qualification.'

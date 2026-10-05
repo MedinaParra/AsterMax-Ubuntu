@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Translate a real Code_Aster MED result into an auditable AsterMax results bundle + VTU.
+"""Translate genuine Code_Aster MED results into an auditable AsterMax bundle + VTU.
 
-No synthetic FEA values are created. Displacements are read directly from MED.
-SIGM_ELNO/SIEQ_ELNO values are element-node fields; for point contours the bridge computes a
-plain arithmetic average over incident element-node values and records that derivation explicitly.
+C10.07 keeps the historical HEXA8 regression contract while extending the production bridge to
+TETRA4, TETRA10 and supported mixed meshes. No synthetic FEA values are created. Displacements are
+read directly from MED. SIGM_ELNO/SIEQ_ELNO are element-node fields; point contours use a declared
+plain arithmetic average over the real incident element-node values.
 
 Validation modes:
 - regression (default): preserves the historical C9.62 44-node/10-HEXA8 numerical regression gate.
-- production: validates the actual MED dimensions dynamically and does not require C9.62 dimensions/results.
+- production: validates actual MED dimensions and supported element families dynamically.
 """
-import json, math, os, sys, xml.etree.ElementTree as ET
-from collections import defaultdict
+import json
+import math
+import os
+import re
+import sys
+import tempfile
+from xml.sax.saxutils import quoteattr
+
 import h5py
 import numpy as np
 
@@ -20,135 +27,717 @@ med_path, bundle_path, vtu_path = sys.argv[1:]
 if not os.path.isfile(med_path):
     raise SystemExit(f"MED file missing: {med_path}")
 
-validation_mode=os.environ.get("ASTERMAX_MED_BRIDGE_MODE","regression").strip().lower()
-if validation_mode not in {"regression","production"}:
+validation_mode = os.environ.get("ASTERMAX_MED_BRIDGE_MODE", "regression").strip().lower()
+if validation_mode not in {"regression", "production"}:
     raise SystemExit("ASTERMAX_MED_BRIDGE_MODE must be regression or production")
 
-MESH_ROOT = "ENS_MAA/00000001/-0000000000000000001-0000000000000000001"
-STEP = "0000000000000000000100000000000000000001"
+# C9.62 reference: GitHub Actions ubuntu-latest, Docker image scimulate/code_aster:15.2.
+# Use a relative tolerance because solver/BLAS/CPU floating-point details can change the last bits.
+C962_DX_MAX_REFERENCE_MM = 0.0471697826890255
+C962_DX_REL_TOL = 1e-9
+
+# MED geometry code -> (nodes/cell, AsterMax semantic name, VTK cell type)
+SUPPORTED_FAMILIES = {
+    "HE8": (8, "HEXA8", 12),
+    "TE4": (4, "TETRA4", 10),
+    "T10": (10, "TETRA10", 24),
+}
+
+# Physical surface groups used for pressure/support scoping are intentionally
+# written into the MED mesh alongside the 3D volume. They are not volume
+# families and must not make the 3D results bridge fail closed.
+SKIN_FAMILIES = {"TR3", "TR6", "QU4"}
+
 
 def decode_components(raw, width=16):
-    if isinstance(raw, bytes): raw = raw.decode("ascii", "ignore")
-    return [raw[i:i+width].strip() for i in range(0, len(raw), width) if raw[i:i+width].strip()]
+    if isinstance(raw, bytes):
+        raw = raw.decode("ascii", "ignore")
+    return [raw[i:i + width].strip() for i in range(0, len(raw), width) if raw[i:i + width].strip()]
 
-def field(h, token, location):
-    root = h[f"CHA/0000000e{token}"]
+
+def discover_mesh(h):
+    if "ENS_MAA" not in h:
+        raise RuntimeError("MED file has no ENS_MAA mesh collection")
+    mesh_names = sorted(
+        name for name, obj in h["ENS_MAA"].items() if isinstance(obj, h5py.Group)
+    )
+    if len(mesh_names) != 1:
+        raise RuntimeError(
+            "MED must contain exactly one mesh under ENS_MAA; found: "
+            + (", ".join(mesh_names) if mesh_names else "<none>")
+        )
+    mesh_name = mesh_names[0]
+    mesh_group = h[f"ENS_MAA/{mesh_name}"]
+    state_names = []
+    for name, obj in mesh_group.items():
+        if isinstance(obj, h5py.Group) and "NOE" in obj and "MAI" in obj:
+            state_names.append(name)
+    if len(state_names) != 1:
+        raise RuntimeError(
+            f"MED mesh {mesh_name} must have exactly one topology state containing NOE and MAI; found: "
+            + (", ".join(sorted(state_names)) if state_names else "<none>")
+        )
+    return mesh_name, f"ENS_MAA/{mesh_name}/{state_names[0]}"
+
+
+def med_field_path(h, token, mesh_name):
+    # Code_Aster 15 uses an internal eight-hex-digit concept prefix; 17 writes
+    # the result concept name followed by __. Never silently pick among results.
+    names = [name for name in h["CHA"] if name == token or name.endswith("__" + token)
+             or re.fullmatch(r"[0-9a-fA-F]{8}" + re.escape(token), name)]
+    if len(names) != 1:
+        raise RuntimeError(f"{token}: expected one unambiguous MED field, found {names}")
+    root = h["CHA/" + names[0]]
+    mesh = root.attrs.get("MAI", b"")
+    if isinstance(mesh, bytes):
+        mesh = mesh.decode("ascii")
+    if str(mesh) != mesh_name:
+        raise RuntimeError(f"{token}: field belongs to a different MED mesh: {mesh}")
+    return "CHA/" + names[0]
+
+
+def optional_med_field_path(h, token, mesh_name):
+    names = [name for name in h["CHA"] if name == token or name.endswith("__" + token)
+             or re.fullmatch(r"[0-9a-fA-F]{8}" + re.escape(token), name)]
+    if not names:
+        return None
+    if len(names) != 1:
+        raise RuntimeError(f"{token}: expected at most one unambiguous MED field, found {names}")
+    root = h["CHA/" + names[0]]
+    mesh = root.attrs.get("MAI", b"")
+    if isinstance(mesh, bytes):
+        mesh = mesh.decode("ascii")
+    if str(mesh) != mesh_name:
+        raise RuntimeError(f"{token}: field belongs to a different MED mesh: {mesh}")
+    return "CHA/" + names[0]
+
+
+def field_step_candidates(h, root_path, token):
+    root = h[root_path]
+    steps = []
+    for name, obj in root.items():
+        if not isinstance(obj, h5py.Group):
+            continue
+        locations = list(obj.keys())
+        if not any(location == "NOE" or location.startswith("NOE.") for location in locations):
+            continue
+        def attr_number(key, default=None):
+            raw = obj.attrs.get(key, default)
+            try:
+                if isinstance(raw, np.ndarray):
+                    raw = raw.reshape(-1)[0]
+                return float(raw)
+            except (TypeError, ValueError, IndexError):
+                return default
+        steps.append({
+            "name": name,
+            "time": attr_number("PDT"),
+            "order": attr_number("NDT"),
+            "suborder": attr_number("NOR"),
+        })
+    if not steps:
+        raise RuntimeError(f"{token}: no MED result steps found")
+    return steps
+
+
+def select_field_step(h, root_path, token):
+    candidates = field_step_candidates(h, root_path, token)
+    mode = os.environ.get("ASTERMAX_MED_STEP_SELECTION", "single").strip().lower()
+    if mode not in {"single", "last"}:
+        raise RuntimeError("ASTERMAX_MED_STEP_SELECTION must be single or last")
+    if len(candidates) == 1:
+        return candidates[0]["name"]
+    if mode == "single":
+        raise RuntimeError(
+            f"{token}: multiple MED result steps found: "
+            f"{[x['name'] for x in candidates]}; explicit step selection is required; "
+            "set ASTERMAX_MED_STEP_SELECTION=last to select the latest instant"
+        )
+    def key(item):
+        return (
+            float("-inf") if item["time"] is None else item["time"],
+            float("-inf") if item["order"] is None else item["order"],
+            float("-inf") if item["suborder"] is None else item["suborder"],
+            item["name"],
+        )
+    return max(candidates, key=key)["name"]
+
+
+def nodal_field(h, token, root_path, step):
+    root = h[root_path]
     comps = decode_components(root.attrs["NOM"])
-    data = np.asarray(h[f"CHA/0000000e{token}/{STEP}/{location}/MED_NO_PROFILE_INTERNAL/CO"][()], dtype=float)
-    if len(data) % len(comps):
+    data_path = f"{root_path}/{step}/NOE/MED_NO_PROFILE_INTERNAL/CO"
+    if data_path not in h:
+        raise RuntimeError(f"{token}: nodal data is missing for MED step {step}")
+    data = np.asarray(h[data_path][()], dtype=float)
+    if not comps or len(data) % len(comps):
         raise RuntimeError(f"{token}: component/data size mismatch")
     return comps, data.reshape(len(comps), -1)
 
-def avg_element_node(values, conn):
-    accum = defaultdict(list)
-    flat_nodes = conn.reshape(-1)
-    if len(values) != len(flat_nodes):
-        raise RuntimeError("element-node value count does not match connectivity")
-    for nid, value in zip(flat_nodes, values):
-        accum[int(nid)].append(float(value))
-    max_node=int(conn.max())
-    if any(i not in accum for i in range(1,max_node+1)):
-        raise RuntimeError("MED connectivity is not contiguous from node 1; production bridge requires explicit node-id mapping before supporting this mesh")
-    return np.array([sum(accum[i])/len(accum[i]) for i in range(1,max_node+1)], dtype=float)
 
-def write_data_array(parent, name, values, ncomp=1, vtk_type="Float64"):
-    attrs={"type":vtk_type,"Name":name,"format":"ascii"}
-    if ncomp != 1: attrs["NumberOfComponents"]=str(ncomp)
-    e=ET.SubElement(parent,"DataArray",attrs)
-    arr=np.asarray(values)
-    e.text="\n"+" ".join(f"{float(x):.15g}" if vtk_type.startswith("Float") else str(int(x)) for x in arr.reshape(-1))+"\n"
+def discover_mesh_families(h, mesh_root):
+    mai_path = f"{mesh_root}/MAI"
+    if mai_path not in h:
+        raise RuntimeError("MED mesh has no MAI element section")
+    families = {}
+    unsupported = []
+    for code in sorted(h[mai_path].keys()):
+        group = h[f"{mai_path}/{code}"]
+        if "NOD" not in group or "NUM" not in group:
+            continue
+        if code in SKIN_FAMILIES:
+            continue
+        if code not in SUPPORTED_FAMILIES:
+            unsupported.append(code)
+            continue
+        nodes_per_cell, semantic, vtk_type = SUPPORTED_FAMILIES[code]
+        n_elem = int(group["NUM"].shape[0])
+        raw = np.asarray(group["NOD"][()], dtype=int)
+        if n_elem <= 0 or raw.size != n_elem * nodes_per_cell:
+            raise RuntimeError(
+                f"{code}: connectivity size {raw.size} is incompatible with {n_elem} x {nodes_per_cell}"
+            )
+        conn = raw.reshape(nodes_per_cell, n_elem).T
+        if np.any(conn <= 0):
+            raise RuntimeError(f"{code}: connectivity contains non-positive node ids")
+        families[code] = {
+            "nodes_per_cell": nodes_per_cell,
+            "semantic": semantic,
+            "vtk_type": vtk_type,
+            "conn": conn,
+            "n_elem": n_elem,
+        }
+    if unsupported:
+        raise RuntimeError("unsupported MED volume element families: " + ",".join(unsupported))
+    if not families:
+        raise RuntimeError("MED contains no supported volume elements (TE4/T10/HE8)")
+    return families
+
+
+def discover_element_node_field(h, token, root_path, step, families):
+    if root_path not in h:
+        raise RuntimeError(f"missing MED field: {token}")
+    root = h[root_path]
+    comps = decode_components(root.attrs["NOM"])
+    if not comps:
+        raise RuntimeError(f"{token}: no components")
+    step_path = f"{root_path}/{step}"
+    if step_path not in h:
+        raise RuntimeError(f"{token}: selected MED step {step} is missing")
+    blocks = {}
+    for location in h[step_path].keys():
+        if not location.startswith("NOE."):
+            continue
+        code = location.split(".", 1)[1]
+        if code not in families:
+            continue
+        data_path = f"{step_path}/{location}/MED_NO_PROFILE_INTERNAL/CO"
+        if data_path not in h:
+            continue
+        raw = np.asarray(h[data_path][()], dtype=float)
+        if raw.size % len(comps):
+            raise RuntimeError(f"{token}/{location}: component/data size mismatch")
+        data = raw.reshape(len(comps), -1)
+        expected = families[code]["n_elem"] * families[code]["nodes_per_cell"]
+        if data.shape[1] != expected:
+            raise RuntimeError(
+                f"{token}/{location}: expected {expected} element-node values/component, got {data.shape[1]}"
+            )
+        blocks[code] = data
+    missing = sorted(set(families) - set(blocks))
+    if missing:
+        raise RuntimeError(f"{token}: missing element-node result blocks for {','.join(missing)}")
+    return comps, blocks
+
+
+def average_element_node_component(blocks, families, component_index, n_nodes):
+    sums = np.zeros(n_nodes, dtype=np.float64)
+    counts = np.zeros(n_nodes, dtype=np.int64)
+    for code, data in blocks.items():
+        values = np.asarray(data[component_index], dtype=np.float64)
+        conn = np.asarray(families[code]["conn"], dtype=np.int64).reshape(-1)
+        if len(values) != len(conn):
+            raise RuntimeError(f"{code}: result/connectivity length mismatch")
+        bad = conn[(conn < 1) | (conn > n_nodes)]
+        if bad.size:
+            raise RuntimeError(f"{code}: node id {int(bad[0])} is outside 1..{n_nodes}")
+        zero_based = conn - 1
+        sums += np.bincount(zero_based, weights=values, minlength=n_nodes)[:n_nodes]
+        counts += np.bincount(zero_based, minlength=n_nodes)[:n_nodes]
+    missing = np.flatnonzero(counts == 0) + 1
+    if missing.size:
+        raise RuntimeError(
+            "element-node result coverage does not include all MED nodes; first missing ids: "
+            + ",".join(map(str, missing[:10].tolist()))
+        )
+    return sums / counts
+
+
+def _write_json_vector(handle, values, integer=False, chunk_size=8192):
+    arr = np.asarray(values).reshape(-1)
+    handle.write("[")
+    first = True
+    for start in range(0, arr.size, chunk_size):
+        chunk = arr[start:start + chunk_size]
+        text = ",".join(str(int(x)) if integer else repr(float(x)) for x in chunk)
+        if text:
+            if not first:
+                handle.write(",")
+            handle.write(text)
+            first = False
+    handle.write("]")
+
+
+def _write_json_matrix(handle, values, integer=False):
+    arr = np.asarray(values)
+    if arr.ndim != 2:
+        raise ValueError("matrix writer requires a 2D array")
+    handle.write("[")
+    for i, row in enumerate(arr):
+        if i:
+            handle.write(",")
+        _write_json_vector(handle, row, integer=integer)
+    handle.write("]")
+
+
+def _write_json_connectivity(handle, families, family_codes):
+    handle.write("[")
+    first = True
+    for code in family_codes:
+        for row in families[code]["conn"]:
+            if not first:
+                handle.write(",")
+            _write_json_vector(handle, row, integer=True)
+            first = False
+    handle.write("]")
+
+
+def _write_json_cell_types(handle, families, family_codes):
+    handle.write("[")
+    first = True
+    for code in family_codes:
+        value = str(int(families[code]["vtk_type"]))
+        remaining = int(families[code]["n_elem"])
+        while remaining:
+            count = min(8192, remaining)
+            text = ",".join([value] * count)
+            if not first:
+                handle.write(",")
+            handle.write(text)
+            first = False
+            remaining -= count
+    handle.write("]")
+
+
+def write_bundle_streaming(path, bundle, families, family_codes, coords, displacement, total, von_mises, nodal_stress):
+    """Write schema v0 compactly without materializing NumPy arrays as Python lists."""
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write("{")
+        first = True
+        for key in ("schema", "release", "source", "units", "mesh", "fields"):
+            if not first:
+                handle.write(",")
+            handle.write(json.dumps(key) + ":")
+            handle.write(json.dumps(bundle[key], indent=None, separators=(",", ":"), allow_nan=False))
+            first = False
+        handle.write(',"arrays":{')
+        handle.write('"coordinates":')
+        _write_json_matrix(handle, coords)
+        handle.write(',"connectivity":')
+        _write_json_connectivity(handle, families, family_codes)
+        handle.write(',"cell_types":')
+        _write_json_cell_types(handle, families, family_codes)
+        handle.write(',"displacement":')
+        _write_json_matrix(handle, displacement)
+        handle.write(',"total_deformation":')
+        _write_json_vector(handle, total)
+        handle.write(',"von_mises":')
+        _write_json_vector(handle, von_mises)
+        handle.write(',"stress":{')
+        for i, (name, values) in enumerate(nodal_stress.items()):
+            if i:
+                handle.write(",")
+            handle.write(json.dumps(name) + ":")
+            _write_json_vector(handle, values)
+        handle.write("}")
+        handle.write("}")
+        handle.write(',"integrity":')
+        handle.write(json.dumps(bundle["integrity"], indent=None, separators=(",", ":"), allow_nan=False))
+        handle.write("}")
+
+
+def _write_vtu_values(handle, chunks, vtk_type, chunk_size=8192):
+    first = True
+    for values in chunks:
+        arr = np.asarray(values).reshape(-1)
+        for start in range(0, arr.size, chunk_size):
+            chunk = arr[start:start + chunk_size]
+            if vtk_type.startswith("Float"):
+                text = " ".join(f"{float(x):.15g}" for x in chunk)
+            else:
+                text = " ".join(str(int(x)) for x in chunk)
+            if text:
+                if not first:
+                    handle.write(" ")
+                handle.write(text)
+                first = False
+
+
+def _write_vtu_data_array(handle, name, chunks, ncomp=1, vtk_type="Float64", indent="        "):
+    attrs = f'type={quoteattr(vtk_type)} Name={quoteattr(name)} format="ascii"'
+    if ncomp != 1:
+        attrs += f' NumberOfComponents="{ncomp}"'
+    handle.write(f"{indent}<DataArray {attrs}>\n{indent}  ")
+    _write_vtu_values(handle, chunks, vtk_type)
+    handle.write(f"\n{indent}</DataArray>\n")
+
+
+def _connectivity_chunks(families, family_codes):
+    for code in family_codes:
+        yield np.asarray(families[code]["conn"], dtype=np.int64).reshape(-1) - 1
+
+
+def _offset_chunks(families, family_codes):
+    running = 0
+    for code in family_codes:
+        fam = families[code]
+        npe = int(fam["nodes_per_cell"])
+        count = int(fam["n_elem"])
+        chunk = running + np.arange(1, count + 1, dtype=np.int64) * npe
+        if count:
+            running = int(chunk[-1])
+        yield chunk
+
+
+def _cell_type_chunks(families, family_codes):
+    for code in family_codes:
+        fam = families[code]
+        yield np.full(int(fam["n_elem"]), int(fam["vtk_type"]), dtype=np.uint8)
+
+
+def write_vtu_streaming(path, n_nodes, n_elem, families, family_codes, coords, displacement, total, von_mises, nodal_stress):
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write('<?xml version="1.0" encoding="utf-8"?>\n')
+        handle.write('<VTKFile type="UnstructuredGrid" version="0.1" byte_order="LittleEndian">\n')
+        handle.write("  <UnstructuredGrid>\n")
+        handle.write(f'    <Piece NumberOfPoints="{n_nodes}" NumberOfCells="{n_elem}">\n')
+        handle.write("      <Points>\n")
+        _write_vtu_data_array(handle, "Points", (coords,), 3, indent="        ")
+        handle.write("      </Points>\n")
+        handle.write("      <Cells>\n")
+        _write_vtu_data_array(handle, "connectivity", _connectivity_chunks(families, family_codes), vtk_type="Int32", indent="        ")
+        _write_vtu_data_array(handle, "offsets", _offset_chunks(families, family_codes), vtk_type="Int32", indent="        ")
+        _write_vtu_data_array(handle, "types", _cell_type_chunks(families, family_codes), vtk_type="UInt8", indent="        ")
+        handle.write("      </Cells>\n")
+        handle.write('      <PointData Scalars="Equivalent Stress" Vectors="Displacement">\n')
+        _write_vtu_data_array(handle, "Displacement", (displacement,), 3, indent="        ")
+        _write_vtu_data_array(handle, "Total Deformation", (total,), indent="        ")
+        _write_vtu_data_array(handle, "Equivalent Stress", (von_mises,), indent="        ")
+        for name, arr in nodal_stress.items():
+            _write_vtu_data_array(handle, f"Stress {name}", (arr,), indent="        ")
+        handle.write("      </PointData>\n")
+        handle.write("    </Piece>\n")
+        handle.write("  </UnstructuredGrid>\n")
+        handle.write("</VTKFile>\n")
+
+
+def _temporary_path(final_path):
+    directory = os.path.dirname(os.path.abspath(final_path))
+    prefix = "." + os.path.basename(final_path) + "."
+    fd, path = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=directory)
+    os.close(fd)
+    return path
+
+
+def _backup_link(final_path):
+    if not os.path.exists(final_path):
+        return None
+    backup = _temporary_path(final_path + ".previous")
+    os.remove(backup)
+    try:
+        os.link(final_path, backup)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot create same-filesystem rollback link for {final_path}; publication aborted"
+        ) from exc
+    return backup
+
 
 with h5py.File(med_path, "r") as h:
-    coords_raw=np.asarray(h[f"{MESH_ROOT}/NOE/COO"][()], dtype=float)
-    n_nodes=int(h[f"{MESH_ROOT}/NOE/COO"].attrs["NBR"])
-    coords=coords_raw.reshape(3,n_nodes).T
+    mesh_name, mesh_root = discover_mesh(h)
+    coords_raw = np.asarray(h[f"{mesh_root}/NOE/COO"][()], dtype=float)
+    n_nodes = int(h[f"{mesh_root}/NOE/COO"].attrs["NBR"])
+    if coords_raw.size != n_nodes * 3:
+        raise RuntimeError("MED coordinate array does not match declared node count")
+    coords = coords_raw.reshape(3, n_nodes).T
 
-    conn_raw=np.asarray(h[f"{MESH_ROOT}/MAI/HE8/NOD"][()], dtype=int)
-    n_elem=int(h[f"{MESH_ROOT}/MAI/HE8/NUM"].shape[0])
-    conn=conn_raw.reshape(8,n_elem).T
+    families = discover_mesh_families(h, mesh_root)
+    n_elem = sum(x["n_elem"] for x in families.values())
 
-    dcomp, displacement_blocks=field(h,"DEPL","NOE")
-    if dcomp[:3] != ["DX","DY","DZ"]:
+    field_paths = {
+        token: med_field_path(h, token, mesh_name)
+        for token in ("DEPL", "SIGM_ELNO", "SIEQ_ELNO")
+    }
+    reaction_path = optional_med_field_path(h, "REAC_NODA", mesh_name)
+    if reaction_path is not None:
+        field_paths["REAC_NODA"] = reaction_path
+    field_steps = {
+        token: select_field_step(h, path, token)
+        for token, path in field_paths.items()
+    }
+    distinct_steps = sorted(set(field_steps.values()))
+    if len(distinct_steps) != 1:
+        raise RuntimeError(
+            "MED result fields do not refer to one common step: "
+            + ", ".join(f"{token}={step}" for token, step in sorted(field_steps.items()))
+        )
+    result_step = distinct_steps[0]
+    displacement_step_candidates = field_step_candidates(
+        h, field_paths["DEPL"], "DEPL"
+    )
+    selected_step_info = next(
+        (x for x in displacement_step_candidates if x["name"] == result_step),
+        {"name": result_step, "time": None, "order": None, "suborder": None},
+    )
+
+    dcomp, displacement_blocks = nodal_field(h, "DEPL", field_paths["DEPL"], result_step)
+    if dcomp[:3] != ["DX", "DY", "DZ"]:
         raise RuntimeError(f"unexpected DEPL components: {dcomp}")
-    displacement=displacement_blocks[:3].T
-    total=np.linalg.norm(displacement,axis=1)
+    if displacement_blocks.shape[1] != n_nodes:
+        raise RuntimeError("DEPL nodal count does not match mesh node count")
+    displacement = displacement_blocks[:3].T
+    total = np.linalg.norm(displacement, axis=1)
 
-    scomp, stress_blocks=field(h,"SIGM_ELNO","NOE.HE8")
-    qcomp, equiv_blocks=field(h,"SIEQ_ELNO","NOE.HE8")
+    reaction = None
+    reaction_resultant = None
+    reaction_moment = None
+    if reaction_path is not None:
+        rcomp, reaction_blocks = nodal_field(
+            h, "REAC_NODA", reaction_path, result_step
+        )
+        if rcomp[:3] != ["DX", "DY", "DZ"]:
+            raise RuntimeError(f"unexpected REAC_NODA components: {rcomp}")
+        if reaction_blocks.shape[1] != n_nodes:
+            raise RuntimeError("REAC_NODA nodal count does not match mesh node count")
+        reaction = reaction_blocks[:3].T
+        reaction_resultant = reaction.sum(axis=0)
+        # Global reaction moment about the study/global origin, in N*mm for the
+        # enforced MM_N_S_MPA solver contract. This is derived directly from
+        # real REAC_NODA and MED nodal coordinates, not from synthetic values.
+        reaction_moment = np.cross(coords, reaction).sum(axis=0)
+
+    scomp, stress_by_family = discover_element_node_field(
+        h, "SIGM_ELNO", field_paths["SIGM_ELNO"], result_step, families
+    )
+    qcomp, equiv_by_family = discover_element_node_field(
+        h, "SIEQ_ELNO", field_paths["SIEQ_ELNO"], result_step, families
+    )
     if "VMIS" not in qcomp:
         raise RuntimeError("SIEQ_ELNO has no VMIS component")
 
-    nodal_stress={}
-    for i,name in enumerate(scomp):
-        nodal_stress[name]=avg_element_node(stress_blocks[i],conn)
-    vm_idx=qcomp.index("VMIS")
-    vm_elno=equiv_blocks[vm_idx]
-    von_mises=avg_element_node(vm_elno,conn)
+    nodal_stress = {
+        name: average_element_node_component(stress_by_family, families, i, n_nodes)
+        for i, name in enumerate(scomp)
+    }
+    required_stress = ("SIXX", "SIYY", "SIZZ", "SIXY", "SIXZ", "SIYZ")
+    missing_stress = [name for name in required_stress if name not in nodal_stress]
+    if missing_stress:
+        raise RuntimeError(
+            "SIGM_ELNO is missing components required for ANSYS-parity von Mises: "
+            + ",".join(missing_stress)
+        )
+    sxx, syy, szz, sxy, sxz, syz = (nodal_stress[name] for name in required_stress)
+    # ANSYS Mechanical parity: average the six tensor components to the node first,
+    # then evaluate the von Mises invariant. Averaging SIEQ/VMIS scalars first is
+    # not mathematically equivalent and can bias local extrema.
+    von_mises = np.sqrt(
+        0.5 * ((sxx - syy) ** 2 + (syy - szz) ** 2 + (szz - sxx) ** 2)
+        + 3.0 * (sxy ** 2 + sxz ** 2 + syz ** 2)
+    )
+    vm_idx = qcomp.index("VMIS")
+    vm_elno = np.concatenate([equiv_by_family[c][vm_idx] for c in sorted(equiv_by_family)])
 
-bundle={
-    "schema":"astermax-results-bundle/v0",
-    "release":"C9.64-production" if validation_mode=="production" else "C9.64",
-    "source":{"kind":"REAL_CODE_ASTER_MED","file":os.path.basename(med_path),"size_bytes":os.path.getsize(med_path)},
-    "units":{"length":"mm","force":"N","stress":"MPa"},
-    "mesh":{"node_count":int(n_nodes),"element_count":int(n_elem),"element_type":"HEXA8"},
-    "fields":{
-        "displacement":{"location":"NODE","components":dcomp[:3],"derived":False,
-            "dx_min":float(displacement[:,0].min()),"dx_max":float(displacement[:,0].max()),
-            "total_min":float(total.min()),"total_max":float(total.max())},
-        "stress":{"location":"NODE","components":scomp,"derived":True,
-            "derivation":"arithmetic mean of real Code_Aster SIGM_ELNO values over incident element-local nodes"},
-        "von_mises":{"location":"NODE","component":"VMIS","derived":True,
-            "derivation":"arithmetic mean of real Code_Aster SIEQ_ELNO/VMIS values over incident element-local nodes",
-            "raw_elno_min":float(vm_elno.min()),"raw_elno_max":float(vm_elno.max()),
-            "nodal_min":float(von_mises.min()),"nodal_max":float(von_mises.max())}
+family_codes = sorted(families)
+semantic_types = [families[c]["semantic"] for c in family_codes]
+mesh_element_type = semantic_types[0] if len(semantic_types) == 1 else "MIXED"
+
+bundle = {
+    "schema": "astermax-results-bundle/v0",
+    "release": "C10.07-production" if validation_mode == "production" else "C10.07-regression",
+    "source": {
+        "kind": "REAL_CODE_ASTER_MED",
+        "file": os.path.basename(med_path),
+        "size_bytes": os.path.getsize(med_path),
+        "med_result_step": result_step,
+        "med_step_selection": os.environ.get("ASTERMAX_MED_STEP_SELECTION", "single").strip().lower(),
+        "med_result_time": selected_step_info["time"],
+        "available_result_steps": displacement_step_candidates,
     },
-    "arrays":{"coordinates":coords.tolist(),"connectivity":conn.tolist(),
-        "displacement":displacement.tolist(),"total_deformation":total.tolist(),
-        "von_mises":von_mises.tolist(),"stress":{k:v.tolist() for k,v in nodal_stress.items()}},
-    "integrity":{"fea_values_invented":False,"solver_output_modified":False,"derived_nodal_stress_average_declared":True,
-                 "bridge_validation_mode":validation_mode}
+    "units": {"length": "mm", "force": "N", "stress": "MPa"},
+    "mesh": {
+        "med_name": mesh_name,
+        "node_count": int(n_nodes),
+        "element_count": int(n_elem),
+        "element_type": mesh_element_type,
+        "element_types": semantic_types,
+        "med_family_codes": family_codes,
+    },
+    "fields": {
+        "displacement": {
+            "location": "NODE",
+            "components": dcomp[:3],
+            "derived": False,
+            "dx_min": float(displacement[:, 0].min()),
+            "dx_max": float(displacement[:, 0].max()),
+            "total_min": float(total.min()),
+            "total_max": float(total.max()),
+        },
+        "stress": {
+            "location": "NODE",
+            "components": scomp,
+            "derived": True,
+            "derivation": "arithmetic mean of real Code_Aster SIGM_ELNO values over incident element-local nodes",
+        },
+        "von_mises": {
+            "location": "NODE",
+            "component": "VMIS",
+            "derived": True,
+            "derivation": "ANSYS-parity component-first: arithmetic mean of real Code_Aster SIGM_ELNO tensor components over incident element-local nodes, then von Mises invariant",
+            "raw_elno_min": float(vm_elno.min()),
+            "raw_elno_max": float(vm_elno.max()),
+            "nodal_min": float(von_mises.min()),
+            "nodal_max": float(von_mises.max()),
+        },
+        "reaction": None if reaction is None else {
+            "location": "NODE",
+            "components": ["DX", "DY", "DZ"],
+            "derived": False,
+            "resultant_n": [float(x) for x in reaction_resultant],
+            "resultant_magnitude_n": float(np.linalg.norm(reaction_resultant)),
+            "moment_about_origin_n_mm": [float(x) for x in reaction_moment],
+            "moment_magnitude_n_mm": float(np.linalg.norm(reaction_moment)),
+            "moment_origin_mm": [0.0, 0.0, 0.0],
+            "source": "real Code_Aster REAC_NODA",
+        },
+    },
+    "integrity": {
+        "fea_values_invented": False,
+        "solver_output_modified": False,
+        "derived_nodal_stress_average_declared": True,
+        "von_mises_component_first_ansys_parity": True,
+        "reaction_resultant_from_real_reac_noda": reaction is not None,
+        "bridge_validation_mode": validation_mode,
+        "supported_med_families": ["TE4", "T10", "HE8"],
+    },
 }
-with open(bundle_path,"w",encoding="utf-8") as f: json.dump(bundle,f,indent=2)
 
-vtk=ET.Element("VTKFile",{"type":"UnstructuredGrid","version":"0.1","byte_order":"LittleEndian"})
-ug=ET.SubElement(vtk,"UnstructuredGrid")
-piece=ET.SubElement(ug,"Piece",{"NumberOfPoints":str(n_nodes),"NumberOfCells":str(n_elem)})
-points=ET.SubElement(piece,"Points")
-write_data_array(points,"Points",coords,3)
-cells=ET.SubElement(piece,"Cells")
-write_data_array(cells,"connectivity",conn-1,1,"Int32")
-write_data_array(cells,"offsets",np.arange(1,n_elem+1)*8,1,"Int32")
-write_data_array(cells,"types",np.full(n_elem,12),1,"UInt8")
-pd=ET.SubElement(piece,"PointData",{"Scalars":"Equivalent Stress","Vectors":"Displacement"})
-write_data_array(pd,"Displacement",displacement,3)
-write_data_array(pd,"Total Deformation",total)
-write_data_array(pd,"Equivalent Stress",von_mises)
-for name,arr in nodal_stress.items(): write_data_array(pd,f"Stress {name}",arr)
-ET.ElementTree(vtk).write(vtu_path,encoding="utf-8",xml_declaration=True)
-
-production_checks={
-    "real_med_source":bool(bundle["source"]["size_bytes"]>1000),
-    "mesh_nonempty_hexa8":bool(n_nodes>0 and n_elem>0 and conn.shape==(n_elem,8)),
-    "coordinates_present_finite":bool(coords.shape==(n_nodes,3) and np.isfinite(coords).all()),
-    "displacement_present_finite":bool(displacement.shape==(n_nodes,3) and np.isfinite(displacement).all()),
-    "stress_present_finite":bool(len(scomp)>0 and all(len(v)==n_nodes and np.isfinite(v).all() for v in nodal_stress.values())),
-    "von_mises_present_finite":bool(len(von_mises)==n_nodes and np.isfinite(von_mises).all()),
-    "no_invented_results":bool(bundle["integrity"]["fea_values_invented"] is False),
-    "vtu_written":bool(os.path.isfile(vtu_path) and os.path.getsize(vtu_path)>1000)
+production_checks = {
+    "real_med_source": bool(bundle["source"]["size_bytes"] > 1000),
+    "mesh_nonempty_supported": bool(n_nodes > 0 and n_elem > 0),
+    "supported_element_families_only": bool(all(c in SUPPORTED_FAMILIES for c in family_codes)),
+    "coordinates_present_finite": bool(coords.shape == (n_nodes, 3) and np.isfinite(coords).all()),
+    "displacement_present_finite": bool(displacement.shape == (n_nodes, 3) and np.isfinite(displacement).all()),
+    "total_deformation_present_finite": bool(total.shape == (n_nodes,) and np.isfinite(total).all()),
+    "stress_present_finite": bool(
+        len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
+    ),
+    "von_mises_present_finite": bool(len(von_mises) == n_nodes and np.isfinite(von_mises).all()),
+    "raw_von_mises_elno_finite": bool(vm_elno.size > 0 and np.isfinite(vm_elno).all()),
+    "reaction_finite_if_present": bool(reaction is None or (reaction.shape == (n_nodes, 3) and np.isfinite(reaction).all())),
+    "reaction_moment_finite_if_present": bool(reaction_moment is None or np.isfinite(reaction_moment).all()),
+    "no_invented_results": bool(bundle["integrity"]["fea_values_invented"] is False),
 }
-if validation_mode=="regression":
-    checks=dict(production_checks)
+if validation_mode == "regression":
+    he8 = families.get("HE8")
+    checks = dict(production_checks)
     checks.update({
-        "mesh_44_nodes_10_hex":bool(n_nodes==44 and n_elem==10 and conn.shape==(10,8)),
-        "c962_dx_reproduced":bool(abs(float(displacement[:,0].max())-0.0471697826890255)<1e-12)
+        "mesh_44_nodes_10_hex": bool(
+            len(families) == 1 and he8 is not None and n_nodes == 44 and he8["n_elem"] == 10
+        ),
+        "c962_dx_reproduced": bool(math.isclose(
+            float(displacement[:, 0].max()),
+            C962_DX_MAX_REFERENCE_MM,
+            rel_tol=C962_DX_REL_TOL,
+            abs_tol=0.0,
+        )),
     })
 else:
-    checks=production_checks
+    checks = production_checks
 
-summary={"release":"C9.64","validation_mode":validation_mode,"checks":checks,"checks_passed":int(sum(checks.values())),"checks_total":len(checks),"pass":bool(all(checks.values())),
-         "node_count":int(n_nodes),"element_count":int(n_elem),
-         "dx_max_mm":float(displacement[:,0].max()),"total_deformation_max_mm":float(total.max()),
-         "von_mises_nodal_max_mpa":float(von_mises.max()),"von_mises_raw_elno_max_mpa":float(vm_elno.max()),
-         "fea_values_invented":False}
-print(json.dumps(summary,indent=2))
-if not summary["pass"]: raise SystemExit("C9.64 results bridge gate failed")
+# Reject invalid numerical data before spending I/O on temporary artifacts. No final artifact is
+# touched here; the full check set is evaluated again after the temporary VTU has been written.
+if not all(checks.values()):
+    failed = [name for name, passed in checks.items() if not passed]
+    raise SystemExit("C10.17 results bridge gate failed before publication: " + ", ".join(failed))
+
+bundle_tmp = None
+vtu_tmp = None
+vtu_backup = None
+vtu_existed = os.path.exists(vtu_path)
+try:
+    bundle_tmp = _temporary_path(bundle_path)
+    write_bundle_streaming(
+        bundle_tmp, bundle, families, family_codes, coords, displacement, total, von_mises, nodal_stress
+    )
+    vtu_tmp = _temporary_path(vtu_path)
+    write_vtu_streaming(
+        vtu_tmp, n_nodes, n_elem, families, family_codes, coords, displacement, total, von_mises, nodal_stress
+    )
+
+    checks["vtu_written"] = bool(os.path.isfile(vtu_tmp) and os.path.getsize(vtu_tmp) > 1000)
+    if not all(checks.values()):
+        failed = [name for name, passed in checks.items() if not passed]
+        raise SystemExit("C10.17 results bridge gate failed before publication: " + ", ".join(failed))
+
+    # All validation is complete before finals are touched. Preserve the previous VTU through a
+    # same-filesystem hard link so a JSON promotion failure can roll the first rename back without
+    # copying a production-size result file into Python memory.
+    vtu_backup = _backup_link(vtu_path)
+    os.replace(vtu_tmp, vtu_path)
+    vtu_tmp = None
+    try:
+        os.replace(bundle_tmp, bundle_path)
+        bundle_tmp = None
+    except BaseException:
+        if vtu_backup and os.path.exists(vtu_backup):
+            os.replace(vtu_backup, vtu_path)
+            vtu_backup = None
+        elif not vtu_existed and os.path.isfile(vtu_path):
+            os.remove(vtu_path)
+        raise
+    if vtu_backup and os.path.exists(vtu_backup):
+        os.remove(vtu_backup)
+        vtu_backup = None
+finally:
+    for temporary in (bundle_tmp, vtu_tmp, vtu_backup):
+        if temporary and os.path.exists(temporary):
+            try:
+                os.remove(temporary)
+            except OSError:
+                pass
+
+summary = {
+    "release": "C10.07",
+    "validation_mode": validation_mode,
+    "checks": checks,
+    "checks_passed": int(sum(checks.values())),
+    "checks_total": len(checks),
+    "pass": bool(all(checks.values())),
+    "med_mesh_name": mesh_name,
+    "med_result_step": result_step,
+    "med_result_time": selected_step_info["time"],
+    "available_result_step_count": len(displacement_step_candidates),
+    "node_count": int(n_nodes),
+    "element_count": int(n_elem),
+    "element_types": semantic_types,
+    "dx_max_mm": float(displacement[:, 0].max()),
+    "total_deformation_max_mm": float(total.max()),
+    "von_mises_nodal_max_mpa": float(von_mises.max()),
+    "von_mises_raw_elno_max_mpa": float(vm_elno.max()),
+    "reaction_resultant_n": None if reaction_resultant is None else [float(x) for x in reaction_resultant],
+    "reaction_resultant_magnitude_n": None if reaction_resultant is None else float(np.linalg.norm(reaction_resultant)),
+    "fea_values_invented": False,
+}
+print(json.dumps(summary, indent=2))
+if not summary["pass"]:
+    raise SystemExit("C10.07 results bridge gate failed")

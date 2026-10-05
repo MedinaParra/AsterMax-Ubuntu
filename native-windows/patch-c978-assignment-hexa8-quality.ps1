@@ -49,20 +49,40 @@ $code=@'
                         r.MissingMaterialReferenceCount++;
                         continue;
                     }
-                    if (section.RegionType != CaeGlobals.RegionTypeEnum.ElementSetName ||
-                        model.Mesh.ElementSets == null || String.IsNullOrWhiteSpace(section.RegionName) ||
-                        !model.Mesh.ElementSets.ContainsKey(section.RegionName))
+                    int[] regionElementIds = null;
+                    if (section.RegionType == CaeGlobals.RegionTypeEnum.ElementSetName)
+                    {
+                        if (model.Mesh.ElementSets == null || String.IsNullOrWhiteSpace(section.RegionName) ||
+                            !model.Mesh.ElementSets.ContainsKey(section.RegionName) ||
+                            model.Mesh.ElementSets[section.RegionName] == null)
+                        {
+                            r.MissingSectionRegionCount++;
+                            continue;
+                        }
+                        regionElementIds = model.Mesh.ElementSets[section.RegionName].Labels;
+                    }
+                    else if (section.RegionType == CaeGlobals.RegionTypeEnum.PartName)
+                    {
+                        if (model.Mesh.Parts == null || String.IsNullOrWhiteSpace(section.RegionName) ||
+                            !model.Mesh.Parts.ContainsKey(section.RegionName) ||
+                            model.Mesh.Parts[section.RegionName] == null)
+                        {
+                            r.MissingSectionRegionCount++;
+                            continue;
+                        }
+                        regionElementIds = model.Mesh.Parts[section.RegionName].Labels;
+                    }
+                    else
                     {
                         r.MissingSectionRegionCount++;
                         continue;
                     }
-                    var set = model.Mesh.ElementSets[section.RegionName];
-                    if (set == null || set.Labels == null)
+                    if (regionElementIds == null || regionElementIds.Length == 0)
                     {
                         r.MissingSectionRegionCount++;
                         continue;
                     }
-                    foreach (int id in set.Labels)
+                    foreach (int id in regionElementIds)
                     {
                         if (!model.Mesh.Elements.ContainsKey(id))
                         {

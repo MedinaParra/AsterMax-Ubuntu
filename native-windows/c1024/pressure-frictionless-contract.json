@@ -1,0 +1,172 @@
+{
+  "schema": "astermax-model-contract/v0",
+  "bridge": "C10.24-regression-fixture",
+  "name": "C10.24 Pressure Frictionless Cube",
+  "unit_system": "MM_N_S_MPA",
+  "source": {
+    "kind": "regression_fixture",
+    "fea_results_included": false,
+    "solver_execution_claimed": false
+  },
+  "mesh": {
+    "nodes": [
+      {
+        "id": "N1",
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N2",
+        "x": 10,
+        "y": 0,
+        "z": 0
+      },
+      {
+        "id": "N3",
+        "x": 10,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N4",
+        "x": 0,
+        "y": 10,
+        "z": 0
+      },
+      {
+        "id": "N5",
+        "x": 0,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N6",
+        "x": 10,
+        "y": 0,
+        "z": 10
+      },
+      {
+        "id": "N7",
+        "x": 10,
+        "y": 10,
+        "z": 10
+      },
+      {
+        "id": "N8",
+        "x": 0,
+        "y": 10,
+        "z": 10
+      }
+    ],
+    "element_type": "HEXA8",
+    "elements": [
+      {
+        "id": "E1",
+        "type": "HEXA8",
+        "nodes": [
+          "N1",
+          "N2",
+          "N3",
+          "N4",
+          "N5",
+          "N6",
+          "N7",
+          "N8"
+        ]
+      }
+    ],
+    "node_groups": {
+      "FIXED_X": [
+        "N1",
+        "N4",
+        "N5",
+        "N8"
+      ],
+      "PRESS_X_NODES": [
+        "N2",
+        "N3",
+        "N6",
+        "N7"
+      ]
+    },
+    "surface_groups": {
+      "PRESS_X": {
+        "area_mm2": 100,
+        "node_group": "PRESS_X_NODES",
+        "elements": [
+          {
+            "id": "SF1",
+            "type": "QUAD4",
+            "nodes": [
+              "N2",
+              "N3",
+              "N7",
+              "N6"
+            ],
+            "parent_element": "E1",
+            "face": "X+"
+          }
+        ]
+      },
+      "FRIC_Y": {
+        "area_mm2": 100,
+        "node_group": null,
+        "elements": [
+          {
+            "id": "SF2",
+            "type": "QUAD4",
+            "nodes": [
+              "N1",
+              "N2",
+              "N6",
+              "N5"
+            ],
+            "parent_element": "E1",
+            "face": "Y-"
+          }
+        ]
+      }
+    }
+  },
+  "materials": [
+    {
+      "name": "Structural Steel",
+      "young_modulus_mpa": 210000,
+      "poisson": 0.3,
+      "constitutive_model": "isotropic_linear_elastic"
+    }
+  ],
+  "analysis": {
+    "type": "static_structural",
+    "step_count": 1
+  },
+  "supports": [
+    {
+      "name": "Fixed Support",
+      "type": "fixed",
+      "group": "FIXED_X",
+      "dx": 0,
+      "dy": 0,
+      "dz": 0
+    },
+    {
+      "name": "Frictionless Support",
+      "type": "frictionless_normal",
+      "surface": "FRIC_Y",
+      "dnor": 0
+    }
+  ],
+  "loads": [
+    {
+      "name": "Pressure",
+      "type": "pressure",
+      "surface": "PRESS_X",
+      "pressure_mpa": 1,
+      "probe_group": "PRESS_X_NODES"
+    }
+  ],
+  "postprocess": {
+    "displacement_probe_group": "PRESS_X_NODES"
+  }
+}
