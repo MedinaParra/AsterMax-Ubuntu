@@ -9,8 +9,8 @@ import gmsh
 
 MEMORY_REFERENCE_NODES = 148000
 MEMORY_REFERENCE_ELEMENTS = 75900
+EXPECTED_SOLIDS = 106
 RANDOM_FACTOR_RETRY_LADDER = (1.0e-9, 1.0e-8, 1.0e-7, 1.0e-6)
-OCC_HEAL_TOLERANCE_MM = 1.0e-6
 
 
 def _global_bbox(volumes: list[tuple[int, int]]) -> tuple[float, float, float, float, float, float]:
@@ -25,22 +25,7 @@ def _global_bbox(volumes: list[tuple[int, int]]) -> tuple[float, float, float, f
     )
 
 
-def _smallest_occ_entities(dim: int, count: int = 30) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    metric_name = {1: "length_mm", 2: "area_mm2", 3: "volume_mm3"}[dim]
-    for _, tag in gmsh.model.getEntities(dim):
-        try:
-            metric = float(gmsh.model.occ.getMass(dim, tag))
-            bbox = [float(v) for v in gmsh.model.getBoundingBox(dim, tag)]
-        except Exception as exc:
-            rows.append({"tag": int(tag), "diagnostic_error": f"{type(exc).__name__}: {exc}"})
-            continue
-        rows.append({"tag": int(tag), metric_name: metric, "bbox_mm": bbox})
-    rows.sort(key=lambda row: float(row.get(metric_name, float("inf"))))
-    return rows[:count]
-
-
-def _generate_tet10_with_deterministic_retry() -> tuple[float, list[dict[str, object]]]:
+def _generate_tet10() -> tuple[float, list[dict[str, object]]]:
     attempts: list[dict[str, object]] = []
     last_error: Exception | None = None
     for factor in RANDOM_FACTOR_RETRY_LADDER:
@@ -68,16 +53,16 @@ def _generate_tet10_with_deterministic_retry() -> tuple[float, list[dict[str, ob
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Mesh the SKM pulley test-bench structural CAD with Gmsh TET10.")
-    parser.add_argument("step", type=Path)
+    parser = argparse.ArgumentParser(description="Mesh the SKM test-bench structural CAD with Gmsh TET10.")
+    parser.add_argument("cad", type=Path)
     parser.add_argument("--out", type=Path, default=Path("artifacts/banco_pruebas"))
     parser.add_argument("--min-mm", type=float, default=30.0)
     parser.add_argument("--max-mm", type=float, default=110.0)
     parser.add_argument("--curvature-elements", type=float, default=20.0)
     args = parser.parse_args()
 
-    if not args.step.is_file():
-        raise SystemExit(f"CAD_NOT_FOUND: {args.step}")
+    if not args.cad.is_file():
+        raise SystemExit(f"CAD_NOT_FOUND: {args.cad}")
     if args.min_mm <= 0 or args.max_mm < args.min_mm:
         raise SystemExit("INVALID_MESH_SIZE_RANGE")
 
@@ -86,7 +71,7 @@ def main() -> int:
     evidence: dict[str, object] = {
         "status": "FAIL",
         "environment": "GitHub Actions windows-latest / gmsh 4.13.1 via AsterMax pyproject",
-        "source_cad": str(args.step).replace("\\", "/"),
+        "source_cad": str(args.cad).replace("\\", "/"),
         "mesh": {
             "element_family": "TET10",
             "min_size_mm": args.min_mm,
@@ -94,15 +79,10 @@ def main() -> int:
             "curvature_elements_per_2pi": args.curvature_elements,
             "random_factor_retry_ladder": list(RANDOM_FACTOR_RETRY_LADDER),
         },
-        "geometry_healing": {
-            "tolerance_mm": OCC_HEAL_TOLERANCE_MM,
-            "fix_degenerated": True,
-            "fix_small_edges": True,
-            "fix_small_faces": True,
-            "sew_faces": False,
-            "make_solids": False,
-            "reason": "Keep the 106 structural solids intact; prior global sewing converted them to shells.",
-        },
+        "geometry_policy": (
+            "No Gmsh OCC healing or sewing. The input BREP must already be the separately "
+            "verified 106-solid defeatured geometry."
+        ),
         "memory_reference": {
             "nodes_approx": MEMORY_REFERENCE_NODES,
             "elements_approx": MEMORY_REFERENCE_ELEMENTS,
@@ -111,66 +91,27 @@ def main() -> int:
     try:
         gmsh.option.setNumber("General.Terminal", 1)
         gmsh.model.add("skm_banco_pruebas_structure")
-
-        # Import the verified BREP without automatic OCC healing. In the previous
-        # experiment enabling OCCSewFaces/OCCMakeSolids at import repaired wires
-        # but converted all 106 valid solids into shells. Healing is therefore
-        # applied below in a targeted mode that does not sew or rebuild solids.
-        imported = gmsh.model.occ.importShapes(str(args.step))
+        imported = gmsh.model.occ.importShapes(str(args.cad))
         gmsh.model.occ.synchronize()
         initial_volumes = gmsh.model.getEntities(3)
-        if not initial_volumes:
-            raise RuntimeError("NO_IMPORTED_VOLUMES")
+        if len(initial_volumes) != EXPECTED_SOLIDS:
+            raise RuntimeError(f"IMPORTED_VOLUME_COUNT:{len(initial_volumes)}!={EXPECTED_SOLIDS}")
 
-        evidence["before_heal"] = {
-            "volume_count": len(initial_volumes),
-            "curve_count": len(gmsh.model.getEntities(1)),
-            "surface_count": len(gmsh.model.getEntities(2)),
-            "smallest_edges": _smallest_occ_entities(1),
-            "smallest_faces": _smallest_occ_entities(2),
-        }
-
-        healed = gmsh.model.occ.healShapes(
-            [],
-            tolerance=OCC_HEAL_TOLERANCE_MM,
-            fixDegenerated=True,
-            fixSmallEdges=True,
-            fixSmallFaces=True,
-            sewFaces=False,
-            makeSolids=False,
-        )
-        gmsh.model.occ.synchronize()
-        healed_volumes = gmsh.model.getEntities(3)
-        if len(healed_volumes) != len(initial_volumes):
-            raise RuntimeError(
-                f"HEAL_CHANGED_VOLUME_COUNT:{len(initial_volumes)}->{len(healed_volumes)}"
-            )
-
-        evidence["after_heal"] = {
-            "returned_entity_count": len(healed),
-            "volume_count": len(healed_volumes),
-            "curve_count": len(gmsh.model.getEntities(1)),
-            "surface_count": len(gmsh.model.getEntities(2)),
-            "smallest_edges": _smallest_occ_entities(1),
-            "smallest_faces": _smallest_occ_entities(2),
-        }
-
+        # Only topological duplicate removal is retained. No healing, no sewing,
+        # and no mesh-size relaxation is allowed in this calibration pass.
         gmsh.model.occ.removeAllDuplicates()
         gmsh.model.occ.synchronize()
         volumes = gmsh.model.getEntities(3)
-        if not volumes:
-            raise RuntimeError("NO_VOLUMES_AFTER_OCC_DEDUP")
+        if len(volumes) != EXPECTED_SOLIDS:
+            raise RuntimeError(f"DEDUP_VOLUME_COUNT:{len(volumes)}!={EXPECTED_SOLIDS}")
 
         bbox = _global_bbox(volumes)
         evidence.update(
             {
                 "imported_entity_count": len(imported),
                 "initial_volume_count": len(initial_volumes),
-                "healed_volume_count": len(healed_volumes),
                 "conformal_volume_count": len(volumes),
                 "bbox_mm": list(map(float, bbox)),
-                "post_dedup_smallest_edges": _smallest_occ_entities(1),
-                "post_dedup_smallest_faces": _smallest_occ_entities(2),
             }
         )
 
@@ -182,9 +123,9 @@ def main() -> int:
         gmsh.option.setNumber("Mesh.HighOrderOptimize", 1)
         gmsh.option.setNumber("Mesh.MshFileVersion", 4.1)
 
-        selected_random_factor, attempts = _generate_tet10_with_deterministic_retry()
+        selected_factor, attempts = _generate_tet10()
         evidence["mesh_attempts"] = attempts
-        evidence["selected_random_factor"] = selected_random_factor
+        evidence["selected_random_factor"] = selected_factor
 
         node_tags, _, _ = gmsh.model.mesh.getNodes()
         element_types, element_tags, _ = gmsh.model.mesh.getElements(3)
@@ -214,10 +155,7 @@ def main() -> int:
                 "tet10_count": int(tet10_count),
                 "node_ratio_to_memory": nodes / MEMORY_REFERENCE_NODES,
                 "element_ratio_to_memory": tet10_count / MEMORY_REFERENCE_ELEMENTS,
-                "outputs": {
-                    "msh": msh_path.as_posix(),
-                    "med": med_path.as_posix(),
-                },
+                "outputs": {"msh": msh_path.as_posix(), "med": med_path.as_posix()},
             }
         )
         return 0
