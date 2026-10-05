@@ -26,52 +26,36 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: Compile bank mesh harness
+      - name: Compile bank harnesses
         shell: pwsh
-        run: python -W error -m py_compile cases/banco_pruebas/mesh_structure.py
+        run: |
+          python -W error -m py_compile cases/banco_pruebas/reconstruct_geometry.py
+          python -W error -m py_compile cases/banco_pruebas/mesh_structure.py
 
-      - name: Check structural STEP payload
-        id: geometry
+      - name: Reconstruct and verify structural BREP
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts\banco_pruebas | Out-Null
-          $p='cases\banco_pruebas\MAX_CIM_structure_base.step.xz'
-          if(Test-Path $p){
-            'present=true' >> $env:GITHUB_OUTPUT
-          } else {
-            'present=false' >> $env:GITHUB_OUTPUT
-            $e=@{
-              status='BLOCKED'
-              environment='GitHub Actions windows-latest'
-              commit='${{ github.sha }}'
-              reason='STRUCTURAL_STEP_PAYLOAD_NOT_COMMITTED'
-              expected_path='cases/banco_pruebas/MAX_CIM_structure_base.step.xz'
-              next_gate='Commit the simplified 106-solid structural STEP payload; then rerun this workflow.'
-            } | ConvertTo-Json -Depth 5
-            $e | Set-Content -Encoding UTF8 artifacts\banco_pruebas\mesh_evidence.json
-          }
-
-      - name: Expand structural STEP
-        if: steps.geometry.outputs.present == 'true'
-        shell: pwsh
-        run: |
-          python -c "import lzma,pathlib; src=pathlib.Path(r'cases/banco_pruebas/MAX_CIM_structure_base.step.xz'); dst=src.with_suffix(''); dst.write_bytes(lzma.decompress(src.read_bytes())); print(dst)"
+          python cases/banco_pruebas/reconstruct_geometry.py 2>&1 | Tee-Object -FilePath artifacts\banco_pruebas\geometry_reconstruction.log
+          if($LASTEXITCODE -ne 0){throw "Geometry reconstruction failed: $LASTEXITCODE"}
+          Get-FileHash cases\banco_pruebas\MAX_CIM_structure_base.brep -Algorithm SHA256 | Format-List | Out-String | Set-Content artifacts\banco_pruebas\geometry_sha256.txt
 
       - name: Generate curvature-bounded TET10 mesh
-        if: steps.geometry.outputs.present == 'true'
         shell: pwsh
         run: |
-          python cases/banco_pruebas/mesh_structure.py cases/banco_pruebas/MAX_CIM_structure_base.step --min-mm 30 --max-mm 110 --curvature-elements 20 --out artifacts/banco_pruebas
+          python cases/banco_pruebas/mesh_structure.py cases/banco_pruebas/MAX_CIM_structure_base.brep --min-mm 30 --max-mm 110 --curvature-elements 20 --out artifacts/banco_pruebas
           if($LASTEXITCODE -ne 0){throw "Banco mesh harness failed: $LASTEXITCODE"}
 
       - name: Show mesh evidence
         if: always()
         shell: pwsh
-        run: Get-Content artifacts\banco_pruebas\mesh_evidence.json
+        run: |
+          if(Test-Path artifacts\banco_pruebas\mesh_evidence.json){Get-Content artifacts\banco_pruebas\mesh_evidence.json}
+          if(Test-Path artifacts\banco_pruebas\geometry_reconstruction.log){Get-Content artifacts\banco_pruebas\geometry_reconstruction.log}
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: banco-pruebas-fem-evidence
+          name: banco-pruebas-fem-evidence-${{ github.run_number }}
           path: artifacts/banco_pruebas/
           if-no-files-found: error
