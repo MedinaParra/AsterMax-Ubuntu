@@ -14,6 +14,7 @@ required = {
     "3D solid tie mode": "TYPE_RACCORD='MASSIF'",
     "master adjacent volume extraction": '["parent_element"]',
     "explicit bonded manifest": '["bonded_contact_count"]',
+    "explicit bonded mode": '["mode"]="BONDED_LIAISON_MAIL"',
 }
 missing = [name for name, token in required.items() if token not in patch]
 assert not missing, "Bonded implementation markers missing: " + ", ".join(missing)
@@ -23,8 +24,8 @@ assert "nonlinear native contact is not certified yet" in patch
 assert "native Code_Aster contact is currently certified only for Bonded/Tied pairs" in patch
 assert "Legacy C10.35 blanket contact blocker could not be replaced safely" in patch
 
-# Ensure we do not implement Bonded by deleting all contact checks or by silently treating Hard contact as Tied.
-assert "PressureOverclosureEnum.Hard" not in patch.split("private static bool IsBondedContactPair", 1)[1].split("private static JArray BuildBondedContacts", 1)[0]
-assert 'mode\"]=\"BONDED_LIAISON_MAIL\"' not in patch  # guard against accidentally escaped C# text
+# Ensure Hard contact is not silently classified as Tied/Bonded.
+bonded_classifier = patch.split("private static bool IsBondedContactPair", 1)[1].split("private static JArray BuildBondedContacts", 1)[0]
+assert "PressureOverclosureEnum.Hard" not in bonded_classifier
 
 print("PASS: Bonded/Tied contract -> LIAISON_MAIL policy is present and non-Bonded contact remains fail-closed.")
