@@ -41,14 +41,6 @@ def _smallest_occ_entities(dim: int, count: int = 30) -> list[dict[str, object]]
 
 
 def _generate_tet10_with_deterministic_retry() -> tuple[float, list[dict[str, object]]]:
-    """Generate the requested 30--110 mm TET10 mesh without relaxing size bounds.
-
-    Gmsh can reject a CAD face with ``Identical points in triangulation`` when
-    the internal geometric perturbation is too small relative to CAD tolerance.
-    The retry ladder changes only ``Mesh.RandomFactor``; element family and mesh
-    size limits remain identical to the calculation-memory target. Every failed
-    attempt is preserved in the evidence package instead of being hidden.
-    """
     attempts: list[dict[str, object]] = []
     last_error: Exception | None = None
     for factor in RANDOM_FACTOR_RETRY_LADDER:
@@ -59,7 +51,7 @@ def _generate_tet10_with_deterministic_retry() -> tuple[float, list[dict[str, ob
             gmsh.model.mesh.setOrder(2)
             attempts.append({"random_factor": factor, "status": "PASS"})
             return factor, attempts
-        except Exception as exc:  # Gmsh raises generic Exception through its Python API
+        except Exception as exc:
             last_error = exc
             attempts.append(
                 {
@@ -107,8 +99,9 @@ def main() -> int:
             "fix_degenerated": True,
             "fix_small_edges": True,
             "fix_small_faces": True,
-            "sew_faces": True,
-            "make_solids": True,
+            "sew_faces": False,
+            "make_solids": False,
+            "reason": "Keep the 106 structural solids intact; prior global sewing converted them to shells.",
         },
         "memory_reference": {
             "nodes_approx": MEMORY_REFERENCE_NODES,
@@ -117,16 +110,12 @@ def main() -> int:
     }
     try:
         gmsh.option.setNumber("General.Terminal", 1)
-        # These OpenCASCADE import/healing flags are the documented Gmsh route
-        # for degenerated/small edges and faces. They do not alter the requested
-        # FEM mesh size bounds.
-        gmsh.option.setNumber("Geometry.OCCFixDegenerated", 1)
-        gmsh.option.setNumber("Geometry.OCCFixSmallEdges", 1)
-        gmsh.option.setNumber("Geometry.OCCFixSmallFaces", 1)
-        gmsh.option.setNumber("Geometry.OCCSewFaces", 1)
-        gmsh.option.setNumber("Geometry.OCCMakeSolids", 1)
-
         gmsh.model.add("skm_banco_pruebas_structure")
+
+        # Import the verified BREP without automatic OCC healing. In the previous
+        # experiment enabling OCCSewFaces/OCCMakeSolids at import repaired wires
+        # but converted all 106 valid solids into shells. Healing is therefore
+        # applied below in a targeted mode that does not sew or rebuild solids.
         imported = gmsh.model.occ.importShapes(str(args.step))
         gmsh.model.occ.synchronize()
         initial_volumes = gmsh.model.getEntities(3)
@@ -147,13 +136,15 @@ def main() -> int:
             fixDegenerated=True,
             fixSmallEdges=True,
             fixSmallFaces=True,
-            sewFaces=True,
-            makeSolids=True,
+            sewFaces=False,
+            makeSolids=False,
         )
         gmsh.model.occ.synchronize()
         healed_volumes = gmsh.model.getEntities(3)
-        if not healed_volumes:
-            raise RuntimeError("NO_VOLUMES_AFTER_OCC_HEAL")
+        if len(healed_volumes) != len(initial_volumes):
+            raise RuntimeError(
+                f"HEAL_CHANGED_VOLUME_COUNT:{len(initial_volumes)}->{len(healed_volumes)}"
+            )
 
         evidence["after_heal"] = {
             "returned_entity_count": len(healed),
@@ -164,9 +155,6 @@ def main() -> int:
             "smallest_faces": _smallest_occ_entities(2),
         }
 
-        # Case-specific assembly route. The generic AsterMax gmsh_bridge remains
-        # fail-closed at one solid; this harness handles the verified structural
-        # subset only. Coherence/duplicate removal is intentionally explicit.
         gmsh.model.occ.removeAllDuplicates()
         gmsh.model.occ.synchronize()
         volumes = gmsh.model.getEntities(3)
@@ -186,8 +174,6 @@ def main() -> int:
             }
         )
 
-        # Preserve the calculation-memory mesh bounds exactly. Retry changes
-        # geometric perturbation only; no hidden coarsening is allowed here.
         gmsh.option.setNumber("Mesh.MeshSizeMin", float(args.min_mm))
         gmsh.option.setNumber("Mesh.MeshSizeMax", float(args.max_mm))
         gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", float(args.curvature_elements))
