@@ -10,6 +10,7 @@ import gmsh
 MEMORY_REFERENCE_NODES = 148000
 MEMORY_REFERENCE_ELEMENTS = 75900
 RANDOM_FACTOR_RETRY_LADDER = (1.0e-9, 1.0e-8, 1.0e-7, 1.0e-6)
+OCC_HEAL_TOLERANCE_MM = 1.0e-6
 
 
 def _global_bbox(volumes: list[tuple[int, int]]) -> tuple[float, float, float, float, float, float]:
@@ -22,6 +23,21 @@ def _global_bbox(volumes: list[tuple[int, int]]) -> tuple[float, float, float, f
         max(b[4] for b in boxes),
         max(b[5] for b in boxes),
     )
+
+
+def _smallest_occ_entities(dim: int, count: int = 30) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    metric_name = {1: "length_mm", 2: "area_mm2", 3: "volume_mm3"}[dim]
+    for _, tag in gmsh.model.getEntities(dim):
+        try:
+            metric = float(gmsh.model.occ.getMass(dim, tag))
+            bbox = [float(v) for v in gmsh.model.getBoundingBox(dim, tag)]
+        except Exception as exc:
+            rows.append({"tag": int(tag), "diagnostic_error": f"{type(exc).__name__}: {exc}"})
+            continue
+        rows.append({"tag": int(tag), metric_name: metric, "bbox_mm": bbox})
+    rows.sort(key=lambda row: float(row.get(metric_name, float("inf"))))
+    return rows[:count]
 
 
 def _generate_tet10_with_deterministic_retry() -> tuple[float, list[dict[str, object]]]:
@@ -86,6 +102,14 @@ def main() -> int:
             "curvature_elements_per_2pi": args.curvature_elements,
             "random_factor_retry_ladder": list(RANDOM_FACTOR_RETRY_LADDER),
         },
+        "geometry_healing": {
+            "tolerance_mm": OCC_HEAL_TOLERANCE_MM,
+            "fix_degenerated": True,
+            "fix_small_edges": True,
+            "fix_small_faces": True,
+            "sew_faces": True,
+            "make_solids": True,
+        },
         "memory_reference": {
             "nodes_approx": MEMORY_REFERENCE_NODES,
             "elements_approx": MEMORY_REFERENCE_ELEMENTS,
@@ -93,6 +117,15 @@ def main() -> int:
     }
     try:
         gmsh.option.setNumber("General.Terminal", 1)
+        # These OpenCASCADE import/healing flags are the documented Gmsh route
+        # for degenerated/small edges and faces. They do not alter the requested
+        # FEM mesh size bounds.
+        gmsh.option.setNumber("Geometry.OCCFixDegenerated", 1)
+        gmsh.option.setNumber("Geometry.OCCFixSmallEdges", 1)
+        gmsh.option.setNumber("Geometry.OCCFixSmallFaces", 1)
+        gmsh.option.setNumber("Geometry.OCCSewFaces", 1)
+        gmsh.option.setNumber("Geometry.OCCMakeSolids", 1)
+
         gmsh.model.add("skm_banco_pruebas_structure")
         imported = gmsh.model.occ.importShapes(str(args.step))
         gmsh.model.occ.synchronize()
@@ -100,9 +133,40 @@ def main() -> int:
         if not initial_volumes:
             raise RuntimeError("NO_IMPORTED_VOLUMES")
 
+        evidence["before_heal"] = {
+            "volume_count": len(initial_volumes),
+            "curve_count": len(gmsh.model.getEntities(1)),
+            "surface_count": len(gmsh.model.getEntities(2)),
+            "smallest_edges": _smallest_occ_entities(1),
+            "smallest_faces": _smallest_occ_entities(2),
+        }
+
+        healed = gmsh.model.occ.healShapes(
+            [],
+            tolerance=OCC_HEAL_TOLERANCE_MM,
+            fixDegenerated=True,
+            fixSmallEdges=True,
+            fixSmallFaces=True,
+            sewFaces=True,
+            makeSolids=True,
+        )
+        gmsh.model.occ.synchronize()
+        healed_volumes = gmsh.model.getEntities(3)
+        if not healed_volumes:
+            raise RuntimeError("NO_VOLUMES_AFTER_OCC_HEAL")
+
+        evidence["after_heal"] = {
+            "returned_entity_count": len(healed),
+            "volume_count": len(healed_volumes),
+            "curve_count": len(gmsh.model.getEntities(1)),
+            "surface_count": len(gmsh.model.getEntities(2)),
+            "smallest_edges": _smallest_occ_entities(1),
+            "smallest_faces": _smallest_occ_entities(2),
+        }
+
         # Case-specific assembly route. The generic AsterMax gmsh_bridge remains
-        # fail-closed at one solid; this harness handles the verified 106-solid
-        # structural subset only.
+        # fail-closed at one solid; this harness handles the verified structural
+        # subset only. Coherence/duplicate removal is intentionally explicit.
         gmsh.model.occ.removeAllDuplicates()
         gmsh.model.occ.synchronize()
         volumes = gmsh.model.getEntities(3)
@@ -114,14 +178,16 @@ def main() -> int:
             {
                 "imported_entity_count": len(imported),
                 "initial_volume_count": len(initial_volumes),
+                "healed_volume_count": len(healed_volumes),
                 "conformal_volume_count": len(volumes),
                 "bbox_mm": list(map(float, bbox)),
+                "post_dedup_smallest_edges": _smallest_occ_entities(1),
+                "post_dedup_smallest_faces": _smallest_occ_entities(2),
             }
         )
 
-        # Preserve the calculation-memory mesh bounds exactly. The only retry
-        # parameter below is the geometric perturbation explicitly implicated by
-        # Gmsh's Identical-points triangulation diagnostic.
+        # Preserve the calculation-memory mesh bounds exactly. Retry changes
+        # geometric perturbation only; no hidden coarsening is allowed here.
         gmsh.option.setNumber("Mesh.MeshSizeMin", float(args.min_mm))
         gmsh.option.setNumber("Mesh.MeshSizeMax", float(args.max_mm))
         gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", float(args.curvature_elements))
@@ -130,15 +196,9 @@ def main() -> int:
         gmsh.option.setNumber("Mesh.HighOrderOptimize", 1)
         gmsh.option.setNumber("Mesh.MshFileVersion", 4.1)
 
-        try:
-            selected_random_factor, attempts = _generate_tet10_with_deterministic_retry()
-            evidence["mesh_attempts"] = attempts
-            evidence["selected_random_factor"] = selected_random_factor
-        except Exception as exc:
-            # Recover the retry detail from the causal chain by rerunning no
-            # hidden approximation: the final failure remains explicit.
-            evidence["mesh_attempts"] = "see runner log; all deterministic random-factor retries failed"
-            raise exc
+        selected_random_factor, attempts = _generate_tet10_with_deterministic_retry()
+        evidence["mesh_attempts"] = attempts
+        evidence["selected_random_factor"] = selected_random_factor
 
         node_tags, _, _ = gmsh.model.mesh.getNodes()
         element_types, element_tags, _ = gmsh.model.mesh.getElements(3)
