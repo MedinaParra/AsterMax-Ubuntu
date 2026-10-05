@@ -1,0 +1,117 @@
+name: AsterMax Bonded Contact Windows Build
+
+on:
+  push:
+    branches: [ agent/bonded-contact-20261005 ]
+    paths:
+      - '.github/workflows/astermax-bonded-contact.yml'
+      - 'native-windows/**'
+  workflow_dispatch:
+
+concurrency:
+  group: astermax-bonded-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate patch dependency graph
+        run: python3 native-windows/validate-patch-chain.py
+      - name: Guard Bonded/Tied translation policy
+        run: python3 native-windows/test-c10221-bonded-contact.py
+
+  build-windows:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply complete AsterMax patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $patches=@(
+            'patch-astermax.ps1','patch-branding.ps1','patch-c960-native-bridge.ps1',
+            'patch-c961-native-codeaster-export.ps1','patch-c965-results-workspace.ps1',
+            'patch-c966-results-scene.ps1','patch-c967-vtk-results-binding.ps1',
+            'patch-c968-professional-results-hud.ps1','patch-c969-renderer-synchronized-results.ps1',
+            'patch-c970-native-3d-probe.ps1','patch-c971-native-probe-callout.ps1',
+            'patch-c972-native-framebuffer-evidence.ps1','patch-c974-solver-provenance.ps1',
+            'patch-c975-analysis-provenance-manifest.ps1','patch-c976-automatic-model-fingerprint.ps1',
+            'patch-c977-pre-solve-readiness.ps1','patch-c978-assignment-hexa8-quality.ps1',
+            'patch-c985-model-fidelity-gate.ps1','patch-c998-current-model-results-gate.ps1',
+            'patch-c991-startup-hardening.ps1','patch-c992-startup-viewport.ps1',
+            'patch-c1000-native-solve-transaction.ps1','patch-c1001-automatic-results-handoff.ps1',
+            'patch-c1002-runtime-discovery.ps1','patch-c1003-runtime-readiness.ps1',
+            'patch-c1004-tetra-native-solve.ps1','patch-c1005-codeaster-runner-probe.ps1',
+            'patch-c1006-python-med-runtime-probe.ps1','patch-c1008-aster-group-records.ps1',
+            'patch-c10081-portable-cad-smoke.ps1','patch-c1009-functional-outline.ps1',
+            'patch-c1010-button-audit.ps1','patch-c1011-windows-runtime.ps1',
+            'patch-c1012-tetra-results-connectivity.ps1','patch-c1013-results-contours-options.ps1',
+            'patch-c1014-refined-mesh-runner-diagnostics.ps1','patch-c1015-vtk-real-scalar-contours.ps1',
+            'patch-c1016-pmx-compatibility.ps1','patch-c1018-integrated-results.ps1',
+            'patch-c1020-workflow-conformance.ps1','patch-c10201-cload-semantics.ps1',
+            'patch-c10202-async-solve-ui.ps1','patch-c10203-cancel-solve.ps1',
+            'patch-c10204-result-lifecycle.ps1','patch-c10205-close-safe-solve.ps1',
+            'patch-c10206-solve-state-coherence.ps1','patch-c10207-model-session-identity.ps1',
+            'patch-c10208-functional-command-smoke.ps1','patch-c10209-audit-exit-diagnostics.ps1',
+            'patch-c10210-audit-hook-release.ps1','patch-c10211-mesh-terminal-telemetry.ps1',
+            'patch-c10212-mechanical-qualification.ps1','patch-c10213-scope-fingerprint.ps1',
+            'patch-c10214-tutorial1-defaults.ps1','patch-c10215-surface-mechanics.ps1',
+            'patch-c10216-body-loads.ps1','patch-c10217-surface-traction.ps1',
+            'patch-c10218-multi-material.ps1','patch-c10219-load-history.ps1',
+            'patch-c10220-result-persistence.ps1'
+          )
+          & .\native-windows\harness-c10208a-patch-chain.ps1 -Root "$PWD\upstream" -Patches $patches -OutDir "$PWD\bonded-audit"
+          if($LASTEXITCODE -ne 0){ throw 'Patch chain failed.' }
+
+      - name: Verify patched Bonded implementation before compilation
+        shell: pwsh
+        run: |
+          $contract=Get-Content .\upstream\PrePoMax\AsterMaxSurfaceMechanicsContract.cs -Raw
+          $exporter=Get-Content .\upstream\PrePoMax\AsterMaxCodeAsterNativeExporter.cs -Raw
+          $solve=Get-Content .\upstream\PrePoMax\Forms\AsterMaxNativeSolveTransaction.cs -Raw
+          foreach($token in @('PressureOverclosureEnum.Tied','BuildBondedContacts','UnsupportedNativeContactPairs')){ if(-not $contract.Contains($token)){ throw "Contract token missing: $token" } }
+          foreach($token in @('LIAISON_MAIL','GROUP_MA_ESCL','GROUP_MA_MAIT',"TYPE_RACCORD='MASSIF'")){ if(-not $exporter.Contains($token)){ throw "Exporter token missing: $token" } }
+          if(-not $solve.Contains('UnsupportedNativeContactPairs(model)')){ throw 'Selective Bonded solve guard missing.' }
+
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - name: Compile Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Assemble portable build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){ throw 'AsterMax Mechanical.exe missing after successful compile.' }
+          New-Item -ItemType Directory -Force .\portable | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\portable\ -Recurse -Force
+          Copy-Item .\native-windows\runtime .\portable\AsterMaxRuntime -Recurse -Force
+          $hash=(Get-FileHash '.\portable\AsterMax Mechanical.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{release='Bonded-R1';commit='${{ github.sha }}';bonded_mode='LIAISON_MAIL_MASSIF';executable_sha256=$hash;nonbonded_contact='BLOCKED'} | ConvertTo-Json | Set-Content .\portable\ASTERMAX_BUILD_MANIFEST.json -Encoding UTF8
+          Compress-Archive -Path .\portable\* -DestinationPath .\AsterMax-Mechanical-Bonded-R1-Windows-x64.zip -Force
+
+      - name: Upload portable Bonded build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-Bonded-R1-Windows-x64
+          path: |
+            AsterMax-Mechanical-Bonded-R1-Windows-x64.zip
+            portable/AsterMax Mechanical.exe
+            portable/ASTERMAX_BUILD_MANIFEST.json
+          if-no-files-found: error
