@@ -71,6 +71,9 @@ if(Test-Path $ui) {
                     if (IsDisposed || _vtk == null) return;
                     PerformLayout();
                     UpdateVtkControlSize();
+                    _vtk.Enabled = true;
+                    _vtk.Visible = true;
+                    _vtk.RenderingOn = true;
                     _vtk.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
                     _vtk.BringToFront();
                     var badge = splitContainer1.Panel2.Controls["asterMaxGraphicsBadge"];
@@ -95,3 +98,12 @@ if(-not (Test-Path $c999)){ throw 'C9.99 portable workspace patch missing' }
 & $c999 -Root $Root
 
 Write-Host 'C9.99 ModelTree + viewport + portable workspace hardening applied.' -ForegroundColor Green
+
+# Keep the warmed-up native viewport visible. Only change the startup pair;
+# intentional hides elsewhere in the application must remain untouched.
+$mainPath=Join-Path $Root 'PrePoMax/Forms/FrmMain.cs'
+$mainText=Get-Content $mainPath -Raw
+$startupHide='(_vtk\.Left -= _vtk\.Width;\s*)_vtk\.Visible = false;'
+if(-not [regex]::IsMatch($mainText,$startupHide)){ throw 'Startup viewport visibility anchor missing.' }
+$mainText=[regex]::Replace($mainText,$startupHide,'$1_vtk.Visible = true;')
+Set-Content $mainPath $mainText -Encoding UTF8
