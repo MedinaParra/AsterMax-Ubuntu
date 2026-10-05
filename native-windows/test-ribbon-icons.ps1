@@ -21,7 +21,10 @@ $icons=$form.GetField('AxCommandIcons',$flags).GetValue($null)
 $resources=$assembly.GetType('PrePoMax.Properties.Resources',$true)
 $manager=$resources.GetProperty('ResourceManager',$flags).GetValue($null,$null)
 $captions=@([regex]::Matches((Get-Content $Source -Raw),'CommandTile\("([^"]+)"') | ForEach-Object {$_.Groups[1].Value} | Select-Object -Unique)
-if($captions.Count -lt 30){throw 'Final ribbon source did not expose expected command set.'}
+if($captions.Count -eq 0){throw 'Final ribbon source did not expose any commands.'}
+foreach($required in @('Pressure','Frictionless','Gravity','Surface Traction','Tablas de carga','Desplazamiento')){
+    if($required -notin $captions){throw "Repaired ribbon command absent: $required"}
+}
 $rows=@()
 foreach($caption in $captions){
     if(-not $icons.ContainsKey($caption)){throw "Command icon mapping missing: $caption"}
