@@ -1,0 +1,49 @@
+{
+  "schema": "astermax-mechanical-qualification-policy/v1",
+  "name": "AsterMax Mechanical Qualification",
+  "principles": [
+    "Solver success is necessary but not sufficient for engineering acceptance.",
+    "Benchmark equivalence is separate from physical/numerical validity.",
+    "Structural solid comparisons should prefer quadratic volume elements.",
+    "Geometric scopes must be topology-stable; raw CAD face indices are audit hints, not persistent identity.",
+    "Nodal equivalent stress is computed component-first from averaged tensor components.",
+    "Global reaction equilibrium is checked when the applied load resultant is known.",
+    "Mesh convergence is evaluated on physical observables, not by chasing a benchmark maximum."
+  ],
+  "thresholds": {
+    "equilibrium_pass_pct": 1,
+    "equilibrium_warn_pct": 5,
+    "convergence_deformation_pass_pct": 5,
+    "convergence_stress_pass_pct": 10,
+    "benchmark_default_tolerance_pct": 5
+  },
+  "structural_solid_policy": {
+    "preferred_order": 2,
+    "preferred_families": ["TETRA10"],
+    "linear_families": ["TETRA4", "HEXA8"],
+    "linear_element_behavior": "WARN_FOR_STRESS_COMPARISON",
+    "default_behavior": "NEW_MESHES_START_QUADRATIC; EXPLICIT_USER_OVERRIDE_ALLOWED"
+  },
+  "scope_policy": {
+    "preferred": "topology_fingerprint",
+    "raw_face_index_only": "WARN_NOT_PERSISTENT",
+    "ambiguous_or_missing_match": "BLOCK",
+    "model_fingerprint_membership": "PASS"
+  },
+  "postprocess_policy": {
+    "equivalent_stress": "average tensor components to node first, then evaluate von Mises invariant",
+    "scalar_first_von_mises_average": "REJECT_FOR_ANSYS_PARITY",
+    "reaction_field": "Code_Aster REAC_NODA",
+    "equilibrium": "independent applied resultant + support reaction resultant"
+  },
+  "defaults": {
+    "structural_solid_order": 2,
+    "midside_nodes_on_geometry": false,
+    "mesh_optimization_3d_steps": 3,
+    "require_real_reaction_resultant": true,
+    "require_independent_applied_load_resultant": true,
+    "require_topology_stable_scope": true,
+    "require_component_first_von_mises": true,
+    "require_mesh_convergence_for_engineering_qualified": true
+  }
+}
