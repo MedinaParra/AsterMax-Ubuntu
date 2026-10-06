@@ -57,6 +57,33 @@ if(-not $s.Contains('mesh.nodesets=')){
     if(-not $s.Contains($anchor)){throw 'C10.41 model fingerprint material anchor missing.'}
     $s=$s.Replace($anchor,$scopeCode+$anchor)
 }
+
+# Nested elastic/friction tables and region-to-material assignments affect the
+# solution but were skipped by the legacy scalar-property reflector.
+$extraAnchor='            f.Canonical = String.Join("\n", lines);'
+$extra=@'
+            lines.Add("mechanical_revision_schema=C10.41");
+            if(model.Materials!=null)
+                foreach(var kv in model.Materials.OrderBy(x=>x.Key,StringComparer.Ordinal))
+                    lines.Add("material.properties|"+Escape(kv.Key)+"|"+
+                        Newtonsoft.Json.JsonConvert.SerializeObject(kv.Value.Properties,Newtonsoft.Json.Formatting.None));
+            if(model.Sections!=null)
+                foreach(var kv in model.Sections.OrderBy(x=>x.Key,StringComparer.Ordinal))
+                    AppendSimpleProperties(lines,"section."+Escape(kv.Key),kv.Value);
+            if(model.ContactPairs!=null)
+                foreach(var kv in model.ContactPairs.OrderBy(x=>x.Key,StringComparer.Ordinal))
+                    AppendSimpleProperties(lines,"contact."+Escape(kv.Key),kv.Value);
+            if(model.SurfaceInteractions!=null)
+                foreach(var kv in model.SurfaceInteractions.OrderBy(x=>x.Key,StringComparer.Ordinal))
+                    lines.Add("interaction.properties|"+Escape(kv.Key)+"|"+
+                        Newtonsoft.Json.JsonConvert.SerializeObject(kv.Value.Properties,Newtonsoft.Json.Formatting.None));
+
+'@
+$extra=[regex]::Replace($extra,"\r\n?","`n")
+if(-not $s.Contains('mechanical_revision_schema=C10.41')){
+    if(-not $s.Contains($extraAnchor)){ throw 'C10.41 nested mechanics fingerprint anchor missing.' }
+    $s=$s.Replace($extraAnchor,$extra+$extraAnchor)
+}
 Set-Content $workspace $s -Encoding UTF8
 
 
