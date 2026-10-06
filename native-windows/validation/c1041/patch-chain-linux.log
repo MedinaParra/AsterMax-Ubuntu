@@ -1,0 +1,15 @@
+PATCH_CHAIN_VALIDATION=PASS
+PATCH_CHAIN_WORKFLOWS=13
+  .github/workflows/astermax-c1002-runtime-discovery.yml: 24 patches
+  .github/workflows/astermax-c1004-tetra-native-solve.yml: 26 patches
+  .github/workflows/astermax-c1006-python-med-runtime.yml: 28 patches
+  .github/workflows/astermax-c1007-tetra-med-results.yml: 28 patches
+  .github/workflows/astermax-c1008-real-tetra-e2e.yml: 33 patches
+  .github/workflows/astermax-c10101-quick-test-zip.yml: 33 patches
+  .github/workflows/astermax-c1014-refined-mesh-hotfix.yml: 34 patches
+  .github/workflows/astermax-c1015-real-contours-hotfix.yml: 37 patches
+  .github/workflows/astermax-c1016-contours-pmx-hotfix.yml: 38 patches
+  .github/workflows/astermax-c1018-integrated-workspace.yml: 39 patches
+  .github/workflows/astermax-c10208a-exit-smoke.yml: 50 patches
+  .github/workflows/astermax-c10208a-mesh-harness.yml: 51 patches
+  .github/workflows/astermax-workflow-conformance.yml: 64 patches
