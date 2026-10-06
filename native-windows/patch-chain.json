@@ -807,6 +807,30 @@
         "AsterMaxNativeGravityContract",
         "AsterMaxCodeAsterContactExporter"
       ]
+    },
+    {
+      "id": "patch-c1041-scope-fingerprint",
+      "file": "patch-c1041-scope-fingerprint.ps1",
+      "depends": [
+        "patch-c1040-large-multicontact-ids"
+      ],
+      "declares": [
+        "AsterMaxScopeMembershipFingerprint"
+      ],
+      "consumes": []
+    },
+    {
+      "id": "patch-c1041-mechanical-qualification",
+      "file": "patch-c1041-mechanical-qualification.ps1",
+      "depends": [
+        "patch-c1041-scope-fingerprint"
+      ],
+      "declares": [
+        "AsterMaxMechanicalQualification"
+      ],
+      "consumes": [
+        "AsterMaxScopeMembershipFingerprint"
+      ]
     }
   ]
 }

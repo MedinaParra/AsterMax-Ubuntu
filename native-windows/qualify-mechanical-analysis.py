@@ -5,7 +5,7 @@ This gate evaluates whether a real solver result is trustworthy for engineering
 review. It deliberately separates numerical/physical qualification from
 cross-solver benchmark equivalence.
 """
-import argparse, json, math
+import argparse, hashlib, json, math
 from pathlib import Path
 
 def pct_delta(a,b):
@@ -218,6 +218,8 @@ else:
 
 report={
     "schema":"astermax-mechanical-qualification/v1",
+    "bundle_sha256":hashlib.sha256(Path(args.bundle).read_bytes()).hexdigest(),
+    "model_fingerprint_sha256":integrity.get("model_fingerprint_sha256"),
     "status":"BLOCKED" if blocks or warns else "PASS",
     "evidence_status":"BLOCKED" if blocks or warns else "PASS",
     "solver_state":"SOURCE_DECLARED_NOT_INDEPENDENTLY_VERIFIED",
