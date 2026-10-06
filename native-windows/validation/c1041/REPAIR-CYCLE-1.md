@@ -37,7 +37,7 @@ These are synthetic fixture regressions, not genuine FEA or Windows certificatio
 | Inherited patch chain | PASS | `python native-windows/validate-patch-chain.py`; patch-chain-linux.log |
 | Whitespace | PASS | `git diff --check` |
 | Baseline ancestry | PASS | `git merge-base --is-ancestor add0efb6c15625c77b43c0a52abe7213aaadd1ba HEAD` |
-| Windows fixture CI | NOT_RUN | New two-platform workflow; no runner result available when this report was written |
+| Windows/Linux fixture CI | PASS | Actions run 37463607504 at `4b9cb99b7e91b6ff8c6d555c31b847d12d3db68f`; both jobs completed successfully; qualification fixtures and patch-chain validation only |
 
 ## RC1 acceptance gates
 
@@ -52,3 +52,6 @@ These are synthetic fixture regressions, not genuine FEA or Windows certificatio
 | V C10.40 regression | NOT_RUN | Inherited patch-chain validation is narrower than product regression |
 
 RC1 readiness: 0/22 acceptance gates PASS in this cycle. No RC1 release or executable produced.
+
+CI evidence: https://github.com/MedinaParra/AsterMax-Ubuntu/actions/runs/37463607504
+Remote tested tree equals local evidence tree `3139c56c417bd3398c6afaee8b6d334c643800a3`. Remote commit identities differ from local commits because publication used the GitHub connector after CLI push lacked authentication. The same tested file content was published without modifying main.
