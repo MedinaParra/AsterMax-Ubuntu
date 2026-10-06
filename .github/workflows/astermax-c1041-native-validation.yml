@@ -51,6 +51,10 @@ jobs:
         shell: pwsh
         run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
 
+      - name: Test result-store identity and portability fixtures
+        shell: powershell
+        run: ./native-windows/test-c1041-result-store.ps1 -BuildRoot "$PWD/upstream" -OutDir "$PWD/dist/Audit/C10.41-ResultStore"
+
       - name: Assemble C10.20 test distribution
         shell: pwsh
         run: |
@@ -134,6 +138,23 @@ jobs:
             -OutDir "$PWD/dist/Audit/C10.20" `
             -TimeoutSeconds 600
 
+      - name: Reopen solved PMX in a separate GUI process and reject changed scopes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $project="$PWD/dist/Audit/C10.20/B01-C10.41-solved.pmx"
+          $out="$PWD/dist/Audit/C10.41-Reopen"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $env:ASTERMAX_C1041_REOPEN_AUDIT_DIR=$out
+          try {
+            $p=Start-Process -FilePath "$PWD/dist/AsterMax Mechanical.exe" -WorkingDirectory "$PWD/dist" -ArgumentList @($project,'-US','MM_TON_S_C') -PassThru
+            if(-not $p.WaitForExit(120000)){ Stop-Process -Id $p.Id -Force; throw 'Fresh-process reopen timed out.' }
+            if($p.ExitCode -ne 0){ throw "Fresh-process reopen failed: $($p.ExitCode)" }
+            $r=Get-Content "$out/fresh-process-reopen.json" -Raw | ConvertFrom-Json
+            $saved=Get-Content "$PWD/dist/Audit/C10.20/solved-project-save.json" -Raw | ConvertFrom-Json
+            if($r.status -ne 'PASS' -or $r.bundle_sha256 -ne $saved.bundle_sha256 -or $r.model_fingerprint_sha256 -ne $saved.model_fingerprint_sha256){ throw 'Saved/reopened result identity mismatch.' }
+          } finally { Remove-Item Env:ASTERMAX_C1041_REOPEN_AUDIT_DIR -ErrorAction SilentlyContinue }
+
       - name: Enforce mandatory FAIL gate
         if: always()
         shell: pwsh
@@ -155,6 +176,8 @@ jobs:
           name: AsterMax-C10.41-Workflow-Conformance
           path: |
             dist/Audit/C10.20
+            dist/Audit/C10.41-Reopen
+            dist/Audit/C10.41-ResultStore
             dist/Audit/PatchChain
             dist/Validation
             upstream/PrePoMax/Forms/AsterMaxWorkflowConformance*.cs
