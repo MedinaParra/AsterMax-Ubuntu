@@ -1,0 +1,22 @@
+name: C10.41 qualification fixture regressions (not FEA certification)
+
+on:
+  push:
+    branches: [agent/c1041-ws01-rc1-integration]
+  workflow_dispatch:
+
+jobs:
+  qualification-fixtures:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate inherited patch chain
+        run: python native-windows/validate-patch-chain.py
+      - name: Run qualification fixture regressions
+        run: python native-windows/test-c1041-mechanical-qualification.py
