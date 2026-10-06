@@ -3,8 +3,8 @@
 
 C10.07 keeps the historical HEXA8 regression contract while extending the production bridge to
 TETRA4, TETRA10 and supported mixed meshes. No synthetic FEA values are created. Displacements are
-read directly from MED. SIGM_ELNO/SIEQ_ELNO are element-node fields; point contours use a declared
-plain arithmetic average over the real incident element-node values.
+read directly from MED. Point stresses average SIGM_ELNO tensor components over incident
+element-local nodes, then compute von Mises. Raw SIEQ_ELNO extrema remain separately available.
 
 Validation modes:
 - regression (default): preserves the historical C9.62 44-node/10-HEXA8 numerical regression gate.
@@ -42,6 +42,7 @@ SUPPORTED_FAMILIES = {
     "TE4": (4, "TETRA4", 10),
     "T10": (10, "TETRA10", 24),
 }
+SKIN_FAMILIES = {"TR3", "TR6", "QU4", "QU8"}
 
 
 def decode_components(raw, width=16):
@@ -91,6 +92,12 @@ def med_field_path(h, token, mesh_name):
     return "CHA/" + names[0]
 
 
+def optional_med_field_path(h, token, mesh_name):
+    names = [name for name in h["CHA"] if name == token or name.endswith("__" + token)
+             or re.fullmatch(r"[0-9a-fA-F]{8}" + re.escape(token), name)]
+    return None if not names else med_field_path(h, token, mesh_name)
+
+
 def select_single_field_step(h, root_path, token):
     root = h[root_path]
     steps = []
@@ -131,6 +138,8 @@ def discover_mesh_families(h, mesh_root):
     for code in sorted(h[mai_path].keys()):
         group = h[f"{mai_path}/{code}"]
         if "NOD" not in group or "NUM" not in group:
+            continue
+        if code in SKIN_FAMILIES:
             continue
         if code not in SUPPORTED_FAMILIES:
             unsupported.append(code)
@@ -423,6 +432,9 @@ with h5py.File(med_path, "r") as h:
         token: med_field_path(h, token, mesh_name)
         for token in ("DEPL", "SIGM_ELNO", "SIEQ_ELNO")
     }
+    reaction_path = optional_med_field_path(h, "REAC_NODA", mesh_name)
+    if reaction_path is not None:
+        field_paths["REAC_NODA"] = reaction_path
     field_steps = {
         token: select_single_field_step(h, path, token)
         for token, path in field_paths.items()
@@ -443,6 +455,15 @@ with h5py.File(med_path, "r") as h:
     displacement = displacement_blocks[:3].T
     total = np.linalg.norm(displacement, axis=1)
 
+    reaction = None
+    reaction_resultant = None
+    if reaction_path is not None:
+        rcomp, rdata = nodal_field(h, "REAC_NODA", reaction_path, result_step)
+        if rcomp[:3] != ["DX", "DY", "DZ"] or rdata.shape[1] != n_nodes:
+            raise RuntimeError("REAC_NODA components/nodal count do not match the result mesh")
+        reaction = rdata[:3].T
+        reaction_resultant = reaction.sum(axis=0)
+
     scomp, stress_by_family = discover_element_node_field(
         h, "SIGM_ELNO", field_paths["SIGM_ELNO"], result_step, families
     )
@@ -456,8 +477,13 @@ with h5py.File(med_path, "r") as h:
         name: average_element_node_component(stress_by_family, families, i, n_nodes)
         for i, name in enumerate(scomp)
     }
+    required_stress = ["SIXX", "SIYY", "SIZZ", "SIXY", "SIXZ", "SIYZ"]
+    if any(name not in nodal_stress for name in required_stress):
+        raise RuntimeError("SIGM_ELNO is missing components required for component-first von Mises")
+    sxx, syy, szz, sxy, sxz, syz = (nodal_stress[name] for name in required_stress)
+    von_mises = np.sqrt(0.5 * ((sxx-syy)**2 + (syy-szz)**2 + (szz-sxx)**2)
+                        + 3.0 * (sxy**2 + sxz**2 + syz**2))
     vm_idx = qcomp.index("VMIS")
-    von_mises = average_element_node_component(equiv_by_family, families, vm_idx, n_nodes)
     vm_elno = np.concatenate([equiv_by_family[c][vm_idx] for c in sorted(equiv_by_family)])
 
 family_codes = sorted(families)
@@ -502,17 +528,26 @@ bundle = {
             "location": "NODE",
             "component": "VMIS",
             "derived": True,
-            "derivation": "arithmetic mean of real Code_Aster SIEQ_ELNO/VMIS values over incident element-local nodes",
+            "derivation": "average SIGM_ELNO tensor components over incident element-local nodes, then evaluate von Mises invariant",
             "raw_elno_min": float(vm_elno.min()),
             "raw_elno_max": float(vm_elno.max()),
             "nodal_min": float(von_mises.min()),
             "nodal_max": float(von_mises.max()),
+        },
+        "reaction": None if reaction is None else {
+            "location": "NODE", "components": ["DX", "DY", "DZ"],
+            "derived": False, "summation_scope": "ALL_MED_NODES",
+            "resultant_n": [float(x) for x in reaction_resultant],
+            "resultant_magnitude_n": float(np.linalg.norm(reaction_resultant)),
+            "source": "Code_Aster REAC_NODA",
         },
     },
     "integrity": {
         "fea_values_invented": False,
         "solver_output_modified": False,
         "derived_nodal_stress_average_declared": True,
+        "von_mises_component_first_ansys_parity": True,
+        "reaction_resultant_from_real_reac_noda": reaction is not None,
         "bridge_validation_mode": validation_mode,
         "supported_med_families": ["TE4", "T10", "HE8"],
     },
@@ -529,6 +564,9 @@ production_checks = {
         len(scomp) > 0 and all(len(v) == n_nodes and np.isfinite(v).all() for v in nodal_stress.values())
     ),
     "von_mises_present_finite": bool(len(von_mises) == n_nodes and np.isfinite(von_mises).all()),
+    "raw_von_mises_present_finite": bool(np.isfinite(vm_elno).all()),
+    "reaction_finite_if_present": bool(reaction is None or
+        (np.isfinite(reaction).all() and np.isfinite(reaction_resultant).all())),
     "no_invented_results": bool(bundle["integrity"]["fea_values_invented"] is False),
 }
 if validation_mode == "regression":
