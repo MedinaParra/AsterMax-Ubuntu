@@ -831,6 +831,19 @@
       "consumes": [
         "AsterMaxScopeMembershipFingerprint"
       ]
+    },
+    {
+      "id": "patch-c1041-project-results",
+      "file": "patch-c1041-project-results.ps1",
+      "depends": [
+        "patch-c1041-mechanical-qualification"
+      ],
+      "declares": [
+        "AsterMaxProjectResultsStore"
+      ],
+      "consumes": [
+        "AsterMaxMechanicalQualification"
+      ]
     }
   ]
 }
