@@ -123,6 +123,100 @@ jobs:
         shell: pwsh
         run: ./native-windows/test-c1011-native-windows.ps1 -Dist "$PWD/dist"
 
+      - name: Execute compiled native exporter on the real contact contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $bin=(Resolve-Path './dist').Path
+          $exe=Join-Path $bin 'AsterMax Mechanical.exe'
+          $contract=Join-Path $bin 'Audit\C10.35-runtime\contact-solver-contract.json'
+          $deck=Join-Path $PWD 'dist/Validation/C10.41-NativeContact'
+          $script:AsterMaxAssemblyRoot=(Resolve-Path '.\upstream').Path
+          New-Item -ItemType Directory -Force $deck | Out-Null
+
+          function Find-AsterMaxAssembly([string]$fileName) {
+            $matches=Get-ChildItem $script:AsterMaxAssemblyRoot -Recurse -File -Filter $fileName -ErrorAction SilentlyContinue
+            $candidate=$matches | Where-Object { $_.FullName -match '\\bin\\x64\\Release\\' } | Select-Object -First 1
+            if(-not $candidate){ $candidate=$matches | Where-Object { $_.FullName -match '\\packages\\' } | Select-Object -First 1 }
+            return $candidate
+          }
+
+          # AsterMax is a .NET Framework application. Resolve its project and
+          # NuGet assemblies from the actual build tree instead of assuming
+          # CaeGlobals/CaeModel/etc. were copied beside the executable.
+          $resolver=[System.ResolveEventHandler]{
+            param($sender,$eventArgs)
+            $simple=(New-Object System.Reflection.AssemblyName($eventArgs.Name)).Name + '.dll'
+            $candidate=Find-AsterMaxAssembly $simple
+            if($candidate){ return [System.Reflection.Assembly]::LoadFrom($candidate.FullName) }
+            return $null
+          }
+          [AppDomain]::CurrentDomain.add_AssemblyResolve($resolver)
+          try {
+            $newton=Find-AsterMaxAssembly 'Newtonsoft.Json.dll'
+            if(-not $newton){ throw 'Newtonsoft.Json.dll not found in build/package tree.' }
+            [System.Reflection.Assembly]::LoadFrom($newton.FullName) | Out-Null
+            $asm=[System.Reflection.Assembly]::LoadFrom($exe)
+            $json=[Newtonsoft.Json.Linq.JObject]::Parse((Get-Content $contract -Raw))
+            $type=$asm.GetType('PrePoMax.AsterMaxCodeAsterNativeExporter',$true)
+            $method=$type.GetMethod('ExportContract',[System.Reflection.BindingFlags]'Public,Static')
+            if($null -eq $method){ throw 'Compiled ExportContract method missing.' }
+            try { $manifest=$method.Invoke($null,[object[]]@($json,[string]$deck,[string]'astermax-c1041-native-contact')) }
+            catch { if($_.Exception.InnerException){ throw $_.Exception.InnerException } else { throw } }
+          }
+          finally {
+            [AppDomain]::CurrentDomain.remove_AssemblyResolve($resolver)
+          }
+          $comm=Get-Content (Join-Path $deck 'astermax-c1041-native-contact.comm') -Raw
+          $mail=Get-Content (Join-Path $deck 'astermax-c1041-native-contact.mail') -Raw
+          foreach($t in @('DEFI_CONTACT','STAT_NON_LINE','GROUP_MA_MAIT','GROUP_MA_ESCL','CONTACT_INIT','stabilize = AFFE_CHAR_MECA',"FROTTEMENT='COULOMB'",'COULOMB=0.2',"GROUP_NO='C1038_LOAD'","DY=0","DZ=0","GROUP_NO='C1038_FIXED'",'gravity = AFFE_CHAR_MECA','PESANTEUR','GRAVITE=9810','DIRECTION=(0, -1, 0)','RHO=')){ if(-not $comm.Contains($t)){ throw "Generated .comm missing: $t" } }
+          foreach($t in @('GROUP_MA NOM = AM_VOL','GROUP_MA NOM = AM_M001','GROUP_MA NOM = AM_S001')){ if(-not $mail.Contains($t)){ throw "Generated .mail missing: $t" } }
+          @'
+          P actions make_etude
+          P version 15.2
+          P mode interactif
+          P time_limit 900
+          P memory_limit 4096
+          P ncpus 1
+          P mpi_nbcpu 1
+
+          F comm /analysis/astermax-c1041-native-contact.comm D 1
+          F mail /analysis/astermax-c1041-native-contact.mail D 20
+          F mess /analysis/astermax-c1041-native-contact.mess R 6
+          F rmed /analysis/astermax-c1041-native-contact.rmed R 81
+          F resu /analysis/astermax-c1041-native-contact.resu R 80
+          '@ | Set-Content (Join-Path $deck 'astermax-c1041-native-contact.export') -Encoding ASCII
+          Copy-Item $contract (Join-Path $deck 'c1039-live-femodel-contract.json') -Force
+
+      - name: Solve the compiled contact deck with native Windows Code_Aster
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $deck="$PWD/dist/Validation/C10.41-NativeContact"
+          $stem='astermax-c1041-native-contact'
+          $runner="$PWD/dist/AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd"
+          $probe=& $runner probe | ConvertFrom-Json
+          if(-not $probe.ready -or $probe.transport -ne 'WINDOWS_NATIVE' -or $probe.wsl_required){ throw 'Native Windows contact solver is not ready.' }
+          & $runner "$deck/$stem.export" $deck | Tee-Object "$deck/NATIVE_CONTACT_STDOUT.log"
+          $solverExit=$LASTEXITCODE
+          if($solverExit -ne 0){ throw "Native contact solve failed: $solverExit" }
+          $mess=Get-Content "$deck/$stem.mess" -Raw
+          if($mess -notmatch 'ARRET NORMAL' -or $mess -match '<F(?:>|_)'){ throw 'Native contact solve did not terminate normally.' }
+          $env:ASTERMAX_MED_BRIDGE_MODE='production'
+          python native-windows/bridge-c964-med-results.py "$deck/$stem.rmed" "$deck/$stem.bundle.json" "$deck/$stem.vtu"
+          if($LASTEXITCODE -ne 0){ throw 'Native contact MED parsing failed.' }
+          python native-windows/qualify-mechanical-analysis.py --bundle "$deck/$stem.bundle.json" --analysis "$deck/$stem.native-export.json" --mess "$deck/$stem.mess" --out "$deck/mechanical-qualification.json"
+          if($LASTEXITCODE -ne 0){ throw 'Native contact mechanical qualification hard block.' }
+          $q=Get-Content "$deck/mechanical-qualification.json" -Raw | ConvertFrom-Json
+          [ordered]@{
+            status='PASS';scope='NATIVE_WINDOWS_CONTACT_SOLVER_AND_MED';commit='${{ github.sha }}';
+            solver_exit_code=$solverExit;transport=$probe.transport;rc1='BLOCKED';
+            engineering_qualification=$q.engineering_qualification;
+            rmed_sha256=(Get-FileHash "$deck/$stem.rmed" -Algorithm SHA256).Hash.ToLowerInvariant();
+            bundle_sha256=(Get-FileHash "$deck/$stem.bundle.json" -Algorithm SHA256).Hash.ToLowerInvariant();
+            fea_values_invented=$false
+          } | ConvertTo-Json | Set-Content "$deck/C10.41_NATIVE_CONTACT_EVIDENCE.json" -Encoding UTF8
+
       - name: Reconstruct B01 STEP from declared dimensions
         shell: pwsh
         run: python native-windows/workflow-conformance/generate-b01-step.py --out "$PWD/dist/Audit/C10.20/B01-100x10x10.step"

@@ -76,6 +76,22 @@ if(-not $e.Contains('["expected_external_resultant_n"]')){
     $e=$e.Replace($manifestAnchor,$manifestInsert.TrimEnd())
 }
 $e=$e.Replace('new JArray("DEPL","SIGM_ELNO","SIEQ_ELNO","MED")','new JArray("DEPL","SIGM_ELNO","SIEQ_ELNO","REAC_NODA","MED")')
+# Static contact uses ten nonlinear increments; request the explicit final state.
+# This changes MED output selection, not the solved contact physics.
+$writeAnchor='            File.WriteAllText(commPath,comm,new System.Text.UTF8Encoding(false));'
+$finalState=@'
+            // C1041_STATIC_CONTACT_FINAL_RESULT
+            if(contacts.Count>0)
+            {
+                string allStates="IMPR_RESU(FORMAT='MED', UNITE=81, RESU=_F(RESULTAT=result))";
+                if(!comm.Contains(allStates)) throw new InvalidOperationException("C10.41 final MED output anchor missing.");
+                comm=comm.Replace(allStates,"IMPR_RESU(FORMAT='MED', UNITE=81, RESU=_F(RESULTAT=result, INST=1.0))");
+            }
+'@
+if(-not $e.Contains('C1041_STATIC_CONTACT_FINAL_RESULT')){
+    if(-not $e.Contains($writeAnchor)){ throw 'C10.41 command publication anchor missing.' }
+    $e=$e.Replace($writeAnchor,$finalState+[Environment]::NewLine+$writeAnchor)
+}
 Set-Content $exporter $e -Encoding UTF8
 
 # Qualify every native solve after the real MED bridge and current-model fingerprint binding.

@@ -76,7 +76,16 @@ foreach($entry in @(@('store.cs',$store),@('qualification.cs',$qualification),@(
     Set-Content $path $entry[1] -Encoding UTF8
     $files+=$path
 }
-Add-Type -Path $files -ReferencedAssemblies @($json.FullName,'System.Core.dll')
+# Windows PowerShell Add-Type uses the legacy compiler; use the same Roslyn
+# toolchain as the product build so C# 6 index initializers compile faithfully.
+$msbuild=(Get-Command msbuild.exe -ErrorAction Stop).Source
+$csc=Join-Path (Split-Path $msbuild -Parent) 'Roslyn/csc.exe'
+if(-not (Test-Path $csc)){throw "Roslyn compiler missing next to MSBuild: $csc"}
+$assembly=Join-Path $OutDir 'ResultStoreFixtures.dll'
+& $csc /nologo /target:library /langversion:latest "/out:$assembly" "/reference:$($json.FullName)" /reference:System.Core.dll $files
+if($LASTEXITCODE -ne 0){throw "Result-store fixture compilation failed: $LASTEXITCODE"}
+[void][System.Reflection.Assembly]::LoadFrom($json.FullName)
+[void][System.Reflection.Assembly]::LoadFrom($assembly)
 $count=[PrePoMax.ResultStoreFixtureTests]::Run((Join-Path $OutDir 'cases'))
 @{status='PASS';cases=$count;scope='UNIT_FILE_PERSISTENCE';solver_execution='NOT_RUN';synthetic_fixture_only=$true} |
     ConvertTo-Json | Set-Content (Join-Path $OutDir 'result-store-fixtures.json') -Encoding UTF8
