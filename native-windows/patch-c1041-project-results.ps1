@@ -73,4 +73,40 @@ if(-not $a.Contains('B01-C10.41-solved.pmx')){
     $a=$a.Replace($anchor,$save)
     Set-Content $audit $a -Encoding UTF8
 }
-Write-Host 'C10.41 PMX result snapshots + revision/hash validation applied.' -ForegroundColor Green
+
+# C10.41 RC1: the Mechanical ribbon is localized after C10.18, while the integrated
+# results router intentionally uses stable English command keys. Canonicalize the visible
+# es-CL captions here so real ribbon clicks stay inside the AsterMax results workspace
+# instead of falling through to the inherited PrePoMax result toolbar and hiding it.
+$integrated=Join-Path $Root 'PrePoMax/Forms/AsterMaxIntegratedResults.cs'
+$i=[regex]::Replace((Get-Content $integrated -Raw),"\r\n?","`n")
+if(-not $i.Contains('case "Contornos": caption = "Contours"; break;')){
+    $routeAnchor="        private bool RouteAsterMaxIntegratedCommand(string caption)`n        {"
+    if(-not $i.Contains($routeAnchor)){ throw 'C10.41 integrated result command router anchor missing.' }
+    $localizedRoute=@'
+        private bool RouteAsterMaxIntegratedCommand(string caption)
+        {
+            switch (caption)
+            {
+                case "Explorador": caption = "Results Explorer"; break;
+                case "Viewport FEA": caption = "FEA Viewport"; break;
+                case "Contornos": caption = "Contours"; break;
+                case "Deformada": caption = "Deformed"; break;
+                case "Ajustar": caption = "Fit"; break;
+                case "Frontal": caption = "Front"; break;
+                case "Superior": caption = "Top"; break;
+                case "Derecha": caption = "Right"; break;
+                case "Isométrica": case "Isometrica": caption = "Isometric"; break;
+                case "Aristas": caption = "Edges"; break;
+                case "Guardar": caption = "Save"; break;
+                case "Auditoría": case "Auditoria": caption = "Auditoria"; break;
+            }
+'@
+    $localizedRoute=[regex]::Replace($localizedRoute,"\r\n?","`n").TrimEnd()
+    $i=$i.Replace($routeAnchor,$localizedRoute)
+    Set-Content $integrated $i -Encoding UTF8
+}
+foreach($token in @('case "Contornos": caption = "Contours"; break;','case "Deformada": caption = "Deformed"; break;','case "Ajustar": caption = "Fit"; break;','case "Isométrica": case "Isometrica": caption = "Isometric"; break;')){
+    if(-not $i.Contains($token)){ throw "C10.41 localized result routing token missing: $token" }
+}
+Write-Host 'C10.41 PMX result snapshots + revision/hash validation + localized integrated-result routing applied.' -ForegroundColor Green
