@@ -16,9 +16,9 @@ rows=[
  ('Aceros','Inoxidable_316_Referencia',200000,0.30,8000,'https://www.thyssenkrupp-materials.co.uk/stainless-steel-316-14401.html','E y densidad a 20 °C de ficha del proveedor; Poisson 0,30 es un supuesto editable de esta plantilla.'),
  ('Aluminios','Aluminio_6061_T6_Referencia',68900,0.33,2700,'https://www.aerospacemetals.com/wp-content/uploads/2023/06/Aluminum-6061-T6-6061-T651.pdf','Datos típicos; Poisson estimado en la fuente. No son valores admisibles de diseño.'),
  ('Aluminios','Aluminio_7075_T6_Referencia',71700,0.33,2810,'https://www.aerospacemetals.com/wp-content/uploads/2023/06/Aluminum-7075-T6-7075-T651.pdf','Datos típicos de la ficha; no son valores admisibles de diseño.'),
- ('No ferrosos','Cobre_C110_Referencia',117000,0.34,8940,'','Valores típicos editables para cobre electrolítico; verificar temple y certificado.'),
- ('No ferrosos','Laton_C260_Referencia',110000,0.34,8530,'','Valores típicos editables; verificar composición y temple.'),
- ('No ferrosos','Bronce_SAE660_Referencia',100000,0.34,8800,'','Valores típicos editables para bronce de cojinete; verificar composición y condición real.'),
+ ('No_Ferrosos','Cobre_C110_Referencia',117000,0.34,8940,'','Valores típicos editables para cobre electrolítico; verificar temple y certificado.'),
+ ('No_Ferrosos','Laton_C260_Referencia',110000,0.34,8530,'','Valores típicos editables; verificar composición y temple.'),
+ ('No_Ferrosos','Bronce_SAE660_Referencia',100000,0.34,8800,'','Valores típicos editables para bronce de cojinete; verificar composición y condición real.'),
  ('Titanio','Titanio_Ti6Al4V_Recocido_Referencia',113800,0.342,4430,'https://www.aerospacemetals.com/wp-content/uploads/2023/07/Titanium-Ti-6Al-4V-Grade-5-Annealed.pdf','Grado 5 recocido; propiedades elásticas de referencia de la ficha.')
 ]
 def item(name,tag=None): return dict(Name=name,Active=True,Visible=True,Valid=True,Internal=False,Expanded=True,Items=[],Tag=tag)
