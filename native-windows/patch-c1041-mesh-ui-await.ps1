@@ -5,7 +5,7 @@ function Replace-Once([string]$Text,[string]$Old,[string]$New) {
     $Old=[regex]::Replace($Old,"\r\n?","`n").TrimEnd()
     $New=[regex]::Replace($New,"\r\n?","`n").TrimEnd()
     if(([regex]::Matches($Text,[regex]::Escape($Old))).Count -ne 1) {
-        throw "C10.41 asynchronous mesh audit anchor must occur exactly once: $Old"
+        throw "C10.41 repair anchor must occur exactly once: $Old"
     }
     return $Text.Replace($Old,$New)
 }
@@ -53,3 +53,32 @@ $source=Replace-Once $source '                ["terminal_signal_observed"]=termi
 $source=Replace-Once $source '                ["synchronization"]="CONTROLLER_TERMINAL_SIGNAL",' '                ["synchronization"]="ASYNC_CONTROLLER_TERMINAL_SIGNAL",'
 Set-Content $path $source -Encoding UTF8
 Write-Host 'C10.41 mesh audit awaits terminal completion without blocking the WinForms dispatcher.' -ForegroundColor Green
+
+# C10.41 RC1: the reference-material catalogue grew from six to fifteen entries.
+# Keep the native-dialog audit aligned with the packaged catalogue and validate all
+# current entries instead of failing on the historical C10.10.1 count.
+$statesPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowStates.cs'
+$states=[regex]::Replace((Get-Content $statesPath -Raw),"\r\n?","`n")
+$countOld=@'
+            var materials=library.Items.SelectMany(category=>category.Items).Select(item=>item.Tag).ToArray();
+            if(materials.Length!=6||materials.Any(m=>m==null)) throw new InvalidOperationException("The six reference materials did not load.");
+'@
+$countNew=@'
+            var materials=library.Items.SelectMany(category=>category.Items).Select(item=>item.Tag).ToArray();
+            const int expectedReferenceMaterialCount=15;
+            if(materials.Length!=expectedReferenceMaterialCount||materials.Any(m=>m==null))
+                throw new InvalidOperationException("The reference material catalogue did not load all "+expectedReferenceMaterialCount+" entries.");
+'@
+$states=Replace-Once $states $countOld $countNew
+$copyOld=@'
+                if(copied!=6||list.Items.Count-initial!=6||copiedNames.Select(n=>(string)n).Distinct().Count()!=6)
+                    throw new InvalidOperationException("Native library copy-to-model buttons did not copy six distinct materials.");
+'@
+$copyNew=@'
+                if(copied!=materials.Length||list.Items.Count-initial!=materials.Length||
+                   copiedNames.Select(n=>(string)n).Distinct().Count()!=materials.Length)
+                    throw new InvalidOperationException("Native library copy-to-model buttons did not copy every distinct reference material.");
+'@
+$states=Replace-Once $states $copyOld $copyNew
+Set-Content $statesPath $states -Encoding UTF8
+Write-Host 'C10.41 material-library audit synchronized with the 15-entry native catalogue.' -ForegroundColor Green
