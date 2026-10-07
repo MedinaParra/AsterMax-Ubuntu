@@ -45,9 +45,12 @@ function Invoke-ResumableProviderDownload {
         }
 
         Write-Host "ASTER_MSI_DOWNLOAD_ATTEMPT=$attempt OFFSET=$offset EXPECTED=$ExpectedSize"
+        # Deliberately use one curl transfer per outer attempt. If the provider truncates
+        # a response (curl 18), the next PowerShell iteration measures the bytes actually
+        # written and resumes from exactly that offset. This avoids ambiguous in-process
+        # retries repeating an old Range request against a partially extended file.
         $curlArgs=@(
-            '-L','--fail','--retry','2','--retry-all-errors','--retry-delay','3',
-            '--connect-timeout','30','--speed-time','60','--speed-limit','1024'
+            '-L','--fail','--connect-timeout','30','--speed-time','60','--speed-limit','1024'
         )
         if($offset -gt 0) {
             $curlArgs += @('--continue-at',[string]$offset)
