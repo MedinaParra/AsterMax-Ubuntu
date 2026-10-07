@@ -143,15 +143,15 @@ Write-Host 'C10.41 Mechanical Qualification + reaction/equilibrium handoff appli
 
 $globals=Join-Path $Root 'PrePoMax/Globals.cs'
 $g=Get-Content $globals -Raw
-$g=$g.Replace('AsterMax Mechanical C10.40','AsterMax Mechanical C10.41 Validation')
+$g=$g.Replace('AsterMax Mechanical C10.40','AsterMax Mechanical C10.41 RC1')
 Set-Content $globals $g -Encoding UTF8
 
 # Keep the inherited tree audit strict, but validate the current build's caption.
 $treeAudit=Join-Path $Root 'PrePoMax/Forms/AsterMaxC1034Audit.cs'
 $a=Get-Content $treeAudit -Raw
 $captionOld='report["caption_pass"]=Text.Contains("C10.34");'
-$captionNew='report["caption_pass"]=Text.Contains("AsterMax Mechanical C10.41 Validation");'
+$captionNew='report["caption_pass"]=Text.Contains("AsterMax Mechanical C10.41 RC1");'
 if($a.Contains($captionOld)){ $a=$a.Replace($captionOld,$captionNew) }
 elseif(-not $a.Contains($captionNew)){ throw 'C10.41 tree caption assertion anchor missing.' }
-$a=$a.Replace('report["release"]="C10.34";','report["release"]="C10.41-validation";')
+$a=$a.Replace('report["release"]="C10.34";','report["release"]="C10.41-RC1";')
 Set-Content $treeAudit $a -Encoding UTF8
