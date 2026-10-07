@@ -136,6 +136,11 @@ namespace PrePoMax
                         ["solver_execution_in_reopen_process"]="NOT_RUN"
                     }.ToString());
                     C1034CaptureScreen(Path.Combine(directory,"fresh-process-reopen.png"));
+                    // The command-line PMX open can still own the transient Opening state
+                    // when this fresh-process audit has already proved result recovery. End
+                    // only that matching state before closing so the headless run never blocks
+                    // on the interactive "task running" confirmation dialog.
+                    SetStateReady(Globals.OpeningText);
                     C1020RequestAuditExit(directory,pass ? 0 : 1);
                 }
                 catch(Exception ex)
@@ -143,6 +148,7 @@ namespace PrePoMax
                     File.WriteAllText(Path.Combine(directory,"fresh-process-reopen.json"),new JObject {
                         ["status"]="FAIL", ["error"]=ex.ToString()
                     }.ToString());
+                    SetStateReady(Globals.OpeningText);
                     C1020RequestAuditExit(directory,1);
                 }
             };
