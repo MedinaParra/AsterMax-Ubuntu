@@ -93,6 +93,11 @@ namespace PrePoMax
 
     public partial class FrmMain
     {
+        // Restore can enter Application.DoEvents while vtkControl completes its WinForms Load.
+        // The fresh-process audit timer must never re-enter that in-flight restore and close the
+        // main window underneath the first renderer initialization.
+        private bool _asterMaxProjectResultsRestoreInProgress;
+
         private void StartAsterMaxC1041ReopenAudit()
         {
             string directory=Environment.GetEnvironmentVariable("ASTERMAX_C1041_REOPEN_AUDIT_DIR");
@@ -101,6 +106,9 @@ namespace PrePoMax
             int attempts=0;
             var timer=new System.Windows.Forms.Timer { Interval=500 };
             timer.Tick+=(sender,args)=> {
+                // DoEvents inside the initial VTK render can pump this timer. Deferring here is
+                // mandatory: observing the bundle field alone does not mean Restore has returned.
+                if(_asterMaxProjectResultsRestoreInProgress) return;
                 if(_asterMaxLoadedResults==null && ++attempts<60) return;
                 timer.Stop();timer.Dispose();
                 Directory.CreateDirectory(directory);
@@ -133,6 +141,7 @@ namespace PrePoMax
                         ["displacement_max_mm"]=_asterMaxLoadedResults.TotalDeformation.Max(),
                         ["von_mises_max_mpa"]=_asterMaxLoadedResults.EquivalentStress.Max(),
                         ["results_rendered"]=rendered, ["scope_change_rejected_old_results"]=staleRejected,
+                        ["restore_in_progress_at_audit"]=_asterMaxProjectResultsRestoreInProgress,
                         ["solver_execution_in_reopen_process"]="NOT_RUN"
                     }.ToString());
                     C1034CaptureScreen(Path.Combine(directory,"fresh-process-reopen.png"));
@@ -170,23 +179,32 @@ namespace PrePoMax
         public void RestoreAsterMaxProjectResults(string project)
         {
             InvokeIfRequired(() => {
-                if(!File.Exists(AsterMaxProjectResultsStore.ManifestPath(project))) return;
+                if(_asterMaxProjectResultsRestoreInProgress) return;
+                _asterMaxProjectResultsRestoreInProgress=true;
                 try
                 {
-                    var bundle=AsterMaxProjectResultsStore.Load(project,AsterMaxModelFingerprint.Extract(_controller.Model).Sha256);
-                    if(bundle==null) return;
-                    bundle.RequireCurrentModel(_controller.Model);
-                    _asterMaxLoadedResults=bundle;
-                    _asterMaxPreviousResultsRetained=false;
-                    ShowAsterMaxIntegratedResult(null);
-                    tsslState.Text="Resultados recuperados para la revision actual del modelo.";
+                    if(!File.Exists(AsterMaxProjectResultsStore.ManifestPath(project))) return;
+                    try
+                    {
+                        var bundle=AsterMaxProjectResultsStore.Load(project,AsterMaxModelFingerprint.Extract(_controller.Model).Sha256);
+                        if(bundle==null) return;
+                        bundle.RequireCurrentModel(_controller.Model);
+                        _asterMaxLoadedResults=bundle;
+                        _asterMaxPreviousResultsRetained=false;
+                        ShowAsterMaxIntegratedResult(null);
+                        tsslState.Text="Resultados recuperados para la revision actual del modelo.";
+                    }
+                    catch(Exception ex)
+                    {
+                        _asterMaxLoadedResults=null;
+                        ShowAsterMaxModelWorkspace();
+                        RefreshAsterMaxResultAvailability();
+                        tsslState.Text="Resultados guardados rechazados: "+ex.Message;
+                    }
                 }
-                catch(Exception ex)
+                finally
                 {
-                    _asterMaxLoadedResults=null;
-                    ShowAsterMaxModelWorkspace();
-                    RefreshAsterMaxResultAvailability();
-                    tsslState.Text="Resultados guardados rechazados: "+ex.Message;
+                    _asterMaxProjectResultsRestoreInProgress=false;
                 }
             });
         }
