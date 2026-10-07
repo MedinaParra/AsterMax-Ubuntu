@@ -844,6 +844,19 @@
       "consumes": [
         "AsterMaxMechanicalQualification"
       ]
+    },
+    {
+      "id": "patch-c1041-mesh-ui-await",
+      "file": "patch-c1041-mesh-ui-await.ps1",
+      "depends": [
+        "patch-c1041-project-results"
+      ],
+      "declares": [
+        "AsterMaxAsyncMeshAudit"
+      ],
+      "consumes": [
+        "AsterMaxProjectResultsStore"
+      ]
     }
   ]
 }

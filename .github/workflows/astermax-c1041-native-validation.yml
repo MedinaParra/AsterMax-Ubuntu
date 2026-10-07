@@ -31,6 +31,10 @@ jobs:
           & ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
           if($LASTEXITCODE -ne 0){ throw 'C10.41 patch application failed.' }
 
+      - name: Regress mesh import dispatcher completion and timeout rejection
+        shell: pwsh
+        run: ./native-windows/test-c1041-mesh-ui-await.ps1 -BuildRoot "$PWD/upstream"
+
       - name: Setup Python runtime
         uses: actions/setup-python@v6
         with:
