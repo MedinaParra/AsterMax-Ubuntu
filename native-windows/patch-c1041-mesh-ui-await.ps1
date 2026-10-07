@@ -113,3 +113,44 @@ $nameNew=@'
 $states=Replace-Once $states $nameOld $nameNew
 Set-Content $statesPath $states -Encoding UTF8
 Write-Host 'C10.41 material-library audit synchronized with the 15-entry catalogue and native duplicate-name policy.' -ForegroundColor Green
+
+# C10.41 RC1: persisted PMX result restoration must run only after the model-open
+# worker has completed. The earlier hook lived inside Controller.Open, which is called
+# from OpenAsync through Task.Run. That made result recovery timing-dependent: a fast
+# run could restore while Opening was active, while another run could miss recovery
+# entirely. Move the hook to FrmMain.OpenAsync on the WinForms thread, after the model
+# and result unit systems are initialized but before Opening is released.
+$controllerPath=Join-Path $Root 'PrePoMax/Controller.cs'
+$controllerSource=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","`n")
+$legacyRestore='            if(extension==".pmx") _form.RestoreAsterMaxProjectResults(fileName);'
+if(-not $controllerSource.Contains($legacyRestore)) {
+    throw 'C10.41 legacy Controller.Open result-restore hook missing before UI-thread migration.'
+}
+$controllerSource=$controllerSource.Replace($legacyRestore+"`n",'')
+if($controllerSource.Contains($legacyRestore)) {
+    throw 'C10.41 Controller.Open result-restore hook survived UI-thread migration.'
+}
+Set-Content $controllerPath $controllerSource -Encoding UTF8
+
+$frmPath=Join-Path $Root 'PrePoMax/Forms/FrmMain.cs'
+$frm=[regex]::Replace((Get-Content $frmPath -Raw),"\r\n?","`n")
+$openOld=@'
+                // If the model space or the unit system are undefined
+                if (_controller.ModelInitialized) IfNeededSelectAndSetNewModelProperties();
+                if (_controller.ResultsInitialized) SelectResultsUnitSystem();
+'@
+$openNew=@'
+                // If the model space or the unit system are undefined
+                if (_controller.ModelInitialized) IfNeededSelectAndSetNewModelProperties();
+                if (_controller.ResultsInitialized) SelectResultsUnitSystem();
+                // Restore persisted AsterMax results only after the PMX worker has fully
+                // reconstructed the model. This runs on the WinForms synchronization context.
+                if (Path.GetExtension(fileName).Equals(".pmx", StringComparison.OrdinalIgnoreCase))
+                    RestoreAsterMaxProjectResults(fileName);
+'@
+$frm=Replace-Once $frm $openOld $openNew
+if(-not $frm.Contains('RestoreAsterMaxProjectResults(fileName);')) {
+    throw 'C10.41 UI-thread result-restore hook was not installed.'
+}
+Set-Content $frmPath $frm -Encoding UTF8
+Write-Host 'C10.41 PMX result restore migrated from Controller.Open worker to completed FrmMain.OpenAsync UI flow.' -ForegroundColor Green
