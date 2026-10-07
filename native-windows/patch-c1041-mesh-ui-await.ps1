@@ -80,5 +80,36 @@ $copyNew=@'
                     throw new InvalidOperationException("Native library copy-to-model buttons did not copy every distinct reference material.");
 '@
 $states=Replace-Once $states $copyOld $copyNew
+
+# The native material-library dialog deliberately renames a copied material when its
+# name already exists in the model (for example the automatically assigned
+# Acero_Estructural becomes Acero_Estructural_Library-1). The audit must verify that
+# exact collision policy and the material properties, rather than incorrectly
+# requiring the source and destination names to remain identical.
+$nameOld=@'
+                        tree.SelectedNode=node;
+                        method.Invoke(dialog,new object[]{null,EventArgs.Empty});
+                        var expected=(Material)node.Tag;
+                        var actual=list.Items[list.Items.Count-1].Tag as Material;
+                        if(actual==null||actual.Name!=expected.Name)
+                            throw new InvalidOperationException("Library copied a different material than the selected node: "+expected.Name);
+'@
+$nameNew=@'
+                        tree.SelectedNode=node;
+                        var expected=(Material)node.Tag;
+                        string expectedCopyName=expected.Name;
+                        int copySuffix=1;
+                        while(list.Items.ContainsKey(expectedCopyName))
+                        {
+                            expectedCopyName=expected.Name+"_Library-"+copySuffix;
+                            copySuffix++;
+                        }
+                        method.Invoke(dialog,new object[]{null,EventArgs.Empty});
+                        var actual=list.Items[list.Items.Count-1].Tag as Material;
+                        if(actual==null||actual.Name!=expectedCopyName)
+                            throw new InvalidOperationException("Library copy did not follow the native duplicate-name policy for: "+expected.Name+
+                                " | expected="+expectedCopyName+" actual="+(actual==null?"<null>":actual.Name));
+'@
+$states=Replace-Once $states $nameOld $nameNew
 Set-Content $statesPath $states -Encoding UTF8
-Write-Host 'C10.41 material-library audit synchronized with the 15-entry native catalogue.' -ForegroundColor Green
+Write-Host 'C10.41 material-library audit synchronized with the 15-entry catalogue and native duplicate-name policy.' -ForegroundColor Green
