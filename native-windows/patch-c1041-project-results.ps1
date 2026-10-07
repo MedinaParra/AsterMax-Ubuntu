@@ -104,9 +104,30 @@ if(-not $i.Contains('case "Contornos": caption = "Contours"; break;')){
 '@
     $localizedRoute=[regex]::Replace($localizedRoute,"\r\n?","`n").TrimEnd()
     $i=$i.Replace($routeAnchor,$localizedRoute)
-    Set-Content $integrated $i -Encoding UTF8
 }
-foreach($token in @('case "Contornos": caption = "Contours"; break;','case "Deformada": caption = "Deformed"; break;','case "Ajustar": caption = "Fit"; break;','case "Isométrica": case "Isometrica": caption = "Isometric"; break;')){
+
+# The visible "Original" result command must also remain in the integrated viewport.
+# Unlike "Deformada", it is deterministic: it turns deformation off instead of toggling.
+if(-not $i.Contains('case "Original":')){
+    $deformedAnchor='                case "Deformed": _showDeformed.Checked = !_showDeformed.Checked; return;'
+    if(-not $i.Contains($deformedAnchor)){ throw 'C10.41 integrated Original handler anchor missing.' }
+    $originalHandler=@'
+                case "Deformed": _showDeformed.Checked = !_showDeformed.Checked; return;
+                case "Original":
+                    if (_showDeformed.Checked) _showDeformed.Checked = false;
+                    else if (_view == null) RenderScene();
+                    return;
+'@
+    $originalHandler=[regex]::Replace($originalHandler,"\r\n?","`n").TrimEnd()
+    $i=$i.Replace($deformedAnchor,$originalHandler)
+}
+$resultOnlyOld='            bool resultOnly = caption == "Contours" || caption == "Deformed";'
+$resultOnlyNew='            bool resultOnly = caption == "Contours" || caption == "Deformed" || caption == "Original";'
+if($i.Contains($resultOnlyOld)) { $i=$i.Replace($resultOnlyOld,$resultOnlyNew) }
+elseif(-not $i.Contains($resultOnlyNew)) { throw 'C10.41 integrated Original routing anchor missing.' }
+Set-Content $integrated $i -Encoding UTF8
+
+foreach($token in @('case "Contornos": caption = "Contours"; break;','case "Deformada": caption = "Deformed"; break;','case "Ajustar": caption = "Fit"; break;','case "Isométrica": case "Isometrica": caption = "Isometric"; break;','case "Original":','caption == "Original"')){
     if(-not $i.Contains($token)){ throw "C10.41 localized result routing token missing: $token" }
 }
 Write-Host 'C10.41 PMX result snapshots + revision/hash validation + localized integrated-result routing applied.' -ForegroundColor Green
