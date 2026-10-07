@@ -130,4 +130,47 @@ Set-Content $integrated $i -Encoding UTF8
 foreach($token in @('case "Contornos": caption = "Contours"; break;','case "Deformada": caption = "Deformed"; break;','case "Ajustar": caption = "Fit"; break;','case "Isométrica": case "Isometrica": caption = "Isometric"; break;','case "Original":','caption == "Original"')){
     if(-not $i.Contains($token)){ throw "C10.41 localized result routing token missing: $token" }
 }
-Write-Host 'C10.41 PMX result snapshots + revision/hash validation + localized integrated-result routing applied.' -ForegroundColor Green
+
+# C10.41 RC1: fail-closed exporter regression must validate behavior, not a localized
+# exception string. The es-CL patch translates the error text after this fixture source is
+# copied into the build tree, so matching the English message produced a false negative.
+$workflowStates=Join-Path $Root 'PrePoMax/Forms/AsterMaxWorkflowStates.cs'
+$w=[regex]::Replace((Get-Content $workflowStates -Raw),"\r\n?","`n")
+$legacyLocalized=@'
+                var incomplete=CreateAsterMaxStatusFixture(); incomplete.Sections.Clear();
+                bool rejected=false;
+                try{AsterMaxCodeAsterNativeExporter.Export(incomplete,output,"must-not-export");}
+                catch(InvalidOperationException ex){rejected=ex.Message.Contains("Asignación de material incompleta");}
+                if(!rejected) throw new InvalidOperationException("Native export accepted unassigned elements.");
+'@
+$legacyEnglish=@'
+                var incomplete=CreateAsterMaxStatusFixture(); incomplete.Sections.Clear();
+                bool rejected=false;
+                try{AsterMaxCodeAsterNativeExporter.Export(incomplete,output,"must-not-export");}
+                catch(InvalidOperationException ex){rejected=ex.Message.Contains("Material assignment incomplete");}
+                if(!rejected) throw new InvalidOperationException("Native export accepted unassigned elements.");
+'@
+$behavioral=@'
+                var incomplete=CreateAsterMaxStatusFixture(); incomplete.Sections.Clear();
+                var incompleteAssignment=AsterMaxAssignmentQualityGate.Evaluate(incomplete);
+                if(incompleteAssignment.Status=="READY")
+                    throw new InvalidOperationException("Unassigned exporter fixture unexpectedly passed the assignment gate.");
+                string forbiddenDeck=System.IO.Path.Combine(output,"must-not-export.comm");
+                if(System.IO.File.Exists(forbiddenDeck)) System.IO.File.Delete(forbiddenDeck);
+                bool rejected=false;
+                try{AsterMaxCodeAsterNativeExporter.Export(incomplete,output,"must-not-export");}
+                catch(InvalidOperationException){rejected=true;}
+                if(!rejected || System.IO.File.Exists(forbiddenDeck))
+                    throw new InvalidOperationException("Native export accepted unassigned elements.");
+'@
+$legacyLocalized=[regex]::Replace($legacyLocalized,"\r\n?","`n").TrimEnd()
+$legacyEnglish=[regex]::Replace($legacyEnglish,"\r\n?","`n").TrimEnd()
+$behavioral=[regex]::Replace($behavioral,"\r\n?","`n").TrimEnd()
+if($w.Contains($legacyLocalized)) { $w=$w.Replace($legacyLocalized,$behavioral) }
+elseif($w.Contains($legacyEnglish)) { $w=$w.Replace($legacyEnglish,$behavioral) }
+elseif(-not $w.Contains('Unassigned exporter fixture unexpectedly passed the assignment gate.')) {
+    throw 'C10.41 localization-safe exporter regression anchor missing.'
+}
+Set-Content $workflowStates $w -Encoding UTF8
+
+Write-Host 'C10.41 PMX result snapshots + revision/hash validation + localized integrated-result routing + localization-safe exporter audit applied.' -ForegroundColor Green
