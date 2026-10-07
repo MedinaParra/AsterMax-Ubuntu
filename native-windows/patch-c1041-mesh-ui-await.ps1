@@ -154,3 +154,22 @@ if(-not $frm.Contains('RestoreAsterMaxProjectResults(fileName);')) {
 }
 Set-Content $frmPath $frm -Encoding UTF8
 Write-Host 'C10.41 PMX result restore migrated from Controller.Open worker to completed FrmMain.OpenAsync UI flow.' -ForegroundColor Green
+
+# C10.41 RC1 teardown: C10.18 retained the viewport's old modal Shown=>RenderScene
+# callback even after integrating it as a docked child form. The integrated workspace
+# already performs an explicit first render through SelectResultField immediately after
+# Show(). Keeping both paths leaves a queued second render that can run after FrmMain
+# has disposed VTK during shutdown. Remove only the redundant Shown render; normal
+# first-render behavior remains explicit and is exercised by the results/reopen gates.
+$vtkBindingPath=Join-Path $Root 'PrePoMax/Forms/AsterMaxVtkResultsBinding.cs'
+$vtkBinding=[regex]::Replace((Get-Content $vtkBindingPath -Raw),"\r\n?","`n")
+$redundantShown='            Shown+=delegate { RenderScene(); };'
+if(([regex]::Matches($vtkBinding,[regex]::Escape($redundantShown))).Count -ne 1) {
+    throw 'C10.41 expected exactly one redundant integrated-results Shown render callback.'
+}
+$vtkBinding=$vtkBinding.Replace($redundantShown,'            // First render is explicit in ShowAsterMaxIntegratedResult -> SelectResultField.')
+if($vtkBinding.Contains($redundantShown)) {
+    throw 'C10.41 redundant Shown render callback survived teardown repair.'
+}
+Set-Content $vtkBindingPath $vtkBinding -Encoding UTF8
+Write-Host 'C10.41 integrated results no longer queues a redundant VTK render past FrmMain shutdown.' -ForegroundColor Green
