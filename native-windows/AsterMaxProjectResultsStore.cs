@@ -106,8 +106,8 @@ namespace PrePoMax
             int attempts=0;
             var timer=new System.Windows.Forms.Timer { Interval=500 };
             timer.Tick+=(sender,args)=> {
-                // DoEvents inside the initial VTK render can pump this timer. Deferring here is
-                // mandatory: observing the bundle field alone does not mean Restore has returned.
+                // DoEvents inside renderer initialization can pump this timer. Deferring while
+                // restore is active prevents the audit from closing the UI inside that callback.
                 if(_asterMaxProjectResultsRestoreInProgress) return;
                 if(_asterMaxLoadedResults==null && ++attempts<60) return;
                 timer.Stop();timer.Dispose();
@@ -191,7 +191,13 @@ namespace PrePoMax
                         bundle.RequireCurrentModel(_controller.Model);
                         _asterMaxLoadedResults=bundle;
                         _asterMaxPreviousResultsRetained=false;
-                        ShowAsterMaxIntegratedResult(null);
+                        // Result recovery and renderer initialization are deliberately separate.
+                        // OpenAsync can run before a docked vtkControl has completed its WinForms
+                        // Load lifecycle. Keep the validated bundle current and publish it in the
+                        // Outline; the stable viewport will render it on explicit selection (or
+                        // in the fresh-process reopen audit on the next message-loop turn).
+                        RefreshAsterMaxResultAvailability();
+                        _modelTree.RefreshAsterMaxOutline();
                         tsslState.Text="Resultados recuperados para la revision actual del modelo.";
                     }
                     catch(Exception ex)
