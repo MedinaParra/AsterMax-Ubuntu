@@ -37,7 +37,7 @@ for level,h in enumerate([.4,.2,.1]):
  for typ in ['HEXA8','SEG2']:
   lines += [typ]+['E%d '%e+' '.join('N%d'%n for n in ns) for t,e,ns in els if t==typ]+['FINSF']
  def grp(typ,name,ids,prefix):
-  lines.extend([typ,name]);lines.extend(' '.join(prefix+str(n) for n in ids[i:i+12]) for i in range(0,len(ids),12));lines.append('FINSF')
+  lines.extend([typ,name]);lines.extend(' '.join(prefix+str(n) for n in ids[i:i+6]) for i in range(0,len(ids),6));lines.append('FINSF')
  grp('GROUP_MA','CONC',conc,'E');grp('GROUP_MA','STEEL',steel,'E');grp('GROUP_NO','SUPPORT',supports,'N')
  grp('GROUP_NO','PIN',[supports[0]],'N');grp('GROUP_NO','GUIDE',[supports[2]],'N');grp('GROUP_NO','ALLN',list(coords),'N')
  lines.append('FIN');(p/'case.mail').write_text('\n'.join(lines)+'\n')
