@@ -1,37 +1,22 @@
-name: Fabian M2 genuine Code_Aster preliminary gravity
+name: Fabian complete lifting input gate
 on:
   push:
     branches: [agent/fabian-m2-codeaster-20261007]
-    paths: [engineering/fabian/**, .github/workflows/fabian-m2-codeaster.yml]
+    paths: [engineering/fabian/RUN_APPROVED.json]
 permissions:
   contents: read
 jobs:
-  solve:
+  input-gate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Generate three meshes
-        run: python3 engineering/fabian/generate.py
-      - name: Pull genuine Code_Aster
+      - name: Check design readiness
         run: |
-          docker pull scimulate/code_aster:15.2
-          docker image inspect scimulate/code_aster:15.2 --format '{{json .RepoDigests}}' > evidence/IMAGE_DIGEST.txt
-      - name: Solve all meshes
-        shell: bash
-        run: |
-          set -euxo pipefail
-          chmod -R 0777 evidence
-          for n in 0 1 2; do
-            docker run --rm --volume "$PWD/evidence:/analysis" scimulate/code_aster:15.2 /opt/aster/bin/as_run /analysis/mesh$n/case.export 2>&1 | tee evidence/mesh$n/STDOUT.log
-            test -s evidence/mesh$n/case.mess
-            test -s evidence/mesh$n/case.rmed
-            if grep -q '<F>' evidence/mesh$n/case.mess; then exit 1; fi
-          done
-      - name: Preserve inputs and actual solver outputs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Fabian-M2-CodeAster-preliminary-not-construction-approved
-          path: evidence
-          if-no-files-found: error
+          python3 - <<'PY'
+          import json
+          data=json.load(open('engineering/fabian/design_basis.json'))
+          missing=[k for k,v in data['required_confirmed_inputs'].items() if v is None]
+          if missing:
+              raise SystemExit('BLOCKED: '+', '.join(missing))
+          raise SystemExit('Complete solver case still requires implementation; gravity generator is not a full lifting verification.')
+          PY
