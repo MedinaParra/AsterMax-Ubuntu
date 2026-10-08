@@ -1,0 +1,26 @@
+name: Fabian FreeCAD V4 execute and STEP export
+on:
+  push:
+    branches: [agent/fabian-m2-codeaster-20261007]
+    paths: [.github/workflows/fabian-freecad-step.yml, engineering/fabian/Fabian_V4.FCMacro, engineering/fabian/export_step.py]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FreeCAD
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends freecad
+      - name: Execute macro and verify STEP roundtrip
+        run: /usr/bin/python3 engineering/fabian/export_step.py
+      - name: Preserve generated geometry and execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fabian-FreeCAD-V4-STEP-preliminary
+          path: step-output
+          if-no-files-found: error
