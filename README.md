@@ -1,103 +1,111 @@
-# AsterMax Mechanical 2.0 beta
+# AsterMax Mechanical C10.41 RC1
 
-AsterMax is a GPL-3.0 finite-element pre/postprocessor for Ubuntu and Xubuntu. It preserves the approved Mechanical-style Ribbon, Outline, Graphics, Details and Worksheet layout while providing two solver paths:
+**Open-source CAE / FEA workflow for Windows x64 with native Code_Aster integration.**
 
-1. **AsterMax Internal Linear Solver** for a verified minimum single-part static workflow.
-2. **Code_Aster** for advanced and nonlinear analyses.
+AsterMax Mechanical is an engineering pre/post-processing environment derived from the PrePoMax ecosystem and oriented toward a Mechanical-style workflow: geometry, materials, contacts, loads, meshing, solving and result review from a single desktop interface.
 
-No proprietary Ansys code, icons, screenshots or documentation are redistributed.
+> **Current status:** C10.41 RC1 — engineering-validated candidate on Windows x64.
 
-## Certified minimum Static Structural workflow
+## RC1 status
 
-Version 2.0 can complete this path locally without Code_Aster:
+| Item | Status |
+|---|---|
+| Windows x64 Release build | PASS |
+| Native Windows Code_Aster installation/execution | PASS |
+| Compiled AsterMax exporter | PASS |
+| Real contact deck solve | PASS |
+| STEP/contact/gravity regression | PASS |
+| Native GUI workflow conformance | PASS |
+| Save / close / reopen solved project | PASS |
+| Mandatory qualification gate | PASS |
 
-```text
-Geometry → Material → Named Selections → TET4 Mesh → Mesh Quality
-→ Fixed/Displacement Support → Force/Pressure/Traction/Gravity
-→ Solve → Displacement/Stress/Strain → Reactions
-→ Stress Tool → Traceable certification report
-```
+**Validated baseline commit:** `9b823e943ffafa3b94de428ff5375feb625939e6`
 
-The internal solver supports:
+**Qualification workflow:** GitHub Actions run `37651647328` — completed successfully on 2026-10-07.
 
-- one 3-D solid;
-- isotropic linear elasticity;
-- small displacement;
-- one load step;
-- first-order tetrahedral elements;
-- fixed or prescribed translational displacement;
-- nodal force, pressure, surface traction and gravity;
-- sparse direct solution using SciPy;
-- authentic VTU displacement, stress, strain and reaction fields;
-- force and moment equilibrium tables;
-- von Mises, Tresca and brittle-material failure screening;
-- SHA-256 traceability of solver inputs and outputs.
+This RC1 is a release candidate, not a claim of universal FEA certification. Every engineering model remains subject to appropriate verification, benchmark comparison, mesh/convergence review, material-model validation and applicable design codes.
 
-Unsupported advanced objects are rejected explicitly instead of being silently ignored. Contacts, remote couplings, joints, bolt pretension, nonlinear geometry, shells, beams, multiple materials and multistep analyses continue through Code_Aster.
+## What the RC1 workflow proves
 
-## One-command certification
-
-```bash
-astermax-cli certify-static project.astermax.json \
-  --backend internal --output certification
-```
-
-The command performs model validation, writes Code_Aster-compatible input, solves the model, reads authentic fields, checks mesh quality and reactions, then creates:
+The C10.41 qualification pipeline exercised the current Windows workflow end to end:
 
 ```text
-static_structural_certification.html
-static_structural_certification.json
-static_workflow_acceptance.html
-astermax_solver_run.json
-certified_project.astermax.json
+CAD / STEP
+  ↓
+AsterMax GUI
+  ↓
+Mechanical model tree
+  ↓
+Materials + contacts + loads
+  ↓
+Mesh / model export
+  ↓
+Native Windows Code_Aster
+  ↓
+Solve
+  ↓
+Results
+  ↓
+Save project
+  ↓
+Close application
+  ↓
+Reopen solved PMX in a separate GUI process
 ```
 
-Run the built-in analytical reference:
+The qualification also preserves regression coverage for real STEP geometry, contact, gravity, stress/result identity and project portability.
 
-```bash
-astermax-cli run-static-reference reference
-```
+## Current RC1 artifacts
 
-The reference is a solid TET4 cantilever. It checks displacement and stress against Euler–Bernoulli values and verifies force and moment equilibrium to numerical precision.
+The validated workflow generated the following GitHub Actions artifacts:
 
-## Mechanical roadmap features
+- `AsterMax-C10.41-Windows-x64-Test-Distribution`
+- `AsterMax-C10.41-Workflow-Conformance`
+- `AsterMax-C10.41-Mechanical-Tree-Evidence`
 
-The application also includes:
+The Windows x64 test distribution is tied to the validated RC1 baseline above. A formal GitHub Release/tag is still pending; until then, the qualification run is the traceable source for the RC1 artifact.
 
-- STEP/IGES/BREP import through Gmsh OCC;
-- materials and assignments by volume;
-- local/global mesh controls and quality contours;
-- Code_Aster static, nonlinear, modal, thermal, buckling and submodel input;
-- contacts, joints, remote points and constraint equations;
-- deformation, stress, strain, reaction and contact-result processing;
-- Solution Information, probes and Named Selection scoping;
-- stress linearization through a Path;
-- project mesh convergence;
-- Design Points;
-- multistep load histories;
-- Mechanical-style failure-theory Stress Tool.
+## Main engineering direction
 
-## Install
+AsterMax is being developed as a practical mechanical-engineering environment with emphasis on:
 
-```bash
-sudo apt install ./AsterMax-Ubuntu-2.0.0b1-amd64.deb
-astermax-safe
-```
+- STEP-based mechanical assemblies;
+- a Mechanical-style analysis tree;
+- structural static workflows;
+- automatic/default material assignment where appropriate;
+- contact-oriented modelling;
+- gravity and mechanical loading;
+- native Code_Aster solving on Windows;
+- displacement, stress and reaction result review;
+- project persistence and reproducibility;
+- validation evidence instead of silent success;
+- explicit PASS / FAIL / BLOCKED / NOT_RUN qualification logic.
 
-The bootstrap package installs the GUI, VTK, SciPy, Gmsh and result-processing dependencies on first launch. The internal solver works without Code_Aster for the certified minimum workflow. Code_Aster can be configured separately through native, Docker, Podman, Apptainer or Singularity backends.
+## Development policy after RC1
 
-## Development
+`main` contains the validated C10.41 RC1 baseline plus documentation updates.
 
-```bash
-./scripts/install_ubuntu.sh
-./scripts/run_dev.sh
-pytest -q
-```
+RC1 should remain functionally frozen. New functionality and behavior changes belong in a new RC2 development branch and must pass the same end-to-end qualification philosophy before promotion.
 
-## Validation boundary
+## Repository note
 
-“Certified” means the exact saved project passed the defined AsterMax certification scope and generated authentic numerical fields. It does not mean complete equivalence to every Ansys Mechanical feature, element formulation or design-code requirement. Advanced Code_Aster workflows require their own benchmark and target-system validation.
+The repository name `AsterMax-Ubuntu` is historical. The current C10.41 RC1 qualification described here is focused on the **native Windows x64** path with **Code_Aster for Windows**.
 
-## License
+Legacy Linux/Ubuntu work remains part of the project history, but it must not be confused with the current Windows RC1 qualification baseline.
 
-GNU GPL v3.
+## Independence and licensing
+
+AsterMax does not redistribute proprietary Ansys source code, icons, screenshots or documentation. Mechanical-style terminology is used only to describe workflow intent and user-experience direction.
+
+Upstream components retain their respective licenses. Project-specific source in this repository must be used consistently with those licenses and notices.
+
+## Qualification boundary
+
+A successful automated workflow means that the tested software chain completed the declared qualification contract for the tested model and environment. It does **not** mean that every element formulation, contact condition, nonlinear model, material law, geometry or engineering use case has been independently validated.
+
+For production engineering decisions, always preserve model inputs, solver version, mesh information, boundary conditions, result files and verification evidence.
+
+---
+
+**AsterMax Mechanical C10.41 RC1**  
+Windows x64 · Native Code_Aster · End-to-end qualification PASS
