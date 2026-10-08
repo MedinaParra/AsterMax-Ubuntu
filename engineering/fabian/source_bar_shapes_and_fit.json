@@ -1,0 +1,141 @@
+{
+  "status": "SOURCE_SHAPES_RECONSTRUCTED_DIMENSION_CONVENTION_PENDING",
+  "units": "mm; nominal diagram vertices, NOT fabrication centerline lengths",
+  "source_shapes": {
+    "1600": {
+      "diagram_vertices": [
+        [
+          0,
+          500
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          5500,
+          0
+        ]
+      ],
+      "diameter": 16,
+      "source_length_mm": 6000
+    },
+    "1601": {
+      "diagram_vertices": [
+        [
+          0,
+          100
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          5900,
+          0
+        ]
+      ],
+      "diameter": 16,
+      "source_length_mm": 6000
+    },
+    "1602": {
+      "diagram_vertices": [
+        [
+          0,
+          500
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          330,
+          0
+        ],
+        [
+          807.2970773009196,
+          477.29707730091957
+        ],
+        [
+          1207.2970773009197,
+          477.29707730091957
+        ]
+      ],
+      "diameter": 16,
+      "source_length_mm": 1905,
+      "angle_degrees": 45
+    },
+    "1603": {
+      "diagram_vertices": [
+        [
+          0,
+          0
+        ],
+        [
+          6000,
+          0
+        ]
+      ],
+      "diameter": 16,
+      "source_length_mm": 6000
+    },
+    "1604": {
+      "diagram_vertices": [
+        [
+          0,
+          100
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          900,
+          0
+        ],
+        [
+          900,
+          100
+        ]
+      ],
+      "diameter": 16,
+      "source_length_mm": 1100
+    },
+    "2500": {
+      "diagram_vertices": [
+        [
+          0,
+          0
+        ],
+        [
+          600,
+          0
+        ]
+      ],
+      "diameter": 25,
+      "source_length_mm": 600
+    }
+  },
+  "section_B_findings": [
+    "1604 appears in upper and lower layers in transverse section; it is not a straight bar",
+    "six longitudinal bars are represented per layer",
+    "50mm cover marked at strip edges",
+    "150mm end longitudinal row spacing explicitly shown, internal distribution must be traced separately"
+  ],
+  "dimension_check": {
+    "slab_thickness_mm": 200,
+    "top_bottom_cover_mm": 50,
+    "usable_outer_depth_mm": 100,
+    "U_nominal_leg_mm": 100,
+    "possible_interpretation": "if 900x100 are outside dimensions, centerline width=884 and leg envelope depth=84 for diameter16; this is inference, not confirmed dimension convention",
+    "rejected_interpretation": "100mm centerline vertical leg plus16 diameter requires116mm envelope and would not fit100mm available",
+    "required_checks": [
+      "confirm outside vs centerline dimension convention",
+      "bend mandrel radius and developed length",
+      "upper/lower U legs at same transverse station overlap unless staggered or otherwise detailed; do not silently duplicate physical steel",
+      "bar layer ordering and exact longitudinal positions"
+    ]
+  },
+  "proposal_state": "M2_lap_proposal.json remains optional adaptation, not exact reconstruction of original bars",
+  "FEA_state": "not ready for complete rebar FE validation until geometry and intersections resolved"
+}
