@@ -1,0 +1,57 @@
+{
+  "status": "PREPARATION_NOT_READY_TO_SOLVE",
+  "operation": "horizontal demoulding; no rotation",
+  "previous_run": "37708155273 failed solver step; no accepted FEA results",
+  "catalogue": "https://www.leviat.com/en-be/mwdownloads/download/link/id/426.pdf",
+  "load_cases": [
+    "gravity baseline",
+    "uniform mould adhesion",
+    "asymmetric partial release",
+    "free horizontal lift with dynamics",
+    "unequal sling loading",
+    "storage and transport"
+  ],
+  "sensitivity_not_approved_design": {
+    "adhesion_kN_m2": [
+      1,
+      2,
+      3
+    ],
+    "adhesion_note": "HALFEN catalogue reference minima for lubricated steel, varnished timber and untreated formwork respectively; not upper bounds.",
+    "crane_dynamic_factor": 1.3,
+    "dynamic_note": "catalogue crane case; actual operation must be confirmed",
+    "early_concrete_strength_MPa": [
+      15,
+      20,
+      25
+    ],
+    "strength_note": "sensitivity only, not release criteria"
+  },
+  "required_confirmed_inputs": {
+    "mould_material_contact_area_and_release_agent": null,
+    "side_form_removal_sequence": null,
+    "tested_concrete_strength_at_lift": null,
+    "early_age_modulus_tension_and_cracking_law": null,
+    "anchor_type_embedding_and_manufacturer_capacity": null,
+    "anchor_shear_combined_load_reinforcement": null,
+    "equalizing_rig_angles_and_crane_conditions": null,
+    "bar_bends_laps_and_module_ends": null,
+    "prefabrication_joints": null,
+    "storage_and_transport_supports": null
+  },
+  "reinforcement_checks": [
+    "original bars by module",
+    "positive/negative lift bending",
+    "local anchor load transfer and splitting",
+    "development length cover spacing and congestion",
+    "no assumed anchor or stirrup capacities"
+  ],
+  "FEA_checks": [
+    "global concrete and steel",
+    "local actual anchor and reinforcement geometry",
+    "early-age cracking where needed",
+    "force equilibrium",
+    "mesh convergence away from support singularities",
+    "no fabrication release based on linear gravity case"
+  ]
+}
