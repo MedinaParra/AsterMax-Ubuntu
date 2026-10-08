@@ -1,0 +1,79 @@
+{
+  "status": "PROPOSED_ADAPTATION_NOT_APPROVED_NOT_FEA",
+  "module": "M2 interior 8000 x 1000 x 200 mm",
+  "source": "SPC-0090-CL-CFD-036002/036003 original longitudinal 1+5 per layer; cover 50mm; stagger laps",
+  "original_mark_reference": [
+    1600,
+    1601
+  ],
+  "new_marks_must_not_reuse_original_without_revision": true,
+  "assumptions": {
+    "straight_longitudinal_route_mm": 7900,
+    "axial_end_cover_mm": 50,
+    "diameter_mm": 16,
+    "rows_per_layer": 6,
+    "layers": 2,
+    "lap_proposed_mm": 740,
+    "lap_basis": "general original note 40 diameters +100mm; 036002 also states 740mm for marks1600/1603. New module applicability needs engineering check",
+    "end_hooks": "not yet designed; original L bars do not automatically map to each new end"
+  },
+  "routes": [
+    {
+      "pattern": "A",
+      "first": {
+        "start_mm": 50,
+        "end_mm": 6050,
+        "length_mm": 6000
+      },
+      "second": {
+        "start_mm": 5310,
+        "end_mm": 7950,
+        "length_mm": 2640
+      },
+      "overlap": [
+        5310,
+        6050
+      ]
+    },
+    {
+      "pattern": "B",
+      "first": {
+        "start_mm": 50,
+        "end_mm": 2690,
+        "length_mm": 2640
+      },
+      "second": {
+        "start_mm": 1950,
+        "end_mm": 7950,
+        "length_mm": 6000
+      },
+      "overlap": [
+        1950,
+        2690
+      ]
+    }
+  ],
+  "assignment": "alternate A/B in each layer, 3 routes each; at either lap band only 50% of routes overlap",
+  "provisional_longitudinal_cut_quantities": {
+    "bars6000mm": 12,
+    "bars2640mm": 12,
+    "total_m": 103.68,
+    "excludes": "end bends, original 1600 deep end details, lifting reinforcement; not a final cut list"
+  },
+  "transverse": {
+    "original_mark": 1604,
+    "diameter_mm": 16,
+    "shape": "U a100 b900 c100 original; centerline and bend radii not established",
+    "original_spacing_mm": 200,
+    "module_count": "not final; distribute from end-cover and verify original end zones and orientation"
+  },
+  "checks_before_acceptance": [
+    "develop new end termination at prefabrication joints",
+    "confirm tension development/lap length for actual early-age concrete",
+    "confirm 1600 vs1601 distribution along original 24m zones",
+    "ensure actual U bends fit cover and 200mm slab",
+    "check bar interference in lap bands and anchor zones",
+    "apply same pattern to FEA only after finalized geometry"
+  ],
+  "mass_center": "calculate from final bar geometry and concrete volume corrected for embedded steel; original concrete-only estimate is not final assembly mass"
+}
