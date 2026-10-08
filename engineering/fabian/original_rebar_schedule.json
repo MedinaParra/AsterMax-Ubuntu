@@ -1,0 +1,233 @@
+{
+  "status": "ORIGINAL_SCHEDULE_TRANSCRIBED_NOT_NEW_MODULE_BOM",
+  "sources": [
+    "SPC-0090-CL-CFD-036002_0",
+    "SPC-0090-CL-CFD-036003_0"
+  ],
+  "units": "mm except lengths explicitly m",
+  "original_bars": [
+    {
+      "mark": 1600,
+      "diameter_mm": 16,
+      "type": 1,
+      "shape": "L",
+      "a_mm": 500,
+      "b_mm": 5500,
+      "length_m": 6,
+      "quantity": 24,
+      "total_length_m": 144
+    },
+    {
+      "mark": 1601,
+      "diameter_mm": 16,
+      "type": 1,
+      "shape": "L",
+      "a_mm": 100,
+      "b_mm": 5900,
+      "length_m": 6,
+      "quantity": 120,
+      "total_length_m": 720
+    },
+    {
+      "mark": 1602,
+      "diameter_mm": 16,
+      "type": 4,
+      "shape": "bent 45 degrees",
+      "a_mm": 500,
+      "b_mm": 330,
+      "c_mm": 675,
+      "d_mm": 400,
+      "length_m": 1.905,
+      "quantity": 24,
+      "total_length_m": 45.72
+    },
+    {
+      "mark": 1603,
+      "diameter_mm": 16,
+      "type": 3,
+      "shape": "straight",
+      "a_mm": 6000,
+      "length_m": 6,
+      "quantity": 216,
+      "total_length_m": 1296
+    },
+    {
+      "mark": 1604,
+      "diameter_mm": 16,
+      "type": 2,
+      "shape": "U",
+      "a_mm": 100,
+      "b_mm": 900,
+      "c_mm": 100,
+      "length_m": 1.1,
+      "quantity": 1484,
+      "total_length_m": 1632.4
+    },
+    {
+      "mark": 2500,
+      "diameter_mm": 25,
+      "type": 3,
+      "shape": "straight smooth dowel",
+      "a_mm": 600,
+      "length_m": 0.6,
+      "quantity": 28,
+      "total_length_m": 16.8
+    }
+  ],
+  "original_totals": {
+    "diameter16_length_m": 3838.12,
+    "diameter25_length_m": 16.8
+  },
+  "module_spans_per_line": [
+    {
+      "piece_per_line": 1,
+      "type": 1,
+      "start_mm": 0,
+      "end_mm": 8000,
+      "original_zone": "outer 24m",
+      "baseline_longitudinal_marks": [
+        1600,
+        1601
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": 1602,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 2,
+      "type": 2,
+      "start_mm": 8000,
+      "end_mm": 16000,
+      "original_zone": "outer 24m",
+      "baseline_longitudinal_marks": [
+        1600,
+        1601
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 3,
+      "type": 2,
+      "start_mm": 16000,
+      "end_mm": 24000,
+      "original_zone": "outer 24m",
+      "baseline_longitudinal_marks": [
+        1600,
+        1601
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 4,
+      "type": 3,
+      "start_mm": 24000,
+      "end_mm": 30250,
+      "original_zone": "central 25m",
+      "baseline_longitudinal_marks": [
+        1603
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 5,
+      "type": 3,
+      "start_mm": 30250,
+      "end_mm": 36500,
+      "original_zone": "central 25m",
+      "baseline_longitudinal_marks": [
+        1603
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 6,
+      "type": 3,
+      "start_mm": 36500,
+      "end_mm": 42750,
+      "original_zone": "central 25m",
+      "baseline_longitudinal_marks": [
+        1603
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 7,
+      "type": 3,
+      "start_mm": 42750,
+      "end_mm": 49000,
+      "original_zone": "central 25m",
+      "baseline_longitudinal_marks": [
+        1603
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 8,
+      "type": 2,
+      "start_mm": 49000,
+      "end_mm": 57000,
+      "original_zone": "outer 24m",
+      "baseline_longitudinal_marks": [
+        1600,
+        1601
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 9,
+      "type": 2,
+      "start_mm": 57000,
+      "end_mm": 65000,
+      "original_zone": "outer 24m",
+      "baseline_longitudinal_marks": [
+        1600,
+        1601
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": null,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    },
+    {
+      "piece_per_line": 10,
+      "type": 1,
+      "start_mm": 65000,
+      "end_mm": 73000,
+      "original_zone": "outer 24m",
+      "baseline_longitudinal_marks": [
+        1600,
+        1601
+      ],
+      "baseline_transverse_mark": 1604,
+      "special_end_mark": 1602,
+      "status": "original bars cross new module cuts; per-piece terminations and lap allocation unresolved"
+    }
+  ],
+  "original_joint_mm": [
+    24000,
+    49000
+  ],
+  "checks": {
+    "diameter16_total_length": 3838.1200000000003,
+    "diameter25_total_length": 16.8
+  },
+  "limitations": [
+    "quantities are original full ramp totals, not per-module quantities",
+    "drawing dimensions are schedule dimensions; mandrel radii and centreline interpretation need verification",
+    "do not cut shared original bars at module joints without designed termination",
+    "original joint dowels are not lift anchors"
+  ]
+}
