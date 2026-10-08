@@ -1,0 +1,262 @@
+# -*- coding: utf-8 -*-
+"""FreeCAD: rampa modular RSD, revision geometrica preliminar.
+Fuentes: DW-COT-2170-EMN-FFC-HRG-0001 y SPC-0090-CL-CFD-036003.
+Ejecutar desde Macro > Macros. No modifica documentos existentes.
+Unidades mm. No contiene armadura ni anclajes de izaje calculados.
+"""
+import math
+import FreeCAD as App
+import Part
+
+# PARAMETROS: separacion de ejes 2000 -> ancho total 3000.
+ANCHO = 1000.0
+ESPESOR = 200.0
+DISTANCIA_EJES = 2000.0
+PENDIENTE_PORCENTAJE = 0.0  # 0: geometria local; 8: pendiente RSD original.
+JUNTA_VISUAL = 0.0  # no sumar juntas al total 73000: recorta cada pieza en su celda.
+RECORTE_EXTREMO = 400.0
+LARGO_CARTELA = 400.0
+PROFUNDIDAD_EXTREMO = 600.0
+TRANSPARENCIA = 15
+SECUENCIA = [(1,8000),(2,8000),(2,8000),(3,6250),(3,6250),
+             (3,6250),(3,6250),(2,8000),(2,8000),(1,8000)]
+assert sum(L for _,L in SECUENCIA) == 73000
+assert 0 <= JUNTA_VISUAL < 100
+
+doc = App.newDocument('Fabian_Rampa_Modular')
+root = doc.addObject('App::DocumentObjectGroup','Conjunto')
+root.Label = 'Rampa modular - geometria para revision'
+params = doc.addObject('App::FeaturePython','Parametros')
+root.addObject(params)
+for name,value in [('Ancho',ANCHO),('Espesor',ESPESOR),('DistanciaEjes',DISTANCIA_EJES),
+                   ('JuntaVisual',JUNTA_VISUAL),('LargoTotal',73000.0)]:
+    params.addProperty('App::PropertyLength',name,'Dimensiones'); setattr(params,name,value)
+params.addProperty('App::PropertyString','Estado','Referencia')
+params.Estado = 'Geometria preliminar. Armaduras, juntas nuevas e izajes pendientes.'
+params.addProperty('App::PropertyString','Uso','Referencia')
+params.Uso = 'Cambiar constantes de la macro y ejecutar de nuevo para regenerar.'
+params.addProperty('App::PropertyFloat','PendientePorcentaje','Dimensiones')
+params.PendientePorcentaje = PENDIENTE_PORCENTAJE
+angle = -math.degrees(math.atan(PENDIENTE_PORCENTAJE/100.0))
+placement = App.Placement(App.Vector(0,0,0),App.Rotation(App.Vector(0,1,0),angle))
+colors = {1:(0.80,0.67,0.46),2:(0.68,0.76,0.84),3:(0.62,0.80,0.66)}
+volumes = []
+for row in range(2):
+    group = doc.addObject('App::DocumentObjectGroup','Linea%d'%(row+1)); root.addObject(group)
+    group.Label = 'Linea %d - 73 m'%(row+1)
+    y = row*DISTANCIA_EJES
+    x = 0.0
+    for idx,(kind,length) in enumerate(SECUENCIA):
+        inset0 = JUNTA_VISUAL/2 if idx else 0
+        inset1 = JUNTA_VISUAL/2 if idx < 9 else 0
+        a,b = x+inset0,x+length-inset1
+        if kind == 1:
+            # Perfil extremo: base plana de 400 y transicion 400, segun RSD.
+            pts = [(0,0),(length,0),(length,-ESPESOR),
+                   (RECORTE_EXTREMO+LARGO_CARTELA,-ESPESOR),
+                   (RECORTE_EXTREMO,-PROFUNDIDAD_EXTREMO),(0,-PROFUNDIDAD_EXTREMO)]
+            if idx == 9:
+                pts = [(length-u,z) for u,z in reversed(pts)]
+            wire = Part.makePolygon([App.Vector(x+u,y,z) for u,z in pts]+[App.Vector(x+pts[0][0],y,pts[0][1])])
+            shape = Part.Face(wire).extrude(App.Vector(0,ANCHO,0))
+            if JUNTA_VISUAL:
+                shape = shape.common(Part.makeBox(b-a,ANCHO,PROFUNDIDAD_EXTREMO+1,App.Vector(a,y,-PROFUNDIDAD_EXTREMO)))
+        else:
+            shape = Part.makeBox(b-a,ANCHO,ESPESOR,App.Vector(a,y,-ESPESOR))
+        obj = doc.addObject('Part::Feature','L%d_P%02d_M%d'%(row+1,idx+1,kind))
+        obj.Label = 'L%d / Pieza %02d / Modulo %d / %g mm'%(row+1,idx+1,kind,length)
+        obj.Shape = shape
+        obj.Placement = placement
+        obj.addProperty('App::PropertyInteger','TipoModulo','Identificacion'); obj.TipoModulo=kind
+        obj.addProperty('App::PropertyLength','LongitudNominal','Identificacion'); obj.LongitudNominal=length
+        obj.addProperty('App::PropertyFloat','VolumenM3','Cantidades'); obj.VolumenM3=shape.Volume/1e9
+        obj.addProperty('App::PropertyString','Estado','Identificacion'); obj.Estado='Geometria preliminar sin enfierradura ni izajes'
+        group.addObject(obj)
+        volumes.append(shape.Volume/1e9)
+        if App.GuiUp:
+            obj.ViewObject.ShapeColor=colors[kind]; obj.ViewObject.Transparency=TRANSPARENCIA
+            obj.ViewObject.LineColor=(0.22,0.22,0.22)
+        x += length
+
+doc.recompute()
+if App.GuiUp:
+    import FreeCADGui as Gui
+    Gui.activeDocument().activeView().viewAxonometric()
+    Gui.activeDocument().activeView().fitAll()
+App.Console.PrintMessage('\nFabian: 20 piezas, 2 lineas de 73 m. Volumen geometrico: %.3f m3\n'%sum(volumes))
+App.Console.PrintMessage('Vista local horizontal por defecto; pendiente RSD opcional 8%.\n')
+App.Console.PrintWarning('No liberado para fabricar. Enfierradura e izajes no modelados. Guardar con Archivo > Guardar como.\n')
+
+# V4: desarrollo geometrico con barras continuas. Adaptaciones propuestas se muestran naranja.
+# NO es reconstruccion exacta/liberada de la armadura prefabricada.
+# Biblioteca: seis formas nominales del cuadro original, sin radios aprobados.
+# Conjunto: U exteriores900x100 interpretadas como propuesta; desfase32 mm.
+# Longitudinales: propuesta recta con traslapes740; NO originales1600/1601.
+D=16.0
+R=D/2
+C=50.0
+DESFASE_U=32.0  # propuesta para evitar patas coincidentes; no cota del original
+CAPAS_Z=[-74.0,-126.0]
+YS=[58.,208.,358.,642.,792.,942.]  # propuesta, espacios interiores a confirmar
+CON_HORMIGON=True
+FUENTES=['SPC-0090-CL-CFD-036002_0','SPC-0090-CL-CFD-036003_0']
+
+# Radio AL EJE propuesto40mm para Ø16; no definido por ingenieria original.
+# Cambiarlo y regenerar. No es automaticamente radio minimo normativo.
+RADIO_EJE_PROPUESTO = 40.0
+
+def tube_path(points,diameter):
+    if len(points)<2: raise ValueError('Barra necesita al menos dos puntos')
+    if len(points)==2:
+        delta=points[1]-points[0]
+        if delta.Length<=1e-6: raise ValueError('Barra nula')
+        return Part.makeCylinder(diameter/2,delta.Length,points[0],delta)
+    corners=[]
+    for i in range(1,len(points)-1):
+        u=points[i]-points[i-1];v=points[i+1]-points[i]
+        u.normalize();v.normalize()
+        turn=math.acos(max(-1.,min(1.,u.dot(v))))
+        if turn<1e-8:
+            corners.append(None);continue
+        if turn>math.pi-1e-8: raise ValueError('Doblado180 requiere definicion separada')
+        radius=RADIO_EJE_PROPUESTO
+        trim=radius*math.tan(turn/2)
+        incoming=points[i]-u*trim;outgoing=points[i]+v*trim
+        bisector=v-u;bisector.normalize()
+        center=points[i]+bisector*(radius/math.cos(turn/2))
+        radial1=incoming-center;radial2=outgoing-center
+        radialmid=radial1+radial2;radialmid.normalize()
+        midpoint=center+radialmid*radius
+        corners.append((incoming,outgoing,midpoint,trim))
+    edges=[];cursor=points[0]
+    for i,corner in enumerate(corners,1):
+        if corner is None:
+            if (points[i]-cursor).Length>1e-7:edges.append(Part.makeLine(cursor,points[i]))
+            cursor=points[i];continue
+        incoming,outgoing,midpoint,trim=corner
+        prevtrim=corners[i-2][3] if i>1 and corners[i-2] else 0.
+        if (points[i]-points[i-1]).Length <= trim+prevtrim+1e-6:
+            raise ValueError('Radios no caben en tramo de barra')
+        if (incoming-cursor).Length>1e-7:edges.append(Part.makeLine(cursor,incoming))
+        edges.append(Part.Arc(incoming,midpoint,outgoing).toShape());cursor=outgoing
+    lasttrim=corners[-1][3] if corners[-1] else 0.
+    if (points[-1]-points[-2]).Length<=lasttrim+1e-6:
+        raise ValueError('Radio no cabe en pata final')
+    edges.append(Part.makeLine(cursor,points[-1]))
+    wire=Part.Wire(edges)
+    tangent=points[1]-points[0];tangent.normalize()
+    profile=Part.Wire([Part.makeCircle(diameter/2,points[0],tangent)])
+    solid=wire.makePipeShell([profile],True,False)
+    if solid.isNull() or not solid.isValid():raise ValueError('Barrido de barra invalido')
+    return solid
+
+def bar_feature(name,label,shape,group,status,color=(0.95,0.45,0.08),placed=True):
+    ob=doc.addObject('Part::Feature',name);ob.Label=label;ob.Shape=shape;group.addObject(ob)
+    if placed:ob.Placement=placement
+    ob.addProperty('App::PropertyString','Estado','Trazabilidad');ob.Estado=status
+    ob.addProperty('App::PropertyString','Representacion','Trazabilidad')
+    ob.Representacion='Barra continua barrida; radio al eje propuesto40mm, no aprobado'
+    if App.GuiUp:ob.ViewObject.ShapeColor=color
+    return ob
+
+ref=doc.addObject('App::DocumentObjectGroup','BibliotecaOriginal');root.addObject(ref)
+ref.Label='Biblioteca original - formas nominales fuera del conjunto'
+q=675.0/math.sqrt(2)
+shapes={
+ 1600:([(0,500),(0,0),(5500,0)],16,6000),
+ 1601:([(0,100),(0,0),(5900,0)],16,6000),
+ 1602:([(0,500),(0,0),(330,0),(330+q,q),(730+q,q)],16,1905),
+ 1603:([(0,0),(6000,0)],16,6000),
+ 1604:([(0,100),(0,0),(900,0),(900,100)],16,1100),
+ 2500:([(0,0),(600,0)],25,600)}
+for ix,(mark,(coords,diam,l)) in enumerate(sorted(shapes.items())):
+    ps=[App.Vector(u,4500+ix*700,v) for u,v in coords]
+    obj=bar_feature('Referencia%d'%mark,'Marca %d / Ø%d / nominal %g mm'%(mark,diam,l),tube_path(ps,diam),ref,
+                    'Forma nominal transcrita del cuadro; no barra colocada ni radio aprobado',(0.20,0.45,0.85),False)
+    obj.addProperty('App::PropertyInteger','MarcaOriginal','Trazabilidad');obj.MarcaOriginal=mark
+    obj.addProperty('App::PropertyLength','LargoCuadro','Trazabilidad');obj.LargoCuadro=l
+    if App.GuiUp:obj.ViewObject.Visibility=False
+
+arm=doc.addObject('App::DocumentObjectGroup','ArmaduraV3');root.addObject(arm)
+arm.Label='Armadura por pieza - adaptacion geometrica propuesta'
+for row in range(2):
+    y0=row*DISTANCIA_EJES;x=0.
+    for idx,(kind,L) in enumerate(SECUENCIA):
+        group=doc.addObject('App::DocumentObjectGroup','BarrasL%dP%02d'%(row+1,idx+1));arm.addObject(group)
+        group.Label='L%d / pieza%02d / M%d'%(row+1,idx+1,kind)
+        # Dos barras por linea longitudinal: traslape740 escalonado.
+        length=L-100
+        short=length+740-6000
+        longitudinals=[]
+        for layer,z in enumerate(CAPAS_Z):
+            for j,y in enumerate(YS):
+                start=50.;end=L-50.
+                if (j+layer)%2==0:
+                    intervals=[(start,start+6000),(end-short,end)]
+                else:
+                    intervals=[(start,start+short),(end-6000,end)]
+                # Separar barras de traslape longitudinalmente paralelas en y.
+                # Desfase32 propuesto hacia interior, NO separaciones originales.
+                for bi,(aa,bb) in enumerate(intervals):
+                    yy=y+(32 if y<500 else -32)*bi
+                    if kind==1 and z==CAPAS_Z[1]:
+                        aa=max(aa,850) if idx==0 else aa
+                        bb=min(bb,L-850) if idx==9 else bb
+                    if bb>aa:longitudinals.append(tube_path([App.Vector(x+aa,y0+yy,z),App.Vector(x+bb,y0+yy,z)],D))
+        bar_feature('LongitudinalL%dP%02d'%(row+1,idx+1),'Longitudinal Ø16 / traslape propuesto740 / no originales L',Part.makeCompound(longitudinals),group,
+                    'Adaptacion propuesta. M1 inferior incompleto: verificar continuidad con1602. Terminaciones sin aprobar.')
+        us=[]
+        # 40 posiciones por8m,32 por6.25m; centradas con paso<=200.
+        n=int(math.ceil((L-200)/200))+1
+        first=100.;last=L-100.;step=(last-first)/(n-1)
+        for npos in range(n):
+            xx=x+first+npos*step
+            for layer in range(2):
+                xp=xx+(-DESFASE_U/2 if layer==0 else DESFASE_U/2)
+                top,bottom=-58.,-142.
+                if layer==0:
+                    zz=[bottom,top,top,bottom]
+                else:
+                    zz=[top,bottom,bottom,top]
+                ps=[App.Vector(xp,y0+yy,z) for yy,z in zip([58.,58.,942.,942.],zz)]
+                us.append(tube_path(ps,D))
+        bar_feature('UL%dP%02d'%(row+1,idx+1),'U Ø16 / referencia1604 / interpretacion exterior900x100',Part.makeCompound(us),group,
+                    'Interpretacion propuesta: desfase32 entre capas, doblados con radio al eje propuesto40mm; distribucion no definitiva.')
+        if kind==1:
+            incl=[]
+            for y in YS:
+                # Perfil1602 del cuadro: vert500 + horiz330 + diagonal675 + horiz400.
+                # Orientacion propuesta dentro del extremo engrosado.
+                pp=[(50,-58),(50,-558),(380,-558),(380+q,-558+q),(780+q,-558+q)]
+                if idx==9:pp=[(L-u,z) for u,z in pp]
+                incl.append(tube_path([App.Vector(x+u,y0+y,z) for u,z in pp],D))
+            bar_feature('ExtremoL%dP%02d'%(row+1,idx+1),'6 barras Ø16 / forma nominal1602 / posicion propuesta',Part.makeCompound(incl),group,
+                        'Forma1602 nominal conservada; ubicacion, mandril y cruces pendientes de verificar',(0.20,0.65,0.35))
+        if App.GuiUp:
+            concrete=doc.getObject('L%d_P%02d_M%d'%(row+1,idx+1,kind))
+            concrete.ViewObject.Transparency=85;concrete.ViewObject.Visibility=CON_HORMIGON
+        x+=L
+
+joints=doc.addObject('App::DocumentObjectGroup','PasadoresOriginales');root.addObject(joints)
+joints.Label='Pasadores originales en24 y49m - sin juntas nuevas definidas'
+for row in range(2):
+    for j,xx in enumerate([24000.,49000.]):
+        bars=[]
+        for k in range(7):
+            yy=row*DISTANCIA_EJES+50+150*k
+            bars.append(tube_path([App.Vector(xx-300,yy,-100),App.Vector(xx+300,yy,-100)],25))
+        bar_feature('PasadoresL%dJ%d'%(row+1,j+1),'7 barras lisas Ø25 L600 / marca2500',Part.makeCompound(bars),joints,
+                    'Referencia junta original. Interferencia con modulos y alojamientos por adaptar',(0.65,0.25,0.75))
+notes=doc.addObject('App::FeaturePython','EstadoGeometriaV4');root.addObject(notes)
+for name,val in [
+ ('Alcance','Conjunto20 piezas, biblioteca6 formas, U y extremo1602 representados; adaptacion propuesta.'),
+ ('NoCerrado','No geometria definitiva: radio40 propuesto, ubicacion original, extremos L, izajes y conexiones nuevas pendientes.'),
+ ('CodigoColor','Azul: biblioteca nominal original. Naranja: adaptacion propuesta. Verde:1602 en ubicacion propuesta.'),
+ ('Masas','Cada barra es un solido continuo. No sumar volumenes de barras que se intersecten; revisar cruces y recubrimientos.'),
+ ('FEA','No ejecutado. Esta version no es malla ni modelo validado para fabricar.'),
+ ('Instrucciones','Expandir BibliotecaOriginal para ver marcas por separado. Seleccionar pieza y pulsar V,F para encuadrar en FreeCAD.')]:
+    notes.addProperty('App::PropertyString',name,'Revision');setattr(notes,name,val)
+doc.recompute()
+if App.GuiUp:
+    Gui.activeDocument().activeView().viewAxonometric();Gui.activeDocument().activeView().fitAll()
+App.Console.PrintWarning('V4 geometrica propuesta. Revisar EstadoGeometriaV4. No izajes calculados. No fabricar.\n')
