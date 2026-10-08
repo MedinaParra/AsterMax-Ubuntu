@@ -1,0 +1,10 @@
+{
+  "status": "SCREENING_ONLY",
+  "available_outer_depth_mm": 100,
+  "centerline100_case_required_mm": 116,
+  "centerline100_case": "does_not_fit",
+  "outside100_case_centerline_depth_mm": 84,
+  "outside100_case": "fits_envelope_only",
+  "same_station_leg_axes": "potential_interference; actual bend and staggering unconfirmed",
+  "mass_and_FEA_status": "not accepted until actual geometry resolves overlap"
+}
