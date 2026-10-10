@@ -150,37 +150,43 @@ if(-not $m.Contains('public void AsterMaxBeginVtkSceneBatch()')){
 Set-Content $mainPath $m -Encoding UTF8
 
 # ----------------------------------------------------------------------
-# Controller: batch only the final geometry draw performed by UpdateAfterImport.
-# The try/finally guarantees camera state is restored/flushed on errors.
-# Exact BREP, model identity, selection IDs, hierarchy and FEM remain untouched.
+# Controller: batch only the final CAD geometry draw introduced by the C10.42
+# large-assembly policy. Later candidates add diagnostics/preview code around
+# it, so locate the draw structurally from the ASTERMAX_LARGE_ASSEMBLY_PARTS
+# policy instead of requiring the old exact multiline block.
 # ----------------------------------------------------------------------
 $c=Normalize-Lf (Get-Content $controllerPath -Raw)
 if(-not $c.Contains('AsterMaxBeginVtkSceneBatch();')){
-    $needle=@'
-                if (_asterMaxCadImportDepth == 0)
-                    _form.WriteDataToOutput("AsterMax visualización CAD: " + asterMaxGeometryPartCount +
-                        " pieza(s); render inicial " +
-                        (asterMaxGeometryPartCount >= asterMaxLargeAssemblyThreshold ? "sin aristas." : "normal."));
-                DrawGeometry(false);
-'@
-    if(-not $c.Contains($needle.TrimEnd())){ throw 'C10.47 final CAD DrawGeometry anchor missing after C10.42.' }
-    $replacement=@'
-                if (_asterMaxCadImportDepth == 0)
-                    _form.WriteDataToOutput("AsterMax visualización CAD: " + asterMaxGeometryPartCount +
-                        " pieza(s); render inicial " +
-                        (asterMaxGeometryPartCount >= asterMaxLargeAssemblyThreshold ? "sin aristas." : "normal."));
+    $policyToken='Environment.GetEnvironmentVariable("ASTERMAX_LARGE_ASSEMBLY_PARTS")'
+    $policyPos=$c.IndexOf($policyToken)
+    if($policyPos -lt 0){ throw 'C10.47 large-assembly policy anchor missing after C10.42.' }
 
-                _form.AsterMaxBeginVtkSceneBatch();
-                try
-                {
-                    DrawGeometry(false);
-                }
-                finally
-                {
-                    _form.AsterMaxEndVtkSceneBatch();
-                }
-'@
-    $c=$c.Replace($needle.TrimEnd(),$replacement.TrimEnd())
+    $drawToken='DrawGeometry(false);'
+    $drawPos=$c.IndexOf($drawToken,$policyPos)
+    if($drawPos -lt 0){ throw 'C10.47 final CAD DrawGeometry call missing after large-assembly policy.' }
+    if(($drawPos-$policyPos) -gt 6000){ throw 'C10.47 final CAD DrawGeometry call is unexpectedly far from large-assembly policy.' }
+
+    $between=$c.Substring($policyPos,$drawPos-$policyPos)
+    if(-not $between.Contains('AsterMax visualización CAD:')){
+        throw 'C10.47 refused to batch an unverified DrawGeometry call.'
+    }
+
+    $lineStart=$c.LastIndexOf("`n",$drawPos)
+    if($lineStart -lt 0){$lineStart=0}else{$lineStart++}
+    $indent=$c.Substring($lineStart,$drawPos-$lineStart)
+    if($indent.Trim().Length -ne 0){ throw 'C10.47 DrawGeometry line has unexpected prefix.' }
+
+    $drawLine=$indent+$drawToken
+    $replacement=$indent+'_form.AsterMaxBeginVtkSceneBatch();'+"`n"+
+                 $indent+'try'+"`n"+
+                 $indent+'{'+"`n"+
+                 $indent+'    DrawGeometry(false);'+"`n"+
+                 $indent+'}'+"`n"+
+                 $indent+'finally'+"`n"+
+                 $indent+'{'+"`n"+
+                 $indent+'    _form.AsterMaxEndVtkSceneBatch();'+"`n"+
+                 $indent+'}'
+    $c=$c.Substring(0,$lineStart)+$replacement+$c.Substring($lineStart+$drawLine.Length)
 }
 Set-Content $controllerPath $c -Encoding UTF8
 
