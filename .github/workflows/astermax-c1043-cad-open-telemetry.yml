@@ -1,0 +1,114 @@
+name: C10.43 CAD open telemetry validation
+on:
+  push:
+    branches: [agent/c1043-cad-open-telemetry]
+  workflow_dispatch:
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax telemetry branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate C10.41 release patch chain
+        shell: pwsh
+        run: python native-windows/validate-patch-chain.py
+
+      - name: Apply C10.41 baseline patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $chain=Get-Content native-windows/patch-chain.json -Raw | ConvertFrom-Json
+          $patches=@($chain.patches | ForEach-Object { $_.file })
+          & ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          if($LASTEXITCODE -ne 0){ throw 'C10.41 baseline patch application failed.' }
+
+      - name: Apply C10.42 large-assembly candidate
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+
+      - name: Apply C10.43 end-to-end telemetry
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1043-cad-open-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-open-telemetry.ps1 -BuildRoot "$PWD/upstream"
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
+          'PASS' | Set-Content .\dist\Audit\C10.43\static-validation.txt -Encoding ASCII
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: |
+          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){ throw 'C10.43 Windows x64 build failed.' }
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
+          'PASS' | Set-Content .\dist\Audit\C10.43\windows-build.txt -Encoding ASCII
+
+      - name: Record Windows runner provenance
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          $cs = Get-CimInstance Win32_ComputerSystem
+          $os = Get-CimInstance Win32_OperatingSystem
+          [ordered]@{
+            github_run_id='${{ github.run_id }}'
+            commit='${{ github.sha }}'
+            branch='${{ github.ref_name }}'
+            upstream='3669e65581650e5d9d868aa761db9efd856f8571'
+            runner_os=$env:RUNNER_OS
+            windows_caption=$os.Caption
+            windows_version=$os.Version
+            cpu=$cpu.Name
+            logical_processors=$cpu.NumberOfLogicalProcessors
+            ram_bytes=[int64]$cs.TotalPhysicalMemory
+          } | ConvertTo-Json | Set-Content .\dist\Audit\C10.43\runner-provenance.json -Encoding UTF8
+
+      - name: Record validation boundary
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
+          $staticPassed=Test-Path .\dist\Audit\C10.43\static-validation.txt
+          $buildPassed=Test-Path .\dist\Audit\C10.43\windows-build.txt
+          [ordered]@{
+            release='C10.43-cad-open-telemetry'
+            static_validation=if($staticPassed){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            windows_x64_build=if($buildPassed){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY'
+            runtime_gui_measurement='NOT_RUN'
+            five_run_benchmark='NOT_RUN'
+            navigation_fps_p95='NOT_RUN'
+            pmx_reopen_benchmark='NOT_RUN'
+            executable_distribution='NOT_PRODUCED_BY_THIS_WORKFLOW'
+            cad_or_fem_fidelity_changed=$false
+            benchmark_values_invented=$false
+          } | ConvertTo-Json | Set-Content .\dist\Audit\C10.43\evidence.json -Encoding UTF8
+
+      - name: Upload C10.43 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.43-CAD-Open-Telemetry-Evidence
+          path: dist/Audit/C10.43
+          if-no-files-found: warn
