@@ -32,7 +32,8 @@ $checks = [ordered]@{
 
 $failed=@($checks.GetEnumerator() | Where-Object { -not $_.Value })
 foreach($item in $checks.GetEnumerator()){
-    Write-Host ((if($item.Value){'PASS'}else{'FAIL'}) + ' - ' + $item.Key)
+    $status = if($item.Value){ 'PASS' } else { 'FAIL' }
+    Write-Host ($status + ' - ' + $item.Key)
 }
 if($failed.Count -gt 0){ throw ('C10.42 static regression failed: ' + (($failed | ForEach-Object {$_.Key}) -join ', ')) }
 

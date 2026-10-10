@@ -73,6 +73,8 @@ jobs:
           New-Item -ItemType Directory -Force .\dist\Audit\C10.42 | Out-Null
           $staticPassed=Test-Path .\dist\Audit\C10.42\static-validation.txt
           $buildPassed=Test-Path .\dist\Audit\C10.42\windows-build.txt
+          $staticStatus = if($staticPassed){ 'PASS' } else { 'FAIL_OR_NOT_RUN' }
+          $buildStatus = if($buildPassed){ 'PASS' } else { 'FAIL_OR_NOT_RUN' }
           [ordered]@{
             release='C10.42-large-assembly-import-candidate'
             commit='${{ github.sha }}'
@@ -85,8 +87,8 @@ jobs:
             runtime_import_telemetry_added=$staticPassed
             large_assembly_edges_default='NoEdges when part count >= threshold'
             default_part_threshold=80
-            static_validation=if($staticPassed){'PASS'}else{'FAIL_OR_NOT_RUN'}
-            windows_x64_build=if($buildPassed){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            static_validation=$staticStatus
+            windows_x64_build=$buildStatus
             benchmark_status='NOT_RUN'
             rc1_status='NOT_PROMOTED'
             fea_values_invented=$false
