@@ -25,14 +25,14 @@ function Get-NetGenSnapshot {
   }
 }
 
-function Invoke-DiagnosticCase([string]$Label,[int]$Workers){
+function Invoke-DiagnosticCase([string]$Label,[int]$RequestedWorkers){
   $out=Join-Path $root $Label
   New-Item -ItemType Directory -Force $out | Out-Null
   $env:ASTERMAX_C1043_AUDIT_DIR=$out
   $env:ASTERMAX_C1043_EXPECTED_PARTS=$ExpectedParts.ToString()
   $env:ASTERMAX_LARGE_ASSEMBLY_PARTS='8'
   $env:ASTERMAX_LARGE_ASSEMBLY_DEFLECTION='0.04'
-  $env:ASTERMAX_CAD_TESSELLATION_WORKERS=$Workers.ToString()
+  $env:ASTERMAX_CAD_TESSELLATION_WORKERS=$RequestedWorkers.ToString()
   try {
     $started=(Get-Date).ToUniversalTime()
     $before=Get-NetGenSnapshot
@@ -58,7 +58,7 @@ function Invoke-DiagnosticCase([string]$Label,[int]$Workers){
     if($p -and -not $timedOut){ try {$exitCode=$p.ExitCode} catch {} }
     $result=[ordered]@{
       label=$Label
-      workers=$Workers
+      requested_workers=$RequestedWorkers
       expected_parts=$ExpectedParts
       process_timeout_ms=$CaseTimeoutMs
       timed_out=$timedOut
@@ -86,13 +86,12 @@ function Invoke-DiagnosticCase([string]$Label,[int]$Workers){
   }
 }
 
-$sequential=Invoke-DiagnosticCase 'sequential-workers1' 1
-# Clean only after recording evidence so the parallel case starts from a known state.
+$sequential=Invoke-DiagnosticCase 'requested-workers1' 1
 Get-Process -Name 'NetGenMesher' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 1
-$parallel=Invoke-DiagnosticCase 'parallel-workers2' 2
+$requestedTwo=Invoke-DiagnosticCase 'requested-workers2' 2
 
-$status=if($parallel.timed_out){'PARALLEL_TIMEOUT'}elseif(-not $parallel.report_present){'PARALLEL_NO_REPORT'}elseif($parallel.report_pass -ne $true){'PARALLEL_REPORT_FAIL'}elseif($sequential.report_pass -eq $true){'BOTH_COMPLETE'}else{'SEQUENTIAL_NOT_CONFIRMED'}
+$status=if($requestedTwo.timed_out){'REQUESTED2_TIMEOUT'}elseif(-not $requestedTwo.report_present){'REQUESTED2_NO_REPORT'}elseif($requestedTwo.report_pass -ne $true){'REQUESTED2_REPORT_FAIL'}elseif($sequential.report_pass -eq $true){'REQUESTED2_SAFE_SINGLEFLIGHT_COMPLETES'}else{'SEQUENTIAL_NOT_CONFIRMED'}
 $summary=[ordered]@{
   fixture='25 analytic spheres STEP'
   step_sha256=$stepHash
@@ -100,8 +99,9 @@ $summary=[ordered]@{
   visualization_deflection=0.04
   status=$status
   sequential=$sequential
-  parallel=$parallel
-  interpretation='DIAGNOSTIC_ONLY: one run per condition; no speedup/FPS claim.'
+  requested_two=$requestedTwo
+  policy_note='C10.46c static guard fixes effective NetGen external concurrency at one; requested_workers=2 tests that the unsafe request is safely serialized.'
+  interpretation='DIAGNOSTIC_ONLY: one run per request; no speedup/FPS claim.'
 }
 $summary | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $root 'diagnostic-summary.json') -Encoding UTF8
 $summary | ConvertTo-Json -Depth 10
