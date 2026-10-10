@@ -43,10 +43,19 @@ jobs:
       - name: Apply C10.43 end-to-end telemetry
         shell: pwsh
         run: |
-          ./native-windows/candidate-c1043-cad-open-telemetry.ps1 -Root "$PWD/upstream"
-          ./native-windows/test-c1043-cad-open-telemetry.ps1 -BuildRoot "$PWD/upstream"
+          $ErrorActionPreference='Stop'
           New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
-          'PASS' | Set-Content .\dist\Audit\C10.43\static-validation.txt -Encoding ASCII
+          try {
+            & ./native-windows/candidate-c1043-cad-open-telemetry.ps1 -Root "$PWD/upstream" *>&1 |
+              Tee-Object -FilePath .\dist\Audit\C10.43\c1043-apply.log
+            & ./native-windows/test-c1043-cad-open-telemetry.ps1 -BuildRoot "$PWD/upstream" *>&1 |
+              Tee-Object -FilePath .\dist\Audit\C10.43\c1043-static.log
+            'PASS' | Set-Content .\dist\Audit\C10.43\static-validation.txt -Encoding ASCII
+          }
+          catch {
+            ($_ | Out-String) | Add-Content .\dist\Audit\C10.43\c1043-apply.log -Encoding UTF8
+            throw
+          }
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -62,6 +71,19 @@ jobs:
           if($LASTEXITCODE -ne 0){ throw 'C10.43 Windows x64 build failed.' }
           New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
           'PASS' | Set-Content .\dist\Audit\C10.43\windows-build.txt -Encoding ASCII
+
+      - name: Capture effective generated sources
+        if: always()
+        shell: pwsh
+        run: |
+          $dst = '.\dist\Audit\C10.43\effective-source'
+          New-Item -ItemType Directory -Force $dst | Out-Null
+          $files = @(
+            @{src='.\upstream\PrePoMax\Controller.cs'; dst='Controller.cs'},
+            @{src='.\upstream\vtkControl\vtkControl.cs'; dst='vtkControl.cs'},
+            @{src='.\upstream\PrePoMax\Forms\AsterMaxNativeUi.cs'; dst='AsterMaxNativeUi.cs'}
+          )
+          foreach($f in $files){ if(Test-Path $f.src){ Copy-Item $f.src (Join-Path $dst $f.dst) -Force } }
 
       - name: Record Windows runner provenance
         if: always()
