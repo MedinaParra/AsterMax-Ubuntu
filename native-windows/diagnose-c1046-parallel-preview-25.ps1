@@ -33,48 +33,49 @@ function Invoke-DiagnosticCase([string]$Label,[int]$Workers){
   $env:ASTERMAX_LARGE_ASSEMBLY_PARTS='8'
   $env:ASTERMAX_LARGE_ASSEMBLY_DEFLECTION='0.04'
   $env:ASTERMAX_CAD_TESSELLATION_WORKERS=$Workers.ToString()
-  $started=(Get-Date).ToUniversalTime()
-  $before=Get-NetGenSnapshot
-  $p=$null
-  $timedOut=$false
-  $errorText=$null
   try {
-    $p=Start-Process -FilePath $exe -WorkingDirectory $Dist -ArgumentList @($step,'-US','MM_TON_S_C') -PassThru
-    if(-not $p.WaitForExit($CaseTimeoutMs)){
-      $timedOut=$true
-      try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { $errorText='AsterMax stop failed: '+$_.Exception.Message }
+    $started=(Get-Date).ToUniversalTime()
+    $before=Get-NetGenSnapshot
+    $p=$null
+    $timedOut=$false
+    $errorText=$null
+    try {
+      $p=Start-Process -FilePath $exe -WorkingDirectory $Dist -ArgumentList @($step,'-US','MM_TON_S_C') -PassThru
+      if(-not $p.WaitForExit($CaseTimeoutMs)){
+        $timedOut=$true
+        try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch { $errorText='AsterMax stop failed: '+$_.Exception.Message }
+      }
     }
-  }
-  catch { $errorText=$_.Exception.Message }
-  Start-Sleep -Seconds 2
-  $after=Get-NetGenSnapshot
-  $reportPath=Join-Path $out 'c1043-import-report.json'
-  $report=$null
-  if(Test-Path $reportPath){
-    try { $report=Get-Content $reportPath -Raw | ConvertFrom-Json } catch { $errorText='Report parse failed: '+$_.Exception.Message }
-  }
-  $exitCode=$null
-  if($p -and -not $timedOut){ try {$exitCode=$p.ExitCode} catch {} }
-  $result=[ordered]@{
-    label=$Label
-    workers=$Workers
-    expected_parts=$ExpectedParts
-    process_timeout_ms=$CaseTimeoutMs
-    timed_out=$timedOut
-    process_exit_code=$exitCode
-    report_present=(Test-Path $reportPath)
-    report_pass=if($report){[bool]$report.pass}else{$null}
-    cad_bodies=if($report){$report.cad_bodies}else{$null}
-    controller_errors=if($report){$report.controller_errors}else{$null}
-    elapsed_ms_upper_bound=if($report){$report.elapsed_ms_upper_bound}else{$null}
-    before=$before
-    after=$after
-    error=$errorText
-    started_utc=$started.ToString('o')
-    completed_utc=(Get-Date).ToUniversalTime().ToString('o')
-  }
-  $result | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'case-result.json') -Encoding UTF8
-  return $result
+    catch { $errorText=$_.Exception.Message }
+    Start-Sleep -Seconds 2
+    $after=Get-NetGenSnapshot
+    $reportPath=Join-Path $out 'c1043-import-report.json'
+    $report=$null
+    if(Test-Path $reportPath){
+      try { $report=Get-Content $reportPath -Raw | ConvertFrom-Json } catch { $errorText='Report parse failed: '+$_.Exception.Message }
+    }
+    $exitCode=$null
+    if($p -and -not $timedOut){ try {$exitCode=$p.ExitCode} catch {} }
+    $result=[ordered]@{
+      label=$Label
+      workers=$Workers
+      expected_parts=$ExpectedParts
+      process_timeout_ms=$CaseTimeoutMs
+      timed_out=$timedOut
+      process_exit_code=$exitCode
+      report_present=(Test-Path $reportPath)
+      report_pass=if($report){[bool]$report.pass}else{$null}
+      cad_bodies=if($report){$report.cad_bodies}else{$null}
+      controller_errors=if($report){$report.controller_errors}else{$null}
+      elapsed_ms_upper_bound=if($report){$report.elapsed_ms_upper_bound}else{$null}
+      before=$before
+      after=$after
+      error=$errorText
+      started_utc=$started.ToString('o')
+      completed_utc=(Get-Date).ToUniversalTime().ToString('o')
+    }
+    $result | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'case-result.json') -Encoding UTF8
+    return $result
   }
   finally {
     Remove-Item Env:ASTERMAX_C1043_AUDIT_DIR -ErrorAction SilentlyContinue
