@@ -57,6 +57,14 @@ jobs:
           ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream" *>&1 | Tee-Object -FilePath .\dist\Audit\C10.46\static-lifecycle.log
           'PASS' | Set-Content .\dist\Audit\C10.46\static-validation.txt -Encoding ASCII
 
+      - name: Apply C10.46c safe NetGen single-flight policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream" *>&1 | Tee-Object -FilePath .\dist\Audit\C10.46\static-singleflight.log
+          'PASS' | Set-Content .\dist\Audit\C10.46\singleflight-validation.txt -Encoding ASCII
+
       - name: Setup Python runtime
         uses: actions/setup-python@v6
         with:
@@ -104,7 +112,7 @@ jobs:
           New-Item -ItemType Directory -Force .\dist\Temp | Out-Null
           Get-FileHash .\dist\'AsterMax Mechanical.exe' -Algorithm SHA256 | Format-List | Out-String | Set-Content .\dist\Audit\C10.46\executable-sha256.txt
 
-      - name: Diagnose one vs two workers on 25 spheres
+      - name: Qualify requested one vs requested two workers on 25 spheres
         shell: pwsh
         run: ./native-windows/diagnose-c1046-parallel-preview-25.ps1 -Dist "$PWD/dist" -ExpectedParts 25 -CaseTimeoutMs 90000
 
@@ -119,7 +127,7 @@ jobs:
           $diagPath='.\dist\Audit\C10.46\diagnostic-25\diagnostic-summary.json'
           $diagStatus=if(Test-Path $diagPath){(Get-Content $diagPath -Raw|ConvertFrom-Json).status}else{'NOT_RUN'}
           [ordered]@{
-            release='C10.46-netgen-worker-lifecycle-audit'
+            release='C10.46c-safe-netgen-singleflight'
             commit='${{ github.sha }}'
             branch='${{ github.ref_name }}'
             upstream='3669e65581650e5d9d868aa761db9efd856f8571'
@@ -129,10 +137,13 @@ jobs:
             cpu=$cpu.Name
             logical_processors=$cpu.NumberOfLogicalProcessors
             ram_bytes=[int64]$cs.TotalPhysicalMemory
-            static_validation=if(Test-Path '.\dist\Audit\C10.46\static-validation.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            c1046_lifecycle_static=if(Test-Path '.\dist\Audit\C10.46\static-validation.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            c1046c_singleflight_static=if(Test-Path '.\dist\Audit\C10.46\singleflight-validation.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
             windows_x64_build=if(Test-Path '.\dist\Audit\C10.46\windows-build.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
-            synthetic_25_part_parallel_diagnostic=$diagStatus
-            inherited_100_part_parallel_status='FAIL_TIMEOUT_CONFIRMED_RUNS_38048558197_AND_38087326745'
+            synthetic_25_part_singleflight_qualification=$diagStatus
+            inherited_c1045_parallel_25_status='FAIL_TIMEOUT_90S_RUN_38087891765'
+            inherited_c1045_parallel_100_status='FAIL_TIMEOUT_180S_RUNS_38048558197_AND_38087326745'
+            netgen_external_concurrency_effective=1
             exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY'
             five_run_per_condition='NOT_RUN'
             navigation_frame_time_p95='NOT_RUN'
