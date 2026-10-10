@@ -36,6 +36,10 @@ jobs:
         shell: pwsh
         run: ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
 
+      - name: Normalize C10.41 controller anchors for C10.42
+        shell: pwsh
+        run: ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+
       - name: Apply C10.42 candidate import and graphics patch
         shell: pwsh
         run: ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
