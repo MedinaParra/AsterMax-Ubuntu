@@ -55,7 +55,18 @@ $prepare=@'
                     process.Start();
                     if (!process.WaitForExit(180000))
                     {
-                        try { process.Kill(); } catch { }
+                        try
+                        {
+                            process.Kill();
+                            // Do not race scratch-directory cleanup against a process that
+                            // may still own files. Bound the post-kill wait; never report it
+                            // as successful preview work.
+                            process.WaitForExit(5000);
+                        }
+                        catch (Exception killEx)
+                        {
+                            _form.WriteDataToOutput("AsterMax CAD NetGen shutdown warning: " + killEx.Message);
+                        }
                         result.Error = "NetGen preview timed out after 180 s.";
                         return result;
                     }
@@ -86,7 +97,12 @@ $prepare=@'
                     if (Directory.Exists(processWorkDirectory))
                         Directory.Delete(processWorkDirectory, true);
                 }
-                catch { }
+                catch (Exception cleanupEx)
+                {
+                    // Cleanup failure is not a geometry failure, but it must be visible so
+                    // repeated large imports cannot silently accumulate worker directories.
+                    _form.WriteDataToOutput("AsterMax CAD NetGen cleanup warning: " + cleanupEx.Message);
+                }
             }
         }
 '@
@@ -99,4 +115,4 @@ $c=$c.Replace('int workers = Math.Min(4, Math.Max(1, Environment.ProcessorCount)
 $c=$c.Replace('workers = Math.Max(1, Math.Min(8, configuredWorkers));',
               'workers = Math.Max(1, Math.Min(4, configuredWorkers));')
 Set-Content $controllerPath $c -Encoding UTF8
-Write-Host 'C10.45b: isolated NetGen scratch directories + conservative worker cap applied.' -ForegroundColor Green
+Write-Host 'C10.45b: isolated NetGen scratch directories + conservative worker cap + bounded shutdown applied.' -ForegroundColor Green
