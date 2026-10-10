@@ -110,7 +110,7 @@ jobs:
 
       - name: Run C10.47 25-part scene batch diagnostic
         shell: pwsh
-        run: ./native-windows/diagnose-c1047-vtk-scene-batch-25.ps1 -Dist "$PWD/dist" -ExpectedParts 25 -CaseTimeoutMs 90000
+        run: ./native-windows/diagnose-c1047-vtk-scene-batch-25.ps1 -Dist "$PWD/dist" -ExpectedParts 25 -CaseTimeoutMs 90000 -ShutdownTimeoutMs 10000
 
       - name: Record runner and C10.47 evidence
         if: always()
@@ -136,7 +136,10 @@ jobs:
             ram_bytes=[int64]$cs.TotalPhysicalMemory
             static_validation=if(Test-Path '.\dist\Audit\C10.47\static-validation.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
             windows_x64_build=if(Test-Path '.\dist\Audit\C10.47\windows-build.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
-            synthetic_25_scene_batch=if($diag -and $diag.report_pass){'PASS'}elseif($diag){'FAIL'}else{'NOT_RUN'}
+            synthetic_25_scene_batch=if($diag -and $diag.scene_batch_status){$diag.scene_batch_status}elseif($diag -and $diag.report_pass){'PASS'}elseif($diag){'FAIL'}else{'NOT_RUN'}
+            graceful_shutdown=if($diag -and $diag.shutdown_status){$diag.shutdown_status}else{'NOT_RUN'}
+            audit_report_timeout=if($diag){$diag.audit_report_timeout}else{$null}
+            audit_ready_wall_ms=if($diag){$diag.audit_ready_wall_ms}else{$null}
             deferred_camera_adjusts=if($diag){$diag.deferred_camera_adjusts}else{$null}
             batch_camera_flushes=if($diag){$diag.batch_camera_flushes}else{$null}
             camera_adjust_calls_avoided_lower_bound=if($diag){$diag.camera_adjust_calls_avoided_lower_bound}else{$null}
