@@ -63,6 +63,62 @@ if(-not $a.Contains('C10.48 animation edge materialization')){
 '@
 $text=Replace-Block $text '# Animation mutates edge-point data directly; materialize before that path.' '# Replace CreatePolyFromData only once and create a lightweight placeholder when deferred.' $animationBlock 'animation'
 
+$createPolyBlock=@'
+# Replace CreatePolyFromData only once and create a lightweight placeholder when deferred.
+$a=Replace-CSharpMethod $a '        private void CreatePolyFromData(vtkMaxActorData data)' {
+    param($existing)
+    $x=$existing.Replace('private void CreatePolyFromData(vtkMaxActorData data)','private void CreatePolyFromData(vtkMaxActorData data, bool deferElementEdges)')
+    $x=$x.Replace('AddNodeAndCellDataToPoly(data.Geometry, out polyActor, out polyEdges, out numOfCellPolys, true);',
+                  'AddNodeAndCellDataToPoly(data.Geometry, out polyActor, out polyEdges, out numOfCellPolys, !deferElementEdges);')
+
+    $ifToken='            if (data.CanHaveElementEdges)'
+    $ifStart=$x.IndexOf($ifToken)
+    if($ifStart -lt 0){ throw 'C10.48 CreatePolyFromData element-edge if missing.' }
+    $braceStart=$x.IndexOf('{',$ifStart)
+    if($braceStart -lt 0){ throw 'C10.48 CreatePolyFromData element-edge opening brace missing.' }
+    $depth=0; $ifEnd=-1
+    for($n=$braceStart; $n -lt $x.Length; $n++){
+        if($x[$n] -eq '{'){ $depth++ }
+        elseif($x[$n] -eq '}'){
+            $depth--
+            if($depth -eq 0){ $ifEnd=$n+1; break }
+        }
+    }
+    if($ifEnd -lt 0){ throw 'C10.48 CreatePolyFromData element-edge closing brace missing.' }
+
+    $new=@'
+            if (data.CanHaveElementEdges)
+            {
+                if (deferElementEdges)
+                {
+                    // Keep a lightweight actor so historical transforms/visibility calls remain valid.
+                    _elementEdges = vtkActor.New();
+                    _elementEdges.PickableOff();
+                    _elementEdgesProperty = _elementEdges.GetProperty();
+                    _elementEdgesProperty.SetLighting(true);
+                    _asterMaxElementEdgesDeferred = true;
+                }
+                else
+                {
+                    // Mapper
+                    mapper = vtkDataSetMapper.New();
+                    mapper.SetInput(polyEdges);
+                    // Actor
+                    _elementEdges = new vtkActor();
+                    _elementEdges.SetMapper(mapper);
+                    _elementEdges.PickableOff();
+                    //
+                    _elementEdgesProperty = _elementEdges.GetProperty();
+                    _elementEdgesProperty.SetLighting(true);
+                }
+            }
+'@
+    return $x.Substring(0,$ifStart)+$new.TrimEnd()+$x.Substring($ifEnd)
+}
+
+'@
+$text=Replace-Block $text '# Replace CreatePolyFromData only once and create a lightweight placeholder when deferred.' '# When extractEdges=false, do not populate/update a second vtkPolyData at all.' $createPolyBlock 'CreatePolyFromData'
+
 $temp=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-runtime.ps1'
 Set-Content $temp $text -Encoding UTF8
 try { & $temp -Root $Root }
