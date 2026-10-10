@@ -36,7 +36,16 @@ namespace PrePoMax
                 int partCount = _controller != null && _controller.Model != null && _controller.Model.Geometry != null
                     ? _controller.Model.Geometry.Parts.Count : 0;
                 bool idle = _controller != null && !IsStateWorking();
-                bool ready = idle && partCount >= expectedParts;
+                long deferredNow = _vtk == null ? -1 : _vtk.AsterMaxSceneBatchDeferredCameraAdjusts;
+                long flushesNow = _vtk == null ? -1 : _vtk.AsterMaxSceneBatchCameraFlushes;
+                int depthNow = _vtk == null ? -1 : _vtk.AsterMaxSceneBatchDepth;
+
+                // Model incorporation can finish before the final VTK scene build. During that
+                // interval all CAD bodies already exist and Controller can appear idle, while the
+                // UI thread is still servicing synchronous AddCells calls from DrawGeometry.
+                // Do not confuse that intermediate state with a visible/completed scene.
+                bool sceneComplete = depthNow == 0 && flushesNow == 1 && deferredNow > 0;
+                bool ready = idle && partCount >= expectedParts && sceneComplete;
                 if (!ready && ticks < 720) return;
 
                 timer.Stop();
@@ -54,6 +63,7 @@ namespace PrePoMax
                     report["cad_bodies"] = partCount;
                     report["controller_errors"] = errors;
                     report["idle"] = idle;
+                    report["scene_complete"] = sceneComplete;
                     report["elapsed_ms_upper_bound"] = ticks * 250;
                     report["deferred_camera_adjusts"] = deferred;
                     report["batch_camera_flushes"] = flushes;
@@ -62,7 +72,7 @@ namespace PrePoMax
                     pass = ready && errors == 0 && deferred > 0 && flushes == 1 && depth == 0;
                     report["pass"] = pass;
                     if (!pass)
-                        report["error"] = "CAD import did not finish with a balanced scene batch and exactly one camera flush.";
+                        report["error"] = "CAD import did not reach a completed, balanced VTK scene batch with exactly one camera flush.";
                 }
                 catch (Exception ex)
                 {
@@ -107,4 +117,4 @@ if(-not $u.Contains('StartAsterMaxC1047SceneBatchAudit();')){
 }
 Set-Content $uiPath $u -Encoding UTF8
 
-Write-Host 'C10.47 runtime scene-batch audit hook applied with prompt-safe UI-thread shutdown.' -ForegroundColor Green
+Write-Host 'C10.47 runtime scene-batch audit waits for final VTK batch completion and uses prompt-safe shutdown.' -ForegroundColor Green
