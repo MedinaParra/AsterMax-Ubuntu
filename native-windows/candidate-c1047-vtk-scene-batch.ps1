@@ -25,6 +25,22 @@ function Replace-CSharpMethod([string]$text,[string]$signature,[scriptblock]$tra
     $replacement=& $transform $existing
     return $text.Substring(0,$start)+$replacement.TrimEnd()+$text.Substring($end)
 }
+function Insert-AfterCSharpMethod([string]$text,[string]$signature,[string]$insertion){
+    $start=$text.IndexOf($signature)
+    if($start -lt 0){ throw "C10.47 insertion method missing: $signature" }
+    $brace=$text.IndexOf('{',$start)
+    if($brace -lt 0){ throw "C10.47 insertion opening brace missing: $signature" }
+    $depth=0; $end=-1
+    for($n=$brace; $n -lt $text.Length; $n++){
+        if($text[$n] -eq '{'){ $depth++ }
+        elseif($text[$n] -eq '}'){
+            $depth--
+            if($depth -eq 0){ $end=$n+1; break }
+        }
+    }
+    if($end -lt 0){ throw "C10.47 insertion closing brace missing: $signature" }
+    return $text.Substring(0,$end)+"`n"+$insertion.TrimEnd()+$text.Substring($end)
+}
 
 # ----------------------------------------------------------------------
 # vtkControl: defer per-actor camera+render work while a CAD scene is built.
@@ -114,21 +130,12 @@ Set-Content $vtkPath $v -Encoding UTF8
 # ----------------------------------------------------------------------
 # FrmMain: synchronous marshaling wrappers. Controller may be importing on a
 # worker thread, while all scene-batch state and VTK calls remain on UI thread.
+# Locate Add3DCells structurally because prior native patches may change its
+# whitespace/body while preserving its signature and semantics.
 # ----------------------------------------------------------------------
 $m=Normalize-Lf (Get-Content $mainPath -Raw)
 if(-not $m.Contains('public void AsterMaxBeginVtkSceneBatch()')){
-    $anchor=@'
-        public void Add3DCells(vtkControl.vtkMaxActorData cellData)
-        {
-            InvokeIfRequired(_vtk.AddCells, cellData);
-        }
-'@
-    if(-not $m.Contains($anchor.TrimEnd())){ throw 'C10.47 FrmMain Add3DCells anchor missing.' }
-    $wrapper=@'
-        public void Add3DCells(vtkControl.vtkMaxActorData cellData)
-        {
-            InvokeIfRequired(_vtk.AddCells, cellData);
-        }
+    $wrappers=@'
         public void AsterMaxBeginVtkSceneBatch()
         {
             InvokeIfRequired(() => _vtk.AsterMaxBeginSceneBatch());
@@ -138,7 +145,7 @@ if(-not $m.Contains('public void AsterMaxBeginVtkSceneBatch()')){
             InvokeIfRequired(() => _vtk.AsterMaxEndSceneBatch());
         }
 '@
-    $m=$m.Replace($anchor.TrimEnd(),$wrapper.TrimEnd())
+    $m=Insert-AfterCSharpMethod $m '        public void Add3DCells(vtkControl.vtkMaxActorData cellData)' $wrappers
 }
 Set-Content $mainPath $m -Encoding UTF8
 
