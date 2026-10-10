@@ -73,8 +73,16 @@ namespace PrePoMax
                 File.WriteAllText(Path.Combine(directory, "c1047-scene-batch-report.json"), report.ToString(Formatting.Indented));
                 Environment.ExitCode = pass ? 0 : 1;
                 _c10209AuditShutdownDirectory = directory;
-                if (_controller != null) _controller.ModelChanged = false;
-                BeginInvoke(new Action(() => Close()));
+
+                // Keep this mutation in the same UI callback as Close(). Import-finalization
+                // messages can mark the model changed after the report is written but before a
+                // queued close callback executes; clearing it earlier races that finalization and
+                // can open a modal save prompt on a headless runner.
+                BeginInvoke(new Action(() =>
+                {
+                    if (_controller != null) _controller.ModelChanged = false;
+                    Close();
+                }));
             };
             timer.Start();
         }
@@ -99,4 +107,4 @@ if(-not $u.Contains('StartAsterMaxC1047SceneBatchAudit();')){
 }
 Set-Content $uiPath $u -Encoding UTF8
 
-Write-Host 'C10.47 runtime scene-batch audit hook applied.' -ForegroundColor Green
+Write-Host 'C10.47 runtime scene-batch audit hook applied with prompt-safe UI-thread shutdown.' -ForegroundColor Green
