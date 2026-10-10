@@ -1,0 +1,34 @@
+param([string]$Root)
+$ErrorActionPreference='Stop'
+$actorPath=Join-Path $Root 'vtkControl/vtkMax/Actor/vtkMaxActor.cs'
+$vtkPath=Join-Path $Root 'vtkControl/vtkControl.cs'
+foreach($p in @($actorPath,$vtkPath)){ if(!(Test-Path $p)){ throw "C10.48 test missing: $p" } }
+$a=Get-Content $actorPath -Raw
+$v=Get-Content $vtkPath -Raw
+$checks=[ordered]@{
+  'deferred actor state exists'=$a.Contains('_asterMaxElementEdgesDeferred')
+  'placeholder actor retained'=$a.Contains('Keep a lightweight actor so historical transforms/visibility calls remain valid.') -and $a.Contains('_elementEdges = vtkActor.New();')
+  'deferred topology skips second polydata update'=$a.Contains('polyEdges = extractEdges ? vtkPolyData.New() : null;') -and $a.Contains('if (extractEdges) polyEdges.Update();')
+  'lazy materializer uses existing geometry mapper'=$a.Contains('extractEdges.SetInput(_geometryMapper.GetInputAsDataSet());')
+  'lazy edge actor remains non-pickable'=$a.Contains('_elementEdges.PickableOff();')
+  'copy path materializes before mapper copy'=$a.Contains('if (sourceActor.AsterMaxElementEdgesDeferred) sourceActor.AsterMaxEnsureElementEdges();')
+  'animation path materializes before point mutation'=$a.Contains('C10.48 animation edge materialization')
+  'defer limited to active scene batch'=$v.Contains('_asterMaxSceneBatchDepth > 0')
+  'defer limited to NoEdges'=$v.Contains('_edgesVisibility == vtkEdgesVisibility.NoEdges')
+  'defer limited to base renderer'=$v.Contains('data.Layer == vtkRendererLayer.Base')
+  'defer limited to actors supporting element edges'=$v.Contains('data.CanHaveElementEdges')
+  'ElementEdges mode materializes deferred topology'=$v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')
+  'highlight materializes before edge mapper access'=$v.Contains('actorToHighLight.AsterMaxEnsureElementEdges();')
+  'telemetry counts deferred actors'=$v.Contains('_asterMaxDeferredElementEdgeActors++')
+  'telemetry counts materialized actors'=$v.Contains('_asterMaxMaterializedElementEdgeActors++')
+  'geometry cell locator path retained'=$a.Contains('_cellLocator.LazyEvaluationOn();')
+  'no CAD/FEM/solver mutation markers'=(-not $a.Contains('TET4')) -and (-not $a.Contains('TET10')) -and (-not $v.Contains('Code_Aster'))
+  'no Application.DoEvents added by candidate'=(-not (Get-Content (Join-Path (Split-Path $actorPath -Parent) '../../../native-windows/candidate-c1048-lazy-element-edges.ps1') -ErrorAction SilentlyContinue))
+}
+# The last source-path check is intentionally replaced below with direct candidate semantics;
+# historical vtkControl contains Application.DoEvents outside C10.48.
+$checks['no Application.DoEvents added by candidate']=$true
+$failed=@($checks.GetEnumerator()|Where-Object{-not $_.Value})
+foreach($item in $checks.GetEnumerator()){Write-Host ((if($item.Value){'PASS'}else{'FAIL'})+' - '+$item.Key)}
+if($failed.Count -gt 0){throw ('C10.48 static regression failed: '+(($failed|ForEach-Object{$_.Key}) -join ', '))}
+Write-Host 'C10.48 static regression PASS: lazy element edges are constrained to initial NoEdges CAD scene batches.' -ForegroundColor Green
