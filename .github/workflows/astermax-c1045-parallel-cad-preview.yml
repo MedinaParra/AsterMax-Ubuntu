@@ -1,4 +1,4 @@
-name: C10.45 Bounded parallel CAD preview benchmark
+name: C10.45 Isolated bounded parallel CAD preview benchmark
 on:
   push:
     branches: [agent/c1045-parallel-cad-preview]
@@ -44,7 +44,8 @@ jobs:
           ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
-          ./native-windows/test-c1045-parallel-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
 
       - name: Setup Python runtime
         uses: actions/setup-python@v6
@@ -91,7 +92,7 @@ jobs:
           Copy-Item $ng.Directory.FullName .\dist\NetGen -Recurse -Force
           New-Item -ItemType Directory -Force .\dist\Temp | Out-Null
 
-      - name: Benchmark bounded parallel preview on 100 spheres
+      - name: Benchmark isolated two-worker preview on 100 spheres
         shell: pwsh
         run: ./native-windows/benchmark-c1045-parallel-preview.ps1 -Dist "$PWD/dist" -ExpectedParts 100
 
@@ -103,12 +104,13 @@ jobs:
           $benchmarkPath='.\dist\Audit\C10.45\benchmark.json'
           $benchmarkStatus=if(Test-Path $benchmarkPath){(Get-Content $benchmarkPath -Raw|ConvertFrom-Json).status}else{'NOT_RUN'}
           [ordered]@{
-            release='C10.45-parallel-cad-preview-candidate'
+            release='C10.45-isolated-parallel-cad-preview-candidate'
             commit='${{ github.sha }}'
             branch='${{ github.ref_name }}'
             exact_brep_modified=$false
             model_mutation_parallel=$false
-            max_parallel_workers=4
+            isolated_worker_directories=$true
+            default_parallel_workers=2
             benchmark_status=$benchmarkStatus
             rc1_status='NOT_PROMOTED'
             fea_values_invented=$false
@@ -118,6 +120,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.45-Parallel-Preview-Evidence
+          name: AsterMax-C10.45-Isolated-Parallel-Preview-Evidence
           path: dist/Audit/C10.45
           if-no-files-found: warn

@@ -23,7 +23,7 @@ function Invoke-ImportCase([string]$Label,[int]$Workers){
   $env:ASTERMAX_CAD_TESSELLATION_WORKERS=$Workers.ToString()
   try {
     $p=Start-Process -FilePath $exe -WorkingDirectory $Dist -ArgumentList @($step,'-US','MM_TON_S_C') -PassThru
-    if(-not $p.WaitForExit(240000)){Stop-Process -Id $p.Id -Force;throw "C10.45 $Label timed out."}
+    if(-not $p.WaitForExit(180000)){Stop-Process -Id $p.Id -Force;throw "C10.45 $Label timed out."}
     $reportPath=Join-Path $out 'c1043-import-report.json'
     if(!(Test-Path $reportPath)){throw "C10.45 $Label report missing."}
     $r=Get-Content $reportPath -Raw | ConvertFrom-Json
@@ -41,8 +41,8 @@ function Invoke-ImportCase([string]$Label,[int]$Workers){
 }
 
 $s1=Invoke-ImportCase 'sequential-1' 1
-$p1=Invoke-ImportCase 'parallel-1' 4
-$p2=Invoke-ImportCase 'parallel-2' 4
+$p1=Invoke-ImportCase 'parallel2-1' 2
+$p2=Invoke-ImportCase 'parallel2-2' 2
 $s2=Invoke-ImportCase 'sequential-2' 1
 $sequential=[math]::Round(($s1+$s2)/2.0,1)
 $parallel=[math]::Round(($p1+$p2)/2.0,1)
@@ -54,7 +54,8 @@ $result=[ordered]@{
   expected_parts=$ExpectedParts
   visualization_deflection=0.04
   sequential_workers=1
-  parallel_workers=4
+  parallel_workers=2
+  isolated_worker_directories=$true
   sequential_runs_ms=@($s1,$s2)
   parallel_runs_ms=@($p1,$p2)
   sequential_average_ms=$sequential
@@ -67,4 +68,4 @@ $result=[ordered]@{
 }
 $result|ConvertTo-Json -Depth 5|Set-Content (Join-Path $root 'benchmark.json') -Encoding UTF8
 $result|ConvertTo-Json -Depth 5
-if($status -eq 'FAIL'){throw 'C10.45 bounded parallel preview caused a material measured regression.'}
+if($status -eq 'FAIL'){throw 'C10.45 isolated two-worker preview caused a material measured regression.'}
