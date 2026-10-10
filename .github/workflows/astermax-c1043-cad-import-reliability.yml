@@ -1,0 +1,126 @@
+name: C10.43 CAD import reliability and 100-body runtime validation
+on:
+  push:
+    branches: [agent/c1043-cad-import-reliability]
+  workflow_dispatch:
+
+jobs:
+  windows-runtime-import:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate C10.41 release patch chain
+        shell: pwsh
+        run: python native-windows/validate-patch-chain.py
+
+      - name: Apply C10.41 baseline patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $chain=Get-Content native-windows/patch-chain.json -Raw | ConvertFrom-Json
+          $patches=@($chain.patches | ForEach-Object { $_.file })
+          & ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          if($LASTEXITCODE -ne 0){throw 'C10.41 baseline patch application failed.'}
+
+      - name: Apply validated C10.42 candidate
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+
+      - name: Apply C10.43 import reliability candidate
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+
+      - name: Setup Python runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install CAD fixture dependency
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: |
+          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'C10.43 Windows x64 build failed.'}
+
+      - name: Assemble runtime import distribution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin\\x64\\Release'} | Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing.'}
+          New-Item -ItemType Directory -Force .\dist | Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python | Out-Null
+          $pythonRoot=Split-Path (Get-Command python).Source -Parent
+          Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
+          & .\dist\AsterMaxRuntime\Python\python.exe -c "import gmsh; print('ASTERMAX_C1043_GMSH_OK')"
+          if($LASTEXITCODE -ne 0){throw 'Packaged gmsh runtime failed.'}
+
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){throw 'Pinned CAD runtime digest mismatch.'}
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){throw 'NetGenMesher.exe missing from pinned runtime.'}
+          Copy-Item $ng.Directory.FullName .\dist\NetGen -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\Temp | Out-Null
+
+      - name: Execute real 100-body STEP import
+        shell: pwsh
+        run: ./native-windows/smoke-c1043-large-step-import.ps1 -Dist "$PWD/dist" -ExpectedParts 100
+
+      - name: Record C10.43 evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.43 | Out-Null
+          $runtimePass=Test-Path .\dist\Audit\C10.43\runtime-import-pass.txt
+          $runtimeStatus=if($runtimePass){'PASS'}else{'FAIL_OR_NOT_RUN'}
+          [ordered]@{
+            release='C10.43-cad-import-reliability-candidate'
+            commit='${{ github.sha }}'
+            branch='${{ github.ref_name }}'
+            c1042_regression='PASS_IF_REACHED_BUILD'
+            unique_vis_jobs=$true
+            staged_import_diagnostics=$true
+            expected_runtime_bodies=100
+            runtime_import=$runtimeStatus
+            benchmark_status='NOT_RUN'
+            rc1_status='NOT_PROMOTED'
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\Audit\C10.43\evidence.json -Encoding UTF8
+
+      - name: Upload C10.43 import evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.43-CAD-Import-Evidence
+          path: dist/Audit/C10.43
+          if-no-files-found: warn
