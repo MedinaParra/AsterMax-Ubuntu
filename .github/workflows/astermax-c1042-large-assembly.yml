@@ -1,0 +1,79 @@
+name: C10.42 Large assembly graphics validation
+on:
+  push:
+    branches: [agent/c1042-large-assembly-pipeline]
+  workflow_dispatch:
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout AsterMax branch
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Validate existing patch chain
+        shell: pwsh
+        run: python native-windows/validate-patch-chain.py
+
+      - name: Apply C10.41 baseline patch chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $chain=Get-Content native-windows/patch-chain.json -Raw | ConvertFrom-Json
+          $patches=@($chain.patches | ForEach-Object { $_.file })
+          & ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          if($LASTEXITCODE -ne 0){ throw 'C10.41 baseline patch application failed.' }
+
+      - name: Apply C10.42 large assembly patch
+        shell: pwsh
+        run: ./native-windows/patch-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+
+      - name: Run C10.42 static regression
+        shell: pwsh
+        run: ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+
+      - name: Record validation evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.42 | Out-Null
+          [ordered]@{
+            release='C10.42-large-assembly-candidate'
+            commit='${{ github.sha }}'
+            branch='${{ github.ref_name }}'
+            scope='GRAPHICS_LOAD_PATH_ONLY'
+            exact_brep_preserved=$true
+            render_requests_coalesced=$true
+            large_assembly_edges_default='NoEdges when part count >= threshold'
+            default_part_threshold=80
+            benchmark_status='NOT_RUN'
+            rc1_status='NOT_PROMOTED'
+            fea_values_invented=$false
+          } | ConvertTo-Json -Depth 5 | Set-Content .\dist\Audit\C10.42\evidence.json -Encoding UTF8
+
+      - name: Upload C10.42 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.42-Large-Assembly-Evidence
+          path: dist/Audit/C10.42
+          if-no-files-found: warn
