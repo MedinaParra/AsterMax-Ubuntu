@@ -1,4 +1,4 @@
-name: C10.42 Large assembly graphics validation
+name: C10.42 Large assembly import and graphics validation
 on:
   push:
     branches: [agent/c1042-large-assembly-pipeline]
@@ -19,7 +19,7 @@ jobs:
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
 
-      - name: Validate existing patch chain
+      - name: Validate C10.41 release patch chain
         shell: pwsh
         run: python native-windows/validate-patch-chain.py
 
@@ -32,13 +32,16 @@ jobs:
           & ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
           if($LASTEXITCODE -ne 0){ throw 'C10.41 baseline patch application failed.' }
 
-      - name: Apply C10.42 large assembly patch
+      - name: Apply C10.42 candidate import and graphics patch
         shell: pwsh
-        run: ./native-windows/patch-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+        run: ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
 
       - name: Run C10.42 static regression
         shell: pwsh
-        run: ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+        run: |
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.42 | Out-Null
+          'PASS' | Set-Content .\dist\Audit\C10.42\static-validation.txt -Encoding ASCII
 
       - name: Restore NuGet packages
         shell: pwsh
@@ -49,22 +52,33 @@ jobs:
 
       - name: Rebuild Windows x64 Release
         shell: pwsh
-        run: msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+        run: |
+          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){ throw 'C10.42 Windows x64 build failed.' }
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.42 | Out-Null
+          'PASS' | Set-Content .\dist\Audit\C10.42\windows-build.txt -Encoding ASCII
 
       - name: Record validation evidence
         if: always()
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force .\dist\Audit\C10.42 | Out-Null
+          $staticPassed=Test-Path .\dist\Audit\C10.42\static-validation.txt
+          $buildPassed=Test-Path .\dist\Audit\C10.42\windows-build.txt
           [ordered]@{
-            release='C10.42-large-assembly-candidate'
+            release='C10.42-large-assembly-import-candidate'
             commit='${{ github.sha }}'
             branch='${{ github.ref_name }}'
-            scope='GRAPHICS_LOAD_PATH_ONLY'
-            exact_brep_preserved=$true
-            render_requests_coalesced=$true
+            scope='CAD_IMPORT_AND_GRAPHICS_LOAD_PATH'
+            exact_brep_modified=$false
+            nested_compound_redraw_suppressed=$staticPassed
+            render_requests_coalesced=$staticPassed
+            camera_only_post_import_finalization=$staticPassed
+            runtime_import_telemetry_added=$staticPassed
             large_assembly_edges_default='NoEdges when part count >= threshold'
             default_part_threshold=80
+            static_validation=if($staticPassed){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            windows_x64_build=if($buildPassed){'PASS'}else{'FAIL_OR_NOT_RUN'}
             benchmark_status='NOT_RUN'
             rc1_status='NOT_PROMOTED'
             fea_values_invented=$false
@@ -74,6 +88,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.42-Large-Assembly-Evidence
+          name: AsterMax-C10.42-Import-Graphics-Evidence
           path: dist/Audit/C10.42
           if-no-files-found: warn
