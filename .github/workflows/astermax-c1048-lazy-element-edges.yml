@@ -1,0 +1,137 @@
+name: C10.48 lazy element edges Windows validation
+on:
+  push:
+    branches: [agent/c1048-lazy-element-edges]
+  workflow_dispatch:
+
+jobs:
+  windows-c1048:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout AsterMax C10.48 branch
+        uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Validate and apply C10.41 baseline
+        shell: pwsh
+        run: |
+          python native-windows/validate-patch-chain.py
+          if($LASTEXITCODE -ne 0){throw 'patch-chain validation failed.'}
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          & ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          if($LASTEXITCODE -ne 0){throw 'C10.41 baseline failed.'}
+      - name: Apply C10.42 through C10.46c
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+      - name: Apply C10.47 validated scene batch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+      - name: Apply and statically validate C10.48
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.48|Out-Null
+          ./native-windows/candidate-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream" *>&1|Tee-Object -FilePath .\dist\Audit\C10.48\static.log
+          ./native-windows/candidate-c1048-runtime-audit.ps1 -Root "$PWD/upstream"
+          'PASS'|Set-Content .\dist\Audit\C10.48\static-validation.txt -Encoding ASCII
+      - name: Setup Python runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install benchmark CAD dependency
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check gmsh
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: nuget restore .\upstream\PrePoMax.sln -NonInteractive
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Rebuild Windows x64 Release
+        shell: pwsh
+        run: |
+          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'C10.48 Windows x64 build failed.'}
+          'PASS'|Set-Content .\dist\Audit\C10.48\windows-build.txt -Encoding ASCII
+      - name: Assemble CAD runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe missing.'}
+          New-Item -ItemType Directory -Force .\dist|Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python|Out-Null
+          $pythonRoot=Split-Path (Get-Command python).Source -Parent
+          Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
+          & .\dist\AsterMaxRuntime\Python\python.exe -c "import gmsh; print('ASTERMAX_C1048_GMSH_OK')"
+          if($LASTEXITCODE -ne 0){throw 'Packaged gmsh runtime failed.'}
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
+          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){throw 'Pinned CAD runtime digest mismatch.'}
+          Expand-Archive runtime.zip runtime
+          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe|Select-Object -First 1
+          if(-not $ng){throw 'NetGenMesher.exe missing.'}
+          Copy-Item $ng.Directory.FullName .\dist\NetGen -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\Temp|Out-Null
+          Get-FileHash .\dist\'AsterMax Mechanical.exe' -Algorithm SHA256|Format-List|Out-String|Set-Content .\dist\Audit\C10.48\executable-sha256.txt
+      - name: Run C10.48 lazy-edge runtime diagnostic
+        shell: pwsh
+        run: ./native-windows/diagnose-c1048-lazy-element-edges-25.ps1 -Dist "$PWD/dist" -ExpectedParts 25 -CaseTimeoutMs 90000 -ShutdownTimeoutMs 10000
+      - name: Record C10.48 evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.48|Out-Null
+          $cpu=Get-CimInstance Win32_Processor|Select-Object -First 1
+          $cs=Get-CimInstance Win32_ComputerSystem
+          $os=Get-CimInstance Win32_OperatingSystem
+          $diagPath='.\dist\Audit\C10.48\diagnostic-25\diagnostic-summary.json'
+          $diag=$null;if(Test-Path $diagPath){$diag=Get-Content $diagPath -Raw|ConvertFrom-Json}
+          [ordered]@{
+            release='C10.48-lazy-element-edges';commit='${{ github.sha }}';branch='${{ github.ref_name }}';upstream='3669e65581650e5d9d868aa761db9efd856f8571'
+            windows_caption=$os.Caption;windows_version=$os.Version;cpu=$cpu.Name;logical_processors=$cpu.NumberOfLogicalProcessors;ram_bytes=[int64]$cs.TotalPhysicalMemory
+            static_validation=if(Test-Path '.\dist\Audit\C10.48\static-validation.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            windows_x64_build=if(Test-Path '.\dist\Audit\C10.48\windows-build.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
+            synthetic_25_lazy_edges=if($diag -and $diag.report_pass){'PASS'}elseif($diag){'FAIL'}else{'NOT_RUN'}
+            deferred_edge_actors=if($diag){$diag.deferred_edge_actors}else{$null}
+            materialized_before_toggle=if($diag){$diag.materialized_before_toggle}else{$null}
+            materialized_after_toggle=if($diag){$diag.materialized_after_toggle}else{$null}
+            remaining_after_toggle=if($diag){$diag.remaining_after_toggle}else{$null}
+            graceful_shutdown=if($diag -and $diag.graceful_shutdown){'PASS'}elseif($diag){'FAIL'}else{'NOT_RUN'}
+            exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';five_run_per_condition='NOT_RUN';navigation_frame_time_p95='NOT_RUN';pmx_reopen_benchmark='NOT_RUN';gui_visual_regression='NOT_RUN';selection_regression='NOT_RUN'
+            exact_brep_modified=$false;fem_policy_modified=$false;code_aster_windows_only_solver_preserved=$true;benchmark_values_invented=$false
+          }|ConvertTo-Json -Depth 5|Set-Content .\dist\Audit\C10.48\evidence.json -Encoding UTF8
+      - name: Upload C10.48 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.48-Lazy-Element-Edges-Evidence
+          path: dist/Audit/C10.48
+          if-no-files-found: warn
