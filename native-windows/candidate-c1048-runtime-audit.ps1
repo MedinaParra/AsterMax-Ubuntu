@@ -53,8 +53,8 @@ namespace PrePoMax
                     bool deferredPhasePass = sceneComplete && initialNoEdges && deferred > 0 &&
                                              materializedBefore == 0 && remainingBefore == deferred;
 
+                    // EdgesVisibility setter and lazy materialization are synchronous on this UI thread.
                     if (_vtk != null) _vtk.EdgesVisibility = vtkEdgesVisibility.ElementEdges;
-                    Application.DoEvents();
 
                     long materializedAfter = _vtk == null ? -1 : _vtk.AsterMaxMaterializedElementEdgeActors;
                     int remainingAfter = _vtk == null ? -1 : _vtk.AsterMaxDeferredElementEdgesRemaining;
