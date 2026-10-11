@@ -4,19 +4,24 @@ $p=Join-Path $Root 'vtkControl/vtkControl.cs'
 if(!(Test-Path $p)){throw "C10.50 missing: $p"}
 $v=Get-Content $p -Raw
 $checks=[ordered]@{
-  mapper_field='_asterMaxSceneBatchMapperInputs'
-  renderer_field='_asterMaxSceneBatchRendererAdds'
-  mapper_api='AsterMaxSceneBatchMapperInputs'
-  renderer_api='AsterMaxSceneBatchRendererAdds'
-  mapper_reset='_asterMaxSceneBatchMapperInputs = 0;'
-  renderer_reset='_asterMaxSceneBatchRendererAdds = 0;'
-  mapper_increment='_asterMaxSceneBatchMapperInputs++;'
-  renderer_increment='_asterMaxSceneBatchRendererAdds++;'
+  actor_field='_asterMaxSceneBatchActorConstructions'
+  geometry_add_field='_asterMaxSceneBatchGeometryAdds'
+  actor_api='AsterMaxSceneBatchActorConstructions'
+  geometry_add_api='AsterMaxSceneBatchGeometryAdds'
+  actor_reset='_asterMaxSceneBatchActorConstructions = 0;'
+  geometry_add_reset='_asterMaxSceneBatchGeometryAdds = 0;'
+  actor_increment='_asterMaxSceneBatchActorConstructions++;'
+  geometry_add_increment='_asterMaxSceneBatchGeometryAdds++;'
 }
 foreach($c in $checks.GetEnumerator()){if(-not $v.Contains($c.Value)){throw "C10.50 static guard FAIL: $($c.Key)"}}
 $add=$v.IndexOf('public void AddCells(vtkMaxActorData data)')
 if($add -lt 0){throw 'C10.50 AddCells missing.'}
-$mapper=$v.IndexOf('_asterMaxSceneBatchMapperInputs++;',$add)
-$renderer=$v.IndexOf('_asterMaxSceneBatchRendererAdds++;',$add)
-if($mapper -lt $add -or $renderer -lt $add){throw 'C10.50 counters are not located after AddCells entry.'}
-Write-Host 'C10.50 static telemetry guards PASS.' -ForegroundColor Green
+$actor=$v.IndexOf('_asterMaxSceneBatchActorConstructions++;',$add)
+$geometryAdd=$v.IndexOf('_asterMaxSceneBatchGeometryAdds++;',$add)
+$ctor=$v.IndexOf('vtkMaxActor actor = new vtkMaxActor(data);',$add)
+$dispatch=$v.IndexOf('AddActorGeometry(actor, data.Layer);',$add)
+if($actor -lt $add -or $geometryAdd -lt $add){throw 'C10.50 counters are not located after AddCells entry.'}
+if($ctor -lt 0 -or $dispatch -lt 0){throw 'C10.50 expected AddCells actor path missing.'}
+if($actor -gt $ctor){throw 'C10.50 actor counter must precede vtkMaxActor construction.'}
+if($geometryAdd -gt $dispatch){throw 'C10.50 geometry-add counter must precede AddActorGeometry dispatch.'}
+Write-Host 'C10.50 static telemetry guards PASS: actual AddCells actor construction/geometry dispatch instrumented.' -ForegroundColor Green
