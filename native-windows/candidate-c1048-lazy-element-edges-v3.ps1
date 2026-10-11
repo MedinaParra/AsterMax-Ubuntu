@@ -23,21 +23,23 @@ $text=$text.Replace($needle,$inject+"`n"+$needle)
 # The historical EdgesVisibility setter is whitespace-sensitive in the base
 # candidate. Replace that script fragment with a structural property transform
 # so CRLF/indentation changes cannot block C10.48 before compilation.
-$old=@'
-$setterOld=@'
+# Use a double-quoted outer here-string because the fragment itself contains
+# single-quoted here-strings; identical delimiters would terminate the wrapper.
+$old=@"
+`$setterOld=@'
                     _edgesVisibility = value;
                     ApplyEdgesVisibilityAndBackfaceCulling();
 '@
-if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
-    if(-not $v.Contains($setterOld.TrimEnd())){ throw 'C10.48 EdgesVisibility setter body anchor missing.' }
-    $setterNew=@'
+if(-not `$v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
+    if(-not `$v.Contains(`$setterOld.TrimEnd())){ throw 'C10.48 EdgesVisibility setter body anchor missing.' }
+    `$setterNew=@'
                     _edgesVisibility = value;
                     if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();
                     ApplyEdgesVisibilityAndBackfaceCulling();
 '@
-    $v=$v.Replace($setterOld.TrimEnd(),$setterNew.TrimEnd())
+    `$v=`$v.Replace(`$setterOld.TrimEnd(),`$setterNew.TrimEnd())
 }
-'@
+"@
 $new=@'
 if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
     $v=Replace-CSharpMethod $v '        public vtkEdgesVisibility EdgesVisibility' {
