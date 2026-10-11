@@ -115,7 +115,7 @@ if(-not $v.Contains('private void AsterMaxEnsureDeferredElementEdges()')){
                     _asterMaxMaterializedElementEdgeActors++;
             }
         }
-        //
+
 '@
     $v=$v.Replace($applySig,$helper+$applySig)
 }
