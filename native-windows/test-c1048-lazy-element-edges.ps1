@@ -8,7 +8,7 @@ foreach($p in @($actorPath,$vtkPath)){ if(!(Test-Path $p)){ throw "C10.48 test m
 $a=Get-Content $actorPath -Raw
 $v=Get-Content $vtkPath -Raw
 $candidatePath=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges.ps1'
-$wrapperPath=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-v2.ps1'
+$wrapperPath=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-v3.ps1'
 $auditPath=Join-Path $PSScriptRoot 'candidate-c1048-runtime-audit.ps1'
 foreach($p in @($candidatePath,$wrapperPath,$auditPath)){ if(!(Test-Path $p)){ throw "C10.48 source guard missing: $p" } }
 $candidateText=Get-Content $candidatePath -Raw
@@ -17,7 +17,7 @@ $auditText=Get-Content $auditPath -Raw
 
 $checks=[ordered]@{
   'deferred actor state exists'=$a.Contains('_asterMaxElementEdgesDeferred')
-  'placeholder actor retained'=$a.Contains('Keep a lightweight actor so historical transforms/visibility calls remain valid.') -and $a.Contains('_elementEdges = vtkActor.New();')
+  'placeholder actor retained'=$a.Contains('_elementEdges = vtkActor.New();') -and $a.Contains('_elementEdgesProperty = _elementEdges.GetProperty();')
   'deferred topology skips second polydata update'=$a.Contains('polyEdges = extractEdges ? vtkPolyData.New() : null;') -and $a.Contains('if (extractEdges) polyEdges.Update();')
   'lazy materializer uses existing geometry mapper'=$a.Contains('extractEdges.SetInput(_geometryMapper.GetInputAsDataSet());')
   'lazy edge actor remains non-pickable'=$a.Contains('_elementEdges.PickableOff();')
@@ -28,7 +28,7 @@ $checks=[ordered]@{
   'defer limited to base renderer'=$v.Contains('data.Layer == vtkRendererLayer.Base')
   'defer limited to actors supporting element edges'=$v.Contains('data.CanHaveElementEdges')
   'ElementEdges mode materializes deferred topology'=$v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')
-  'highlight materializes before edge mapper access'=$v.Contains('actorToHighLight.AsterMaxEnsureElementEdges();')
+  'highlight materializes before edge mapper access'=$v.Contains('if (actorToHighLight.AsterMaxElementEdgesDeferred)') -and $v.Contains('if (actorToHighLight.AsterMaxEnsureElementEdges()) _asterMaxMaterializedElementEdgeActors++;')
   'telemetry counts deferred actors'=$v.Contains('_asterMaxDeferredElementEdgeActors++')
   'telemetry counts materialized actors'=$v.Contains('_asterMaxMaterializedElementEdgeActors++')
   'geometry cell locator path retained'=$a.Contains('_cellLocator.LazyEvaluationOn();')
