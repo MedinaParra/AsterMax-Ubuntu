@@ -20,11 +20,28 @@ $text=$text.Replace($actorWrite,$combined+"`n"+$actorWrite)
 '@
 $text=$text.Replace($needle,$inject+"`n"+$needle)
 
-# The base C10.48 candidate already owns the EdgesVisibility transformation.
-# v3 must not parse/rewrite that here-string a second time: doing so made the
-# wrapper depend on the exact textual representation of nested PowerShell.
-# The base candidate applies the setter change structurally to vtkControl.cs;
-# v3 only composes the additional vtkMaxActor transformations above.
+# The historical implementation matches the EdgesVisibility setter byte-for-byte.
+# Replace that generated PowerShell block by a structural C# method transform.
+$setterStart='$setterOld=@'''
+$setterEnd='$v=Replace-CSharpMethod $v ''        public void AddCells(vtkMaxActorData data)'' {'
+$start=$text.IndexOf($setterStart)
+if($start -lt 0){ throw 'C10.48 v3 setter transform start missing.' }
+$end=$text.IndexOf($setterEnd,$start)
+if($end -lt 0 -or $end -le $start){ throw 'C10.48 v3 AddCells boundary missing after setter transform.' }
+$setterStructural=@'
+if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
+    $v=Replace-CSharpMethod $v '        public vtkEdgesVisibility EdgesVisibility' {
+        param($existing)
+        $pattern='(?m)^(\s*)_edgesVisibility\s*=\s*value;\s*$'
+        $matches=[regex]::Matches($existing,$pattern)
+        if($matches.Count -ne 1){ throw "C10.48 EdgesVisibility assignment expected 1 structural match, got $($matches.Count)." }
+        $indent=$matches[0].Groups[1].Value
+        $replacement=$matches[0].Value+"`n"+$indent+'if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();'
+        return [regex]::Replace($existing,$pattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $replacement },1)
+    }
+}
+'@
+$text=$text.Substring(0,$start)+$setterStructural+"`n"+$text.Substring($end)
 
 $temp=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-v3-runtime.ps1'
 Set-Content $temp $text -Encoding UTF8
