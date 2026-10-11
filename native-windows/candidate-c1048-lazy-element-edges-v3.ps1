@@ -20,26 +20,10 @@ $text=$text.Replace($actorWrite,$combined+"`n"+$actorWrite)
 '@
 $text=$text.Replace($needle,$inject+"`n"+$needle)
 
-# The historical EdgesVisibility setter is whitespace-sensitive in the base
-# candidate. Replace that script fragment with a structural property transform
-# so CRLF/indentation changes cannot block C10.48 before compilation.
-# Use a double-quoted outer here-string because the fragment itself contains
-# single-quoted here-strings; identical delimiters would terminate the wrapper.
-$old=@"
-`$setterOld=@'
-                    _edgesVisibility = value;
-                    ApplyEdgesVisibilityAndBackfaceCulling();
-'@
-if(-not `$v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
-    if(-not `$v.Contains(`$setterOld.TrimEnd())){ throw 'C10.48 EdgesVisibility setter body anchor missing.' }
-    `$setterNew=@'
-                    _edgesVisibility = value;
-                    if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();
-                    ApplyEdgesVisibilityAndBackfaceCulling();
-'@
-    `$v=`$v.Replace(`$setterOld.TrimEnd(),`$setterNew.TrimEnd())
-}
-"@
+# Replace the historical whitespace-sensitive setter transform in the generated
+# v2 script by locating its script block structurally rather than reproducing
+# the whole fragment byte-for-byte. This keeps CRLF/indentation/quoting changes
+# from blocking C10.48 before the C# source is even inspected.
 $new=@'
 if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
     $v=Replace-CSharpMethod $v '        public vtkEdgesVisibility EdgesVisibility' {
@@ -53,8 +37,10 @@ if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) As
     }
 }
 '@
-if(-not $text.Contains($old)){ throw 'C10.48 v3 EdgesVisibility script fragment missing.' }
-$text=$text.Replace($old,$new)
+$setterPattern='(?s)\$setterOld=@''.*?\$v=\$v\.Replace\(\$setterOld\.TrimEnd\(\),\$setterNew\.TrimEnd\(\)\)\s*\r?\n\}'
+$setterMatches=[regex]::Matches($text,$setterPattern)
+if($setterMatches.Count -ne 1){ throw "C10.48 v3 historical setter script expected 1 structural match, got $($setterMatches.Count)." }
+$text=[regex]::Replace($text,$setterPattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $new.TrimEnd() },1)
 
 $temp=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-v3-runtime.ps1'
 Set-Content $temp $text -Encoding UTF8
