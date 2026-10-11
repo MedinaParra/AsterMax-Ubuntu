@@ -52,17 +52,12 @@ namespace PrePoMax
                     bool initialNoEdges = _vtk != null && _vtk.EdgesVisibility == vtkEdgesVisibility.NoEdges;
                     bool deferredPhasePass = sceneComplete && initialNoEdges && deferred > 0 &&
                                              materializedBefore == 0 && remainingBefore == deferred;
-
-                    // EdgesVisibility setter and lazy materialization are synchronous on this UI thread.
                     if (_vtk != null) _vtk.EdgesVisibility = vtkEdgesVisibility.ElementEdges;
-
                     long materializedAfter = _vtk == null ? -1 : _vtk.AsterMaxMaterializedElementEdgeActors;
                     int remainingAfter = _vtk == null ? -1 : _vtk.AsterMaxDeferredElementEdgesRemaining;
                     int errorsAfter = _controller == null ? -1 : _controller.GetNumberOfErrors();
                     bool elementEdgesMode = _vtk != null && _vtk.EdgesVisibility == vtkEdgesVisibility.ElementEdges;
                     bool materializePhasePass = elementEdgesMode && materializedAfter == deferred && remainingAfter == 0;
-
-                    // Return to the lightweight display mode to exercise the reverse visibility transition too.
                     if (_vtk != null) _vtk.EdgesVisibility = vtkEdgesVisibility.NoEdges;
 
                     report["release"] = "C10.48-lazy-element-edges";
@@ -90,7 +85,6 @@ namespace PrePoMax
                     report["pass"] = false;
                     report["error"] = ex.ToString();
                 }
-
                 File.WriteAllText(Path.Combine(directory,"c1048-lazy-edges-report.json"), report.ToString(Formatting.Indented));
                 Environment.ExitCode = pass ? 0 : 1;
                 _c10209AuditShutdownDirectory = directory;
@@ -108,15 +102,19 @@ namespace PrePoMax
 Set-Content $auditPath $audit -Encoding UTF8
 $p=[regex]::Replace((Get-Content $projectPath -Raw),"\r\n?","`n")
 if(-not $p.Contains('Forms\AsterMaxC1048LazyEdgesAudit.cs')){
+  # C10.48 does not require the optional C10.47 runtime-audit hook to have run.
+  # Prefer it when present; otherwise attach after the C10.43 audit already in the validated chain.
   $anchor='<Compile Include="Forms\AsterMaxC1047SceneBatchAudit.cs" />'
-  if(-not $p.Contains($anchor)){throw 'C10.48 C1047 audit project anchor missing.'}
+  if(-not $p.Contains($anchor)){ $anchor='<Compile Include="Forms\AsterMaxC1043ImportAudit.cs" />' }
+  if(-not $p.Contains($anchor)){throw 'C10.48 runtime audit project anchor missing (C1047/C1043).'}
   $p=$p.Replace($anchor,$anchor+"`n    "+'<Compile Include="Forms\AsterMaxC1048LazyEdgesAudit.cs" />')
 }
 Set-Content $projectPath $p -Encoding UTF8
 $u=[regex]::Replace((Get-Content $uiPath -Raw),"\r\n?","`n")
 if(-not $u.Contains('StartAsterMaxC1048LazyEdgesAudit();')){
   $anchor='                StartAsterMaxC1047SceneBatchAudit();'
-  if(-not $u.Contains($anchor)){throw 'C10.48 C1047 startup anchor missing.'}
+  if(-not $u.Contains($anchor)){ $anchor='                StartAsterMaxC1043ImportAudit();' }
+  if(-not $u.Contains($anchor)){throw 'C10.48 runtime audit startup anchor missing (C1047/C1043).'}
   $u=$u.Replace($anchor,$anchor+"`n                StartAsterMaxC1048LazyEdgesAudit();")
 }
 Set-Content $uiPath $u -Encoding UTF8
