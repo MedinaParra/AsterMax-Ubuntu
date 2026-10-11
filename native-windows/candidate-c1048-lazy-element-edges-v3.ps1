@@ -1,48 +1,105 @@
 param([string]$Root)
 $ErrorActionPreference='Stop'
 
-# C10.48 v3 repairs wrapper composition only. v2 defines four structural
-# transformation blocks but tries to replace comment markers absent from the
-# base candidate. Preserve the C# transformations and inject them immediately
-# before the base candidate writes vtkMaxActor.cs.
-$v2=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-v2.ps1'
-if(!(Test-Path $v2)){ throw "C10.48 v3 wrapper missing: $v2" }
-$text=Get-Content $v2 -Raw
-$text=[regex]::Replace($text,'(?m)^\$text=Replace-Block \$text .*\r?\n','')
+# C10.48 v3 composes the structural actor transformations directly from the
+# base candidate. Do not derive executable text from v2: v2 first rewrites the
+# base script with marker-dependent Replace-Block calls, so parsing v2 itself
+# couples v3 to implementation details that are not part of the C# transform.
+$impl=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges.ps1'
+if(!(Test-Path $impl)){ throw "C10.48 implementation missing: $impl" }
+$text=Get-Content $impl -Raw
 
-$needle='$temp=Join-Path $PSScriptRoot ''candidate-c1048-lazy-element-edges-runtime.ps1'''
-if(-not $text.Contains($needle)){ throw 'C10.48 v3 runtime-script anchor missing.' }
-$inject=@'
 $actorWrite='Set-Content $actorPath $a -Encoding UTF8'
 if(-not $text.Contains($actorWrite)){ throw 'C10.48 v3 actor write anchor missing in base candidate.' }
-$combined=$constructorBlock+$copyBlock+$animationBlock+$createPolyBlock
-$text=$text.Replace($actorWrite,$combined+"`n"+$actorWrite)
-'@
-$text=$text.Replace($needle,$inject+"`n"+$needle)
 
-# The historical implementation matches the EdgesVisibility setter byte-for-byte.
-# Replace that generated PowerShell block by a structural C# method transform.
-$setterStart='$setterOld=@'''
-$setterEnd='$v=Replace-CSharpMethod $v ''        public void AddCells(vtkMaxActorData data)'' {'
-$start=$text.IndexOf($setterStart)
-if($start -lt 0){ throw 'C10.48 v3 setter transform start missing.' }
-$end=$text.IndexOf($setterEnd,$start)
-if($end -lt 0 -or $end -le $start){ throw 'C10.48 v3 AddCells boundary missing after setter transform.' }
-$setterStructural=@'
-if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
-    $v=Replace-CSharpMethod $v '        public vtkEdgesVisibility EdgesVisibility' {
-        param($existing)
-        $pattern='(?m)^(\s*)_edgesVisibility\s*=\s*value;\s*$'
-        $matches=[regex]::Matches($existing,$pattern)
-        if($matches.Count -ne 1){ throw "C10.48 EdgesVisibility assignment expected 1 structural match, got $($matches.Count)." }
-        $indent=$matches[0].Groups[1].Value
-        $replacement=$matches[0].Value+"`n"+$indent+'if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();'
-        return [regex]::Replace($existing,$pattern,[System.Text.RegularExpressions.MatchEvaluator]{ param($m) $replacement },1)
+$blocks=@'
+# Keep historical constructors, add a fourth argument only for the optimized path.
+if(-not $a.Contains('bool deferElementEdges')){
+    $pattern='(?s)        public vtkMaxActor\(vtkMaxActorData data, bool extractVisualizationSurface, bool createNodalActor\)\s*:\s*this\(\)\s*\{'
+    $rx=[regex]::new($pattern)
+    $matches=$rx.Matches($a)
+    if($matches.Count -ne 1){ throw "C10.48 vtkMaxActor three-argument constructor expected 1 structural match, got $($matches.Count)." }
+    $replacement='        public vtkMaxActor(vtkMaxActorData data, bool extractVisualizationSurface, bool createNodalActor)' + "`n" +
+                 '            : this(data, extractVisualizationSurface, createNodalActor, false)' + "`n" +
+                 '        {' + "`n" +
+                 '        }' + "`n" +
+                 '        public vtkMaxActor(vtkMaxActorData data, bool extractVisualizationSurface, bool createNodalActor, bool deferElementEdges)' + "`n" +
+                 '            : this()' + "`n" +
+                 '        {'
+    $a=$rx.Replace($a,$replacement,1)
+}
+
+# Ensure source edges exist before copy construction if an operation requires a full actor copy.
+if(-not $a.Contains('sourceActor.AsterMaxEnsureElementEdges();')){
+    $pattern='(?s)        public vtkMaxActor\(vtkMaxActor sourceActor\)\s*:\s*this\(\)\s*\{'
+    $rx=[regex]::new($pattern)
+    $matches=$rx.Matches($a)
+    if($matches.Count -ne 1){ throw "C10.48 vtkMaxActor copy constructor expected 1 structural match, got $($matches.Count)." }
+    $replacement=$matches[0].Value + "`n" +
+        '            if (sourceActor.AsterMaxElementEdgesDeferred) sourceActor.AsterMaxEnsureElementEdges();'
+    $a=$rx.Replace($a,$replacement,1)
+}
+
+# Animation mutates edge-point data directly; materialize before that path.
+if(-not $a.Contains('C10.48 animation edge materialization')){
+    $pattern='(?s)        public void SetAnimationFrame\(vtkMaxActorData data, int frameNumber\)\s*\{'
+    $rx=[regex]::new($pattern)
+    $matches=$rx.Matches($a)
+    if($matches.Count -ne 1){ throw "C10.48 SetAnimationFrame expected 1 structural match, got $($matches.Count)." }
+    $replacement=$matches[0].Value + "`n" +
+        '            // C10.48 animation edge materialization' + "`n" +
+        '            if (_asterMaxElementEdgesDeferred) AsterMaxEnsureElementEdges();'
+    $a=$rx.Replace($a,$replacement,1)
+}
+
+# Replace CreatePolyFromData once and avoid extracting edge topology while deferred.
+$a=Replace-CSharpMethod $a '        private void CreatePolyFromData(vtkMaxActorData data)' {
+    param($existing)
+    $x=$existing.Replace('private void CreatePolyFromData(vtkMaxActorData data)','private void CreatePolyFromData(vtkMaxActorData data, bool deferElementEdges)')
+    $x=$x.Replace('AddNodeAndCellDataToPoly(data.Geometry, out polyActor, out polyEdges, out numOfCellPolys, true);',
+                  'AddNodeAndCellDataToPoly(data.Geometry, out polyActor, out polyEdges, out numOfCellPolys, !deferElementEdges);')
+    $ifToken='            if (data.CanHaveElementEdges)'
+    $ifStart=$x.IndexOf($ifToken)
+    if($ifStart -lt 0){ throw 'C10.48 CreatePolyFromData element-edge if missing.' }
+    $braceStart=$x.IndexOf('{',$ifStart)
+    if($braceStart -lt 0){ throw 'C10.48 CreatePolyFromData element-edge opening brace missing.' }
+    $depth=0; $ifEnd=-1
+    for($n=$braceStart; $n -lt $x.Length; $n++){
+        if($x[$n] -eq '{'){ $depth++ }
+        elseif($x[$n] -eq '}'){
+            $depth--
+            if($depth -eq 0){ $ifEnd=$n+1; break }
+        }
     }
+    if($ifEnd -lt 0){ throw 'C10.48 CreatePolyFromData element-edge closing brace missing.' }
+    $new=@'
+            if (data.CanHaveElementEdges)
+            {
+                if (deferElementEdges)
+                {
+                    _elementEdges = vtkActor.New();
+                    _elementEdges.PickableOff();
+                    _elementEdgesProperty = _elementEdges.GetProperty();
+                    _elementEdgesProperty.SetLighting(true);
+                    _asterMaxElementEdgesDeferred = true;
+                }
+                else
+                {
+                    mapper = vtkDataSetMapper.New();
+                    mapper.SetInput(polyEdges);
+                    _elementEdges = new vtkActor();
+                    _elementEdges.SetMapper(mapper);
+                    _elementEdges.PickableOff();
+                    _elementEdgesProperty = _elementEdges.GetProperty();
+                    _elementEdgesProperty.SetLighting(true);
+                }
+            }
+'@
+    return $x.Substring(0,$ifStart)+$new.TrimEnd()+$x.Substring($ifEnd)
 }
 '@
-$text=$text.Substring(0,$start)+$setterStructural+"`n"+$text.Substring($end)
 
+$text=$text.Replace($actorWrite,$blocks+"`n"+$actorWrite)
 $temp=Join-Path $PSScriptRoot 'candidate-c1048-lazy-element-edges-v3-runtime.ps1'
 Set-Content $temp $text -Encoding UTF8
 try { & $temp -Root $Root }
