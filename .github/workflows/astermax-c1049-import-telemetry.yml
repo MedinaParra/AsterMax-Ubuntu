@@ -1,7 +1,7 @@
-name: C10.50 AddCells telemetry Windows validation
+name: C10.50 structural AddCells telemetry Windows validation
 on:
   push:
-    branches: [agent/c1050-addcells-telemetry]
+    branches: [agent/c1050-structural-addcells-telemetry]
   workflow_dispatch:
 
 jobs:
@@ -66,11 +66,11 @@ jobs:
           & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
           if($LASTEXITCODE -ne 0){throw 'C10.50 Windows x64 build failed.'}
           New-Item -ItemType Directory -Force .\dist\Audit\C10.50|Out-Null
-          [ordered]@{release='C10.50-addcells-telemetry';commit='${{ github.sha }}';branch='${{ github.ref_name }}';windows_x64_build='PASS';static_telemetry='PASS';runtime_telemetry='NOT_RUN';performance='NOT_RUN';gui_visual_regression='NOT_RUN';selection_regression='NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';exact_brep_modified=$false;fem_policy_modified=$false;code_aster_windows_only_solver_preserved=$true;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.50\evidence.json -Encoding UTF8
+          [ordered]@{release='C10.50-structural-addcells-telemetry';commit='${{ github.sha }}';branch='${{ github.ref_name }}';windows_x64_build='PASS';static_telemetry='PASS';runtime_telemetry='NOT_RUN';performance='NOT_RUN';gui_visual_regression='NOT_RUN';selection_regression='NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';exact_brep_modified=$false;fem_policy_modified=$false;code_aster_windows_only_solver_preserved=$true;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.50\evidence.json -Encoding UTF8
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.50-AddCells-Telemetry-Evidence
+          name: AsterMax-C10.50-Structural-AddCells-Telemetry-Evidence
           path: dist/Audit/C10.50
           if-no-files-found: warn
