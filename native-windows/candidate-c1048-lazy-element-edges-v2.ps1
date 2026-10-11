@@ -7,8 +7,12 @@ $text=Get-Content $impl -Raw
 
 function Replace-Block([string]$Source,[string]$StartMarker,[string]$EndMarker,[string]$Replacement,[string]$Name){
     $start=$Source.IndexOf($StartMarker)
-    $end=$Source.IndexOf($EndMarker,$start)
-    if($start -lt 0 -or $end -le $start){ throw "C10.48 v2 $Name block markers missing." }
+    if($start -lt 0){ throw "C10.48 v2 $Name start marker missing." }
+    $searchFrom=$start+$StartMarker.Length
+    if($searchFrom -gt $Source.Length){ throw "C10.48 v2 $Name start marker range invalid." }
+    $end=$Source.IndexOf($EndMarker,$searchFrom)
+    if($end -lt 0){ throw "C10.48 v2 $Name end marker missing after start marker." }
+    if($end -le $start){ throw "C10.48 v2 $Name block marker order invalid." }
     return $Source.Substring(0,$start)+$Replacement+$Source.Substring($end)
 }
 
