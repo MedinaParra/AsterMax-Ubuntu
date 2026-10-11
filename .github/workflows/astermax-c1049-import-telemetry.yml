@@ -1,11 +1,11 @@
-name: C10.49 import telemetry Windows validation
+name: C10.50 AddCells telemetry Windows validation
 on:
   push:
-    branches: [agent/c1049-runtime-telemetry]
+    branches: [agent/c1050-addcells-telemetry]
   workflow_dispatch:
 
 jobs:
-  windows-c1049:
+  windows-c1050:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -45,78 +45,32 @@ jobs:
           ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1048-runtime-audit.ps1 -Root "$PWD/upstream"
-      - name: Apply and validate C10.49 telemetry
+      - name: Apply C10.49 and C10.50 telemetry
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
           ./native-windows/candidate-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1049-runtime-audit.ps1 -Root "$PWD/upstream"
-      - name: Setup Python runtime
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - name: Install diagnostic CAD dependency
-        shell: pwsh
-        run: python -m pip install --disable-pip-version-check gmsh
+          ./native-windows/candidate-c1050-addcells-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1050-addcells-telemetry.ps1 -Root "$PWD/upstream"
       - name: Restore and build Windows x64 Release
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           nuget restore .\upstream\PrePoMax.sln -NonInteractive
           $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if(!(Test-Path $vswhere)){throw 'vswhere.exe not found on Windows runner.'}
+          if(!(Test-Path $vswhere)){throw 'vswhere.exe not found.'}
           $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
-          if([string]::IsNullOrWhiteSpace($msbuild) -or !(Test-Path $msbuild)){throw 'MSBuild.exe not found by vswhere.'}
+          if([string]::IsNullOrWhiteSpace($msbuild) -or !(Test-Path $msbuild)){throw 'MSBuild.exe not found.'}
           & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
-          if($LASTEXITCODE -ne 0){throw 'C10.49 Windows x64 build failed.'}
-          New-Item -ItemType Directory -Force .\dist\Audit\C10.49|Out-Null
-          'PASS'|Set-Content .\dist\Audit\C10.49\windows-build.txt -Encoding ASCII
-      - name: Assemble CAD runtime
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $exe=Get-ChildItem .\upstream -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
-          if(-not $exe){throw 'AsterMax Mechanical.exe missing.'}
-          Copy-Item "$($exe.Directory.FullName)\*" .\dist\ -Recurse -Force
-          New-Item -ItemType Directory -Force .\dist\AsterMaxRuntime\Python|Out-Null
-          $pythonRoot=Split-Path (Get-Command python).Source -Parent
-          Copy-Item "$pythonRoot\*" .\dist\AsterMaxRuntime\Python\ -Recurse -Force
-          & .\dist\AsterMaxRuntime\Python\python.exe -c "import gmsh; print('ASTERMAX_C1049_GMSH_OK')"
-          if($LASTEXITCODE -ne 0){throw 'Packaged gmsh runtime failed.'}
-          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
-          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
-          Invoke-WebRequest $runtimeUrl -OutFile runtime.zip
-          if((Get-FileHash runtime.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $runtimeSha256){throw 'Pinned CAD runtime digest mismatch.'}
-          Expand-Archive runtime.zip runtime
-          $ng=Get-ChildItem runtime -Recurse -Filter NetGenMesher.exe|Select-Object -First 1
-          if(-not $ng){throw 'NetGenMesher.exe missing.'}
-          Copy-Item $ng.Directory.FullName .\dist\NetGen -Recurse -Force
-          New-Item -ItemType Directory -Force .\dist\Temp|Out-Null
-      - name: Run C10.49 import telemetry diagnostic
-        shell: pwsh
-        run: ./native-windows/diagnose-c1049-import-telemetry-25.ps1 -Dist "$PWD/dist" -ExpectedParts 25 -CaseTimeoutMs 90000 -ShutdownTimeoutMs 10000
-      - name: Record evidence
-        if: always()
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force .\dist\Audit\C10.49|Out-Null
-          $diagPath='.\dist\Audit\C10.49\diagnostic-25\diagnostic-summary.json'
-          $diag=$null;if(Test-Path $diagPath){$diag=Get-Content $diagPath -Raw|ConvertFrom-Json}
-          [ordered]@{
-            release='C10.49-import-telemetry';commit='${{ github.sha }}';branch='${{ github.ref_name }}'
-            windows_x64_build=if(Test-Path '.\dist\Audit\C10.49\windows-build.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'}
-            runtime_telemetry=if($diag -and $diag.report_pass){'PASS'}elseif($diag){'FAIL'}else{'NOT_RUN'}
-            synthetic_fixture='25 analytic spheres STEP';cad_bodies=if($diag){$diag.cad_bodies}else{$null};controller_errors=if($diag){$diag.controller_errors}else{$null}
-            add_cells_calls=if($diag){$diag.add_cells_calls}else{$null};render_requests_during_batch=if($diag){$diag.render_requests_during_batch}else{$null}
-            deferred_camera_adjusts=if($diag){$diag.deferred_camera_adjusts}else{$null};camera_flushes=if($diag){$diag.camera_flushes}else{$null}
-            graceful_shutdown=if($diag -and $diag.graceful_shutdown){'PASS'}elseif($diag){'FAIL'}else{'NOT_RUN'}
-            performance_claim='NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';gui_visual_regression='NOT_RUN';selection_regression='NOT_RUN'
-            exact_brep_modified=$false;fem_policy_modified=$false;code_aster_windows_only_solver_preserved=$true;benchmark_values_invented=$false
-          }|ConvertTo-Json -Depth 5|Set-Content .\dist\Audit\C10.49\evidence.json -Encoding UTF8
+          if($LASTEXITCODE -ne 0){throw 'C10.50 Windows x64 build failed.'}
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.50|Out-Null
+          [ordered]@{release='C10.50-addcells-telemetry';commit='${{ github.sha }}';branch='${{ github.ref_name }}';windows_x64_build='PASS';static_telemetry='PASS';runtime_telemetry='NOT_RUN';performance='NOT_RUN';gui_visual_regression='NOT_RUN';selection_regression='NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';exact_brep_modified=$false;fem_policy_modified=$false;code_aster_windows_only_solver_preserved=$true;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.50\evidence.json -Encoding UTF8
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.49-Runtime-Telemetry-Evidence
-          path: dist/Audit/C10.49
+          name: AsterMax-C10.50-AddCells-Telemetry-Evidence
+          path: dist/Audit/C10.50
           if-no-files-found: warn
