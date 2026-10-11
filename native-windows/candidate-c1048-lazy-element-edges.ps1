@@ -93,7 +93,6 @@ if(-not $v.Contains('AsterMaxDeferredElementEdgeActors')){
 '@
     $v=$v.Replace($userPick,$props+$userPick)
 }
-# Reset C10.48 counters structurally inside the C10.47 begin-batch method.
 if(-not $v.Contains('_asterMaxDeferredElementEdgeActors = 0;')){
     $v=Replace-CSharpMethod $v '        public void AsterMaxBeginSceneBatch()' {
         param($existing)
@@ -120,18 +119,14 @@ if(-not $v.Contains('private void AsterMaxEnsureDeferredElementEdges()')){
 '@
     $v=$v.Replace($applySig,$helper+$applySig)
 }
-$setterOld=@'
-                    _edgesVisibility = value;
-                    ApplyEdgesVisibilityAndBackfaceCulling();
-'@
 if(-not $v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')){
-    if(-not $v.Contains($setterOld.TrimEnd())){ throw 'C10.48 EdgesVisibility setter body anchor missing.' }
-    $setterNew=@'
-                    _edgesVisibility = value;
-                    if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();
-                    ApplyEdgesVisibilityAndBackfaceCulling();
-'@
-    $v=$v.Replace($setterOld.TrimEnd(),$setterNew.TrimEnd())
+    $v=Replace-CSharpMethod $v '        public vtkEdgesVisibility EdgesVisibility' {
+        param($existing)
+        $assignment='                    _edgesVisibility = value;'
+        $matches=[regex]::Matches($existing,[regex]::Escape($assignment))
+        if($matches.Count -ne 1){ throw "C10.48 EdgesVisibility assignment expected 1 structural match, got $($matches.Count)." }
+        return $existing.Replace($assignment,$assignment+"`n"+'                    if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')
+    }
 }
 $v=Replace-CSharpMethod $v '        public void AddCells(vtkMaxActorData data)' {
     param($existing)
