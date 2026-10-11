@@ -1,0 +1,73 @@
+name: C10.49 import telemetry Windows validation
+on:
+  push:
+    branches: [agent/c1049-import-telemetry]
+  workflow_dispatch:
+
+jobs:
+  windows-c1049:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Apply validated baseline through C10.48
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-runtime-audit.ps1 -Root "$PWD/upstream"
+      - name: Apply and validate C10.49 telemetry
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1049-runtime-audit.ps1 -Root "$PWD/upstream"
+      - name: Restore and build Windows x64 Release
+        shell: pwsh
+        run: |
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'C10.49 Windows x64 build failed.'}
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.49|Out-Null
+          'PASS'|Set-Content .\dist\Audit\C10.49\windows-build.txt -Encoding ASCII
+      - name: Record evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.49|Out-Null
+          [ordered]@{release='C10.49-import-telemetry';commit='${{ github.sha }}';branch='${{ github.ref_name }}';windows_x64_build=if(Test-Path '.\dist\Audit\C10.49\windows-build.txt'){'PASS'}else{'FAIL_OR_NOT_RUN'};runtime_telemetry='NOT_RUN';performance_claim='NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true}|ConvertTo-Json|Set-Content .\dist\Audit\C10.49\evidence.json -Encoding UTF8
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.49-Import-Telemetry-Evidence
+          path: dist/Audit/C10.49
