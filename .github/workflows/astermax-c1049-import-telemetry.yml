@@ -54,8 +54,14 @@ jobs:
       - name: Restore and build Windows x64 Release
         shell: pwsh
         run: |
+          $ErrorActionPreference='Stop'
           nuget restore .\upstream\PrePoMax.sln -NonInteractive
-          msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if(!(Test-Path $vswhere)){throw 'vswhere.exe not found on Windows runner.'}
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if([string]::IsNullOrWhiteSpace($msbuild) -or !(Test-Path $msbuild)){throw 'MSBuild.exe not found by vswhere.'}
+          Write-Host "C10.49_MSBUILD=$msbuild"
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
           if($LASTEXITCODE -ne 0){throw 'C10.49 Windows x64 build failed.'}
           New-Item -ItemType Directory -Force .\dist\Audit\C10.49|Out-Null
           'PASS'|Set-Content .\dist\Audit\C10.49\windows-build.txt -Encoding ASCII
