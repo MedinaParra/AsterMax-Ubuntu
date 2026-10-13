@@ -48,13 +48,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $exe=Get-ChildItem .\upstream -Recurse -File -Filter PrePoMax.exe | Where-Object {$_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
-          if(!$exe){throw 'PrePoMax.exe Release output not found'}
+          $exe=Get-ChildItem .\upstream -Recurse -File | Where-Object {$_.Name -in @('AsterMax Mechanical.exe','PrePoMax.exe') -and $_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
+          if(!$exe){throw 'AsterMax Mechanical.exe/PrePoMax.exe Release output not found'}
           $root=$exe.Directory.FullName
           $netgen=Get-ChildItem .\upstream -Recurse -File -Filter NetGenMesher.exe | Select-Object -First 1
           if(!$netgen){throw 'NetGenMesher.exe was not produced/found anywhere in upstream checkout'}
           "APP_ROOT=$root" | Out-File $env:GITHUB_ENV -Append
           "NETGEN_EXE=$($netgen.FullName)" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "App exe: $($exe.FullName)"
           Write-Host "App root: $root"
           Write-Host "NetGen: $($netgen.FullName)"
       - name: Assemble portable package preserving runtime directories
