@@ -44,30 +44,38 @@ jobs:
           if(!$msbuild){throw 'MSBuild.exe not found'}
           & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
           if($LASTEXITCODE -ne 0){throw 'Windows x64 Release build failed'}
-      - name: Locate complete runnable output and NetGen runtime
+      - name: Locate runnable AsterMax output
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $exe=Get-ChildItem .\upstream -Recurse -File | Where-Object {$_.Name -in @('AsterMax Mechanical.exe','PrePoMax.exe') -and $_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
           if(!$exe){throw 'AsterMax Mechanical.exe/PrePoMax.exe Release output not found'}
-          $root=$exe.Directory.FullName
-          $netgen=Get-ChildItem .\upstream -Recurse -File -Filter NetGenMesher.exe | Select-Object -First 1
-          if(!$netgen){throw 'NetGenMesher.exe was not produced/found anywhere in upstream checkout'}
-          "APP_ROOT=$root" | Out-File $env:GITHUB_ENV -Append
-          "NETGEN_EXE=$($netgen.FullName)" | Out-File $env:GITHUB_ENV -Append
+          "APP_ROOT=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append
           Write-Host "App exe: $($exe.FullName)"
-          Write-Host "App root: $root"
-          Write-Host "NetGen: $($netgen.FullName)"
-      - name: Assemble portable package preserving runtime directories
+      - name: Provision official PrePoMax NetGen runtime only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v3.0.0%20RC1.zip'
+          $zip="$env:RUNNER_TEMP\PrePoMax-v3.0.0-RC1.zip"
+          $extract="$env:RUNNER_TEMP\PrePoMaxRuntime"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgen=Get-ChildItem $extract -Recurse -File -Filter NetGenMesher.exe | Select-Object -First 1
+          if(!$netgen){throw 'Official PrePoMax v3.0.0 RC1 archive does not contain NetGenMesher.exe'}
+          $netgenDir=$netgen.Directory.FullName
+          "NETGEN_DIR=$netgenDir" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "Official NetGen runtime: $netgenDir"
+          Write-Host 'Solver directory is intentionally NOT copied; AsterMax remains Code_Aster Windows-only.'
+      - name: Assemble portable package preserving NetGen runtime
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $pkg="$PWD\dist\AsterMax-C10.54-Windows-x64"
           New-Item -ItemType Directory -Force $pkg|Out-Null
           Copy-Item "$env:APP_ROOT\*" $pkg -Recurse -Force
-          $srcNetGen=Split-Path $env:NETGEN_EXE -Parent
           New-Item -ItemType Directory -Force "$pkg\NetGen"|Out-Null
-          Copy-Item "$srcNetGen\*" "$pkg\NetGen" -Recurse -Force
+          Copy-Item "$env:NETGEN_DIR\*" "$pkg\NetGen" -Recurse -Force
           ./native-windows/test-c1054-portable-runtime.ps1 -PackageRoot $pkg
           Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.54-Windows-x64.zip" -Force
       - name: Upload validated review ZIP
