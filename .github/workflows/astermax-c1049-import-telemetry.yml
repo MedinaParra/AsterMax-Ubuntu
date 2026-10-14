@@ -1,0 +1,84 @@
+name: C10.50 post-patch AddCells evidence Windows validation
+on:
+  push:
+    branches: [agent/c1050-postpatch-addcells-evidence]
+  workflow_dispatch:
+
+jobs:
+  windows-c1050:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Apply validated baseline through C10.49
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-runtime-audit.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1049-runtime-audit.ps1 -Root "$PWD/upstream"
+      - name: Capture effective post-patch AddCells
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $p="$PWD/upstream/vtkControl/vtkControl.cs"
+          $v=[regex]::Replace((Get-Content $p -Raw),"\r\n?","`n")
+          $sig='        public void AddCells(vtkMaxActorData data)'
+          $start=$v.IndexOf($sig); if($start -lt 0){throw 'C10.50 AddCells missing after C10.49.'}
+          $brace=$v.IndexOf('{',$start); $depth=0; $end=-1
+          for($n=$brace;$n -lt $v.Length;$n++){if($v[$n]-eq '{'){$depth++}elseif($v[$n]-eq '}'){$depth--;if($depth-eq 0){$end=$n+1;break}}}
+          if($end -lt 0){throw 'C10.50 AddCells closing brace missing.'}
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.50|Out-Null
+          $m=$v.Substring($start,$end-$start)
+          Set-Content .\dist\Audit\C10.50\AddCells-post-C10.49.cs.txt $m -Encoding UTF8
+          $ctors=[regex]::Matches($m,'new\s+vtkMaxActor\s*\(').Count
+          $dispatch=[regex]::Matches($m,'AddActorGeometry\s*\(').Count
+          [ordered]@{release='C10.50-postpatch-evidence';commit='${{ github.sha }}';branch='${{ github.ref_name }}';vtkMaxActor_ctor_tokens=$ctors;add_actor_geometry_tokens=$dispatch;compilation='NOT_RUN';functionality='PASS_CAPTURE_ONLY';performance='NOT_RUN';regressions='NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.50\evidence.json -Encoding UTF8
+      - name: Restore and build Windows x64 Release baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if([string]::IsNullOrWhiteSpace($msbuild) -or !(Test-Path $msbuild)){throw 'MSBuild.exe not found.'}
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'C10.50 baseline Windows x64 build failed.'}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.50-PostPatch-AddCells-Evidence
+          path: dist/Audit/C10.50
+          if-no-files-found: warn

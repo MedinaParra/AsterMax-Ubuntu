@@ -1,0 +1,83 @@
+name: C10.52 viewport purity Windows validation
+on:
+  push:
+    branches: [agent/c1052-viewport-purity]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout pinned PrePoMax upstream
+        uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Apply validated baseline through C10.49
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+      - name: Run C10.52 viewport purity guard
+        shell: pwsh
+        run: ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+      - name: Restore and build Windows x64 Release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if([string]::IsNullOrWhiteSpace($msbuild)){throw 'MSBuild.exe not found.'}
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'Windows x64 Release build failed.'}
+      - name: Package Windows review build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidates=Get-ChildItem .\upstream -Recurse -Directory | Where-Object { $_.FullName -match '\\bin\\x64\\Release$|\\bin\\Release$' }
+          if(-not $candidates){throw 'No Release output directory found.'}
+          New-Item -ItemType Directory -Force .\dist\AsterMax-C10.52-Windows-x64 | Out-Null
+          foreach($d in $candidates){Copy-Item "$($d.FullName)\*" .\dist\AsterMax-C10.52-Windows-x64 -Recurse -Force -ErrorAction SilentlyContinue}
+          Compress-Archive -Path .\dist\AsterMax-C10.52-Windows-x64\* -DestinationPath .\dist\AsterMax-C10.52-Windows-x64.zip -Force
+      - name: Upload review ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.52-Windows-x64
+          path: dist/AsterMax-C10.52-Windows-x64.zip
+          if-no-files-found: error
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.52-Audit
+          path: |
+            dist/Audit/C10.52
+            dist/Audit/PatchChain
+          if-no-files-found: warn
