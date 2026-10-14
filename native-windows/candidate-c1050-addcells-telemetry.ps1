@@ -4,10 +4,10 @@ $vtkPath=Join-Path $Root 'vtkControl/vtkControl.cs'
 if(!(Test-Path $vtkPath)){throw "C10.50 missing: $vtkPath"}
 $v=[regex]::Replace((Get-Content $vtkPath -Raw),"\r\n?","`n")
 
-# Telemetry only. Instrument the actual AddCells actor construction/dispatch structurally,
-# without depending on a specific local variable name or whitespace. C10.48 may extend the
-# constructor with a deferElementEdges argument, so identify the construction semantically
-# instead of requiring data to appear inside the constructor argument list.
+# Telemetry only. Count the AddCells actor-construction dispatch once per call, not individual
+# constructor expressions. C10.48 deliberately changes the old single construction into a
+# conditional expression (deferred edges vs historical constructor), so instrument the unique
+# assignment statement that owns that conditional rather than either branch of the ternary.
 $fieldAnchor='        private long _asterMaxSceneBatchRenderRequests;'
 if(-not $v.Contains('_asterMaxSceneBatchActorConstructions')){
   if(-not $v.Contains($fieldAnchor)){throw 'C10.50 C10.49 telemetry anchor missing.'}
@@ -41,13 +41,12 @@ function Insert-BeforeUniqueMatch([string]$text,[string]$pattern,[string]$counte
   return $text.Insert($line,$indent+"if (_asterMaxSceneBatchDepth > 0) $counter`n")
 }
 
-# Match the unique vtkMaxActor construction assignment in AddCells regardless of constructor
-# overload/arguments. C10.48 changes this call when lazy edges are active; telemetry must compose
-# with that optimization rather than pinning an older constructor shape.
-$m=Insert-BeforeUniqueMatch $m '(?m)^\s*(?:[\w<>\.]+\s+)?\w+\s*=\s*new\s+vtkMaxActor\s*\([^;]*\)\s*;' '_asterMaxSceneBatchActorConstructions++;' 'vtkMaxActor construction'
-# Match the geometry dispatch regardless of actor variable name or spacing.
+# C10.48 turns the actor assignment into a multiline ternary containing two vtkMaxActor
+# constructor expressions. The stable semantic boundary is the single declaration/assignment.
+# Match through its terminating semicolon, while requiring vtkMaxActor to occur in the RHS.
+$m=Insert-BeforeUniqueMatch $m '(?ms)^\s*vtkMaxActor\s+\w+\s*=\s*(?=[^;]*new\s+vtkMaxActor\s*\()[^;]+;' '_asterMaxSceneBatchActorConstructions++;' 'vtkMaxActor assignment'
 $m=Insert-BeforeUniqueMatch $m '(?m)^\s*AddActorGeometry\s*\([^;]+\)\s*;' '_asterMaxSceneBatchGeometryAdds++;' 'AddActorGeometry dispatch'
 
 $v=$v.Substring(0,$start)+$m+$v.Substring($end)
 Set-Content $vtkPath $v -Encoding UTF8
-Write-Host 'C10.50: telemetry only; structurally instruments unique vtkMaxActor construction and AddActorGeometry dispatch inside AddCells.' -ForegroundColor Green
+Write-Host 'C10.50: telemetry only; instruments the unique vtkMaxActor assignment and AddActorGeometry dispatch inside AddCells, including C10.48 conditional construction.' -ForegroundColor Green
