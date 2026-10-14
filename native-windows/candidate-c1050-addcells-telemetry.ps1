@@ -5,7 +5,9 @@ if(!(Test-Path $vtkPath)){throw "C10.50 missing: $vtkPath"}
 $v=[regex]::Replace((Get-Content $vtkPath -Raw),"\r\n?","`n")
 
 # Telemetry only. Instrument the actual AddCells actor construction/dispatch structurally,
-# without depending on a specific local variable name or whitespace.
+# without depending on a specific local variable name or whitespace. C10.48 may extend the
+# constructor with a deferElementEdges argument, so identify the construction semantically
+# instead of requiring data to appear inside the constructor argument list.
 $fieldAnchor='        private long _asterMaxSceneBatchRenderRequests;'
 if(-not $v.Contains('_asterMaxSceneBatchActorConstructions')){
   if(-not $v.Contains($fieldAnchor)){throw 'C10.50 C10.49 telemetry anchor missing.'}
@@ -39,9 +41,10 @@ function Insert-BeforeUniqueMatch([string]$text,[string]$pattern,[string]$counte
   return $text.Insert($line,$indent+"if (_asterMaxSceneBatchDepth > 0) $counter`n")
 }
 
-# Match any declaration/assignment whose RHS constructs vtkMaxActor(...data...), regardless
-# of local variable name. The unique-match guard prevents silently instrumenting the wrong path.
-$m=Insert-BeforeUniqueMatch $m '(?m)^\s*(?:[\w<>\.]+\s+)?\w+\s*=\s*new\s+vtkMaxActor\s*\([^;]*\bdata\b[^;]*\)\s*;' '_asterMaxSceneBatchActorConstructions++;' 'vtkMaxActor construction'
+# Match the unique vtkMaxActor construction assignment in AddCells regardless of constructor
+# overload/arguments. C10.48 changes this call when lazy edges are active; telemetry must compose
+# with that optimization rather than pinning an older constructor shape.
+$m=Insert-BeforeUniqueMatch $m '(?m)^\s*(?:[\w<>\.]+\s+)?\w+\s*=\s*new\s+vtkMaxActor\s*\([^;]*\)\s*;' '_asterMaxSceneBatchActorConstructions++;' 'vtkMaxActor construction'
 # Match the geometry dispatch regardless of actor variable name or spacing.
 $m=Insert-BeforeUniqueMatch $m '(?m)^\s*AddActorGeometry\s*\([^;]+\)\s*;' '_asterMaxSceneBatchGeometryAdds++;' 'AddActorGeometry dispatch'
 
