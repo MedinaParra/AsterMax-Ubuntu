@@ -1,0 +1,100 @@
+name: C10.63 cumulative Windows x64 validation
+on:
+  push:
+    branches: [agent/c1063-cumulative-windows-build]
+  workflow_dispatch:
+
+jobs:
+  cumulative-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Apply validated baseline and cumulative performance chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1049-import-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1050-addcells-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1050-addcells-telemetry.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1053-render-hotspots.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1056-netgen-failure-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1056-netgen-failure-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1058-native-localization-resx.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1058-native-localization.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1060-progress-ui.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1060-progress-ui.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1061-progress-render-purity.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1062-import-finalization-singleflush.ps1 -Root "$PWD/upstream"
+      - name: Windows x64 Release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if(!$msbuild){throw 'MSBuild.exe not found'}
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'C10.63 cumulative Windows x64 build failed'}
+      - name: Locate output and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -File | Where-Object {$_.Name -in @('AsterMax Mechanical.exe','PrePoMax.exe') -and $_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
+          if(!$exe){throw 'Release executable not found'}
+          $pkg="$PWD\dist\AsterMax-C10.63-Windows-x64"
+          New-Item -ItemType Directory -Force $pkg|Out-Null
+          Copy-Item "$($exe.Directory.FullName)\*" $pkg -Recurse -Force
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.63|Out-Null
+          [ordered]@{release='C10.63-cumulative-candidate';commit='${{ github.sha }}';branch='${{ github.ref_name }}';compilation='PASS';functionality='PASS_STATIC_CONTRACTS_ONLY';performance='NOT_RUN';regressions='PASS_STATIC_CONTRACTS_ONLY';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.63\evidence.json -Encoding UTF8
+          Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.63-Windows-x64.zip" -Force
+      - name: Record failure evidence
+        if: failure()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.63|Out-Null
+          [ordered]@{release='C10.63-cumulative-candidate';commit='${{ github.sha }}';branch='${{ github.ref_name }}';compilation='FAIL_OR_BLOCKED';functionality='NOT_RUN_OR_PARTIAL';performance='NOT_RUN';regressions='NOT_RUN_OR_PARTIAL';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.63\evidence.json -Encoding UTF8
+      - name: Upload package
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.63-Windows-x64
+          path: dist/AsterMax-C10.63-Windows-x64.zip
+          if-no-files-found: error
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.63-Audit
+          path: dist/Audit
+          if-no-files-found: warn
