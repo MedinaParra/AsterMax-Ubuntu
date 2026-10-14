@@ -1,7 +1,7 @@
-name: C10.63 cumulative Windows x64 validation
+name: C10.64 cumulative Windows x64 validation
 on:
   push:
-    branches: [agent/c1063-cumulative-windows-build]
+    branches: [agent/c1064-addcells-telemetry-composition-fix]
   workflow_dispatch:
 
 jobs:
@@ -60,41 +60,37 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          nuget restore .\upstream\PrePoMax.sln -NonInteractive
-          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
-          if(!$msbuild){throw 'MSBuild.exe not found'}
-          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
-          if($LASTEXITCODE -ne 0){throw 'C10.63 cumulative Windows x64 build failed'}
+          nuget restore "$PWD/upstream/PrePoMax.sln" -NonInteractive
+          $msbuild=(Get-Command msbuild.exe -ErrorAction SilentlyContinue).Source
+          if(-not $msbuild){$msbuild=& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe|Select-Object -First 1}
+          if(-not $msbuild){throw 'MSBuild not found'}
+          & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform=x64
+          if($LASTEXITCODE -ne 0){throw "MSBuild exit $LASTEXITCODE"}
       - name: Locate output and package
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $exe=Get-ChildItem .\upstream -Recurse -File | Where-Object {$_.Name -in @('AsterMax Mechanical.exe','PrePoMax.exe') -and $_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
-          if(!$exe){throw 'Release executable not found'}
-          $pkg="$PWD\dist\AsterMax-C10.63-Windows-x64"
-          New-Item -ItemType Directory -Force $pkg|Out-Null
-          Copy-Item "$($exe.Directory.FullName)\*" $pkg -Recurse -Force
-          New-Item -ItemType Directory -Force .\dist\Audit\C10.63|Out-Null
-          [ordered]@{release='C10.63-cumulative-candidate';commit='${{ github.sha }}';branch='${{ github.ref_name }}';compilation='PASS';functionality='PASS_STATIC_CONTRACTS_ONLY';performance='NOT_RUN';regressions='PASS_STATIC_CONTRACTS_ONLY';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.63\evidence.json -Encoding UTF8
-          Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.63-Windows-x64.zip" -Force
+          $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
+          if(-not $exe){throw 'AsterMax Mechanical.exe not found after cumulative build'}
+          $out=Join-Path $PWD 'dist/AsterMax-C10.64-Cumulative-Windows-x64'
+          New-Item -ItemType Directory -Force $out|Out-Null
+          Copy-Item (Join-Path $exe.Directory.FullName '*') $out -Recurse -Force
+          [ordered]@{release='C10.64-cumulative-candidate';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME;compilation='PASS';functionality='STATIC_GUARDS_PASS_RUNTIME_NOT_RUN';performance='NOT_RUN';regressions='STATIC_GUARDS_PASS_RUNTIME_NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content (Join-Path $out 'ASTERMAX-C10.64-MANIFEST.json') -Encoding UTF8
       - name: Record failure evidence
         if: failure()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force .\dist\Audit\C10.63|Out-Null
-          [ordered]@{release='C10.63-cumulative-candidate';commit='${{ github.sha }}';branch='${{ github.ref_name }}';compilation='FAIL_OR_BLOCKED';functionality='NOT_RUN_OR_PARTIAL';performance='NOT_RUN';regressions='NOT_RUN_OR_PARTIAL';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.63\evidence.json -Encoding UTF8
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.64|Out-Null
+          [ordered]@{release='C10.64-cumulative-candidate';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME;compilation='FAIL_OR_BLOCKED';functionality='NOT_RUN_OR_PARTIAL';performance='NOT_RUN';regressions='NOT_RUN_OR_PARTIAL';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.64\evidence.json -Encoding UTF8
       - name: Upload package
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.63-Windows-x64
-          path: dist/AsterMax-C10.63-Windows-x64.zip
-          if-no-files-found: error
+          name: AsterMax-C10.64-Cumulative-Windows-x64
+          path: dist/AsterMax-C10.64-Cumulative-Windows-x64
       - name: Upload audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.63-Audit
+          name: AsterMax-C10.64-Audit
           path: dist/Audit
-          if-no-files-found: warn
