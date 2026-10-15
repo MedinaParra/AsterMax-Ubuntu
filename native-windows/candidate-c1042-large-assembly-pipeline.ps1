@@ -6,32 +6,17 @@ $controllerPath = Join-Path $Root 'PrePoMax/Controller.cs'
 $uiPath = Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeUi.cs'
 foreach($p in @($vtkPath,$controllerPath,$uiPath)){ if(!(Test-Path $p)){ throw "C10.42 missing: $p" } }
 
-# ----------------------------------------------------------------------
-# 1. Coalesce VTK render requests.
-# C10.30 prevents render re-entry. C10.42 also collapses the many render
-# requests emitted while a large CAD assembly is adding actors.
-# C10.69d: validate behavior semantically instead of matching a historical
-# method body byte-for-byte.
-# ----------------------------------------------------------------------
 $v=[regex]::Replace((Get-Content $vtkPath -Raw),"\r\n?","`n")
 $activeDecl='        private bool _asterMaxRenderRequestActive;'
 $pendingDecl='        private bool _asterMaxRenderPending;'
 $scheduledDecl='        private bool _asterMaxRenderScheduled;'
 if(-not $v.Contains($activeDecl) -or -not $v.Contains($pendingDecl)){ throw 'C10.42 C10.30 render guard fields missing.' }
-if(-not $v.Contains('_asterMaxRenderScheduled')){
-    $v=$v.Replace($pendingDecl,$pendingDecl+"`n"+$scheduledDecl)
-}
-
+if(-not $v.Contains('_asterMaxRenderScheduled')){ $v=$v.Replace($pendingDecl,$pendingDecl+"`n"+$scheduledDecl) }
 $signature='        private void RenderSceene()'
-$methodStart=$v.IndexOf($signature)
-if($methodStart -lt 0){ throw 'C10.42 RenderSceene method missing.' }
-$braceStart=$v.IndexOf('{',$methodStart)
-if($braceStart -lt 0){ throw 'C10.42 RenderSceene opening brace missing.' }
+$methodStart=$v.IndexOf($signature); if($methodStart -lt 0){ throw 'C10.42 RenderSceene method missing.' }
+$braceStart=$v.IndexOf('{',$methodStart); if($braceStart -lt 0){ throw 'C10.42 RenderSceene opening brace missing.' }
 $depth=0; $methodEnd=-1
-for($n=$braceStart; $n -lt $v.Length; $n++){
-    if($v[$n] -eq '{'){ $depth++ }
-    elseif($v[$n] -eq '}'){ $depth--; if($depth -eq 0){ $methodEnd=$n+1; break } }
-}
+for($n=$braceStart; $n -lt $v.Length; $n++){ if($v[$n] -eq '{'){ $depth++ } elseif($v[$n] -eq '}'){ $depth--; if($depth -eq 0){ $methodEnd=$n+1; break } } }
 if($methodEnd -lt 0){ throw 'C10.42 RenderSceene closing brace missing.' }
 $currentRender=$v.Substring($methodStart,$methodEnd-$methodStart)
 $required=@('if (!_renderingOn || IsDisposed || !IsHandleCreated) return;','if (_asterMaxRenderRequestActive)','_asterMaxRenderPending = true;','BeginInvoke(new Action(RenderSceene));')
@@ -51,7 +36,6 @@ $newRender=@'
                 BeginInvoke(new Action(RenderSceene));
                 return;
             }
-
             // C10.42 large-assembly path: one queued paint per message-loop turn.
             if (_asterMaxRenderScheduled) return;
             _asterMaxRenderScheduled = true;
@@ -66,37 +50,86 @@ $newRender=@'
 }
 Set-Content $vtkPath $v -Encoding UTF8
 
-# ----------------------------------------------------------------------
-# 2. Treat a STEP/IGES/BREP assembly as one import transaction.
-# ----------------------------------------------------------------------
 $c=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","`n")
 $stateAnchor='        [NonSerialized] protected bool _animating;'
-if(-not $c.Contains('_asterMaxCadImportDepth')){
-    if(-not $c.Contains($stateAnchor)){ throw 'C10.42 Controller state anchor missing.' }
-    $c=$c.Replace($stateAnchor,$stateAnchor+"`n        [NonSerialized] private int _asterMaxCadImportDepth;")
-}
-$methodStartOld="        public string[] ImportCADAssemblyFile(string assemblyFileName, string splitCommand)`n        {`n            string[] filesToImport = SplitAssembly(assemblyFileName, splitCommand);"
-$methodStartNew="        public string[] ImportCADAssemblyFile(string assemblyFileName, string splitCommand)`n        {`n            bool asterMaxTopLevelCadImport = _asterMaxCadImportDepth == 0;`n            _asterMaxCadImportDepth++;`n            var asterMaxCadImportWatch = System.Diagnostics.Stopwatch.StartNew();`n            try`n            {`n                string[] filesToImport = SplitAssembly(assemblyFileName, splitCommand);`n                if (asterMaxTopLevelCadImport)`n                    _form.WriteDataToOutput(\"AsterMax CAD split: \" +`n                        (filesToImport == null ? 0 : filesToImport.Length) + \" item(s) temporales.\");"
+if(-not $c.Contains('_asterMaxCadImportDepth')){ if(-not $c.Contains($stateAnchor)){ throw 'C10.42 Controller state anchor missing.' }; $c=$c.Replace($stateAnchor,$stateAnchor+"`n        [NonSerialized] private int _asterMaxCadImportDepth;") }
+$methodStartOld=@'
+        public string[] ImportCADAssemblyFile(string assemblyFileName, string splitCommand)
+        {
+            string[] filesToImport = SplitAssembly(assemblyFileName, splitCommand);
+'@
+$methodStartNew=@'
+        public string[] ImportCADAssemblyFile(string assemblyFileName, string splitCommand)
+        {
+            bool asterMaxTopLevelCadImport = _asterMaxCadImportDepth == 0;
+            _asterMaxCadImportDepth++;
+            var asterMaxCadImportWatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                string[] filesToImport = SplitAssembly(assemblyFileName, splitCommand);
+                if (asterMaxTopLevelCadImport)
+                    _form.WriteDataToOutput("AsterMax CAD split: " +
+                        (filesToImport == null ? 0 : filesToImport.Length) + " item(s) temporales.");
+'@
 if(-not $c.Contains('bool asterMaxTopLevelCadImport = _asterMaxCadImportDepth == 0;')){
+    $methodStartOld=$methodStartOld.TrimStart("`r","`n").Replace("`r`n","`n")
+    $methodStartNew=$methodStartNew.TrimStart("`r","`n").Replace("`r`n","`n")
     if(-not $c.Contains($methodStartOld)){ throw 'C10.42 ImportCADAssemblyFile start anchor missing.' }
     $c=$c.Replace($methodStartOld,$methodStartNew)
-    $methodEndOld="            return allAddedPartNames.ToArray();`n        }`n        //`n        public string[] SplitAssembly(string assemblyFileName, string splitCommand)"
-    $methodEndNew="                asterMaxCadImportWatch.Stop();`n                if (asterMaxTopLevelCadImport)`n                    _form.WriteDataToOutput(\"AsterMax CAD import: \" + allAddedPartNames.Count +`n                        \" pieza(s) preparadas en \" + asterMaxCadImportWatch.ElapsedMilliseconds +`n                        \" ms. Visualización final diferida hasta completar el conjunto.\");`n                return allAddedPartNames.ToArray();`n            }`n            finally`n            {`n                _asterMaxCadImportDepth--;`n            }`n        }`n        //`n        public string[] SplitAssembly(string assemblyFileName, string splitCommand)"
+    $methodEndOld=@'
+            return allAddedPartNames.ToArray();
+        }
+        //
+        public string[] SplitAssembly(string assemblyFileName, string splitCommand)
+'@
+    $methodEndNew=@'
+                asterMaxCadImportWatch.Stop();
+                if (asterMaxTopLevelCadImport)
+                    _form.WriteDataToOutput("AsterMax CAD import: " + allAddedPartNames.Count +
+                        " pieza(s) preparadas en " + asterMaxCadImportWatch.ElapsedMilliseconds +
+                        " ms. Visualización final diferida hasta completar el conjunto.");
+                return allAddedPartNames.ToArray();
+            }
+            finally
+            {
+                _asterMaxCadImportDepth--;
+            }
+        }
+        //
+        public string[] SplitAssembly(string assemblyFileName, string splitCommand)
+'@
+    $methodEndOld=$methodEndOld.TrimStart("`r","`n").Replace("`r`n","`n")
+    $methodEndNew=$methodEndNew.TrimStart("`r","`n").Replace("`r`n","`n")
     if(-not $c.Contains($methodEndOld)){ throw 'C10.42 ImportCADAssemblyFile end anchor missing.' }
     $c=$c.Replace($methodEndOld,$methodEndNew)
 }
-$compoundMethod=$c.IndexOf('        private void ImportBrepCompoundPart(')
-if($compoundMethod -lt 0){ throw 'C10.42 ImportBrepCompoundPart method missing.' }
+$compoundMethod=$c.IndexOf('        private void ImportBrepCompoundPart('); if($compoundMethod -lt 0){ throw 'C10.42 ImportBrepCompoundPart method missing.' }
 $compoundUpdate='            UpdateAfterImport(".brep");'
 $compoundUpdatePos=$c.IndexOf($compoundUpdate,$compoundMethod)
 if($compoundUpdatePos -lt 0 -and -not $c.Contains('if (_asterMaxCadImportDepth == 0)')){ throw 'C10.42 compound UpdateAfterImport anchor missing.' }
 if($compoundUpdatePos -ge 0){ $c=$c.Substring(0,$compoundUpdatePos)+'            if (_asterMaxCadImportDepth == 0)'+"`n"+'                UpdateAfterImport(".brep");'+$c.Substring($compoundUpdatePos+$compoundUpdate.Length) }
-$importAnchor="                _currentView = ViewGeometryModelResults.Geometry;`n                _form.SetCurrentView(_currentView);`n                DrawGeometry(false);"
-$importNew="                _currentView = ViewGeometryModelResults.Geometry;`n                _form.SetCurrentView(_currentView);`n`n                // Keep the CAD/BREP exact; only simplify the initial graphics path.`n                int asterMaxLargeAssemblyThreshold = 80;`n                string asterMaxThresholdText = Environment.GetEnvironmentVariable(\"ASTERMAX_LARGE_ASSEMBLY_PARTS\");`n                int asterMaxConfiguredThreshold;`n                if (!String.IsNullOrWhiteSpace(asterMaxThresholdText) && Int32.TryParse(asterMaxThresholdText, out asterMaxConfiguredThreshold) && asterMaxConfiguredThreshold > 1) asterMaxLargeAssemblyThreshold = asterMaxConfiguredThreshold;`n                int asterMaxGeometryPartCount = (_model != null && _model.Geometry != null && _model.Geometry.Parts != null) ? _model.Geometry.Parts.Count : 0;`n                if (asterMaxGeometryPartCount >= asterMaxLargeAssemblyThreshold) CurrentEdgesVisibility = vtkEdgesVisibility.NoEdges;`n                if (_asterMaxCadImportDepth == 0) _form.WriteDataToOutput(\"AsterMax visualización CAD: \" + asterMaxGeometryPartCount + \" pieza(s); render inicial \" + (asterMaxGeometryPartCount >= asterMaxLargeAssemblyThreshold ? \"sin aristas.\" : \"normal.\"));`n                DrawGeometry(false);"
-if(-not $c.Contains('ASTERMAX_LARGE_ASSEMBLY_PARTS')){ if(-not $c.Contains($importAnchor)){ throw 'C10.42 CAD import draw anchor missing.' }; $c=$c.Replace($importAnchor,$importNew) }
+$importAnchor=@'
+                _currentView = ViewGeometryModelResults.Geometry;
+                _form.SetCurrentView(_currentView);
+                DrawGeometry(false);
+'@
+$importNew=@'
+                _currentView = ViewGeometryModelResults.Geometry;
+                _form.SetCurrentView(_currentView);
+
+                // Keep the CAD/BREP exact; only simplify the initial graphics path.
+                int asterMaxLargeAssemblyThreshold = 80;
+                string asterMaxThresholdText = Environment.GetEnvironmentVariable("ASTERMAX_LARGE_ASSEMBLY_PARTS");
+                int asterMaxConfiguredThreshold;
+                if (!String.IsNullOrWhiteSpace(asterMaxThresholdText) && Int32.TryParse(asterMaxThresholdText, out asterMaxConfiguredThreshold) && asterMaxConfiguredThreshold > 1) asterMaxLargeAssemblyThreshold = asterMaxConfiguredThreshold;
+                int asterMaxGeometryPartCount = (_model != null && _model.Geometry != null && _model.Geometry.Parts != null) ? _model.Geometry.Parts.Count : 0;
+                if (asterMaxGeometryPartCount >= asterMaxLargeAssemblyThreshold) CurrentEdgesVisibility = vtkEdgesVisibility.NoEdges;
+                if (_asterMaxCadImportDepth == 0) _form.WriteDataToOutput("AsterMax visualización CAD: " + asterMaxGeometryPartCount + " pieza(s); render inicial " + (asterMaxGeometryPartCount >= asterMaxLargeAssemblyThreshold ? "sin aristas." : "normal."));
+                DrawGeometry(false);
+'@
+if(-not $c.Contains('ASTERMAX_LARGE_ASSEMBLY_PARTS')){ $importAnchor=$importAnchor.TrimStart("`r","`n").Replace("`r`n","`n"); $importNew=$importNew.TrimStart("`r","`n").Replace("`r`n","`n"); if(-not $c.Contains($importAnchor)){ throw 'C10.42 CAD import draw anchor missing.' }; $c=$c.Replace($importAnchor,$importNew) }
 Set-Content $controllerPath $c -Encoding UTF8
 
-# 4. Camera-only post import finalization.
 $u=[regex]::Replace((Get-Content $uiPath -Raw),"\r\n?","`n")
 $signature2='        private void AsterMaxCenterImportedGeometry()'
 $ms=$u.IndexOf($signature2); if($ms -lt 0){ throw 'C10.42 AsterMaxCenterImportedGeometry missing.' }
