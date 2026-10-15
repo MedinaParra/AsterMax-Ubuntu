@@ -23,10 +23,10 @@ $m=$v.Substring($add,$end-$add)
 $actor=$m.IndexOf('_asterMaxSceneBatchActorConstructions++;')
 $geometryAdd=$m.IndexOf('_asterMaxSceneBatchGeometryAdds++;')
 $assignment=[regex]::Match($m,'(?ms)^\s*vtkMaxActor\s+\w+\s*=\s*(?=[^;]*new\s+vtkMaxActor\s*\()[^;]+;')
-$dispatches=[regex]::Matches($m,'(?m)^\s*(?:this\s*\.\s*)?AddActorGeometry\s*\(')
+$dispatches=[regex]::Matches($m,'(?m)^\s*(?:this\s*\.\s*)?AddActor\s*\(')
 if($actor -lt 0 -or $geometryAdd -lt 0){throw 'C10.50 counters are not located inside AddCells.'}
 if(-not $assignment.Success){throw 'C10.50 semantic vtkMaxActor assignment missing.'}
-if($dispatches.Count -ne 1){throw "C10.50 expected exactly one AddActorGeometry dispatch, got $($dispatches.Count)."}
+if($dispatches.Count -ne 1){throw "C10.50 expected exactly one AddActor dispatch, got $($dispatches.Count)."}
 if($actor -gt $assignment.Index){throw 'C10.50 actor counter must precede vtkMaxActor assignment.'}
-if($geometryAdd -gt $dispatches[0].Index){throw 'C10.50 geometry-add counter must precede AddActorGeometry dispatch.'}
-Write-Host 'C10.50 static telemetry guards PASS: semantic AddCells actor assignment/qualified geometry dispatch instrumented.' -ForegroundColor Green
+if($geometryAdd -gt $dispatches[0].Index){throw 'C10.50 geometry-add counter must precede AddActor dispatch.'}
+Write-Host 'C10.50 static telemetry guards PASS: semantic AddCells actor assignment/AddActor scene insertion instrumented.' -ForegroundColor Green
