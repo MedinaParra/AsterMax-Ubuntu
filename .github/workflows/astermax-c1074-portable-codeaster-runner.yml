@@ -1,0 +1,99 @@
+name: C10.74 portable Code_Aster runner
+on:
+  push:
+    branches: [agent/c1074-portable-codeaster-runner]
+  workflow_dispatch:
+
+jobs:
+  windows-x64-portable:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Apply cumulative AsterMax chain and C10.74
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          ./native-windows/candidate-c1074-portable-codeaster-runner.ps1 -Root "$PWD/upstream"
+          $src=Get-Content "$PWD/upstream/PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs" -Raw
+          foreach($token in @('ResolveRunnerExecutable','CodeAster','astermax-codeaster-runner.ps1')){if(-not $src.Contains($token)){throw "C10.74 source gate missing $token"}}
+
+      - name: Restore and build Release x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $nuget="$PWD/nuget.exe"
+          Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile $nuget
+          & $nuget restore "$PWD/upstream/PrePoMax.sln" -PackagesDirectory "$PWD/upstream/packages" -NonInteractive
+          if($LASTEXITCODE -ne 0){throw "NuGet restore failed: $LASTEXITCODE"}
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+          if(-not $msbuild){throw 'MSBuild not found'}
+          & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform=x64
+          if($LASTEXITCODE -ne 0){throw "MSBuild failed: $LASTEXITCODE"}
+
+      - name: Package portable with NetGen and AsterMax Code_Aster runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD/dist/AsterMax-C10.74-Windows-x64"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object {$_.FullName -match 'bin.*Release'} | Select-Object -First 1
+          if(-not $exe){throw 'Release AsterMax Mechanical.exe not found'}
+          Copy-Item (Join-Path $exe.Directory.FullName '*') $out -Recurse -Force
+          $runtimeUrl='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $runtimeSha256='954f406b65a08cb2fb47ef2fb02b03e4f70aa9c97e0979bd7048448273e17d46'
+          Invoke-WebRequest $runtimeUrl -OutFile "$PWD/runtime.zip"
+          $actual=(Get-FileHash "$PWD/runtime.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $runtimeSha256){throw "Pinned CAD runtime digest mismatch: $actual"}
+          Expand-Archive "$PWD/runtime.zip" "$PWD/runtime"
+          $ng=Get-ChildItem "$PWD/runtime" -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $ng){throw 'NetGenMesher.exe missing from pinned runtime'}
+          Copy-Item $ng.Directory.FullName (Join-Path $out 'NetGen') -Recurse -Force
+          New-Item -ItemType Directory -Force (Join-Path $out 'CodeAster') | Out-Null
+          Copy-Item native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 (Join-Path $out 'CodeAster/astermax-codeaster-runner.ps1') -Force
+          Copy-Item native-windows/runtime/CodeAster/astermax-codeaster-runner.cmd (Join-Path $out 'CodeAster/astermax-codeaster-runner.cmd') -Force
+          New-Item -ItemType Directory -Force (Join-Path $out 'Temp') | Out-Null
+          foreach($required in @('AsterMax Mechanical.exe','NetGen\NetGenMesher.exe','CodeAster\astermax-codeaster-runner.ps1','CodeAster\astermax-codeaster-runner.cmd')){if(-not(Test-Path (Join-Path $out $required))){throw "Portable missing $required"}}
+
+      - name: Record evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1074" | Out-Null
+          $portable="$PWD/dist/AsterMax-C10.74-Windows-x64"
+          [ordered]@{
+            candidate='C10.74'
+            branch='agent/c1074-portable-codeaster-runner'
+            windows_x64=$true
+            runner_autodiscovery_patch=$true
+            portable_runner_ps1=(Test-Path (Join-Path $portable 'CodeAster\astermax-codeaster-runner.ps1'))
+            portable_runner_cmd=(Test-Path (Join-Path $portable 'CodeAster\astermax-codeaster-runner.cmd'))
+            netgen_mesher_present=(Test-Path (Join-Path $portable 'NetGen\NetGenMesher.exe'))
+            code_aster_solver_runtime_bundled=$false
+            exact_user_step='NOT_AVAILABLE_IN_CI'
+            exact_user_gui_solve='NOT_RUN'
+            performance='NOT_RUN'
+            benchmark_values_invented=$false
+          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1074/evidence.json" -Encoding utf8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C10.74-Audit
+          path: dist/Audit
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: AsterMax-C10.74-Windows-x64
+          path: dist/AsterMax-C10.74-Windows-x64
