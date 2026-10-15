@@ -41,12 +41,13 @@ function Insert-BeforeUniqueMatch([string]$text,[string]$pattern,[string]$counte
 }
 
 # C10.48 turns the actor assignment into a multiline conditional with two constructor branches.
-# Instrument the one declaration/assignment that owns the conditional.
 $m=Insert-BeforeUniqueMatch $m '(?ms)^\s*vtkMaxActor\s+\w+\s*=\s*(?=[^;]*new\s+vtkMaxActor\s*\()[^;]+;' '_asterMaxSceneBatchActorConstructions++;' 'vtkMaxActor assignment'
-# Dispatch arguments have changed across the native/performance chain. The stable semantic event is
-# the unique AddActorGeometry invocation in AddCells; require exactly one to fail closed on ambiguity.
-$m=Insert-BeforeUniqueMatch $m '(?m)^\s*AddActorGeometry\s*\([^;]*\)\s*;' '_asterMaxSceneBatchGeometryAdds++;' 'AddActorGeometry invocation'
+
+# AddActorGeometry is also allowed to span multiple source lines after C10.48. Match the whole
+# invocation semantically from the statement start through its terminating semicolon. This remains
+# fail-closed: exactly one invocation must exist inside AddCells, otherwise no source is modified.
+$m=Insert-BeforeUniqueMatch $m '(?ms)^\s*AddActorGeometry\s*\(.*?\)\s*;' '_asterMaxSceneBatchGeometryAdds++;' 'AddActorGeometry invocation'
 
 $v=$v.Substring(0,$start)+$m+$v.Substring($end)
 Set-Content $vtkPath $v -Encoding UTF8
-Write-Host 'C10.50: telemetry only; instruments unique actor assignment and AddActorGeometry invocation inside AddCells without depending on argument shape.' -ForegroundColor Green
+Write-Host 'C10.50: telemetry only; instruments unique actor assignment and multiline-compatible AddActorGeometry invocation inside AddCells.' -ForegroundColor Green
