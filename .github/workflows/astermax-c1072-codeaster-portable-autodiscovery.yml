@@ -1,4 +1,4 @@
-name: C10.72 native Code_Aster Windows autodiscovery
+name: C10.72b native Code_Aster Windows autodiscovery
 on:
   push:
     branches: [agent/c1072-codeaster-portable-autodiscovery]
@@ -29,14 +29,26 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $url='https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
           $expectedSha256='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
           $expectedSize=398012592
-          & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
-          if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){throw 'Provider MSI download failed.'}
-          $sha=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
-          $size=(Get-Item $msi).Length
-          if($size -ne $expectedSize){throw "MSI size mismatch: $size"}
-          if($sha -ne $expectedSha256){throw "MSI SHA256 mismatch: $sha"}
+          Remove-Item $msi -Force -ErrorAction SilentlyContinue
+          $ok=$false
+          for($attempt=1;$attempt -le 8;$attempt++){
+            Write-Host "MSI_DOWNLOAD_ATTEMPT=$attempt"
+            & curl.exe -L --fail --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 30 --speed-time 60 --speed-limit 1024 -C - --output $msi $url
+            $size=if(Test-Path $msi){(Get-Item $msi).Length}else{0}
+            Write-Host "MSI_PARTIAL_SIZE=$size"
+            if($size -eq $expectedSize){
+              $sha=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+              Write-Host "MSI_SHA256=$sha"
+              if($sha -eq $expectedSha256){$ok=$true;break}
+              throw "MSI SHA256 mismatch after complete download: $sha"
+            }
+            if($size -gt $expectedSize){throw "MSI exceeded pinned size: $size"}
+            Start-Sleep -Seconds ([Math]::Min(5*$attempt,30))
+          }
+          if(-not $ok){throw "Provider MSI download incomplete after resumable attempts. Bytes=$((Get-Item $msi -ErrorAction SilentlyContinue).Length)"}
 
       - name: Install pinned Code_Aster for current Windows user
         shell: pwsh
@@ -74,7 +86,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist/Audit/C1072 | Out-Null
           [ordered]@{
-            candidate='C10.72'
+            candidate='C10.72b'
             branch='agent/c1072-codeaster-portable-autodiscovery'
             windows_x64=$true
             native_gui_preserved=$true
@@ -87,6 +99,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.72-CodeAster-Autodiscovery-Audit
+          name: AsterMax-C10.72b-CodeAster-Autodiscovery-Audit
           path: dist/Audit/C1072
           if-no-files-found: error
