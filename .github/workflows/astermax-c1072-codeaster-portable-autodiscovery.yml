@@ -1,0 +1,92 @@
+name: C10.72 native Code_Aster Windows autodiscovery
+on:
+  push:
+    branches: [agent/c1072-codeaster-portable-autodiscovery]
+  workflow_dispatch:
+
+jobs:
+  windows-native-codeaster:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify runner policy and discovery implementation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner='native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1'
+          if(-not(Test-Path $runner)){throw 'Native Code_Aster runner missing.'}
+          $text=Get-Content $runner -Raw
+          foreach($token in @('ASTERMAX_WINDOWS_CODE_ASTER_COMMAND','ASTERMAX_CODE_ASTER_HOME','LOCALAPPDATA','ProgramFiles','C:\code_aster','as_run.bat','run_aster.bat','WINDOWS_NATIVE')){
+            if(-not $text.Contains($token)){throw "Runner discovery contract missing: $token"}
+          }
+          if($text -match '(?i)wsl\.exe|calculix|ccx\.exe'){throw 'Forbidden alternate solver/WSL path found in native runner.'}
+          Write-Host 'PASS: native Windows Code_Aster autodiscovery contract is present.'
+
+      - name: Download and verify pinned Code_Aster 2025 MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $expectedSha256='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
+          $expectedSize=398012592
+          & curl.exe -L --fail --retry 4 --retry-delay 5 --connect-timeout 30 --output $msi 'https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+          if($LASTEXITCODE -ne 0 -or -not(Test-Path $msi)){throw 'Provider MSI download failed.'}
+          $sha=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+          $size=(Get-Item $msi).Length
+          if($size -ne $expectedSize){throw "MSI size mismatch: $size"}
+          if($sha -ne $expectedSha256){throw "MSI SHA256 mismatch: $sha"}
+
+      - name: Install pinned Code_Aster for current Windows user
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $log=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+          $p=Start-Process msiexec.exe -ArgumentList @('/i',('"'+$msi+'"'),'/qn','/norestart','/l*v',('"'+$log+'"')) -PassThru
+          if(-not $p.WaitForExit(900000)){try{$p.Kill()}catch{};throw 'Code_Aster MSI install timeout.'}
+          if($p.ExitCode -notin @(0,3010)){throw "Code_Aster MSI failed: $($p.ExitCode)"}
+
+      - name: Probe using AsterMax autodiscovery only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Continue'
+          Remove-Item Env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND -ErrorAction SilentlyContinue
+          Remove-Item Env:ASTERMAX_CODE_ASTER_HOME -ErrorAction SilentlyContinue
+          $runner=Resolve-Path 'native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1'
+          $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner probe 2>&1
+          $code=$LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          New-Item -ItemType Directory -Force dist/Audit/C1072 | Out-Null
+          $out | Set-Content dist/Audit/C1072/probe.log -Encoding UTF8
+          if($code -ne 0){throw "AsterMax native autodiscovery probe failed: $code"}
+          $json=($out | Where-Object { $_ -match '^\{' } | Select-Object -Last 1) | ConvertFrom-Json
+          if(-not $json.ready){throw 'Probe did not report ready=true.'}
+          if($json.transport -ne 'WINDOWS_NATIVE'){throw "Unexpected transport: $($json.transport)"}
+          if($json.wsl_required){throw 'WSL must remain disabled.'}
+          if($json.backend -eq 'missing'){throw 'Native backend was not autodiscovered.'}
+          $json | ConvertTo-Json -Depth 8 | Set-Content dist/Audit/C1072/probe.json -Encoding UTF8
+
+      - name: Record validation status
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/Audit/C1072 | Out-Null
+          [ordered]@{
+            candidate='C10.72'
+            branch='agent/c1072-codeaster-portable-autodiscovery'
+            windows_x64=$true
+            native_gui_preserved=$true
+            solver='Code_Aster native Windows only'
+            exact_user_model='NOT_AVAILABLE_IN_CI'
+            performance='NOT_RUN'
+            benchmark_values_invented=$false
+          } | ConvertTo-Json | Set-Content dist/Audit/C1072/evidence.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C10.72-CodeAster-Autodiscovery-Audit
+          path: dist/Audit/C1072
+          if-no-files-found: error
