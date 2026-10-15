@@ -25,6 +25,9 @@ jobs:
       - name: Apply required C10.42 large assembly optimization
         shell: pwsh
         run: ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+      - name: Repair BREP import contract and diagnostics
+        shell: pwsh
+        run: ./native-windows/candidate-c1078-brep-repair.ps1 -Root "$PWD/upstream"
       - name: C10.77 trace import to first frame
         shell: pwsh
         run: ./native-windows/test-c1077-vtk-import-path-trace.ps1 -Root "$PWD/upstream"
@@ -68,7 +71,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $pkg="$PWD\dist\AsterMax-C10.77-repaired-Windows-x64"
+          $pkg="$PWD\dist\AsterMax-C10.78-BREP-repair-Windows-x64"
           New-Item -ItemType Directory -Force $pkg|Out-Null
           Copy-Item "$env:APP_ROOT\*" $pkg -Recurse -Force
           New-Item -ItemType Directory -Force "$pkg\NetGen"|Out-Null
@@ -78,12 +81,12 @@ jobs:
           if(!(Test-Path "$pkg\AsterMax Mechanical.exe")){throw 'AsterMax executable missing'}
           [ordered]@{commit=$env:GITHUB_SHA;build='PASS';static_contract='PASS';runtime_performance='NOT_RUN';gui_regressions='NOT_RUN';solver='Native Windows Code_Aster required separately'}|ConvertTo-Json|Set-Content "$pkg\BUILD-STATUS.json"
           ./native-windows/test-c1054-portable-runtime.ps1 -PackageRoot $pkg
-          Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.77-repaired-Windows-x64.zip" -Force
+          Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.78-BREP-repair-Windows-x64.zip" -Force
       - name: Upload validated review ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.77-repaired-Windows-x64
-          path: dist/AsterMax-C10.77-repaired-Windows-x64.zip
+          name: AsterMax-C10.78-BREP-repair-Windows-x64
+          path: dist/AsterMax-C10.78-BREP-repair-Windows-x64.zip
           if-no-files-found: error
       - name: Upload C10.77 evidence
         if: always()
