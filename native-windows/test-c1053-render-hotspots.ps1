@@ -1,7 +1,7 @@
-param([Parameter(Mandatory=$true)][string]$Root)
+param([Parameter(Mandatory=$true)][string]$Root,[string]$OutDir)
 $ErrorActionPreference='Stop'
 $rootPath=(Resolve-Path $Root).Path
-$out=Join-Path $PSScriptRoot '..\dist\Audit\C10.53'
+$out=if([string]::IsNullOrWhiteSpace($OutDir)){Join-Path $PSScriptRoot '..\dist\Audit\C10.53'}else{$OutDir}
 New-Item -ItemType Directory -Force $out|Out-Null
 $files=Get-ChildItem $rootPath -Recurse -Filter *.cs -File
 $patterns=[ordered]@{
