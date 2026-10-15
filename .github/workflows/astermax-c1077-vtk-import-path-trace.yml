@@ -41,6 +41,50 @@ jobs:
           if(!$msbuild){throw 'MSBuild.exe not found'}
           & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
           if($LASTEXITCODE -ne 0){throw 'Windows x64 build failed'}
+      - name: Locate runnable AsterMax output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -File | Where-Object {$_.Name -in @('AsterMax Mechanical.exe','PrePoMax.exe') -and $_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
+          if(!$exe){throw 'AsterMax Mechanical.exe/PrePoMax.exe Release output not found'}
+          "APP_ROOT=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "App exe: $($exe.FullName)"
+      - name: Provision official PrePoMax NetGen runtime only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v3.0.0%20RC1.zip'
+          $zip="$env:RUNNER_TEMP\PrePoMax-v3.0.0-RC1.zip"
+          $extract="$env:RUNNER_TEMP\PrePoMaxRuntime"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgen=Get-ChildItem $extract -Recurse -File -Filter NetGenMesher.exe | Select-Object -First 1
+          if(!$netgen){throw 'Official PrePoMax v3.0.0 RC1 archive does not contain NetGenMesher.exe'}
+          $netgenDir=$netgen.Directory.FullName
+          "NETGEN_DIR=$netgenDir" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "Official NetGen runtime: $netgenDir"
+          Write-Host 'Solver directory is intentionally NOT copied; AsterMax remains Code_Aster Windows-only.'
+      - name: Assemble portable package preserving NetGen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg="$PWD\dist\AsterMax-C10.77-repaired-Windows-x64"
+          New-Item -ItemType Directory -Force $pkg|Out-Null
+          Copy-Item "$env:APP_ROOT\*" $pkg -Recurse -Force
+          New-Item -ItemType Directory -Force "$pkg\NetGen"|Out-Null
+          Copy-Item "$env:NETGEN_DIR\*" "$pkg\NetGen" -Recurse -Force
+          if(Test-Path "$pkg\PrePoMax.exe"){Rename-Item "$pkg\PrePoMax.exe" 'AsterMax Mechanical.exe'}
+          if(Test-Path "$pkg\PrePoMax.exe.config"){Rename-Item "$pkg\PrePoMax.exe.config" 'AsterMax Mechanical.exe.config'}
+          if(!(Test-Path "$pkg\AsterMax Mechanical.exe")){throw 'AsterMax executable missing'}
+          [ordered]@{commit=$env:GITHUB_SHA;build='PASS';static_contract='PASS';runtime_performance='NOT_RUN';gui_regressions='NOT_RUN';solver='Native Windows Code_Aster required separately'}|ConvertTo-Json|Set-Content "$pkg\BUILD-STATUS.json"
+          ./native-windows/test-c1054-portable-runtime.ps1 -PackageRoot $pkg
+          Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.77-repaired-Windows-x64.zip" -Force
+      - name: Upload validated review ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.77-repaired-Windows-x64
+          path: dist/AsterMax-C10.77-repaired-Windows-x64.zip
+          if-no-files-found: error
       - name: Upload C10.77 evidence
         if: always()
         uses: actions/upload-artifact@v4
