@@ -1,7 +1,7 @@
-name: C10.69s cumulative Windows x64 validation
+name: C10.70 cumulative Windows x64 validation
 on:
   push:
-    branches: [agent/c1069c-c1042-semantic-render-fix]
+    branches: [agent/c1070-package-astermax-exe-fix]
   workflow_dispatch:
 
 jobs:
@@ -85,27 +85,25 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $out="$PWD/dist/AsterMax-C10.69s-Windows-x64"
+          $out="$PWD/dist/AsterMax-C10.70-Windows-x64"
           New-Item -ItemType Directory -Force $out | Out-Null
-          $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
-          if(-not $exe){ throw 'Release PrePoMax.exe not found after successful MSBuild' }
+          $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
+          if(-not $exe){ throw 'Release AsterMax Mechanical.exe not found after successful MSBuild' }
           Copy-Item (Join-Path $exe.Directory.FullName '*') $out -Recurse -Force
-          if(Test-Path (Join-Path $out 'PrePoMax.exe')){ Rename-Item (Join-Path $out 'PrePoMax.exe') 'AsterMax Mechanical.exe' }
-          if(Test-Path (Join-Path $out 'PrePoMax.exe.config')){ Rename-Item (Join-Path $out 'PrePoMax.exe.config') 'AsterMax Mechanical.exe.config' }
           if(-not (Test-Path (Join-Path $out 'AsterMax Mechanical.exe'))){ throw 'Packaged AsterMax Mechanical.exe missing' }
       - name: Write validation status
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069s" | Out-Null
-          [ordered]@{candidate='C10.69s';branch='agent/c1069c-c1042-semantic-render-fix';windows_x64=$true;solution_platform='x64';native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069s/evidence.json" -Encoding utf8
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1070" | Out-Null
+          [ordered]@{candidate='C10.70';branch='agent/c1070-package-astermax-exe-fix';windows_x64=$true;solution_platform='x64';native_gui=$true;code_aster_windows_only_solver_preserved=$true;performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1070/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.69s-Cumulative-Windows-x64-Audit
+          name: AsterMax-C10.70-Cumulative-Windows-x64-Audit
           path: dist/Audit
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: AsterMax-C10.69s-Windows-x64
-          path: dist/AsterMax-C10.69s-Windows-x64
+          name: AsterMax-C10.70-Windows-x64
+          path: dist/AsterMax-C10.70-Windows-x64
