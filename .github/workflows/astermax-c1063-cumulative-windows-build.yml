@@ -1,4 +1,4 @@
-name: C10.69c cumulative Windows x64 validation
+name: C10.69d cumulative Windows x64 validation
 on:
   push:
     branches: [agent/c1069c-c1042-semantic-render-fix]
@@ -24,7 +24,6 @@ jobs:
           $patches=@($chain.patches|ForEach-Object{$_.file})
           ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
           ./native-windows/candidate-c1067-c1042-render-guard-compat.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1069Compat"
-          ./native-windows/candidate-c1069c-modernize-c1042.ps1 -ScriptPath "$PWD/native-windows/candidate-c1042-large-assembly-pipeline.ps1" -OutDir "$PWD/dist/Audit/C1069cModernize"
           ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1042-large-assembly.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1042Test"
           ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1043"
@@ -69,26 +68,26 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $out="$PWD/dist/AsterMax-C10.69c-Windows-x64"
+          $out="$PWD/dist/AsterMax-C10.69d-Windows-x64"
           New-Item -ItemType Directory -Force $out | Out-Null
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
           if(-not $exe){ throw 'Release PrePoMax.exe not found after successful MSBuild' }
           Copy-Item (Join-Path $exe.Directory.FullName '*') $out -Recurse -Force
           if(Test-Path (Join-Path $out 'PrePoMax.exe')){ Rename-Item (Join-Path $out 'PrePoMax.exe') 'AsterMax Mechanical.exe' }
-          Compress-Archive -Path "$out/*" -DestinationPath "$PWD/dist/AsterMax-C10.69c-Windows-x64.zip" -Force
+          Compress-Archive -Path "$out/*" -DestinationPath "$PWD/dist/AsterMax-C10.69d-Windows-x64.zip" -Force
       - name: Write validation status
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069c" | Out-Null
-          [ordered]@{candidate='C10.69c';branch='agent/c1069c-c1042-semantic-render-fix';windows_x64=$true;native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069c/evidence.json" -Encoding utf8
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069d" | Out-Null
+          [ordered]@{candidate='C10.69d';branch='agent/c1069c-c1042-semantic-render-fix';windows_x64=$true;native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069d/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.69c-Cumulative-Windows-x64-Audit
+          name: AsterMax-C10.69d-Cumulative-Windows-x64-Audit
           path: dist/Audit
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: AsterMax-C10.69c-Windows-x64
-          path: dist/AsterMax-C10.69c-Windows-x64.zip
+          name: AsterMax-C10.69d-Windows-x64
+          path: dist/AsterMax-C10.69d-Windows-x64.zip
