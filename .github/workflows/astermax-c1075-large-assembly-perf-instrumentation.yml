@@ -1,0 +1,51 @@
+name: C10.75 large assembly performance instrumentation
+on:
+  push:
+    branches: [agent/c1075-large-assembly-perf-instrumentation]
+  workflow_dispatch:
+
+jobs:
+  windows-x64-static-instrumentation:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Rebuild cumulative AsterMax baseline
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+      - name: C10.52 viewport purity regression guard
+        shell: pwsh
+        run: ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+      - name: C10.75 static redundancy inventory
+        shell: pwsh
+        run: ./native-windows/test-c1075-large-assembly-redundancy-inventory.ps1 -Root "$PWD/upstream"
+      - name: Windows x64 Release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if([string]::IsNullOrWhiteSpace($msbuild)){throw 'MSBuild.exe not found'}
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'Windows x64 build failed'}
+      - name: Upload C10.75 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.75-Large-Assembly-Perf-Instrumentation
+          path: |
+            dist/Audit/C10.75
+            dist/Audit/C10.52
+            dist/Audit/PatchChain
+          if-no-files-found: warn
