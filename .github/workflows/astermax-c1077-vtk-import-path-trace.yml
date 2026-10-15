@@ -1,7 +1,7 @@
 name: C10.77 VTK import-to-first-frame trace
 on:
   push:
-    branches: [agent/c1077-vtk-import-path-trace]
+    branches: [agent/c1077-vtk-import-path-trace, audit/c1077-optimization]
   workflow_dispatch:
 jobs:
   windows-x64-trace:
@@ -22,6 +22,9 @@ jobs:
           $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
           $patches=@($chain.patches|ForEach-Object{$_.file})
           ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+      - name: Apply required C10.42 large assembly optimization
+        shell: pwsh
+        run: ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
       - name: C10.77 trace import to first frame
         shell: pwsh
         run: ./native-windows/test-c1077-vtk-import-path-trace.ps1 -Root "$PWD/upstream"
