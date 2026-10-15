@@ -1,0 +1,153 @@
+name: C10.73 native Code_Aster E2E contract
+on:
+  push:
+    branches: [agent/c1073-codeaster-e2e-contract]
+  workflow_dispatch:
+
+jobs:
+  windows-x64-codeaster-e2e:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify native-only solver policy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner='native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1'
+          if(-not(Test-Path $runner)){throw 'Native Code_Aster runner missing.'}
+          $text=Get-Content $runner -Raw
+          foreach($token in @('WINDOWS_NATIVE','Get-ExpectedOutputs','solver_probe_mess_ready','synthetic_results_allowed')){
+            if(-not $text.Contains($token)){throw "Runner contract missing: $token"}
+          }
+          if($text -match '(?i)wsl\.exe|calculix|ccx\.exe'){throw 'Forbidden alternate solver/WSL path found.'}
+
+      - name: Download pinned Code_Aster 2025 MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $url='https://simulease.com/wp-content/uploads/2026/03/code-aster_v2025_std.msi'
+          $expectedSha256='B789FEFFC12E0FECBCFBABE6D386FA15C1AB74797C8C9D27A5733F8D2B5D092D'
+          $expectedSize=398012592
+          Remove-Item $msi -Force -ErrorAction SilentlyContinue
+          for($attempt=1;$attempt -le 8;$attempt++){
+            & curl.exe -L --fail --retry 3 --retry-all-errors --retry-delay 3 --connect-timeout 30 --speed-time 60 --speed-limit 1024 -C - --output $msi $url
+            $size=if(Test-Path $msi){(Get-Item $msi).Length}else{0}
+            Write-Host "MSI_SIZE=$size"
+            if($size -eq $expectedSize){
+              $sha=(Get-FileHash $msi -Algorithm SHA256).Hash.ToUpperInvariant()
+              if($sha -ne $expectedSha256){throw "MSI SHA256 mismatch: $sha"}
+              exit 0
+            }
+            if($size -gt $expectedSize){throw "MSI exceeded pinned size: $size"}
+          }
+          throw 'Pinned Code_Aster MSI download incomplete.'
+
+      - name: Install pinned Code_Aster
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
+          $p=Start-Process msiexec.exe -ArgumentList @('/i',('"'+$msi+'"'),'/qn','/norestart') -PassThru
+          if(-not $p.WaitForExit(900000)){try{$p.Kill()}catch{};throw 'Code_Aster install timeout.'}
+          if($p.ExitCode -notin @(0,3010)){throw "Code_Aster install failed: $($p.ExitCode)"}
+
+      - name: Probe AsterMax autodiscovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Remove-Item Env:ASTERMAX_WINDOWS_CODE_ASTER_COMMAND -ErrorAction SilentlyContinue
+          Remove-Item Env:ASTERMAX_CODE_ASTER_HOME -ErrorAction SilentlyContinue
+          $runner=Resolve-Path 'native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1'
+          $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner probe 2>&1
+          $out | ForEach-Object {Write-Host $_}
+          if($LASTEXITCODE -ne 0){throw 'Autodiscovery probe failed.'}
+          $json=($out | Where-Object {$_ -match '^\{'} | Select-Object -Last 1) | ConvertFrom-Json
+          if(-not $json.ready -or $json.transport -ne 'WINDOWS_NATIVE' -or -not $json.solver_probe_mess_ready){throw 'Native probe contract failed.'}
+
+      - name: Run minimal real E2E solve through AsterMax runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $work=Join-Path $env:RUNNER_TEMP 'astermax-e2e'
+          Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $work | Out-Null
+          @'
+          DEBUT()
+          mesh=LIRE_MAILLAGE(FORMAT='ASTER')
+          model=AFFE_MODELE(MAILLAGE=mesh,AFFE=_F(TOUT='OUI',PHENOMENE='MECANIQUE',MODELISATION='3D'))
+          mat=DEFI_MATERIAU(ELAS=_F(E=210000000000.0,NU=0.3))
+          field=AFFE_MATERIAU(MAILLAGE=mesh,AFFE=_F(TOUT='OUI',MATER=mat))
+          bc=AFFE_CHAR_MECA(MODELE=model,DDL_IMPO=_F(GROUP_MA='FIX',DX=0.0,DY=0.0,DZ=0.0))
+          load=AFFE_CHAR_MECA(MODELE=model,FORCE_NODALE=_F(GROUP_NO='LOAD',FZ=-1000.0))
+          resu=MECA_STATIQUE(MODELE=model,CHAM_MATER=field,EXCIT=(_F(CHARGE=bc),_F(CHARGE=load)))
+          IMPR_RESU(FORMAT='MED',RESU=_F(RESULTAT=resu))
+          FIN()
+          '@ | Set-Content (Join-Path $work 'case.comm') -Encoding ascii
+          @'
+          TITRE
+          ASTERMAX_C1073
+          FINSF
+          COOR_3D
+          N1 0.0 0.0 0.0
+          N2 1.0 0.0 0.0
+          N3 0.0 1.0 0.0
+          N4 0.0 0.0 1.0
+          FINSF
+          TETRA4
+          M1 N1 N2 N3 N4
+          FINSF
+          GROUP_MA
+          FIX M1
+          FINSF
+          GROUP_NO
+          LOAD N4
+          FINSF
+          FIN
+          '@ | Set-Content (Join-Path $work 'case.mail') -Encoding ascii
+          @'
+          P version stable
+          P time_limit 120
+          P memory_limit 512
+          P ncpus 1
+          P mpi_nbcpu 1
+          P mpi_nbnoeud 1
+          P actions make_etude
+          F comm ./case.comm D 1
+          F mmed ./case.mail D 20
+          F mess ./case.mess R 6
+          F rmed ./case.rmed R 80
+          '@ | Set-Content (Join-Path $work 'case.export') -Encoding ascii
+          $runner=Resolve-Path 'native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1'
+          $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $runner (Join-Path $work 'case.export') $work 2>&1
+          $code=$LASTEXITCODE
+          $out | ForEach-Object {Write-Host $_}
+          New-Item -ItemType Directory -Force dist/Audit/C1073 | Out-Null
+          $out | Set-Content dist/Audit/C1073/e2e-runner.log -Encoding UTF8
+          if($code -ne 0){throw "AsterMax runner E2E failed: $code"}
+          foreach($name in @('case.mess','case.rmed')){
+            $path=Join-Path $work $name
+            if(-not(Test-Path $path) -or (Get-Item $path).Length -le 0){throw "Expected output missing: $name"}
+            Copy-Item $path dist/Audit/C1073/$name -Force
+          }
+          $mess=Get-Content (Join-Path $work 'case.mess') -Raw
+          if($mess -notmatch '(?i)normal|fin'){throw 'MESS does not contain a recognizable completion marker.'}
+          [ordered]@{
+            candidate='C10.73'
+            transport='WINDOWS_NATIVE'
+            minimal_real_solve='PASS'
+            mess_bytes=(Get-Item (Join-Path $work 'case.mess')).Length
+            rmed_bytes=(Get-Item (Join-Path $work 'case.rmed')).Length
+            exact_user_step='NOT_AVAILABLE_IN_CI'
+            performance='NOT_RUN'
+            benchmark_values_invented=$false
+          } | ConvertTo-Json | Set-Content dist/Audit/C1073/evidence.json -Encoding UTF8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C10.73-CodeAster-E2E-Audit
+          path: dist/Audit/C1073
+          if-no-files-found: warn
