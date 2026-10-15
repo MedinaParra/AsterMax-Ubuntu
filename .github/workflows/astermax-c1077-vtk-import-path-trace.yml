@@ -56,13 +56,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v3.0.0%20RC1.zip'
-          $zip="$env:RUNNER_TEMP\PrePoMax-v3.0.0-RC1.zip"
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $zip="$env:RUNNER_TEMP\PrePoMax-v1.4.0.zip"
           $extract="$env:RUNNER_TEMP\PrePoMaxRuntime"
           Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
           Expand-Archive -Path $zip -DestinationPath $extract -Force
           $netgen=Get-ChildItem $extract -Recurse -File -Filter NetGenMesher.exe | Select-Object -First 1
-          if(!$netgen){throw 'Official PrePoMax v3.0.0 RC1 archive does not contain NetGenMesher.exe'}
+          if(!$netgen){throw 'Official PrePoMax v1.4.0 archive does not contain NetGenMesher.exe'}
           $netgenDir=$netgen.Directory.FullName
           "NETGEN_DIR=$netgenDir" | Out-File $env:GITHUB_ENV -Append
           Write-Host "Official NetGen runtime: $netgenDir"
