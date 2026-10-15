@@ -1,7 +1,7 @@
-name: C10.64 cumulative Windows x64 validation
+name: C10.65 cumulative Windows x64 validation
 on:
   push:
-    branches: [agent/c1064-addcells-telemetry-composition-fix]
+    branches: [agent/c1065-addcells-conditional-telemetry-fix]
   workflow_dispatch:
 
 jobs:
@@ -72,25 +72,25 @@ jobs:
           $ErrorActionPreference='Stop'
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter 'AsterMax Mechanical.exe'|Where-Object{$_.FullName -match 'bin\\x64\\Release'}|Select-Object -First 1
           if(-not $exe){throw 'AsterMax Mechanical.exe not found after cumulative build'}
-          $out=Join-Path $PWD 'dist/AsterMax-C10.64-Cumulative-Windows-x64'
+          $out=Join-Path $PWD 'dist/AsterMax-C10.65-Cumulative-Windows-x64'
           New-Item -ItemType Directory -Force $out|Out-Null
           Copy-Item (Join-Path $exe.Directory.FullName '*') $out -Recurse -Force
-          [ordered]@{release='C10.64-cumulative-candidate';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME;compilation='PASS';functionality='STATIC_GUARDS_PASS_RUNTIME_NOT_RUN';performance='NOT_RUN';regressions='STATIC_GUARDS_PASS_RUNTIME_NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content (Join-Path $out 'ASTERMAX-C10.64-MANIFEST.json') -Encoding UTF8
+          [ordered]@{release='C10.65-cumulative-candidate';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME;compilation='PASS';functionality='STATIC_GUARDS_PASS_RUNTIME_NOT_RUN';performance='NOT_RUN';regressions='STATIC_GUARDS_PASS_RUNTIME_NOT_RUN';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content (Join-Path $out 'ASTERMAX-C10.65-MANIFEST.json') -Encoding UTF8
       - name: Record failure evidence
         if: failure()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force .\dist\Audit\C10.64|Out-Null
-          [ordered]@{release='C10.64-cumulative-candidate';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME;compilation='FAIL_OR_BLOCKED';functionality='NOT_RUN_OR_PARTIAL';performance='NOT_RUN';regressions='NOT_RUN_OR_PARTIAL';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.64\evidence.json -Encoding UTF8
+          New-Item -ItemType Directory -Force .\dist\Audit\C10.65|Out-Null
+          [ordered]@{release='C10.65-cumulative-candidate';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME;compilation='FAIL_OR_BLOCKED';functionality='NOT_RUN_OR_PARTIAL';performance='NOT_RUN';regressions='NOT_RUN_OR_PARTIAL';exact_incident_step='BLOCKED_NOT_PRESENT_IN_REPOSITORY';code_aster_windows_only_solver_preserved=$true;main_modified=$false;benchmark_values_invented=$false}|ConvertTo-Json|Set-Content .\dist\Audit\C10.65\evidence.json -Encoding UTF8
       - name: Upload package
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.64-Cumulative-Windows-x64
-          path: dist/AsterMax-C10.64-Cumulative-Windows-x64
+          name: AsterMax-C10.65-Cumulative-Windows-x64
+          path: dist/AsterMax-C10.65-Cumulative-Windows-x64
       - name: Upload audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.64-Audit
+          name: AsterMax-C10.65-Audit
           path: dist/Audit
