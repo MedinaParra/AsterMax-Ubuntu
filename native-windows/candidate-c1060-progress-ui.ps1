@@ -81,13 +81,14 @@ namespace PrePoMax
 $proj=Join-Path $pre 'PrePoMax.csproj'
 if(-not(Test-Path $proj)){throw 'PrePoMax.csproj missing'}
 $p=Get-Content $proj -Raw
+$compileLine='    <Compile Include="AsterMaxProgressDialog.cs" />'
 if(-not $p.Contains('AsterMaxProgressDialog.cs')){
   $anchor='<Compile Include="AsterMaxLocalization.cs" />'
-  if($p.Contains($anchor)){$p=$p.Replace($anchor,$anchor+"`r`n    <Compile Include=\"AsterMaxProgressDialog.cs\" />")}
+  if($p.Contains($anchor)){$p=$p.Replace($anchor,$anchor+"`r`n"+$compileLine)}
   else {
     $anchor='<Compile Include="AsterMaxSpanishChile.cs" />'
     if(-not $p.Contains($anchor)){throw 'No safe Compile anchor found for progress dialog'}
-    $p=$p.Replace($anchor,$anchor+"`r`n    <Compile Include=\"AsterMaxProgressDialog.cs\" />")
+    $p=$p.Replace($anchor,$anchor+"`r`n"+$compileLine)
   }
   Set-Content $proj $p -Encoding UTF8
 }
