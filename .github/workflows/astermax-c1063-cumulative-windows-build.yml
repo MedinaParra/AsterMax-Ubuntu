@@ -1,7 +1,7 @@
-name: C10.68 cumulative Windows x64 validation
+name: C10.69 cumulative Windows x64 validation
 on:
   push:
-    branches: [agent/c1068-cumulative-outdir-contract-fix]
+    branches: [agent/c1069-recompile-windows-x64]
   workflow_dispatch:
 
 jobs:
@@ -23,9 +23,7 @@ jobs:
           $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
           $patches=@($chain.patches|ForEach-Object{$_.file})
           ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
-          ./native-windows/candidate-c1067-c1042-render-guard-compat.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1067Compat"
-          # C10.42 predates the evidence-output contract and accepts only -Root.
-          # Passing -OutDir aborts PowerShell parameter binding before candidate code runs.
+          ./native-windows/candidate-c1067-c1042-render-guard-compat.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1069Compat"
           ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1042-large-assembly.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1042Test"
           ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1043"
@@ -69,20 +67,20 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1068" | Out-Null
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069" | Out-Null
           [ordered]@{
-            candidate='C10.68'
-            branch='agent/c1068-cumulative-outdir-contract-fix'
+            candidate='C10.69'
+            branch='agent/c1069-recompile-windows-x64'
             windows_x64=$true
             native_gui=$true
             code_aster_windows_only_solver_preserved=$true
             exact_incident_step='BLOCKED'
             performance='NOT_RUN'
             benchmark_values_invented=$false
-            note='C10.68 fixes the cumulative harness invocation contract for C10.42. It does not claim performance until a representative/exact STEP benchmark is executed.'
-          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1068/evidence.json" -Encoding utf8
+            note='C10.69 establishes the C10.42 scheduling field only after semantic verification of the C10.30 render guard, then recompiles the cumulative Windows x64 candidate.'
+          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.68-Cumulative-Windows-x64-Audit
+          name: AsterMax-C10.69-Cumulative-Windows-x64-Audit
           path: dist/Audit
