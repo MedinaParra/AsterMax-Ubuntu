@@ -1,4 +1,4 @@
-name: C10.69f cumulative Windows x64 validation
+name: C10.69g cumulative Windows x64 validation
 on:
   push:
     branches: [agent/c1069c-c1042-semantic-render-fix]
@@ -27,13 +27,13 @@ jobs:
           ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1043"
-          ./native-windows/test-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1043Test"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1043Test"
           ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1044"
-          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1044Test"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1045"
-          ./native-windows/test-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1045Test"
+          ./native-windows/test-c1045-parallel-cad-preview.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1045b"
-          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1045bTest"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1046c"
           ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1046cTest"
           ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1047"
@@ -68,26 +68,27 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $out="$PWD/dist/AsterMax-C10.69f-Windows-x64"
+          $out="$PWD/dist/AsterMax-C10.69g-Windows-x64"
           New-Item -ItemType Directory -Force $out | Out-Null
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
           if(-not $exe){ throw 'Release PrePoMax.exe not found after successful MSBuild' }
           Copy-Item (Join-Path $exe.Directory.FullName '*') $out -Recurse -Force
           if(Test-Path (Join-Path $out 'PrePoMax.exe')){ Rename-Item (Join-Path $out 'PrePoMax.exe') 'AsterMax Mechanical.exe' }
-          Compress-Archive -Path "$out/*" -DestinationPath "$PWD/dist/AsterMax-C10.69f-Windows-x64.zip" -Force
+          if(Test-Path (Join-Path $out 'PrePoMax.exe.config')){ Rename-Item (Join-Path $out 'PrePoMax.exe.config') 'AsterMax Mechanical.exe.config' }
+          if(-not (Test-Path (Join-Path $out 'AsterMax Mechanical.exe'))){ throw 'Packaged AsterMax Mechanical.exe missing' }
       - name: Write validation status
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069f" | Out-Null
-          [ordered]@{candidate='C10.69f';branch='agent/c1069c-c1042-semantic-render-fix';windows_x64=$true;native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069f/evidence.json" -Encoding utf8
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069g" | Out-Null
+          [ordered]@{candidate='C10.69g';branch='agent/c1069c-c1042-semantic-render-fix';windows_x64=$true;native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069g/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.69f-Cumulative-Windows-x64-Audit
+          name: AsterMax-C10.69g-Cumulative-Windows-x64-Audit
           path: dist/Audit
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: AsterMax-C10.69f-Windows-x64
-          path: dist/AsterMax-C10.69f-Windows-x64.zip
+          name: AsterMax-C10.69g-Windows-x64
+          path: dist/AsterMax-C10.69g-Windows-x64
