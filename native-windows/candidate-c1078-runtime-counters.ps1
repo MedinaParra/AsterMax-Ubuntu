@@ -11,11 +11,13 @@ if(!$v.Contains('_asterMaxRenderScheduled')){throw 'C10.78 requires C10.42 rende
 $importAnchor='            bool asterMaxTopLevelCadImport = _asterMaxCadImportDepth == 0;'
 if(!$c.Contains('ASTERMAX_PERF_IMPORT')){
  if(!$c.Contains($importAnchor)){throw 'C10.78 import anchor missing.'}
- $c=$c.Replace($importAnchor,$importAnchor+"`n            if (asterMaxTopLevelCadImport && Environment.GetEnvironmentVariable(\"ASTERMAX_PERF_TRACE\") == \"1\") _form.WriteDataToOutput(\"ASTERMAX_PERF_IMPORT begin\");")
+ $beginLine='            if (asterMaxTopLevelCadImport && Environment.GetEnvironmentVariable("ASTERMAX_PERF_TRACE") == "1") _form.WriteDataToOutput("ASTERMAX_PERF_IMPORT begin");'
+ $c=$c.Replace($importAnchor,$importAnchor+"`n"+$beginLine)
  $endAnchor='                if (asterMaxTopLevelCadImport)'
  $endPos=$c.IndexOf($endAnchor,$c.IndexOf('asterMaxCadImportWatch.Stop();'))
  if($endPos -lt 0){throw 'C10.78 import end anchor missing.'}
- $c=$c.Insert($endPos,'                if (asterMaxTopLevelCadImport && Environment.GetEnvironmentVariable("ASTERMAX_PERF_TRACE") == "1") _form.WriteDataToOutput("ASTERMAX_PERF_IMPORT end parts=" + allAddedPartNames.Count);'+"`n")
+ $endLine='                if (asterMaxTopLevelCadImport && Environment.GetEnvironmentVariable("ASTERMAX_PERF_TRACE") == "1") _form.WriteDataToOutput("ASTERMAX_PERF_IMPORT end parts=" + allAddedPartNames.Count);'
+ $c=$c.Insert($endPos,$endLine+"`n")
 }
 # vtkControl counters count requests/actors; they intentionally do not alter scheduling.
 $fieldAnchor='        private bool _asterMaxRenderScheduled;'
@@ -30,7 +32,11 @@ if(!$v.Contains('ASTERMAX_PERF_RENDER')){
  $v=$v.Replace($fieldAnchor,$fieldAnchor+"`n"+$fields.TrimEnd())
  $renderSig='        private void RenderSceene()'
  $renderBrace=$v.IndexOf('{',$v.IndexOf($renderSig)); if($renderBrace -lt 0){throw 'C10.78 RenderSceene anchor missing.'}
- $v=$v.Insert($renderBrace+1,"`n            _asterMaxPerfRenderRequests++;`n            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace(\"ASTERMAX_PERF_RENDER request=\" + _asterMaxPerfRenderRequests + \" scheduled=\" + _asterMaxRenderScheduled + \" active=\" + _asterMaxRenderRequestActive); ")
+ $renderLines=@'
+            _asterMaxPerfRenderRequests++;
+            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_RENDER request=" + _asterMaxPerfRenderRequests + " scheduled=" + _asterMaxRenderScheduled + " active=" + _asterMaxRenderRequestActive);
+'@
+ $v=$v.Insert($renderBrace+1,"`n"+$renderLines.TrimEnd()+" ")
 }
 if(!$v.Contains('ASTERMAX_PERF_ACTOR')){
  $actorSig='        public void AddActorGeometry('
@@ -38,7 +44,11 @@ if(!$v.Contains('ASTERMAX_PERF_ACTOR')){
  if($actorStart -lt 0){$actorSig='        private void AddActorGeometry('; $actorStart=$v.IndexOf($actorSig)}
  if($actorStart -lt 0){throw 'C10.78 AddActorGeometry method anchor missing.'}
  $actorBrace=$v.IndexOf('{',$actorStart); if($actorBrace -lt 0){throw 'C10.78 AddActorGeometry brace missing.'}
- $v=$v.Insert($actorBrace+1,"`n            _asterMaxPerfActorAdds++;`n            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace(\"ASTERMAX_PERF_ACTOR add=\" + _asterMaxPerfActorAdds); ")
+ $actorLines=@'
+            _asterMaxPerfActorAdds++;
+            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_ACTOR add=" + _asterMaxPerfActorAdds);
+'@
+ $v=$v.Insert($actorBrace+1,"`n"+$actorLines.TrimEnd()+" ")
 }
 Set-Content $controllerPath $c -Encoding UTF8
 Set-Content $vtkPath $v -Encoding UTF8
