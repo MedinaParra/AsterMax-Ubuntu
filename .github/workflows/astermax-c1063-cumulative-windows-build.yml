@@ -1,4 +1,4 @@
-name: C10.69r cumulative Windows x64 validation
+name: C10.69s cumulative Windows x64 validation
 on:
   push:
     branches: [agent/c1069c-c1042-semantic-render-fix]
@@ -62,7 +62,15 @@ jobs:
           Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile $nuget
           & $nuget restore "$PWD/upstream/PrePoMax.sln" -PackagesDirectory "$PWD/upstream/packages" -NonInteractive
           if($LASTEXITCODE -ne 0){ throw "NuGet restore failed: $LASTEXITCODE" }
-          foreach($p in @('ncalc.1.3.8','System.ValueTuple.4.5.0','UnitsNet.4.89.1')){ if(-not (Test-Path "$PWD/upstream/packages/$p")){ throw "Required package missing after restore: $p" } }
+          foreach($p in @('ncalc.1.3.8','System.ValueTuple.4.5.0','UnitsNet.4.89.1','Activiz.NET.x64.5.8.0')){ if(-not (Test-Path "$PWD/upstream/packages/$p")){ throw "Required package missing after restore: $p" } }
+      - name: Verify Release x64 solution contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $sln=Get-Content "$PWD/upstream/PrePoMax.sln" -Raw
+          if($sln -notmatch '(?m)^\s*Release\|x64\s*=\s*Release\|x64\s*$'){ throw 'Release|x64 solution configuration missing after patch chain' }
+          if($sln -match '(?m)^\s*Release\|Any CPU\s*='){ throw 'Unexpected Release|Any CPU solution configuration detected' }
+          Write-Host 'PASS: upstream solution retains native Release|x64 contract.'
       - name: Build Release x64
         shell: pwsh
         run: |
@@ -70,14 +78,14 @@ jobs:
           $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
           if(-not $msbuild){ throw 'MSBuild not found' }
-          & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform="Any CPU"
+          & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform=x64
           if($LASTEXITCODE -ne 0){ throw "MSBuild failed: $LASTEXITCODE" }
       - name: Package Windows x64
         if: success()
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $out="$PWD/dist/AsterMax-C10.69r-Windows-x64"
+          $out="$PWD/dist/AsterMax-C10.69s-Windows-x64"
           New-Item -ItemType Directory -Force $out | Out-Null
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
           if(-not $exe){ throw 'Release PrePoMax.exe not found after successful MSBuild' }
@@ -89,15 +97,15 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069r" | Out-Null
-          [ordered]@{candidate='C10.69r';branch='agent/c1069c-c1042-semantic-render-fix';windows_native=$true;solution_platform='Any CPU';native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069r/evidence.json" -Encoding utf8
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1069s" | Out-Null
+          [ordered]@{candidate='C10.69s';branch='agent/c1069c-c1042-semantic-render-fix';windows_x64=$true;solution_platform='x64';native_gui=$true;code_aster_windows_only_solver_preserved=$true;exact_incident_step='BLOCKED';performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1069s/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.69r-Cumulative-Windows-Audit
+          name: AsterMax-C10.69s-Cumulative-Windows-x64-Audit
           path: dist/Audit
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: AsterMax-C10.69r-Windows
-          path: dist/AsterMax-C10.69r-Windows-x64
+          name: AsterMax-C10.69s-Windows-x64
+          path: dist/AsterMax-C10.69s-Windows-x64
