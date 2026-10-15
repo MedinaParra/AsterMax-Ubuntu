@@ -67,6 +67,34 @@ jobs:
           "NETGEN_DIR=$netgenDir" | Out-File $env:GITHUB_ENV -Append
           Write-Host "Official NetGen runtime: $netgenDir"
           Write-Host 'Solver directory is intentionally NOT copied; AsterMax remains Code_Aster Windows-only.'
+      - name: Real NetGen BREP visualization smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD/dist/Audit/C10.78"
+          New-Item -ItemType Directory -Force $out|Out-Null
+          $brep=(Resolve-Path 'native-windows/workflow-conformance/fixtures/B01-100x10x10.brep').Path
+          $vis=Join-Path $out 'B01.vis'
+          $exe=Join-Path $env:NETGEN_DIR 'NetGenMesher.exe'
+          $psi=[Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName=$exe
+          $psi.Arguments='BREP_VISUALIZATION "'+$brep+'" "'+$vis+'" 0.1'
+          $psi.WorkingDirectory=$out
+          $psi.UseShellExecute=$false
+          $psi.RedirectStandardOutput=$true
+          $psi.RedirectStandardError=$true
+          $proc=[Diagnostics.Process]::new()
+          $proc.StartInfo=$psi
+          $proc.Start()|Out-Null
+          $stdout=$proc.StandardOutput.ReadToEndAsync()
+          $stderr=$proc.StandardError.ReadToEndAsync()
+          if(!$proc.WaitForExit(60000)){$proc.Kill();throw 'NetGen BREP smoke timeout'}
+          $stdout.GetAwaiter().GetResult()|Set-Content "$out/stdout.txt"
+          $stderr.GetAwaiter().GetResult()|Set-Content "$out/stderr.txt"
+          $code=$proc.ExitCode
+          if($code -ne 0){throw "NetGen smoke exit=$code"}
+          if(!(Test-Path $vis) -or (Get-Item $vis).Length -eq 0){throw 'NetGen smoke missing/empty VIS'}
+          [ordered]@{native_brep_visualization='PASS';fixture='B01-100x10x10';exit_code=$code;vis_bytes=(Get-Item $vis).Length;incident_step='BLOCKED_NOT_PROVIDED';gui='NOT_RUN'}|ConvertTo-Json|Set-Content "$out/evidence.json"
       - name: Assemble portable package preserving NetGen runtime
         shell: pwsh
         run: |
@@ -95,5 +123,6 @@ jobs:
           name: AsterMax-C10.77-VTK-Import-Path-Trace
           path: |
             dist/Audit/C10.77
+            dist/Audit/C10.78
             dist/Audit/PatchChain
           if-no-files-found: warn
