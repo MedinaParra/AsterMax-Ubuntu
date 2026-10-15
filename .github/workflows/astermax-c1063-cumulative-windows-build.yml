@@ -1,7 +1,7 @@
-name: C10.66 cumulative Windows x64 validation
+name: C10.67 cumulative Windows x64 validation
 on:
   push:
-    branches: [agent/c1066-addcells-geometry-dispatch-fix]
+    branches: [agent/c1067-c1042-render-guard-compat]
   workflow_dispatch:
 
 jobs:
@@ -23,6 +23,7 @@ jobs:
           $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
           $patches=@($chain.patches|ForEach-Object{$_.file})
           ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+          ./native-windows/candidate-c1067-c1042-render-guard-compat.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1067Compat"
           ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1042"
           ./native-windows/test-c1042-large-assembly.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1042Test"
           ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1043"
@@ -66,20 +67,20 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1066" | Out-Null
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1067" | Out-Null
           [ordered]@{
-            candidate='C10.66'
-            branch='agent/c1066-addcells-geometry-dispatch-fix'
+            candidate='C10.67'
+            branch='agent/c1067-c1042-render-guard-compat'
             windows_x64=$true
             native_gui=$true
             code_aster_windows_only_solver_preserved=$true
             exact_incident_step='BLOCKED'
             performance='NOT_RUN'
             benchmark_values_invented=$false
-            note='Performance remains NOT_RUN until a representative/exact STEP benchmark is executed.'
-          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1066/evidence.json" -Encoding utf8
+            note='C10.67 validates C10.30 render-guard semantics before normalizing declaration layout for C10.42. Performance remains NOT_RUN until a representative/exact STEP benchmark is executed.'
+          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1067/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C10.66-Cumulative-Windows-x64-Audit
+          name: AsterMax-C10.67-Cumulative-Windows-x64-Audit
           path: dist/Audit
