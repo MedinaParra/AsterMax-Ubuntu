@@ -1,0 +1,133 @@
+name: C10.79 integrated Windows package
+on:
+  push:
+    branches: [build/c1079-integrated]
+  workflow_dispatch:
+jobs:
+  windows-x64-trace:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Rebuild cumulative AsterMax source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+      - name: Apply required C10.42 large assembly optimization
+        shell: pwsh
+        run: ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+      - name: Repair BREP import contract and diagnostics
+        shell: pwsh
+        run: ./native-windows/candidate-c1078-brep-repair.ps1 -Root "$PWD/upstream"
+      - name: Apply and validate latest runtime counters
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+      - name: C10.77 trace import to first frame
+        shell: pwsh
+        run: ./native-windows/test-c1077-vtk-import-path-trace.ps1 -Root "$PWD/upstream"
+      - name: Viewport purity regression guard
+        shell: pwsh
+        run: ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+      - name: Windows x64 Release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if(!$msbuild){throw 'MSBuild.exe not found'}
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'Windows x64 build failed'}
+      - name: Locate runnable AsterMax output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem .\upstream -Recurse -File | Where-Object {$_.Name -in @('AsterMax Mechanical.exe','PrePoMax.exe') -and $_.FullName -match '\\bin\\(x64\\)?Release\\'} | Select-Object -First 1
+          if(!$exe){throw 'AsterMax Mechanical.exe/PrePoMax.exe Release output not found'}
+          "APP_ROOT=$($exe.Directory.FullName)" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "App exe: $($exe.FullName)"
+      - name: Provision official PrePoMax NetGen runtime only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $url='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          $zip="$env:RUNNER_TEMP\PrePoMax-v1.4.0.zip"
+          $extract="$env:RUNNER_TEMP\PrePoMaxRuntime"
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          $netgen=Get-ChildItem $extract -Recurse -File -Filter NetGenMesher.exe | Select-Object -First 1
+          if(!$netgen){throw 'Official PrePoMax v1.4.0 archive does not contain NetGenMesher.exe'}
+          $netgenDir=$netgen.Directory.FullName
+          "NETGEN_DIR=$netgenDir" | Out-File $env:GITHUB_ENV -Append
+          Write-Host "Official NetGen runtime: $netgenDir"
+          Write-Host 'Solver directory is intentionally NOT copied; AsterMax remains Code_Aster Windows-only.'
+      - name: Real NetGen BREP visualization smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out="$PWD/dist/Audit/C10.78"
+          New-Item -ItemType Directory -Force $out|Out-Null
+          $brep=(Resolve-Path 'native-windows/workflow-conformance/fixtures/B01-100x10x10.brep').Path
+          $vis=Join-Path $out 'B01.vis'
+          $exe=Join-Path $env:NETGEN_DIR 'NetGenMesher.exe'
+          $psi=[Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName=$exe
+          $psi.Arguments='BREP_VISUALIZATION "'+$brep+'" "'+$vis+'" 0.1'
+          $psi.WorkingDirectory=$out
+          $psi.UseShellExecute=$false
+          $psi.RedirectStandardOutput=$true
+          $psi.RedirectStandardError=$true
+          $proc=[Diagnostics.Process]::new()
+          $proc.StartInfo=$psi
+          $proc.Start()|Out-Null
+          $stdout=$proc.StandardOutput.ReadToEndAsync()
+          $stderr=$proc.StandardError.ReadToEndAsync()
+          if(!$proc.WaitForExit(60000)){$proc.Kill();throw 'NetGen BREP smoke timeout'}
+          $stdout.GetAwaiter().GetResult()|Set-Content "$out/stdout.txt"
+          $stderr.GetAwaiter().GetResult()|Set-Content "$out/stderr.txt"
+          $code=$proc.ExitCode
+          if($code -ne 0){throw "NetGen smoke exit=$code"}
+          if(!(Test-Path $vis) -or (Get-Item $vis).Length -eq 0){throw 'NetGen smoke missing/empty VIS'}
+          [ordered]@{native_brep_visualization='PASS';fixture='B01-100x10x10';exit_code=$code;vis_bytes=(Get-Item $vis).Length;incident_step='BLOCKED_NOT_PROVIDED';gui='NOT_RUN'}|ConvertTo-Json|Set-Content "$out/evidence.json"
+      - name: Assemble portable package preserving NetGen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg="$PWD\dist\AsterMax-C10.79-integrated-Windows-x64"
+          New-Item -ItemType Directory -Force $pkg|Out-Null
+          Copy-Item "$env:APP_ROOT\*" $pkg -Recurse -Force
+          New-Item -ItemType Directory -Force "$pkg\NetGen"|Out-Null
+          Copy-Item "$env:NETGEN_DIR\*" "$pkg\NetGen" -Recurse -Force
+          if(Test-Path "$pkg\PrePoMax.exe"){Rename-Item "$pkg\PrePoMax.exe" 'AsterMax Mechanical.exe'}
+          if(Test-Path "$pkg\PrePoMax.exe.config"){Rename-Item "$pkg\PrePoMax.exe.config" 'AsterMax Mechanical.exe.config'}
+          if(!(Test-Path "$pkg\AsterMax Mechanical.exe")){throw 'AsterMax executable missing'}
+          [ordered]@{commit=$env:GITHUB_SHA;build='PASS';static_contract='PASS';runtime_performance='NOT_RUN';gui_regressions='NOT_RUN';solver='Native Windows Code_Aster required separately'}|ConvertTo-Json|Set-Content "$pkg\BUILD-STATUS.json"
+          ./native-windows/test-c1054-portable-runtime.ps1 -PackageRoot $pkg
+          Compress-Archive -Path "$pkg\*" -DestinationPath "$PWD\dist\AsterMax-C10.79-integrated-Windows-x64.zip" -Force
+      - name: Upload validated review ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.79-integrated-Windows-x64
+          path: dist/AsterMax-C10.79-integrated-Windows-x64.zip
+          if-no-files-found: error
+      - name: Upload C10.77 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.77-VTK-Import-Path-Trace
+          path: |
+            dist/Audit/C10.77
+            dist/Audit/C10.78
+            dist/Audit/PatchChain
+          if-no-files-found: warn
