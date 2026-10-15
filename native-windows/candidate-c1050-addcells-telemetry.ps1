@@ -6,7 +6,7 @@ $v=[regex]::Replace((Get-Content $vtkPath -Raw),"\r\n?","`n")
 
 # Telemetry only. Count semantic AddCells operations once per call. Later performance patches
 # legitimately change constructor and dispatch argument shapes, so anchor on the unique actor
-# assignment and unique AddActorGeometry invocation inside AddCells rather than exact arguments.
+# assignment and unique AddActorGeometry dispatch inside AddCells rather than exact arguments.
 $fieldAnchor='        private long _asterMaxSceneBatchRenderRequests;'
 if(-not $v.Contains('_asterMaxSceneBatchActorConstructions')){
   if(-not $v.Contains($fieldAnchor)){throw 'C10.50 C10.49 telemetry anchor missing.'}
@@ -40,14 +40,11 @@ function Insert-BeforeUniqueMatch([string]$text,[string]$pattern,[string]$counte
   return $text.Insert($line,$indent+"if (_asterMaxSceneBatchDepth > 0) $counter`n")
 }
 
-# C10.48 turns the actor assignment into a multiline conditional with two constructor branches.
 $m=Insert-BeforeUniqueMatch $m '(?ms)^\s*vtkMaxActor\s+\w+\s*=\s*(?=[^;]*new\s+vtkMaxActor\s*\()[^;]+;' '_asterMaxSceneBatchActorConstructions++;' 'vtkMaxActor assignment'
-
-# AddActorGeometry is also allowed to span multiple source lines after C10.48. Match the whole
-# invocation semantically from the statement start through its terminating semicolon. This remains
-# fail-closed: exactly one invocation must exist inside AddCells, otherwise no source is modified.
-$m=Insert-BeforeUniqueMatch $m '(?ms)^\s*AddActorGeometry\s*\(.*?\)\s*;' '_asterMaxSceneBatchGeometryAdds++;' 'AddActorGeometry invocation'
+# Match the dispatch head only. This tolerates multiline arguments and an explicit this. qualifier,
+# while the exactly-one requirement still fails closed if AddCells gains another geometry dispatch.
+$m=Insert-BeforeUniqueMatch $m '(?m)^\s*(?:this\s*\.\s*)?AddActorGeometry\s*\(' '_asterMaxSceneBatchGeometryAdds++;' 'AddActorGeometry dispatch'
 
 $v=$v.Substring(0,$start)+$m+$v.Substring($end)
 Set-Content $vtkPath $v -Encoding UTF8
-Write-Host 'C10.50: telemetry only; instruments unique actor assignment and multiline-compatible AddActorGeometry invocation inside AddCells.' -ForegroundColor Green
+Write-Host 'C10.50: telemetry only; instruments unique actor assignment and qualified/multiline AddActorGeometry dispatch inside AddCells.' -ForegroundColor Green
