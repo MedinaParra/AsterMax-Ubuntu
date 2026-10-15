@@ -128,3 +128,11 @@ $u=Get-Content $ui -Raw
 $u=$u.Replace('AsterMax Mechanical C10.41 RC1','AsterMax Mechanical C10.79 Integrated')
 Set-Content $ui $u -Encoding UTF8
 Write-Host 'C10.78 BREP prerequisites, invariant arguments, unique visualization, actionable errors applied.'
+
+foreach($rel in @('PrePoMax/Globals.cs','PrePoMax/Forms/AsterMaxC1034Audit.cs')){
+ $path=Join-Path $Root $rel
+ $text=Get-Content $path -Raw
+ if(!$text.Contains('AsterMax Mechanical C10.41 RC1')){throw "C10.79 version anchor missing in $rel"}
+ $text=$text.Replace('AsterMax Mechanical C10.41 RC1','AsterMax Mechanical C10.79 Integrated')
+ Set-Content $path $text -Encoding UTF8
+}
