@@ -6,13 +6,14 @@ $ErrorActionPreference='Stop'
 
 $vtkPath = Join-Path $Root 'vtkControl/vtkControl.cs'
 $designerPath = Join-Path $Root 'vtkControl/vtkControl.Designer.cs'
-foreach($p in @($vtkPath,$designerPath)){ if(!(Test-Path $p)){ throw "C10.67 missing: $p" } }
+foreach($p in @($vtkPath,$designerPath)){ if(!(Test-Path $p)){ throw "C10.69 missing: $p" } }
 
 $v=[regex]::Replace((Get-Content $vtkPath -Raw),"\r\n?","`n")
 $d=[regex]::Replace((Get-Content $designerPath -Raw),"\r\n?","`n")
 
 $activeDecl='        private bool _asterMaxRenderRequestActive;'
 $pendingDecl='        private bool _asterMaxRenderPending;'
+$scheduledDecl='        private bool _asterMaxRenderScheduled;'
 $lockAnchor='        private object myLock = new object();'
 
 $activeDeclCount=([regex]::Matches($v,[regex]::Escape($activeDecl))).Count
@@ -22,45 +23,38 @@ $renderSetsPending=$v.Contains('_asterMaxRenderPending = true;')
 $paintUsesActive=$d.Contains('_asterMaxRenderRequestActive')
 $paintUsesPending=$d.Contains('_asterMaxRenderPending')
 
-# C10.30 must still be semantically present. Never manufacture a guard when its
-# render/paint behavior has disappeared; that would hide a real regression.
 if(-not ($renderUsesActive -and $renderSetsPending -and $paintUsesActive -and $paintUsesPending)){
-    throw ('C10.67 C10.30 render guard behavior missing: RenderActive={0} RenderPending={1} PaintActive={2} PaintPending={3}' -f $renderUsesActive,$renderSetsPending,$paintUsesActive,$paintUsesPending)
+    throw ('C10.69 C10.30 render guard behavior missing: RenderActive={0} RenderPending={1} PaintActive={2} PaintPending={3}' -f $renderUsesActive,$renderSetsPending,$paintUsesActive,$paintUsesPending)
 }
-if($activeDeclCount -gt 1 -or $pendingDeclCount -gt 1){
-    throw "C10.67 duplicate render guard declarations: active=$activeDeclCount pending=$pendingDeclCount"
+if($activeDeclCount -ne 1 -or $pendingDeclCount -ne 1){
+    throw "C10.69 render guard declarations invalid: active=$activeDeclCount pending=$pendingDeclCount"
 }
-if(-not $v.Contains($lockAnchor)){ throw 'C10.67 vtk myLock anchor missing.' }
+if(-not $v.Contains($lockAnchor)){ throw 'C10.69 vtk myLock anchor missing.' }
 
-$normalized=$false
-$pair=$activeDecl+"`n"+$pendingDecl
-if(-not $v.Contains($pair)){
-    # Later patches are allowed to insert fields between the C10.30 declarations.
-    # C10.42 historically required textual adjacency. Normalize declarations only;
-    # render behavior is required above and remains untouched.
-    if($activeDeclCount -eq 1){ $v=$v.Replace($activeDecl+"`n",'').Replace($activeDecl,'') }
-    if($pendingDeclCount -eq 1){ $v=$v.Replace($pendingDecl+"`n",'').Replace($pendingDecl,'') }
-    $v=$v.Replace($lockAnchor,$lockAnchor+"`n"+$activeDecl+"`n"+$pendingDecl)
-    $normalized=$true
+# C10.42's historical textual anchor is brittle after the cumulative patch chain.
+# Establish only the scheduling field it intends to add, after proving C10.30 behavior.
+# C10.42 then skips its fragile declaration replacement and continues with its render logic.
+$scheduledAdded=$false
+if(-not $v.Contains('_asterMaxRenderScheduled')){
+    $v=$v.Replace($pendingDecl,$pendingDecl+"`n"+$scheduledDecl)
+    $scheduledAdded=$true
 }
-
-# Recheck exact single declarations and semantic behavior after normalization.
-if((([regex]::Matches($v,[regex]::Escape($activeDecl))).Count) -ne 1){ throw 'C10.67 active declaration normalization failed.' }
-if((([regex]::Matches($v,[regex]::Escape($pendingDecl))).Count) -ne 1){ throw 'C10.67 pending declaration normalization failed.' }
-if(-not $v.Contains($pair)){ throw 'C10.67 C10.42-compatible declaration pair not established.' }
+if((([regex]::Matches($v,[regex]::Escape($scheduledDecl))).Count) -ne 1){
+    throw 'C10.69 scheduled render declaration establishment failed.'
+}
 Set-Content $vtkPath $v -Encoding UTF8
 
 if($OutDir){
     New-Item -ItemType Directory -Force $OutDir | Out-Null
     [ordered]@{
-        candidate='C10.67'
-        purpose='C10.30/C10.42 render-guard composition compatibility'
+        candidate='C10.69'
+        purpose='C10.30/C10.42 cumulative render-guard compatibility'
         render_guard_behavior_verified=$true
-        declarations_normalized=$normalized
+        scheduled_field_added=$scheduledAdded
         active_declarations_before=$activeDeclCount
         pending_declarations_before=$pendingDeclCount
         performance='NOT_RUN'
         benchmark_values_invented=$false
     } | ConvertTo-Json | Set-Content (Join-Path $OutDir 'evidence.json') -Encoding UTF8
 }
-Write-Host ("C10.67: C10.30 render guard semantic behavior verified; declarations normalized={0}." -f $normalized) -ForegroundColor Green
+Write-Host ("C10.69: C10.30 behavior verified; C10.42 scheduling field ready; added={0}." -f $scheduledAdded) -ForegroundColor Green
