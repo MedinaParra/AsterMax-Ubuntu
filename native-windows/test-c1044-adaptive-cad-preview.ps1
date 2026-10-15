@@ -1,4 +1,4 @@
-param([string]$BuildRoot)
+param([Alias('Root')][string]$BuildRoot,[string]$OutDir)
 $ErrorActionPreference='Stop'
 $c=Get-Content (Join-Path $BuildRoot 'PrePoMax/Controller.cs') -Raw
 $checks=[ordered]@{
