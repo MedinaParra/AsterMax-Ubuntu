@@ -22,12 +22,37 @@ jobs:
           $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
           $patches=@($chain.patches|ForEach-Object{$_.file})
           ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
-      - name: Apply C10.42 large assembly semantics
+      - name: Apply C10.42 through C10.46c prerequisites
         shell: pwsh
-        run: ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+      - name: Apply C10.47 scene batch prerequisite
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
       - name: Apply C10.48 lazy element edges
         shell: pwsh
-        run: ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
       - name: Apply C10.78 diagnostic counters
         shell: pwsh
         run: ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
