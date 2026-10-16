@@ -22,22 +22,22 @@ foreach($sig in @('        public void SetZoomToFit(','        public void SetIs
  if($start -lt 0){throw "C10.80 camera method missing: $sig"}
  $brace=$v.IndexOf('{',$start)
  if($brace -lt 0){throw "C10.80 camera brace missing: $sig"}
- $methodEnd=$v.IndexOf('}', $brace)
  $snippet=$v.Substring($brace,[Math]::Min(500,$v.Length-$brace))
  if(!$snippet.Contains('ASTERMAX_PERF_CAMERA')){
   $name=if($sig.Contains('Zoom')){'zoom_fit'}else{'isometric'}
-  $line="`n            _asterMaxPerfCameraRequests++;`n            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace(\"ASTERMAX_PERF_CAMERA type=$name request=\" + _asterMaxPerfCameraRequests);"
-  $v=$v.Insert($brace+1,$line)
+  $line1='            _asterMaxPerfCameraRequests++;'
+  $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_CAMERA type='+$name+' request=" + _asterMaxPerfCameraRequests);'
+  $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
  }
 }
 # Instrument edge visibility requests, a safe proxy for expensive edge-path activation; no visibility semantics change.
-$edgeToken='CurrentEdgesVisibility'
 $edgeMethod=$v.IndexOf('SetEdgesVisibility')
 if($edgeMethod -ge 0 -and !$v.Substring($edgeMethod,[Math]::Min(900,$v.Length-$edgeMethod)).Contains('ASTERMAX_PERF_EDGE')){
  $brace=$v.IndexOf('{',$edgeMethod)
  if($brace -ge 0){
-  $line="`n            _asterMaxPerfEdgeRequests++;`n            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace(\"ASTERMAX_PERF_EDGE request=\" + _asterMaxPerfEdgeRequests);"
-  $v=$v.Insert($brace+1,$line)
+  $line1='            _asterMaxPerfEdgeRequests++;'
+  $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE request=" + _asterMaxPerfEdgeRequests);'
+  $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
  }
 }
 Set-Content $vtkPath $v -Encoding UTF8
