@@ -36,7 +36,7 @@ jobs:
         run: ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
       - name: Apply C10.81 effective deferred edge trace
         shell: pwsh
-        run: ./native-windows/candidate-c1081-edge-actor-tree-counters.ps1 -Root "$PWD/upstream"
+        run: ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
       - name: Validate C10.78 contract
         shell: pwsh
         run: ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
@@ -48,7 +48,7 @@ jobs:
         run: ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
       - name: Validate C10.81 contract
         shell: pwsh
-        run: ./native-windows/test-c1081-edge-actor-tree-counter-contract.ps1 -Root "$PWD/upstream"
+        run: ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
       - name: Viewport purity regression guard
         shell: pwsh
         run: ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
