@@ -6,29 +6,31 @@ $v=[regex]::Replace((Get-Content $vtkPath -Raw),'\r\n?',"`n")
 if(!$v.Contains('_asterMaxDeferredElementEdgeActors')){throw 'C10.81 requires C10.48 lazy element edges.'}
 if(!$v.Contains('_asterMaxMaterializedElementEdgeActors')){throw 'C10.81 requires C10.48 materialization telemetry.'}
 if(!$v.Contains('AsterMaxPerfTraceEnabled')){throw 'C10.81 requires C10.78 runtime trace helper.'}
-$needle='                if (actor.AsterMaxElementEdgesDeferred && actor.AsterMaxEnsureElementEdges())`n                    _asterMaxMaterializedElementEdgeActors++;'
 if(!$v.Contains('ASTERMAX_PERF_EDGE materialized=')){
- if(!$v.Contains($needle)){throw 'C10.81 deferred-edge materialization anchor missing.'}
- $replacement=@'
-                if (actor.AsterMaxElementEdgesDeferred && actor.AsterMaxEnsureElementEdges())
-                {
-                    _asterMaxMaterializedElementEdgeActors++;
-                    if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE materialized=" + _asterMaxMaterializedElementEdgeActors + " deferred=" + _asterMaxDeferredElementEdgeActors + " remaining=" + AsterMaxDeferredElementEdgesRemaining);
-                }
-'@
- $v=$v.Replace($needle,$replacement.TrimEnd())
+ $pattern='(?m)^(?<indent>\s*)if \(actor\.AsterMaxElementEdgesDeferred && actor\.AsterMaxEnsureElementEdges\(\)\)\s*\r?\n\s*_asterMaxMaterializedElementEdgeActors\+\+;'
+ $rx=[regex]::new($pattern)
+ $matches=$rx.Matches($v)
+ if($matches.Count -ne 1){throw "C10.81 deferred-edge materialization anchor expected 1 structural match, got $($matches.Count)."}
+ $indent=$matches[0].Groups['indent'].Value
+ $replacement=$indent+'if (actor.AsterMaxElementEdgesDeferred && actor.AsterMaxEnsureElementEdges())'+"`n"+
+              $indent+'{'+"`n"+
+              $indent+'    _asterMaxMaterializedElementEdgeActors++;'+"`n"+
+              $indent+'    if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE materialized=" + _asterMaxMaterializedElementEdgeActors + " deferred=" + _asterMaxDeferredElementEdgeActors + " remaining=" + AsterMaxDeferredElementEdgesRemaining);'+"`n"+
+              $indent+'}'
+ $v=$rx.Replace($v,$replacement,1)
 }
-$highlight='                    if (actorToHighLight.AsterMaxEnsureElementEdges()) _asterMaxMaterializedElementEdgeActors++;'
 if(!$v.Contains('ASTERMAX_PERF_EDGE highlight-materialized=')){
- if(!$v.Contains($highlight)){throw 'C10.81 highlight edge materialization anchor missing.'}
- $highlightReplacement=@'
-                    if (actorToHighLight.AsterMaxEnsureElementEdges())
-                    {
-                        _asterMaxMaterializedElementEdgeActors++;
-                        if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE highlight-materialized=" + _asterMaxMaterializedElementEdgeActors + " deferred=" + _asterMaxDeferredElementEdgeActors + " remaining=" + AsterMaxDeferredElementEdgesRemaining);
-                    }
-'@
- $v=$v.Replace($highlight,$highlightReplacement.TrimEnd())
+ $pattern='(?m)^(?<indent>\s*)if \(actorToHighLight\.AsterMaxEnsureElementEdges\(\)\)\s*_asterMaxMaterializedElementEdgeActors\+\+;'
+ $rx=[regex]::new($pattern)
+ $matches=$rx.Matches($v)
+ if($matches.Count -ne 1){throw "C10.81 highlight edge materialization anchor expected 1 structural match, got $($matches.Count)."}
+ $indent=$matches[0].Groups['indent'].Value
+ $replacement=$indent+'if (actorToHighLight.AsterMaxEnsureElementEdges())'+"`n"+
+              $indent+'{'+"`n"+
+              $indent+'    _asterMaxMaterializedElementEdgeActors++;'+"`n"+
+              $indent+'    if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE highlight-materialized=" + _asterMaxMaterializedElementEdgeActors + " deferred=" + _asterMaxDeferredElementEdgeActors + " remaining=" + AsterMaxDeferredElementEdgesRemaining);'+"`n"+
+              $indent+'}'
+ $v=$rx.Replace($v,$replacement,1)
 }
 Set-Content $vtkPath $v -Encoding UTF8
 Write-Host 'C10.81 effective deferred-edge materialization tracing applied; no edge/render behavior changed.' -ForegroundColor Green
