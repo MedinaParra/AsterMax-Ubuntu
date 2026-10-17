@@ -23,14 +23,17 @@ if(!$v.Contains('ASTERMAX_PERF_EDGE highlight-materialized=')){
  $pattern='(?m)^(?<indent>\s*)if \(actorToHighLight\.AsterMaxEnsureElementEdges\(\)\)\s*_asterMaxMaterializedElementEdgeActors\+\+;'
  $rx=[regex]::new($pattern)
  $matches=$rx.Matches($v)
- if($matches.Count -ne 1){throw "C10.81 highlight edge materialization anchor expected 1 structural match, got $($matches.Count)."}
- $indent=$matches[0].Groups['indent'].Value
- $replacement=$indent+'if (actorToHighLight.AsterMaxEnsureElementEdges())'+"`n"+
-              $indent+'{'+"`n"+
-              $indent+'    _asterMaxMaterializedElementEdgeActors++;'+"`n"+
-              $indent+'    if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE highlight-materialized=" + _asterMaxMaterializedElementEdgeActors + " deferred=" + _asterMaxDeferredElementEdgeActors + " remaining=" + AsterMaxDeferredElementEdgesRemaining);'+"`n"+
-              $indent+'}'
- $v=$rx.Replace($v,$replacement,1)
+ if($matches.Count -lt 1){throw 'C10.81 highlight edge materialization anchor expected at least 1 structural match.'}
+ $replacementEvaluator={
+  param($m)
+  $indent=$m.Groups['indent'].Value
+  return $indent+'if (actorToHighLight.AsterMaxEnsureElementEdges())'+"`n"+
+         $indent+'{'+"`n"+
+         $indent+'    _asterMaxMaterializedElementEdgeActors++;'+"`n"+
+         $indent+'    if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE highlight-materialized=" + _asterMaxMaterializedElementEdgeActors + " deferred=" + _asterMaxDeferredElementEdgeActors + " remaining=" + AsterMaxDeferredElementEdgesRemaining);'+"`n"+
+         $indent+'}'
+ }
+ $v=$rx.Replace($v,$replacementEvaluator)
 }
 Set-Content $vtkPath $v -Encoding UTF8
-Write-Host 'C10.81 effective deferred-edge materialization tracing applied; no edge/render behavior changed.' -ForegroundColor Green
+Write-Host 'C10.81 effective deferred-edge materialization tracing applied to all structural highlight paths; no edge/render behavior changed.' -ForegroundColor Green
