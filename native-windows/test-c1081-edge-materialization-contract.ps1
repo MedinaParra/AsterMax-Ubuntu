@@ -6,10 +6,15 @@ $v=[regex]::Replace((Get-Content $vtkPath -Raw),'\r\n?',"`n")
 $required=@(
  'ASTERMAX_PERF_EDGE materialized=',
  'ASTERMAX_PERF_EDGE highlight-materialized=',
- 'AsterMaxDeferredElementEdgesMaterialized',
+ '_asterMaxMaterializedElementEdgeActors',
+ '_asterMaxDeferredElementEdgeActors',
  'AsterMaxDeferredElementEdgesRemaining',
  'AsterMaxPerfTraceEnabled'
 )
 foreach($token in $required){if(!$v.Contains($token)){throw "C10.81 contract missing token: $token"}}
 if(!$v.Contains('MaterializeDeferredElementEdges')){throw 'C10.81 deferred-edge materialization method missing.'}
+$materializedTrace='ASTERMAX_PERF_EDGE materialized='
+$highlightTrace='ASTERMAX_PERF_EDGE highlight-materialized='
+if(([regex]::Matches($v,[regex]::Escape($materializedTrace))).Count -lt 1){throw 'C10.81 effective materialization trace missing.'}
+if(([regex]::Matches($v,[regex]::Escape($highlightTrace))).Count -lt 1){throw 'C10.81 highlight materialization trace missing.'}
 Write-Host 'PASS C10.81 deferred-edge effective materialization trace contract.' -ForegroundColor Green
