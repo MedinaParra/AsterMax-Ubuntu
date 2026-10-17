@@ -15,6 +15,13 @@ $candidateText=Get-Content $candidatePath -Raw
 $wrapperText=Get-Content $wrapperPath -Raw
 $auditText=Get-Content $auditPath -Raw
 
+# C10.81 may expand the historical one-line highlight materialization into an
+# instrumented block. Validate semantics structurally instead of requiring the
+# old exact counter line.
+$highlightGuard=[regex]::IsMatch($v,'if\s*\(actorToHighLight\.AsterMaxElementEdgesDeferred\)')
+$highlightMaterialize=[regex]::IsMatch($v,'if\s*\(actorToHighLight\.AsterMaxEnsureElementEdges\(\)\)')
+$highlightCount=[regex]::IsMatch($v,'(?s)actorToHighLight\.AsterMaxEnsureElementEdges\(\).*?_asterMaxMaterializedElementEdgeActors\+\+;')
+
 $checks=[ordered]@{
   'deferred actor state exists'=$a.Contains('_asterMaxElementEdgesDeferred')
   'placeholder actor retained'=$a.Contains('_elementEdges = vtkActor.New();') -and $a.Contains('_elementEdgesProperty = _elementEdges.GetProperty();')
@@ -28,7 +35,7 @@ $checks=[ordered]@{
   'defer limited to base renderer'=$v.Contains('data.Layer == vtkRendererLayer.Base')
   'defer limited to actors supporting element edges'=$v.Contains('data.CanHaveElementEdges')
   'ElementEdges mode materializes deferred topology'=$v.Contains('if (_edgesVisibility == vtkEdgesVisibility.ElementEdges) AsterMaxEnsureDeferredElementEdges();')
-  'highlight materializes before edge mapper access'=$v.Contains('if (actorToHighLight.AsterMaxElementEdgesDeferred)') -and $v.Contains('if (actorToHighLight.AsterMaxEnsureElementEdges()) _asterMaxMaterializedElementEdgeActors++;')
+  'highlight materializes before edge mapper access'=$highlightGuard -and $highlightMaterialize -and $highlightCount
   'telemetry counts deferred actors'=$v.Contains('_asterMaxDeferredElementEdgeActors++')
   'telemetry counts materialized actors'=$v.Contains('_asterMaxMaterializedElementEdgeActors++')
   'geometry cell locator path retained'=$a.Contains('_cellLocator.LazyEvaluationOn();')
