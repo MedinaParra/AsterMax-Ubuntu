@@ -1,0 +1,96 @@
+name: C10.82 performance baseline contracts
+on:
+  push:
+    branches: [agent/c1082-next-level-perf-baseline]
+  workflow_dispatch:
+
+jobs:
+  windows-x64-perf-baseline:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+
+      - name: Rebuild cumulative source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+
+      - name: Apply C10.42 through C10.46c prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+
+      - name: Apply viewport performance chain C10.47-C10.81
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
+
+      - name: Validate inherited viewport contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1079-render-execution-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+
+      - name: Validate C10.82 telemetry parser contracts
+        shell: pwsh
+        run: ./native-windows/run-c1082-perf-contracts.ps1
+
+      - name: Windows x64 Release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          nuget restore .\upstream\PrePoMax.sln -NonInteractive
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe'|Select-Object -First 1
+          if(!$msbuild){throw 'MSBuild.exe not found'}
+          & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
+          if($LASTEXITCODE -ne 0){throw 'Windows x64 build failed'}
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C10.82-Performance-Baseline-Audit
+          path: |
+            dist/Audit/C10.82
+            dist/Audit/C10.81
+            dist/Audit/PatchChain
+          if-no-files-found: warn
