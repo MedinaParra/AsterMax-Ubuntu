@@ -17,7 +17,7 @@ ASTERMAX_PERF_ACTOR add
 ASTERMAX_PERF_TREE refresh
 '@ | Set-Content -LiteralPath $tmp -Encoding UTF8
 $r=(& $parser -TracePath $tmp | ConvertFrom-Json)
-if($r.schema -ne 'astermax-c1082-perf-trace-v1'){throw 'schema mismatch'}
+if($r.schema -ne 'astermax-c1082-perf-trace-v2'){throw 'schema mismatch'}
 if($r.render_request_events -ne 3){throw 'render request accounting mismatch'}
 if($r.render_queued_events -ne 1){throw 'render queued accounting mismatch'}
 if($r.render_executed_events -ne 1){throw 'render executed accounting mismatch'}
