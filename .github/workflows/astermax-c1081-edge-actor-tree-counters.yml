@@ -1,10 +1,10 @@
-name: C10.81 deferred edge actor trace
+name: C10.81 Windows executable package
 on:
   push:
-    branches: [agent/c1081-edge-actor-tree-counters]
+    branches: [agent/c1081-windows-executable-package]
   workflow_dispatch:
 jobs:
-  windows-x64-deferred-edge-trace:
+  windows-x64-executable:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -40,49 +40,29 @@ jobs:
           ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
-      - name: Apply C10.47 scene batch prerequisite
+      - name: Apply C10.47 through C10.81
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
-      - name: Apply C10.48 lazy element edges
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
+      - name: Validate contracts
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
-          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
-      - name: Apply C10.78 diagnostic counters
-        shell: pwsh
-        run: ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
-      - name: Apply C10.79 render execution counters
-        shell: pwsh
-        run: ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
-      - name: Apply C10.80 edge camera counters
-        shell: pwsh
-        run: ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
-      - name: Apply C10.81 effective deferred edge trace
-        shell: pwsh
-        run: ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
-      - name: Validate C10.48 lazy edge contract
-        shell: pwsh
-        run: ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
-      - name: Validate C10.78 contract
-        shell: pwsh
-        run: ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
-      - name: Validate C10.79 contract
-        shell: pwsh
-        run: ./native-windows/test-c1079-render-execution-counter-contract.ps1 -Root "$PWD/upstream"
-      - name: Validate C10.80 contract
-        shell: pwsh
-        run: ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
-      - name: Validate C10.81 contract
-        shell: pwsh
-        run: ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
-      - name: Viewport purity regression guard
-        shell: pwsh
-        run: ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1079-render-execution-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
       - name: Windows x64 Release build
         shell: pwsh
         run: |
@@ -93,12 +73,23 @@ jobs:
           if(!$msbuild){throw 'MSBuild.exe not found'}
           & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
           if($LASTEXITCODE -ne 0){throw 'Windows x64 build failed'}
-      - name: Upload evidence
-        if: always()
+      - name: Package executable and runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem "$PWD/upstream" -Recurse -File -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
+          if(!$exe){throw 'PrePoMax.exe not found after successful Release x64 build'}
+          $source=$exe.Directory.FullName
+          $dest="$PWD/dist/AsterMax-C10.81-Windows-x64"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Copy-Item "$source\*" $dest -Recurse -Force
+          Copy-Item $exe.FullName "$dest\AsterMax.exe" -Force
+          if(!(Test-Path "$dest\AsterMax.exe")){throw 'AsterMax.exe package validation failed'}
+          Write-Host "Packaged executable from $source"
+          Get-ChildItem $dest | Select-Object Name,Length
+      - name: Upload executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.81-Deferred-Edge-Trace-Audit
-          path: |
-            dist/Audit/C10.81
-            dist/Audit/PatchChain
-          if-no-files-found: warn
+          name: AsterMax-C10.81-Windows-x64-Executable
+          path: dist/AsterMax-C10.81-Windows-x64
+          if-no-files-found: error
