@@ -10,12 +10,9 @@ try {
     'ASTERMAX_PERF_RENDER invalidate request=false'
   ) | Set-Content -LiteralPath $tmp -Encoding UTF8
   $r = (& $parser -TracePath $tmp | ConvertFrom-Json)
-  if($r.render_request_events -ne 4){ throw "C10.82 render token overlap detected: request=$($r.render_request_events), expected=4 for token-based parser contract." }
-  # The parser is intentionally token-based: both the explicit queued event and
-  # request queued=false contain the queued token. Preserve that documented
-  # semantic here rather than pretending queued=false is not observable.
-  if($r.render_queued_events -ne 2){ throw "C10.82 queued token accounting changed: $($r.render_queued_events), expected=2." }
-  if($r.render_executed_events -ne 2){ throw "C10.82 executed/invalidate accounting changed: $($r.render_executed_events)" }
-  Write-Host 'PASS C10.82 render token accounting contract.' -ForegroundColor Green
+  if($r.render_request_events -ne 1){ throw "C10.82 request value accounting changed: $($r.render_request_events), expected=1." }
+  if($r.render_queued_events -ne 1){ throw "C10.82 queued value accounting changed: $($r.render_queued_events), expected=1." }
+  if($r.render_executed_events -ne 2){ throw "C10.82 executed/invalidate accounting changed: $($r.render_executed_events), expected=2." }
+  Write-Host 'PASS C10.82 render value/overlap accounting contract.' -ForegroundColor Green
 }
 finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
