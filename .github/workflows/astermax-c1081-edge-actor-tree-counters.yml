@@ -1,7 +1,7 @@
-name: C10.81 Windows executable package
+name: C10.83 STEP import format hotfix
 on:
   push:
-    branches: [agent/c1081-windows-executable-package]
+    branches: [agent/c1083-step-import-format-hotfix]
   workflow_dispatch:
 jobs:
   windows-x64-executable:
@@ -22,7 +22,7 @@ jobs:
           $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
           $patches=@($chain.patches|ForEach-Object{$_.file})
           ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
-      - name: Apply C10.42 through C10.46c prerequisites
+      - name: Apply C10.42 through C10.46c prerequisites and C10.83 hotfix
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -35,6 +35,7 @@ jobs:
           ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1083-step-import-format-hotfix.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
           ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
@@ -80,40 +81,22 @@ jobs:
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -File -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match '[\\/]bin[\\/]x64[\\/]Release[\\/]' } | Select-Object -First 1
           if(!$exe){throw 'AsterMax Mechanical.exe not found in bin/x64/Release after successful build'}
           $source=$exe.Directory.FullName
-          $dest="$PWD/dist/AsterMax-C10.81-Windows-x64"
+          $dest="$PWD/dist/AsterMax-C10.83-Windows-x64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item "$source\*" $dest -Recurse -Force
-
-          # The source build does not ship the external NetGen runtime. AsterMax/PrePoMax
-          # resolves STEP import through <app>\NetGen\NetGenMesher.exe, so acquire only
-          # that mesher directory from the release matching the pinned 2024-era source.
-          # Do NOT copy the release Solver directory: AsterMax keeps native Code_Aster
-          # Windows as its only solver.
           $releaseZip="$env:RUNNER_TEMP\PrePoMax-v2.0.0.zip"
           $releaseDir="$env:RUNNER_TEMP\PrePoMax-v2.0.0"
           Invoke-WebRequest -Uri 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.0.0.zip' -OutFile $releaseZip
           Expand-Archive -Path $releaseZip -DestinationPath $releaseDir -Force
           $netgenExe=Get-ChildItem $releaseDir -Recurse -File -Filter 'NetGenMesher.exe' | Select-Object -First 1
           if(!$netgenExe){throw 'NetGenMesher.exe not found in PrePoMax v2.0.0 portable release'}
-          $netgenSource=$netgenExe.Directory.FullName
           $netgenDest=Join-Path $dest 'NetGen'
           New-Item -ItemType Directory -Force -Path $netgenDest | Out-Null
-          Copy-Item "$netgenSource\*" $netgenDest -Recurse -Force
-
-          $required=@(
-            (Join-Path $dest 'AsterMax Mechanical.exe'),
-            (Join-Path $dest 'NetGen\NetGenMesher.exe')
-          )
-          foreach($path in $required){
-            if(!(Test-Path $path)){throw "Required packaged runtime missing: $path"}
-            if((Get-Item $path).Length -le 0){throw "Required packaged runtime is empty: $path"}
-          }
-          Write-Host "Packaged executable: $($required[0])"
-          Write-Host "Packaged STEP mesher: $($required[1])"
-          Get-ChildItem $dest -Recurse -File | Select-Object FullName,Length
+          Copy-Item "$($netgenExe.Directory.FullName)\*" $netgenDest -Recurse -Force
+          foreach($path in @((Join-Path $dest 'AsterMax Mechanical.exe'),(Join-Path $dest 'NetGen\NetGenMesher.exe'))){if(!(Test-Path $path)){throw "Required runtime missing: $path"};if((Get-Item $path).Length -le 0){throw "Required runtime empty: $path"}}
       - name: Upload executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-C10.81-Windows-x64-NetGenFix
-          path: dist/AsterMax-C10.81-Windows-x64
+          name: AsterMax-Mechanical-C10.83-Windows-x64-StepImportFix
+          path: dist/AsterMax-C10.83-Windows-x64
           if-no-files-found: error
