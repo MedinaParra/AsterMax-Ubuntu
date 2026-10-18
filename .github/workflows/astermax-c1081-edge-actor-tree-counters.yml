@@ -77,15 +77,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $exe=Get-ChildItem "$PWD/upstream" -Recurse -File -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'Release' } | Select-Object -First 1
-          if(!$exe){throw 'PrePoMax.exe not found after successful Release x64 build'}
+          $exe=Get-ChildItem "$PWD/upstream" -Recurse -File -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match '[\\/]bin[\\/]x64[\\/]Release[\\/]' } | Select-Object -First 1
+          if(!$exe){throw 'AsterMax Mechanical.exe not found in bin/x64/Release after successful build'}
           $source=$exe.Directory.FullName
           $dest="$PWD/dist/AsterMax-C10.81-Windows-x64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item "$source\*" $dest -Recurse -Force
-          Copy-Item $exe.FullName "$dest\AsterMax Mechanical.exe" -Force
           if(!(Test-Path "$dest\AsterMax Mechanical.exe")){throw 'AsterMax Mechanical.exe package validation failed'}
-          Write-Host "Packaged executable from $source"
+          $packaged=Get-Item "$dest\AsterMax Mechanical.exe"
+          if($packaged.Length -le 0){throw 'AsterMax Mechanical.exe is empty'}
+          Write-Host "Packaged executable: $($packaged.FullName) ($($packaged.Length) bytes)"
           Get-ChildItem $dest | Select-Object Name,Length
       - name: Upload executable package
         uses: actions/upload-artifact@v4
