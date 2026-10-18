@@ -13,16 +13,27 @@ function Invoke-Case([string]$Name,[string]$Trace,[scriptblock]$Assert){
 }
 
 Invoke-Case 'coalesced' @'
-ASTERMAX_PERF_RENDER request=1
-ASTERMAX_PERF_RENDER request=2
-ASTERMAX_PERF_RENDER request=3
-ASTERMAX_PERF_RENDER queued=1
-ASTERMAX_PERF_RENDER executed=1
+ASTERMAX_PERF_RENDER request
+ASTERMAX_PERF_RENDER request
+ASTERMAX_PERF_RENDER request
+ASTERMAX_PERF_RENDER queued
+ASTERMAX_PERF_RENDER executed
 '@ {
     param($j)
     if($j.render_request_events -ne 3 -or $j.render_queued_events -ne 1 -or $j.render_executed_events -ne 1){throw 'coalesced render counts mismatch'}
     if($j.render_queued_events -gt $j.render_request_events){throw 'queued renders exceed requests'}
     if($j.render_executed_events -gt $j.render_queued_events){throw 'executed renders exceed queued renders'}
+}
+
+Invoke-Case 'boolean-semantics' @'
+ASTERMAX_PERF_RENDER request=true queued=false executed=false
+ASTERMAX_PERF_RENDER request=true queued=true executed=false
+ASTERMAX_PERF_RENDER request=false queued=false executed=true
+'@ {
+    param($j)
+    if($j.render_request_events -ne 2){throw 'explicit false request must not count'}
+    if($j.render_queued_events -ne 1){throw 'explicit false queued must not count'}
+    if($j.render_executed_events -ne 1){throw 'explicit false executed must not count'}
 }
 
 Invoke-Case 'deferred-edges' @'
