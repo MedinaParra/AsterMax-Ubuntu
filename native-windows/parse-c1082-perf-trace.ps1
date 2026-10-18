@@ -12,15 +12,24 @@ function Count-Matches([string]$Pattern) {
     return @($lines | Select-String -Pattern $Pattern).Count
 }
 
-# These are deliberately trace-token based. Missing tokens are reported as zero,
-# never converted into timing/FPS claims.
+function Count-RenderEvent([string]$Token) {
+    # Producers may emit either event-only tokens (`request`) or boolean fields
+    # (`request=true/false`). Count bare/true occurrences, never explicit false.
+    $positive = 'ASTERMAX_PERF_RENDER.*\b' + [regex]::Escape($Token) + '(?:=true)?(?:\s|$)'
+    $negative = 'ASTERMAX_PERF_RENDER.*\b' + [regex]::Escape($Token) + '=false(?:\s|$)'
+    return @($lines | Where-Object { ($_ -match $positive) -and ($_ -notmatch $negative) }).Count
+}
+
+# Missing tokens are reported as zero and are never converted into timing/FPS
+# claims. Render boolean fields use value semantics so `queued=false` cannot be
+# mistaken for work actually queued/executed.
 $result = [ordered]@{
-    schema = 'astermax-c1082-perf-trace-v1'
+    schema = 'astermax-c1082-perf-trace-v2'
     trace = (Resolve-Path -LiteralPath $TracePath).Path
     lines = $lines.Count
-    render_request_events = Count-Matches 'ASTERMAX_PERF_RENDER.*request'
-    render_queued_events = Count-Matches 'ASTERMAX_PERF_RENDER.*queued'
-    render_executed_events = Count-Matches 'ASTERMAX_PERF_RENDER.*(executed|invalidate)'
+    render_request_events = Count-RenderEvent 'request'
+    render_queued_events = Count-RenderEvent 'queued'
+    render_executed_events = (Count-RenderEvent 'executed') + (Count-RenderEvent 'invalidate')
     edge_materialized_events = Count-Matches 'ASTERMAX_PERF_EDGE materialized='
     edge_highlight_materialized_events = Count-Matches 'ASTERMAX_PERF_EDGE highlight-materialized='
     camera_events = Count-Matches 'ASTERMAX_PERF_CAMERA'
