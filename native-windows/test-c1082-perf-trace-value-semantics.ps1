@@ -14,13 +14,11 @@ $trace = Join-Path $env:TEMP 'astermax-c1082-value-semantics.log'
 
 $r = (& $parser -TracePath $trace | ConvertFrom-Json)
 
-# C10.82 parser is intentionally token-based today. This regression makes the
-# limitation explicit: false-valued telemetry is still counted as an event.
-# Do not interpret these counts as work actually performed until the producer
-# emits unambiguous event-only tokens or the parser gains value semantics.
-if ($r.render_request_events -ne 2) { throw "Expected 2 request tokens, got $($r.render_request_events)" }
-if ($r.render_queued_events -ne 2) { throw "Expected 2 queued tokens, got $($r.render_queued_events)" }
-if ($r.render_executed_events -ne 2) { throw "Expected 2 executed tokens, got $($r.render_executed_events)" }
+# C10.82 v2 uses value semantics: explicit false fields are metadata, not work.
+if ($r.schema -ne 'astermax-c1082-perf-trace-v2') { throw "Expected v2 schema, got $($r.schema)" }
+if ($r.render_request_events -ne 1) { throw "Expected 1 true request event, got $($r.render_request_events)" }
+if ($r.render_queued_events -ne 1) { throw "Expected 1 true queued event, got $($r.render_queued_events)" }
+if ($r.render_executed_events -ne 1) { throw "Expected 1 true executed event, got $($r.render_executed_events)" }
 
 Remove-Item -LiteralPath $trace -Force -ErrorAction SilentlyContinue
-Write-Host 'PASS C10.82 boolean token counting limitation is explicit'
+Write-Host 'PASS C10.82 render boolean value semantics'
