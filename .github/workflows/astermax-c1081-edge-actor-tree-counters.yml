@@ -73,7 +73,7 @@ jobs:
           if(!$msbuild){throw 'MSBuild.exe not found'}
           & $msbuild .\upstream\PrePoMax.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x64 /v:minimal
           if($LASTEXITCODE -ne 0){throw 'Windows x64 build failed'}
-      - name: Package executable and runtime
+      - name: Package executable and required NetGen runtime
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -83,14 +83,37 @@ jobs:
           $dest="$PWD/dist/AsterMax-C10.81-Windows-x64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item "$source\*" $dest -Recurse -Force
-          if(!(Test-Path "$dest\AsterMax Mechanical.exe")){throw 'AsterMax Mechanical.exe package validation failed'}
-          $packaged=Get-Item "$dest\AsterMax Mechanical.exe"
-          if($packaged.Length -le 0){throw 'AsterMax Mechanical.exe is empty'}
-          Write-Host "Packaged executable: $($packaged.FullName) ($($packaged.Length) bytes)"
-          Get-ChildItem $dest | Select-Object Name,Length
+
+          # The source build does not ship the external NetGen runtime. AsterMax/PrePoMax
+          # resolves STEP import through <app>\NetGen\NetGenMesher.exe, so acquire only
+          # that mesher directory from the release matching the pinned 2024-era source.
+          # Do NOT copy the release Solver directory: AsterMax keeps native Code_Aster
+          # Windows as its only solver.
+          $releaseZip="$env:RUNNER_TEMP\PrePoMax-v2.0.0.zip"
+          $releaseDir="$env:RUNNER_TEMP\PrePoMax-v2.0.0"
+          Invoke-WebRequest -Uri 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.0.0.zip' -OutFile $releaseZip
+          Expand-Archive -Path $releaseZip -DestinationPath $releaseDir -Force
+          $netgenExe=Get-ChildItem $releaseDir -Recurse -File -Filter 'NetGenMesher.exe' | Select-Object -First 1
+          if(!$netgenExe){throw 'NetGenMesher.exe not found in PrePoMax v2.0.0 portable release'}
+          $netgenSource=$netgenExe.Directory.FullName
+          $netgenDest=Join-Path $dest 'NetGen'
+          New-Item -ItemType Directory -Force -Path $netgenDest | Out-Null
+          Copy-Item "$netgenSource\*" $netgenDest -Recurse -Force
+
+          $required=@(
+            (Join-Path $dest 'AsterMax Mechanical.exe'),
+            (Join-Path $dest 'NetGen\NetGenMesher.exe')
+          )
+          foreach($path in $required){
+            if(!(Test-Path $path)){throw "Required packaged runtime missing: $path"}
+            if((Get-Item $path).Length -le 0){throw "Required packaged runtime is empty: $path"}
+          }
+          Write-Host "Packaged executable: $($required[0])"
+          Write-Host "Packaged STEP mesher: $($required[1])"
+          Get-ChildItem $dest -Recurse -File | Select-Object FullName,Length
       - name: Upload executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-C10.81-Windows-x64
+          name: AsterMax-Mechanical-C10.81-Windows-x64-NetGenFix
           path: dist/AsterMax-C10.81-Windows-x64
           if-no-files-found: error
