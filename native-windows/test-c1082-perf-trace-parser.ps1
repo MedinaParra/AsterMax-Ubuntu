@@ -5,15 +5,18 @@ if(!(Test-Path $parser)){throw 'C10.82 parser missing.'}
 $tmp=Join-Path ([IO.Path]::GetTempPath()) ('astermax-c1082-'+[guid]::NewGuid().ToString('N')+'.log')
 try {
 @'
-ASTERMAX_PERF_RENDER request=1
-ASTERMAX_PERF_RENDER request=2
-ASTERMAX_PERF_RENDER queued=1
-ASTERMAX_PERF_RENDER executed=1
+ASTERMAX_PERF_RENDER request=true
+ASTERMAX_PERF_RENDER request=true
+ASTERMAX_PERF_RENDER queued=true
+ASTERMAX_PERF_RENDER executed=true
 ASTERMAX_PERF_EDGE materialized=1
 ASTERMAX_PERF_EDGE highlight-materialized=1
 ASTERMAX_PERF_CAMERA reset=1
 ASTERMAX_PERF_ACTOR add=1
 ASTERMAX_PERF_TREE update=1
+ASTERMAX_PERF_RENDER request=false
+ASTERMAX_PERF_RENDER queued=false
+ASTERMAX_PERF_RENDER executed=false
 '@ | Set-Content -LiteralPath $tmp -Encoding UTF8
 $j=& $parser -TracePath $tmp | ConvertFrom-Json
 if($j.render_request_events -ne 2){throw 'render request count mismatch'}
