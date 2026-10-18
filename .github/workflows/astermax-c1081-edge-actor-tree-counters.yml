@@ -83,13 +83,13 @@ jobs:
           $dest="$PWD/dist/AsterMax-C10.81-Windows-x64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item "$source\*" $dest -Recurse -Force
-          Copy-Item $exe.FullName "$dest\AsterMax.exe" -Force
-          if(!(Test-Path "$dest\AsterMax.exe")){throw 'AsterMax.exe package validation failed'}
+          Copy-Item $exe.FullName "$dest\AsterMax Mechanical.exe" -Force
+          if(!(Test-Path "$dest\AsterMax Mechanical.exe")){throw 'AsterMax Mechanical.exe package validation failed'}
           Write-Host "Packaged executable from $source"
           Get-ChildItem $dest | Select-Object Name,Length
       - name: Upload executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-C10.81-Windows-x64-Executable
+          name: AsterMax-Mechanical-C10.81-Windows-x64
           path: dist/AsterMax-C10.81-Windows-x64
           if-no-files-found: error
