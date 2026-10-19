@@ -20,11 +20,10 @@ if($next -lt 0){throw 'C10.86 next method anchor missing.'}
 $segment=$c.Substring($methodStart,$next-$methodStart)
 $before=$segment
 
-# String.Split with a null char[] separator uses Unicode whitespace. This keeps
-# the original VIS grammar (whitespace-separated integer IDs) while accepting
-# tabs emitted by compatible NetGen builds.
+# Split on the whitespace characters used by VIS records. Avoid the ambiguous
+# Split(null, ...) overload so this compiles against the repository's .NET target.
 $old='allIds = data[i].Split(spaceSplitter, StringSplitOptions.RemoveEmptyEntries);'
-$new='allIds = data[i].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);'
+$new='allIds = data[i].Split(new char[] { '' '', ''\t'', ''\r'', ''\n'' }, StringSplitOptions.RemoveEmptyEntries);'
 if(-not $segment.Contains($old)){throw 'C10.86 ReadEdges tokenization anchor missing.'}
 $segment=$segment.Replace($old,$new)
 
