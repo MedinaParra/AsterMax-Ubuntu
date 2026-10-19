@@ -5,7 +5,10 @@ if(!(Test-Path $path)){throw "C10.86 missing: $path"}
 $c=[regex]::Replace((Get-Content $path -Raw),"\r\n?","`n")
 
 # Runtime evidence from C10.85 proves FormatException -> ParseInt32 -> ReadEdges.
-# Instrument only ReadEdges integer parsing; do not accept/repair malformed data.
+# NetGen VIS edge records are whitespace-delimited. The upstream reader splits
+# only on a literal ASCII space, so tabs/other whitespace remain attached to
+# integer fields and Int32.Parse fails. Repair only ReadEdges tokenization;
+# integer acceptance remains strict and malformed numeric data still fails.
 $start=$c.IndexOf('ReadEdges(')
 if($start -lt 0){throw 'C10.86 ReadEdges anchor missing.'}
 $methodStart=$c.LastIndexOf('private', $start)
@@ -16,18 +19,28 @@ if($next -lt 0){$next=$c.IndexOf("`n        static", $start)}
 if($next -lt 0){throw 'C10.86 next method anchor missing.'}
 $segment=$c.Substring($methodStart,$next-$methodStart)
 $before=$segment
+
+# String.Split with a null char[] separator uses Unicode whitespace. This keeps
+# the original VIS grammar (whitespace-separated integer IDs) while accepting
+# tabs emitted by compatible NetGen builds.
+$old='allIds = data[i].Split(spaceSplitter, StringSplitOptions.RemoveEmptyEntries);'
+$new='allIds = data[i].Split((char[])null, StringSplitOptions.RemoveEmptyEntries);'
+if(-not $segment.Contains($old)){throw 'C10.86 ReadEdges tokenization anchor missing.'}
+$segment=$segment.Replace($old,$new)
+
+# Keep precise diagnostics if a genuinely non-integer token is encountered.
 $segment=$segment.Replace('Int32.Parse(', 'AsterMaxParseVisEdgeInt32(')
 $segment=$segment.Replace('int.Parse(', 'AsterMaxParseVisEdgeInt32(')
-if($segment -eq $before){throw 'C10.86 found no Int32.Parse/int.Parse inside ReadEdges.'}
+if($segment -eq $before){throw 'C10.86 ReadEdges was not modified.'}
 
 $helper=@'
-        // C10.86 diagnostic only: preserve Int32.Parse semantics while exposing
-        // the exact VIS edge token that causes the proven FormatException.
+        // C10.86: strict VIS edge integer parser with exact-token diagnostics.
         private static int AsterMaxParseVisEdgeInt32(string token)
         {
             try
             {
-                return Int32.Parse(token);
+                return Int32.Parse(token, System.Globalization.NumberStyles.Integer,
+                                   System.Globalization.CultureInfo.InvariantCulture);
             }
             catch (FormatException ex)
             {
@@ -39,4 +52,4 @@ $helper=@'
 '@
 $c=$c.Substring(0,$methodStart)+$helper+$segment+$c.Substring($next)
 Set-Content $path $c -Encoding UTF8
-Write-Host 'C10.86: ReadEdges Int32 token diagnostics applied; parser acceptance semantics unchanged.' -ForegroundColor Green
+Write-Host 'C10.86: repaired ReadEdges whitespace tokenization; strict Int32 diagnostics retained.' -ForegroundColor Green
