@@ -5,16 +5,15 @@ if(!(Test-Path $controllerPath)){throw "C10.85 missing: $controllerPath"}
 $c=[regex]::Replace((Get-Content $controllerPath -Raw),"\r\n?","`n")
 
 # Instrument the proven failing serial ImportBrepPartFile path. Do not change
-# geometry semantics: identify whether FormatException occurs before NetGen,
-# during NetGen submission, or while parsing the generated VIS file.
-# Keep diagnostics limited to variables whose scope is proven at each anchor.
+# geometry semantics. Diagnostics at shared NetGen Submit anchors intentionally
+# avoid method-local variables because this anchor occurs in multiple scopes.
 $argAnchor='                _form.WriteDataToOutput("AsterMax CAD tessellation START: " + Path.GetFileName(brepFileName) +'
 if(!$c.Contains($argAnchor)){throw 'C10.85 tessellation START anchor missing.'}
 $c=$c.Replace($argAnchor,'                _form.WriteDataToOutput("ASTERMAX_CAD_STAGE=ARG_READY culture=" + System.Globalization.CultureInfo.CurrentCulture.Name + " ui=" + System.Globalization.CultureInfo.CurrentUICulture.Name + " brep=" + Path.GetFileName(brepFileName));'+"`n"+$argAnchor)
 
 $submit='                _netgenJob.Submit();'
 if(!$c.Contains($submit)){throw 'C10.85 NetGen Submit anchor missing.'}
-$c=$c.Replace($submit,'                _form.WriteDataToOutput("ASTERMAX_CAD_STAGE=NETGEN_SUBMIT brep=" + Path.GetFileName(brepFileName));'+"`n"+$submit+"`n"+'                _form.WriteDataToOutput("ASTERMAX_CAD_STAGE=NETGEN_RETURN status=" + _netgenJob.JobStatus.ToString() + " brep=" + Path.GetFileName(brepFileName));')
+$c=$c.Replace($submit,'                _form.WriteDataToOutput("ASTERMAX_CAD_STAGE=NETGEN_SUBMIT");'+"`n"+$submit+"`n"+'                _form.WriteDataToOutput("ASTERMAX_CAD_STAGE=NETGEN_RETURN status=" + _netgenJob.JobStatus.ToString());')
 
 $parse='                string[] addedPartNames = _model.ImportGeometryFromBrepFile(visFileName, brepFileName);'
 if(!$c.Contains($parse)){throw 'C10.85 VIS parser anchor missing.'}
