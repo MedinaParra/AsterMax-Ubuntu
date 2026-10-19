@@ -5,29 +5,33 @@ if(!(Test-Path $path)){throw "C10.86 missing: $path"}
 $c=[regex]::Replace((Get-Content $path -Raw),"\r\n?","`n")
 
 # Runtime evidence from C10.85 proves FormatException -> ParseInt32 -> ReadEdges.
-# NetGen VIS edge records are whitespace-delimited. The upstream reader splits
-# only on a literal ASCII space, so tabs/other whitespace remain attached to
-# integer fields and Int32.Parse fails. Repair only ReadEdges tokenization;
-# integer acceptance remains strict and malformed numeric data still fails.
-$start=$c.IndexOf('ReadEdges(')
-if($start -lt 0){throw 'C10.86 ReadEdges anchor missing.'}
-$methodStart=$c.LastIndexOf('private', $start)
-if($methodStart -lt 0){$methodStart=$c.LastIndexOf('static', $start)}
-if($methodStart -lt 0){throw 'C10.86 ReadEdges method start missing.'}
-$next=$c.IndexOf("`n        private", $start)
-if($next -lt 0){$next=$c.IndexOf("`n        static", $start)}
-if($next -lt 0){throw 'C10.86 next method anchor missing.'}
-$segment=$c.Substring($methodStart,$next-$methodStart)
+# Locate ReadEdges structurally and repair only its tokenizer. This avoids a
+# fragile exact-line dependency on earlier patches while preserving strict ints.
+$sig='private static int ReadEdges('
+$methodStart=$c.IndexOf($sig)
+if($methodStart -lt 0){throw 'C10.86 ReadEdges signature missing.'}
+$brace=$c.IndexOf('{',$methodStart)
+if($brace -lt 0){throw 'C10.86 ReadEdges opening brace missing.'}
+$depth=0; $methodEnd=-1
+for($n=$brace; $n -lt $c.Length; $n++){
+    if($c[$n] -eq '{'){$depth++}
+    elseif($c[$n] -eq '}'){
+        $depth--
+        if($depth -eq 0){$methodEnd=$n+1; break}
+    }
+}
+if($methodEnd -lt 0){throw 'C10.86 ReadEdges closing brace missing.'}
+$segment=$c.Substring($methodStart,$methodEnd-$methodStart)
 $before=$segment
 
-# Split on the whitespace characters used by VIS records. Avoid the ambiguous
-# Split(null, ...) overload so this compiles against the repository's .NET target.
-$old='allIds = data[i].Split(spaceSplitter, StringSplitOptions.RemoveEmptyEntries);'
-$new='allIds = data[i].Split(new char[] { '' '', ''\t'', ''\r'', ''\n'' }, StringSplitOptions.RemoveEmptyEntries);'
-if(-not $segment.Contains($old)){throw 'C10.86 ReadEdges tokenization anchor missing.'}
-$segment=$segment.Replace($old,$new)
+# Match the assignment structurally rather than requiring the original line.
+$pattern='allIds\s*=\s*data\[i\]\.Split\([^;]+;'
+$replacement="allIds = data[i].Split(new char[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);"
+$matches=[regex]::Matches($segment,$pattern)
+if($matches.Count -ne 1){throw "C10.86 expected exactly one ReadEdges Split assignment, found $($matches.Count)."}
+$segment=[regex]::Replace($segment,$pattern,$replacement,1)
 
-# Keep precise diagnostics if a genuinely non-integer token is encountered.
+# Keep precise diagnostics if a genuinely non-integer edge token is encountered.
 $segment=$segment.Replace('Int32.Parse(', 'AsterMaxParseVisEdgeInt32(')
 $segment=$segment.Replace('int.Parse(', 'AsterMaxParseVisEdgeInt32(')
 if($segment -eq $before){throw 'C10.86 ReadEdges was not modified.'}
@@ -49,6 +53,6 @@ $helper=@'
         }
 
 '@
-$c=$c.Substring(0,$methodStart)+$helper+$segment+$c.Substring($next)
+$c=$c.Substring(0,$methodStart)+$helper+$segment+$c.Substring($methodEnd)
 Set-Content $path $c -Encoding UTF8
-Write-Host 'C10.86: repaired ReadEdges whitespace tokenization; strict Int32 diagnostics retained.' -ForegroundColor Green
+Write-Host 'C10.86: structurally repaired ReadEdges whitespace tokenization; strict Int32 diagnostics retained.' -ForegroundColor Green
