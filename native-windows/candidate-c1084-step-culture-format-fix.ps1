@@ -16,10 +16,10 @@ if($c.Contains($old)){
     $c=$c.Replace($old,$new)
     Write-Host 'C10.84: serial NetGen BREP_VISUALIZATION deflection forced to InvariantCulture.' -ForegroundColor Green
 }
-elif($c.Contains($new)){
+elseif($c.Contains($new)){
     Write-Host 'C10.84: serial invariant formatting already present.' -ForegroundColor Green
 }
-elif($c.Contains($adaptiveDecl) -and $c.Contains($adaptiveUse)){
+elseif($c.Contains($adaptiveDecl) -and $c.Contains($adaptiveUse)){
     Write-Host 'C10.84: C10.44 adaptive preview already provides invariant NetGen numeric formatting; no duplicate rewrite required.' -ForegroundColor Green
 }
 else {
