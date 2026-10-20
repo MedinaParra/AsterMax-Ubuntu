@@ -35,12 +35,12 @@ if($matches.Count -ne 1){throw "C10.86 expected exactly one ReadEdges Split assi
 $segment=[regex]::Replace($segment,$pattern,$replacement,1)
 
 # NetGen VIS compatibility: find the first strict integer token. Legacy records
-# start at zero; descriptor-first records start later. Do not coerce descriptors,
-# decimals, exponents, or punctuation into integers.
+# start at zero; descriptor-first records start later. Initialize parsedEdgeId so
+# the C# definite-assignment analysis remains valid after the guarded scan.
 $old='edgeId = int.Parse(allIds[0]);'
 $new=@'
                 int firstIdIndex = 0;
-                int parsedEdgeId;
+                int parsedEdgeId = 0;
                 while (firstIdIndex < allIds.Length &&
                        !Int32.TryParse(allIds[firstIdIndex], System.Globalization.NumberStyles.Integer,
                                        System.Globalization.CultureInfo.InvariantCulture, out parsedEdgeId))
