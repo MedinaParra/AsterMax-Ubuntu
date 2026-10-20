@@ -4,11 +4,12 @@ $path=Join-Path $Root 'CaeModel/FileInOut/Input/VisFileReader/VisFileReader.cs'
 if(!(Test-Path $path)){throw "C10.86 missing: $path"}
 $c=[regex]::Replace((Get-Content $path -Raw),"\r\n?","`n")
 
-# Runtime evidence from the exact failing STEP now proves that ReadEdges receives
-# NetGen VIS records whose first token can be the geometry kind "Line" or
-# "Circle", followed by the numeric edge id and node ids. Older PrePoMax expects
-# the numeric edge id in token zero. Support both grammars, and only those two
-# observed prefixes, while keeping all integer parsing strict.
+# Runtime evidence from the exact failing STEP proves that NetGen VIS edge
+# records may be numeric-first (legacy) or descriptor-first (Line, Circle,
+# BSplineCurve, and potentially other curve kinds). The descriptor is metadata;
+# the first integer token is the edge id and the remaining integer tokens are
+# node ids. Detect that grammar structurally instead of maintaining a curve-name
+# allow-list. Integer fields remain strict once their start position is found.
 $sig='private static int ReadEdges('
 $methodStart=$c.IndexOf($sig)
 if($methodStart -lt 0){throw 'C10.86 ReadEdges signature missing.'}
@@ -33,16 +34,20 @@ $matches=[regex]::Matches($segment,$pattern)
 if($matches.Count -ne 1){throw "C10.86 expected exactly one ReadEdges Split assignment, found $($matches.Count)."}
 $segment=[regex]::Replace($segment,$pattern,$replacement,1)
 
-# NetGen v2 VIS compatibility. Runtime diagnostics from OT-1717 observed both
-# "Circle" and "Line" in token zero. Shift the numeric grammar by one only for
-# those known descriptors; legacy numeric-first records remain unchanged.
+# NetGen VIS compatibility: find the first strict integer token. Legacy records
+# start at zero; descriptor-first records start later. Do not coerce descriptors,
+# decimals, exponents, or punctuation into integers.
 $old='edgeId = int.Parse(allIds[0]);'
 $new=@'
                 int firstIdIndex = 0;
-                if (allIds.Length > 0 && (allIds[0] == "Line" || allIds[0] == "Circle")) firstIdIndex = 1;
-                if (allIds.Length <= firstIdIndex + 1)
-                    throw new FormatException("ASTERMAX_VIS_EDGE_RECORD malformed=[" + data[i] + "]");
-                edgeId = int.Parse(allIds[firstIdIndex]);
+                int parsedEdgeId;
+                while (firstIdIndex < allIds.Length &&
+                       !Int32.TryParse(allIds[firstIdIndex], System.Globalization.NumberStyles.Integer,
+                                       System.Globalization.CultureInfo.InvariantCulture, out parsedEdgeId))
+                    firstIdIndex++;
+                if (firstIdIndex >= allIds.Length || allIds.Length <= firstIdIndex + 1)
+                    throw new FormatException("ASTERMAX_VIS_EDGE_RECORD no numeric edge grammar=[" + data[i] + "]");
+                edgeId = parsedEdgeId;
 '@
 if(-not $segment.Contains($old)){throw 'C10.86 edgeId grammar anchor missing.'}
 $segment=$segment.Replace($old,$new.TrimEnd())
@@ -55,7 +60,7 @@ $newFirst='if (j == firstIdIndex + 1) vertexNodeIds.Add(nodeIds[0]);'
 if(-not $segment.Contains($oldFirst)){throw 'C10.86 first vertex anchor missing.'}
 $segment=$segment.Replace($oldFirst,$newFirst)
 
-# Keep precise diagnostics for genuinely invalid numeric fields.
+# Keep precise diagnostics for genuinely invalid numeric node fields.
 $segment=$segment.Replace('Int32.Parse(', 'AsterMaxParseVisEdgeInt32(')
 $segment=$segment.Replace('int.Parse(', 'AsterMaxParseVisEdgeInt32(')
 if($segment -eq $before){throw 'C10.86 ReadEdges was not modified.'}
@@ -79,4 +84,4 @@ $helper=@'
 '@
 $c=$c.Substring(0,$methodStart)+$helper+$segment+$c.Substring($methodEnd)
 Set-Content $path $c -Encoding UTF8
-Write-Host 'C10.86: repaired NetGen VIS Line/Circle edge grammar with legacy compatibility.' -ForegroundColor Green
+Write-Host 'C10.86: repaired descriptor-first NetGen VIS edge grammar generically; legacy numeric-first compatibility retained.' -ForegroundColor Green
