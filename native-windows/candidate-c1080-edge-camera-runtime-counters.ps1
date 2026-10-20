@@ -12,11 +12,7 @@ if(!$v.Contains('_asterMaxPerfEdgeRequests')){
 '@
  $v=$v.Replace($fieldAnchor,$fieldAnchor+"`n"+$fields.TrimEnd())
 }
-# Count edge-related actor additions at the existing geometry actor entry point without changing edge construction.
-$actorMarker='ASTERMAX_PERF_ACTOR add='
-$actorPos=$v.IndexOf($actorMarker)
-if($actorPos -lt 0){throw 'C10.80 requires C10.78 actor instrumentation.'}
-# Camera request counters are attached to the stable public camera methods used by C10.42 finalization.
+# Camera request counters are attached to stable public camera methods used by C10.42 finalization.
 foreach($sig in @('        public void SetZoomToFit(','        public void SetIsometricView(')){
  $start=$v.IndexOf($sig)
  if($start -lt 0){throw "C10.80 camera method missing: $sig"}
@@ -30,15 +26,19 @@ foreach($sig in @('        public void SetZoomToFit(','        public void SetIs
   $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
  }
 }
-# Instrument edge visibility requests, a safe proxy for expensive edge-path activation; no visibility semantics change.
-$edgeMethod=$v.IndexOf('SetEdgesVisibility')
-if($edgeMethod -ge 0 -and !$v.Substring($edgeMethod,[Math]::Min(900,$v.Length-$edgeMethod)).Contains('ASTERMAX_PERF_EDGE')){
- $brace=$v.IndexOf('{',$edgeMethod)
- if($brace -ge 0){
-  $line1='            _asterMaxPerfEdgeRequests++;'
-  $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE request=" + _asterMaxPerfEdgeRequests);'
-  $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
- }
+# Instrument the actual SetEdgesVisibility method, not the first textual mention/call site.
+# This remains diagnostic-only: it counts requests before existing edge visibility semantics execute.
+$edgePattern='(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:void|bool)\s+SetEdgesVisibility\s*\('
+$edgeMatch=[regex]::Match($v,$edgePattern)
+if(!$edgeMatch.Success){throw 'C10.80 SetEdgesVisibility method declaration missing.'}
+$edgeMethod=$edgeMatch.Index
+$brace=$v.IndexOf('{',$edgeMethod)
+if($brace -lt 0){throw 'C10.80 SetEdgesVisibility method brace missing.'}
+$snippet=$v.Substring($brace,[Math]::Min(1200,$v.Length-$brace))
+if(!$snippet.Contains('ASTERMAX_PERF_EDGE request=')){
+ $line1='            _asterMaxPerfEdgeRequests++;'
+ $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE request=" + _asterMaxPerfEdgeRequests);'
+ $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
 }
 Set-Content $vtkPath $v -Encoding UTF8
-Write-Host 'C10.80 diagnostic edge/camera request counters applied; rendering and camera semantics unchanged.' -ForegroundColor Green
+Write-Host 'C10.80 diagnostic edge/camera request counters applied at method declarations; rendering and camera semantics unchanged.' -ForegroundColor Green
