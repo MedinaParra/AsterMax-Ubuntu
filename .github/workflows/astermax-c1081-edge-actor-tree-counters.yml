@@ -1,7 +1,7 @@
-name: C11.94 performance lineage package
+name: C11.95 edge visibility compatibility package
 on:
   push:
-    branches: [agent/c1194-perf-lineage-reconcile]
+    branches: [agent/c1195-edge-visibility-signature-compat]
   workflow_dispatch:
 jobs:
   windows-x64-executable:
@@ -85,7 +85,7 @@ jobs:
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -File -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match '[\\/]bin[\\/]x64[\\/]Release[\\/]' } | Select-Object -First 1
           if(!$exe){throw 'AsterMax Mechanical.exe not found in bin/x64/Release after successful build'}
           $source=$exe.Directory.FullName
-          $dest="$PWD/dist/AsterMax-C11.94-Windows-x64"
+          $dest="$PWD/dist/AsterMax-C11.95-Windows-x64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item "$source\*" $dest -Recurse -Force
           $releaseZip="$env:RUNNER_TEMP\PrePoMax-v2.0.0.zip"
@@ -104,6 +104,6 @@ jobs:
       - name: Upload executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-C11.94-Windows-x64-CodeAster
-          path: dist/AsterMax-C11.94-Windows-x64
+          name: AsterMax-Mechanical-C11.95-Windows-x64-CodeAster
+          path: dist/AsterMax-C11.95-Windows-x64
           if-no-files-found: error
