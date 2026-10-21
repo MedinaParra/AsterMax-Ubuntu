@@ -1,0 +1,107 @@
+name: C11.98 Windows x64 build gate
+on:
+  push:
+    branches: [agent/c1198-windows-x64-build-gate]
+  workflow_dispatch:
+jobs:
+  windows-x64-build:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Rebuild cumulative source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+      - name: Apply validated STEP VTK performance chain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1084-step-culture-format-fix.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1083-step-import-format-hotfix.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1086-vis-edge-token-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1079-render-execution-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+      - name: Restore legacy NuGet packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $nuget="$PWD/nuget.exe"
+          Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile $nuget
+          & $nuget restore "$PWD/upstream/PrePoMax.sln" -PackagesDirectory "$PWD/upstream/packages" -NonInteractive
+          if($LASTEXITCODE -ne 0){ throw "NuGet restore failed: $LASTEXITCODE" }
+          foreach($p in @('ncalc.1.3.8','System.ValueTuple.4.5.0','UnitsNet.4.89.1','Activiz.NET.x64.5.8.0')){ if(-not (Test-Path "$PWD/upstream/packages/$p")){ throw "Required package missing after restore: $p" } }
+      - name: Verify native Release x64 contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $sln=Get-Content "$PWD/upstream/PrePoMax.sln" -Raw
+          if($sln -notmatch '(?m)^\s*Release\|x64\s*=\s*Release\|x64\s*$'){ throw 'Release|x64 solution configuration missing' }
+          if($sln -match '(?m)^\s*Release\|Any CPU\s*='){ throw 'Unexpected Release|Any CPU configuration detected' }
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+          if(-not $msbuild){ throw 'MSBuild not found' }
+          & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform=x64
+          if($LASTEXITCODE -ne 0){ throw "MSBuild failed: $LASTEXITCODE" }
+      - name: Verify GUI and native Code Aster distribution contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
+          if(-not $exe){ throw 'Release GUI executable missing' }
+          foreach($f in @('native-windows/runtime/CodeAster/astermax-codeaster-runner.cmd','native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1')){ if(-not (Test-Path "$PWD/$f")){ throw "Native Windows Code_Aster runner missing: $f" } }
+          if(Select-String -Path 'native-windows/runtime/CodeAster/*' -Pattern 'wsl.exe|wsl ' -SimpleMatch -Quiet){ throw 'WSL solver dependency detected in native Code_Aster runtime' }
+          Write-Host 'PASS: Windows x64 GUI build and native Code_Aster runner contract present.'
+      - name: Write C11.98 evidence
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1198" | Out-Null
+          [ordered]@{candidate='C11.98';branch='agent/c1198-windows-x64-build-gate';windows_x64=$true;native_gui=$true;code_aster_native_windows_only=$true;exact_large_step='BLOCKED';dynamic_performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1198/evidence.json" -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C11.98-Windows-x64-Build-Audit
+          path: dist/Audit
