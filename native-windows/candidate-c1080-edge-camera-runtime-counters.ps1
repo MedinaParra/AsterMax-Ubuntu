@@ -26,38 +26,23 @@ foreach($sig in @('        public void SetZoomToFit(','        public void SetIs
  }
 }
 # Edge visibility API names vary across the reconstructed PrePoMax lineage.
-# Instrument one effective public/protected/private visibility entry point structurally,
-# without assuming the historical SetEdgesVisibility name or changing its semantics.
+# Instrument the effective vtkControl visibility entry point structurally without changing rendering semantics.
 $edgePatterns=@(
  '(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:void|bool)\s+SetEdgesVisibility\s*\(',
  '(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:void|bool)\s+SetElementEdgesVisibility\s*\(',
- '(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:void|bool)\s+SetEdgeVisibility\s*\('
+ '(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:void|bool)\s+SetEdgeVisibility\s*\(',
+ '(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?void\s+ApplyEdgesVisibilityAndBackfaceCulling\s*\('
 )
 $edgeMatch=$null
 foreach($pattern in $edgePatterns){$m=[regex]::Match($v,$pattern);if($m.Success){$edgeMatch=$m;break}}
-if($null -ne $edgeMatch){
- $brace=$v.IndexOf('{',$edgeMatch.Index)
- if($brace -lt 0){throw 'C10.80 edge visibility method brace missing.'}
- $snippet=$v.Substring($brace,[Math]::Min(1200,$v.Length-$brace))
- if(!$snippet.Contains('ASTERMAX_PERF_EDGE request=')){
-  $line1='            _asterMaxPerfEdgeRequests++;'
-  $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE request=" + _asterMaxPerfEdgeRequests);'
-  $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
- }
-} else {
- # C10.48 guarantees an on-demand edge materialization entry point when historical visibility APIs are absent.
- # Count that effective request path instead of failing on a stale method name.
- $fallbackPattern='(?m)^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:void|bool)\s+AsterMaxEnsureElementEdges\s*\('
- $fallback=[regex]::Match($v,$fallbackPattern)
- if(!$fallback.Success){throw 'C10.80 no effective edge visibility/materialization entry point found.'}
- $brace=$v.IndexOf('{',$fallback.Index)
- if($brace -lt 0){throw 'C10.80 edge materialization method brace missing.'}
- $snippet=$v.Substring($brace,[Math]::Min(1200,$v.Length-$brace))
- if(!$snippet.Contains('ASTERMAX_PERF_EDGE request=')){
-  $line1='            _asterMaxPerfEdgeRequests++;'
-  $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE request=" + _asterMaxPerfEdgeRequests);'
-  $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
- }
+if($null -eq $edgeMatch){throw 'C10.80 no effective vtkControl edge visibility entry point found.'}
+$brace=$v.IndexOf('{',$edgeMatch.Index)
+if($brace -lt 0){throw 'C10.80 edge visibility method brace missing.'}
+$snippet=$v.Substring($brace,[Math]::Min(1200,$v.Length-$brace))
+if(!$snippet.Contains('ASTERMAX_PERF_EDGE request=')){
+ $line1='            _asterMaxPerfEdgeRequests++;'
+ $line2='            if (AsterMaxPerfTraceEnabled) AsterMaxPerfTrace("ASTERMAX_PERF_EDGE request=" + _asterMaxPerfEdgeRequests);'
+ $v=$v.Insert($brace+1,"`n"+$line1+"`n"+$line2)
 }
 Set-Content $vtkPath $v -Encoding UTF8
-Write-Host 'C10.80 diagnostic edge/camera request counters applied to an effective edge entry point; rendering semantics unchanged.' -ForegroundColor Green
+Write-Host 'C10.80 diagnostic edge/camera request counters applied to effective vtkControl entry points; rendering semantics unchanged.' -ForegroundColor Green
