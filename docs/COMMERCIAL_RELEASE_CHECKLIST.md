@@ -22,6 +22,9 @@ Complete this checklist before publishing or commercially deploying a binary dis
 
 - [ ] No proprietary source code, decompiled code, leaked code, copied icons, manuals, screenshots, tutorial media, or restricted sample files are present.
 - [ ] Significant externally inspired features have a documented functional requirement and independent implementation history.
+- [ ] Public references discovered through Google, YouTube, forums, blogs, documentation, or product demonstrations were treated as knowledge/behavior references unless an actual reuse license or permission is recorded.
+- [ ] Any code/assets copied or adapted from public internet sources have original-source provenance and a license/permission compatible with the release.
+- [ ] No file is treated as reusable merely because it was publicly accessible or indexed by a search engine.
 - [ ] Contributor rights/sign-offs are present for material contributions.
 - [ ] Employer/client ownership issues are resolved for contributors whose agreements may claim the work.
 

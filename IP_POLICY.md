@@ -15,6 +15,18 @@ AsterMax features must be implemented from one or more of the following permitte
 
 A remembered workflow may be written down as a functional requirement. The implementation must still be independently designed and coded.
 
+### Public internet references
+
+Material found through Google, YouTube, forums, blogs, documentation sites, social networks, conference talks, or other publicly accessible sources may be used to learn facts, concepts, workflows, terminology, and observable behavior. **Public availability is not treated as a license to copy, adapt, redistribute, or embed the material.**
+
+Before importing any third-party code, image, icon, model, drawing, text, dataset, binary, tutorial asset, transcript, audio, or video content, identify the original source and the actual license or permission that authorizes the intended use.
+
+For publicly demonstrated product behavior, the preferred AsterMax workflow is:
+
+`reference -> functional requirement -> independent design -> original/cleared implementation -> validation`
+
+See `docs/PUBLIC_REFERENCE_PROVENANCE.md`.
+
 ## 2. Prohibited inputs
 
 Do not add or use as implementation source material:
@@ -52,6 +64,8 @@ Every imported dependency, source fragment, binary, model, icon set, font, mesh 
 
 If any of these is unknown, the item is **not cleared for redistribution**.
 
+A URL found in Google or a video being publicly viewable on YouTube is not, by itself, evidence of reuse permission.
+
 ## 5. Copyleft boundary
 
 AsterMax is historically a native derivative of the GPLv3 PrePoMax codebase. Code that forms part of that derivative must remain compliant with the GNU GPL version 3 when conveyed. Do not represent derivative PrePoMax code as proprietary or closed-source.
@@ -75,6 +89,8 @@ Marketing should describe AsterMax capabilities in AsterMax terms rather than pr
 ## 9. AI-assisted contributions
 
 AI-assisted code is subject to exactly the same provenance rules. Do not provide proprietary source code, confidential material, or restricted assets to an AI system for the purpose of recreating a protected implementation. Generated output must be reviewed for license, provenance, security, and technical correctness before merge.
+
+Public tutorials, videos, screenshots, or snippets supplied to an AI system remain subject to their original rights and licenses. AI assistance does not convert restricted third-party material into cleared AsterMax material.
 
 ## 10. Contributor declaration
 
