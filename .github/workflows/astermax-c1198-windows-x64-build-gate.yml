@@ -1,7 +1,7 @@
-name: C11.98 Windows x64 build gate
+name: C11.99 Windows x64 build gate
 on:
   push:
-    branches: [agent/c1198-windows-x64-build-gate]
+    branches: [agent/c1199-codeaster-contract-fix]
   workflow_dispatch:
 jobs:
   windows-x64-build:
@@ -91,17 +91,22 @@ jobs:
           $ErrorActionPreference='Stop'
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
           if(-not $exe){ throw 'Release GUI executable missing' }
-          foreach($f in @('native-windows/runtime/CodeAster/astermax-codeaster-runner.cmd','native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1')){ if(-not (Test-Path "$PWD/$f")){ throw "Native Windows Code_Aster runner missing: $f" } }
-          if(Select-String -Path 'native-windows/runtime/CodeAster/*' -Pattern 'wsl.exe|wsl ' -SimpleMatch -Quiet){ throw 'WSL solver dependency detected in native Code_Aster runtime' }
+          $runtimeFiles=@('native-windows/runtime/CodeAster/astermax-codeaster-runner.cmd','native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1')
+          foreach($f in $runtimeFiles){ if(-not (Test-Path "$PWD/$f")){ throw "Native Windows Code_Aster runner missing: $f" } }
+          $wslPattern='(?i)(?:^|[^A-Za-z0-9_.-])wsl(?:\.exe)?(?:\s|$)'
+          foreach($f in $runtimeFiles){
+            $hits=Select-String -LiteralPath "$PWD/$f" -Pattern $wslPattern -AllMatches
+            if($hits){ throw "WSL solver dependency detected in native Code_Aster runtime: $f" }
+          }
           Write-Host 'PASS: Windows x64 GUI build and native Code_Aster runner contract present.'
-      - name: Write C11.98 evidence
+      - name: Write C11.99 evidence
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1198" | Out-Null
-          [ordered]@{candidate='C11.98';branch='agent/c1198-windows-x64-build-gate';windows_x64=$true;native_gui=$true;code_aster_native_windows_only=$true;exact_large_step='BLOCKED';dynamic_performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1198/evidence.json" -Encoding utf8
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1199" | Out-Null
+          [ordered]@{candidate='C11.99';branch='agent/c1199-codeaster-contract-fix';windows_x64=$true;native_gui=$true;code_aster_native_windows_only=$true;exact_large_step='BLOCKED';dynamic_performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1199/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C11.98-Windows-x64-Build-Audit
+          name: AsterMax-C11.99-Windows-x64-Build-Audit
           path: dist/Audit
