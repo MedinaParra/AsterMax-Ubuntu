@@ -1,0 +1,22 @@
+AsterMax Mechanical
+
+This repository is distributed under the GNU General Public License,
+version 3 (GPL-3.0), unless a file or third-party component states a
+different applicable license.
+
+AsterMax is historically a modified/derived work of the PrePoMax codebase,
+which is distributed under GNU GPL version 3. Copyright in upstream code
+remains with its respective copyright holders. Copyright in AsterMax
+modifications remains with the respective contributors.
+
+You may copy, modify and redistribute GPL-covered material under the terms
+of GNU GPL version 3. There is no warranty, to the extent permitted by law.
+
+Canonical GNU GPL version 3 text:
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+IMPORTANT FOR BINARY DISTRIBUTION: a distribution of GPL-covered AsterMax
+object code must comply with the GPL's corresponding-source and license-copy
+requirements. Release packaging must include the complete GNU GPL version 3
+license text and all required upstream notices. See
+`docs/COMMERCIAL_RELEASE_CHECKLIST.md` and `THIRD_PARTY_NOTICES.md`.
