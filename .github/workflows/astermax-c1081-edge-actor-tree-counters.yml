@@ -1,7 +1,7 @@
-name: C11.95 edge visibility compatibility package
+name: C11.96 VTK stage diagnostics package
 on:
   push:
-    branches: [agent/c1195-edge-visibility-signature-compat]
+    branches: [agent/c1196-vtk-stage-diagnostics]
   workflow_dispatch:
 jobs:
   windows-x64-executable:
@@ -45,19 +45,31 @@ jobs:
           ./native-windows/candidate-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1086-vis-edge-token-diagnostics.ps1 -Root "$PWD/upstream"
-      - name: Apply VTK performance instrumentation
+      - name: VTK C10.47 scene batch
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.48 lazy element edges
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
           ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
           ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
-          ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
-          ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
-          ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
-          ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.78 runtime counters
+        shell: pwsh
+        run: ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.79 render execution counters
+        shell: pwsh
+        run: ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.80 edge camera counters
+        shell: pwsh
+        run: ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.81 edge materialization counters
+        shell: pwsh
+        run: ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
       - name: Validate performance contracts
         shell: pwsh
         run: |
@@ -85,7 +97,7 @@ jobs:
           $exe=Get-ChildItem "$PWD/upstream" -Recurse -File -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match '[\\/]bin[\\/]x64[\\/]Release[\\/]' } | Select-Object -First 1
           if(!$exe){throw 'AsterMax Mechanical.exe not found in bin/x64/Release after successful build'}
           $source=$exe.Directory.FullName
-          $dest="$PWD/dist/AsterMax-C11.95-Windows-x64"
+          $dest="$PWD/dist/AsterMax-C11.96-Windows-x64"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           Copy-Item "$source\*" $dest -Recurse -Force
           $releaseZip="$env:RUNNER_TEMP\PrePoMax-v2.0.0.zip"
@@ -104,6 +116,6 @@ jobs:
       - name: Upload executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-C11.95-Windows-x64-CodeAster
-          path: dist/AsterMax-C11.95-Windows-x64
+          name: AsterMax-Mechanical-C11.96-Windows-x64-CodeAster
+          path: dist/AsterMax-C11.96-Windows-x64
           if-no-files-found: error
