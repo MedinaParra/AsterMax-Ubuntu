@@ -1,8 +1,8 @@
 # AsterMax Mechanical C10.41 RC1
 
-**Open-source CAE / FEA workflow for Windows x64 with native Code_Aster integration.**
+**Open-source mechanical CAE / FEA workflow for Windows x64 with native Code_Aster integration.**
 
-AsterMax Mechanical is an engineering pre/post-processing environment derived from the PrePoMax ecosystem and oriented toward a Mechanical-style workflow: geometry, materials, contacts, loads, meshing, solving and result review from a single desktop interface.
+AsterMax Mechanical is an engineering pre/post-processing environment derived from the GPLv3 PrePoMax ecosystem. Its goal is an efficient, integrated mechanical-engineering workflow with an independent AsterMax user experience: geometry, materials, interactions, meshing, constraints, loads, solving, verification and result review from a single desktop environment.
 
 > **Current status:** C10.41 RC1 — engineering-validated candidate on Windows x64.
 
@@ -34,9 +34,9 @@ CAD / STEP
   ↓
 AsterMax GUI
   ↓
-Mechanical model tree
+Engineering model hierarchy
   ↓
-Materials + contacts + loads
+Materials + interactions + loads
   ↓
 Mesh / model export
   ↓
@@ -65,12 +65,34 @@ The validated workflow generated the following GitHub Actions artifacts:
 
 The Windows x64 test distribution is tied to the validated RC1 baseline above. A formal GitHub Release/tag is still pending; until then, the qualification run is the traceable source for the RC1 artifact.
 
+## Integrated product direction
+
+The current RC1 is a CAE application. The longer-term AsterMax direction is an integrated mechanical-engineering environment with two connected workflows.
+
+### Design
+
+A parametric mechanical-CAD workflow based on original AsterMax implementation and lawfully licensed components:
+
+`Part / Sketch → Features → Assemblies → Drawings / Exchange`
+
+The goal is to preserve interaction patterns that experienced mechanical designers find efficient—feature history, constrained sketches, direct access to common operations and predictable assemblies—without copying proprietary source code, artwork, icons or distinctive trade dress.
+
+### Analysis
+
+A structured mechanical-analysis workflow:
+
+`Geometry → Materials → Interactions → Mesh → Constraints / Loads → Solve → Results → Verification`
+
+The goal is to keep model definition and result interpretation predictable for experienced FEA users while using AsterMax code, Code_Aster and other legally cleared components.
+
+See `docs/ARCHITECTURE_IP_BOUNDARIES.md` for the intended technical and licensing boundaries.
+
 ## Main engineering direction
 
-AsterMax is being developed as a practical mechanical-engineering environment with emphasis on:
+AsterMax development currently emphasizes:
 
 - STEP-based mechanical assemblies;
-- a Mechanical-style analysis tree;
+- a clear engineering model hierarchy;
 - structural static workflows;
 - automatic/default material assignment where appropriate;
 - contact-oriented modelling;
@@ -93,11 +115,23 @@ The repository name `AsterMax-Ubuntu` is historical. The current C10.41 RC1 qual
 
 Legacy Linux/Ubuntu work remains part of the project history, but it must not be confused with the current Windows RC1 qualification baseline.
 
-## Independence and licensing
+## Independence, provenance and licensing
 
-AsterMax does not redistribute proprietary Ansys source code, icons, screenshots or documentation. Mechanical-style terminology is used only to describe workflow intent and user-experience direction.
+AsterMax is an independent project and is not affiliated with or endorsed by proprietary CAD/CAE vendors used for external engineering comparison.
 
-Upstream components retain their respective licenses. Project-specific source in this repository must be used consistently with those licenses and notices.
+AsterMax must not redistribute proprietary source code, binaries, logos, icons, screenshots, documentation, tutorial assets or distinctive trade dress without an express right to do so. Familiar workflows may be used as functional requirements, but implementation and AsterMax visual identity must remain independent.
+
+Because the existing native application is historically derived from PrePoMax, GPLv3 obligations are treated as the conservative baseline for derivative code when it is conveyed. Upstream components retain their respective copyright and license terms.
+
+Development and release rules are documented in:
+
+- `LICENSE`
+- `NOTICE.md`
+- `IP_POLICY.md`
+- `THIRD_PARTY_NOTICES.md`
+- `CONTRIBUTING.md`
+- `TRADEMARKS.md`
+- `docs/COMMERCIAL_RELEASE_CHECKLIST.md`
 
 ## Qualification boundary
 
