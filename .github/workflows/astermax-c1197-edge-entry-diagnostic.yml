@@ -1,0 +1,76 @@
+name: C11.97 effective edge visibility diagnostic
+on:
+  push:
+    branches: [agent/c1197-edge-visibility-effective-entry]
+  workflow_dispatch:
+jobs:
+  windows-x64-diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: upstream
+      - name: Rebuild cumulative source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python native-windows/validate-patch-chain.py
+          $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+          $patches=@($chain.patches|ForEach-Object{$_.file})
+          ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+      - name: Apply CAD pipeline and STEP diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/candidate-c1084-step-culture-format-fix.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1083-step-import-format-hotfix.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+          ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1086-vis-edge-token-diagnostics.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.47 scene batch
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+      - name: VTK C10.48 lazy element edges
+        shell: pwsh
+        run: |
+          ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+      - name: VTK counters through C10.81
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
+          ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
+      - name: Validate performance contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1079-render-execution-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
+          ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
