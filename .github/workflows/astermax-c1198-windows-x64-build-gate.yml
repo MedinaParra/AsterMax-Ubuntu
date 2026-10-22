@@ -1,8 +1,10 @@
-name: C11.99 Windows x64 build gate
+name: C12.06 Windows x64 native Code_Aster package
 on:
   push:
     branches: [agent/c1199-codeaster-contract-fix]
   workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   windows-x64-build:
     runs-on: windows-latest
@@ -14,6 +16,17 @@ jobs:
           repository: tsvilans/PrePoMax
           ref: 3669e65581650e5d9d868aa761db9efd856f8571
           path: upstream
+      - name: Setup Python MED runtime
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Install Python MED dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --disable-pip-version-check --only-binary=:all: numpy h5py
+          if($LASTEXITCODE -ne 0){ throw 'Python MED dependency installation failed.' }
       - name: Rebuild cumulative source
         shell: pwsh
         run: |
@@ -60,6 +73,18 @@ jobs:
           ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+      - name: Verify C12.06 runner discovery
+        id: discovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1206-runner-discovery.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1206/RunnerDiscovery"
+      - name: Verify native runner rejects invalid backend probes
+        id: native_probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1206-native-probe.ps1
       - name: Restore legacy NuGet packages
         shell: pwsh
         run: |
@@ -77,6 +102,7 @@ jobs:
           if($sln -notmatch '(?m)^\s*Release\|x64\s*=\s*Release\|x64\s*$'){ throw 'Release|x64 solution configuration missing' }
           if($sln -match '(?m)^\s*Release\|Any CPU\s*='){ throw 'Unexpected Release|Any CPU configuration detected' }
       - name: Build Release x64
+        id: build
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
@@ -86,27 +112,270 @@ jobs:
           & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform=x64
           if($LASTEXITCODE -ne 0){ throw "MSBuild failed: $LASTEXITCODE" }
       - name: Verify GUI and native Code Aster distribution contract
+        id: contract
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $exe=Get-ChildItem "$PWD/upstream" -Recurse -Filter PrePoMax.exe | Where-Object { $_.FullName -match 'bin.*Release' } | Select-Object -First 1
-          if(-not $exe){ throw 'Release GUI executable missing' }
-          $runtimeFiles=@('native-windows/runtime/CodeAster/astermax-codeaster-runner.cmd','native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1')
-          foreach($f in $runtimeFiles){ if(-not (Test-Path "$PWD/$f")){ throw "Native Windows Code_Aster runner missing: $f" } }
-          $wslPattern='(?i)(?:^|[^A-Za-z0-9_.-])wsl(?:\.exe)?(?:\s|$)'
+          $executables=@(Get-ChildItem "$PWD/upstream" -Recurse -File -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match '[\\/]bin[\\/]x64[\\/]Release[\\/]' })
+          if($executables.Count -ne 1){ throw "Expected one Release x64 AsterMax Mechanical.exe; found $($executables.Count)." }
+          "ASTERMAX_BUILT_EXE=$($executables[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $runtimeFiles=@('astermax-codeaster-runner.cmd','astermax-codeaster-runner.ps1','setup-codeaster-windows.cmd','setup-codeaster-windows.ps1')
           foreach($f in $runtimeFiles){
-            $hits=Select-String -LiteralPath "$PWD/$f" -Pattern $wslPattern -AllMatches
-            if($hits){ throw "WSL solver dependency detected in native Code_Aster runtime: $f" }
+            $path=Join-Path "$PWD/native-windows/runtime/CodeAster" $f
+            if(-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0){ throw "Native Windows Code_Aster runtime file missing or empty: $f" }
+            if($f.EndsWith('.ps1')){
+              $tokens=$null; $parseErrors=$null
+              $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$parseErrors)
+              if($parseErrors.Count -gt 0){ throw "PowerShell syntax error in ${f}: $($parseErrors -join '; ')" }
+              $foreignCommands=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -match '^(?:wsl|bash|docker|podman|ccx|calculix)(?:\.exe)?$'},$true))
+              if($foreignCommands.Count -gt 0){ throw "Non-native solver command detected in $f" }
+            }
           }
           Write-Host 'PASS: Windows x64 GUI build and native Code_Aster runner contract present.'
-      - name: Write C11.99 evidence
+      - name: Assemble Windows package and complete MED runtime
+        id: assemble
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest="$PWD/dist/AsterMax-Mechanical-C12.06-Windows-x64-CodeAster"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $source=Split-Path $env:ASTERMAX_BUILT_EXE -Parent
+          Copy-Item "$source/*" $dest -Recurse -Force
+
+          $tools=Join-Path $dest 'AsterMaxTools'
+          $codeAster=Join-Path $dest 'AsterMaxRuntime/CodeAster'
+          $pythonDest=Join-Path $dest 'AsterMaxRuntime/Python'
+          New-Item -ItemType Directory -Force -Path $tools,$codeAster,$pythonDest | Out-Null
+          Copy-Item "$PWD/native-windows/runtime/CodeAster/*" $codeAster -Recurse -Force
+          $toolNames=@('bridge-c964-med-results.py','bind-c998-results-fingerprint.py','qualify-mechanical-analysis.py')
+          foreach($name in $toolNames){
+            Copy-Item (Join-Path "$PWD/native-windows" $name) $tools -Force
+          }
+          $solveSource=Get-Content "$PWD/upstream/PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs" -Raw
+          foreach($match in [regex]::Matches($solveSource,'Path\.Combine\(tools,\s*"([^"\r\n]+\.py)"\)')){
+            if($match.Groups[1].Value -notin $toolNames){ throw "Generated application references an unpackaged Python tool: $($match.Groups[1].Value)" }
+          }
+          $pythonRoot=Split-Path (Get-Command python).Source -Parent
+          Copy-Item "$pythonRoot/*" $pythonDest -Recurse -Force
+          $python=Join-Path $pythonDest 'python.exe'
+          & $python -c "import sys,numpy,h5py; assert sys.maxsize > 2**32; print('ASTERMAX_PACKAGED_PYTHON_MED_OK')"
+          if($LASTEXITCODE -ne 0){ throw 'Packaged Windows x64 Python MED runtime failed.' }
+          foreach($name in @('bind-c998-results-fingerprint.py','qualify-mechanical-analysis.py')){
+            & $python (Join-Path $tools $name) --help
+            if($LASTEXITCODE -ne 0){ throw "Packaged Python tool could not start: $name" }
+          }
+
+          $releaseZip=Join-Path $env:RUNNER_TEMP 'PrePoMax-v2.0.0.zip'
+          $releaseDir=Join-Path $env:RUNNER_TEMP 'PrePoMax-v2.0.0'
+          Invoke-WebRequest -Uri 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.0.0.zip' -OutFile $releaseZip
+          $netgenSourceSha256=(Get-FileHash $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Expand-Archive -LiteralPath $releaseZip -DestinationPath $releaseDir -Force
+          $netgenExe=Get-ChildItem $releaseDir -Recurse -File -Filter 'NetGenMesher.exe' | Select-Object -First 1
+          if(-not $netgenExe){ throw 'NetGenMesher.exe missing from the PrePoMax v2.0.0 runtime.' }
+          $netgenDest=Join-Path $dest 'NetGen'
+          New-Item -ItemType Directory -Force -Path $netgenDest | Out-Null
+          Copy-Item "$($netgenExe.Directory.FullName)/*" $netgenDest -Recurse -Force
+          New-Item -ItemType Directory -Force -Path (Join-Path $dest 'Temp') | Out-Null
+
+          $licenseDest=Join-Path $dest 'ThirdParty/PrePoMax'
+          New-Item -ItemType Directory -Force -Path $licenseDest | Out-Null
+          foreach($license in @(Get-ChildItem "$PWD/upstream" -Recurse -File | Where-Object { $_.Name -match '^(?:COPYING|LICEN[CS]E|NOTICE)(?:[._-]|$)' })){
+            $relative=[IO.Path]::GetRelativePath("$PWD/upstream",$license.FullName)
+            $target=Join-Path $licenseDest $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+            Copy-Item -LiteralPath $license.FullName -Destination $target -Force
+          }
+          $netgenLicenses=Join-Path $dest 'ThirdParty/NetGen'
+          foreach($license in @(Get-ChildItem $releaseDir -Recurse -File | Where-Object { $_.Name -match '^(?:COPYING|LICEN[CS]E|NOTICE|README)(?:[._-]|$)' })){
+            $relative=[IO.Path]::GetRelativePath($releaseDir,$license.FullName)
+            $target=Join-Path $netgenLicenses $relative
+            New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+            Copy-Item -LiteralPath $license.FullName -Destination $target -Force
+          }
+          if(-not (Test-Path -LiteralPath (Join-Path $licenseDest 'LICENSE'))){ throw 'Upstream PrePoMax license was not preserved.' }
+          if(-not (Test-Path -LiteralPath (Join-Path $licenseDest 'UserControls/License-LGPL.txt'))){ throw 'UserControls LGPL notice was not preserved.' }
+          if(-not (Test-Path -LiteralPath (Join-Path $pythonDest 'LICENSE.txt'))){ throw 'Python runtime license was not preserved.' }
+          python "$PWD/native-windows/build-c1010-materials.py" --out $dest
+          if($LASTEXITCODE -ne 0){ throw 'Material library generation failed.' }
+
+          @'
+          @echo off
+          call "%~dp0AsterMaxRuntime\CodeAster\setup-codeaster-windows.cmd" %*
+          exit /b %ERRORLEVEL%
+          '@ | Set-Content (Join-Path $dest 'Configurar-Code_Aster.cmd') -Encoding ascii
+          @"
+          AsterMax Mechanical C12.06 - Windows x64
+
+          1. Extraiga el ZIP completo en una carpeta.
+          2. Ejecute Configurar-Code_Aster.cmd para instalar y comprobar Code_Aster para Windows.
+             La primera configuracion requiere Internet: descarga el instalador original del proveedor
+             y verifica su SHA-256 antes de instalarlo. No necesita definir variables de entorno.
+          3. Abra AsterMax Mechanical.exe. Runtime/PREFLIGHT muestra el estado del motor.
+
+          Este paquete contiene el ejecutable, NetGen, los adaptadores nativos, Python y el puente MED.
+          Code_Aster requiere una instalacion nativa; el instalador del proveedor no se redistribuye
+          dentro del ZIP. Se conservan las pruebas numericas reales de CI en el manifiesto de validacion.
+
+          Origen y fuentes:
+          AsterMax y cadena de reconstruccion: https://github.com/MedinaParra/AsterMax-Ubuntu/tree/$env:GITHUB_SHA
+          PrePoMax base: https://github.com/tsvilans/PrePoMax/tree/3669e65581650e5d9d868aa761db9efd856f8571
+          Python: https://github.com/python/cpython
+          NumPy: https://github.com/numpy/numpy
+          h5py: https://github.com/h5py/h5py
+          NetGen distribuido por PrePoMax: https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.0.0.zip
+          Code_Aster para Windows, instalacion desde proveedor: https://code-aster-windows.com/
+
+          Las versiones Python y paquetes instalados figuran en ASTERMAX_BUILD_MANIFEST.json.
+          Las licencias y avisos originales se conservan en ThirdParty y AsterMaxRuntime/Python,
+          incluidos los directorios dist-info de los paquetes Python.
+          "@ | Set-Content (Join-Path $dest 'LEEME-C12.06.txt') -Encoding utf8
+          [ordered]@{
+            release='C12.06';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME
+            executable='AsterMax Mechanical.exe'
+            executable_sha256=(Get-FileHash (Join-Path $dest 'AsterMax Mechanical.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+            python_med_runtime_bundled=$true
+            python_version=([string](& $python -c "import sys; print(sys.version.split()[0])")).Trim()
+            python_packages=((& $python -m pip list --format=json) | ConvertFrom-Json)
+            netgen_source='https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v2.0.0.zip'
+            netgen_source_sha256=$netgenSourceSha256
+            runner_path='AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd'
+            bootstrap_path='AsterMaxRuntime/CodeAster/setup-codeaster-windows.ps1'
+            solver_installer_bundled=$false;bootstrap_bundled=$true;native_installation_required=$true
+            solver_transport='WINDOWS_NATIVE';synthetic_results_allowed=$false
+            native_solver_validation='PENDING';gui_interactive_validation='NOT_RUN'
+          } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $dest 'ASTERMAX_BUILD_MANIFEST.json') -Encoding utf8
+          "ASTERMAX_PACKAGE_DIR=$dest" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install genuine native Windows Code_Aster using packaged setup
+        id: native_setup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $setup=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/CodeAster/setup-codeaster-windows.ps1'
+          $setupLogs="$PWD/dist/Audit/C1206/NativeSetup"
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $setup -Unattended -LogDirectory $setupLogs
+          if($LASTEXITCODE -ne 0){ throw "Packaged native Code_Aster setup failed: $LASTEXITCODE" }
+          $runner=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd'
+          $probeText=& $runner probe
+          $probeExit=$LASTEXITCODE
+          $audit="$PWD/dist/Audit/C1206"
+          New-Item -ItemType Directory -Force -Path $audit | Out-Null
+          $probeText | Set-Content (Join-Path $audit 'packaged-runner-probe.json') -Encoding utf8
+          $probe=$probeText | ConvertFrom-Json
+          if($probeExit -ne 0 -or -not $probe.ready -or $probe.transport -ne 'WINDOWS_NATIVE' -or $probe.wsl_required -eq $true){ throw 'Packaged runner did not validate a real native Windows Code_Aster installation.' }
+      - name: Solve real TETRA4 model and validate native MED results
+        id: native_solve
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1011-native-windows.ps1 -Dist $env:ASTERMAX_PACKAGE_DIR -RequireInstalledRuntime
+          $validationRoot=Join-Path $env:ASTERMAX_PACKAGE_DIR 'Validation/C10.10.1-Native-Windows'
+          $python=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/Python/python.exe'
+          $bridge=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxTools/bridge-c964-med-results.py'
+          $env:ASTERMAX_MED_BRIDGE_MODE='production'
+          & $python $bridge (Join-Path $validationRoot 'astermax-tet4-bar.rmed') (Join-Path $validationRoot 'astermax-tet4-bar.astermax-results.json') (Join-Path $validationRoot 'astermax-tet4-bar.astermax-results.vtu')
+          if($LASTEXITCODE -ne 0){ throw 'Packaged MED bridge failed on the genuine native solver result.' }
+          & $python "$PWD/native-windows/c1008-real-tetra/validate_c1008.py" --root $validationRoot --name astermax-tet4-bar
+          if($LASTEXITCODE -ne 0){ throw 'Packaged MED bridge output failed the real TETRA4 numerical validation.' }
+          $evidence=Join-Path $env:ASTERMAX_PACKAGE_DIR 'Validation/C10.10.1-Native-Windows/WINDOWS_NATIVE_EVIDENCE.json'
+          if(-not (Test-Path -LiteralPath $evidence)){ throw 'Native numerical validation evidence missing.' }
+          $validated=Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+          if($validated.transport -ne 'WINDOWS_NATIVE' -or $validated.solver_execution -ne 'RUN' -or $validated.synthetic_results_allowed -ne $false){ throw 'Native validation evidence does not satisfy the package contract.' }
+          Copy-Item -LiteralPath $evidence -Destination (Join-Path $env:ASTERMAX_PACKAGE_DIR 'VALIDATION_NATIVE_CODE_ASTER.json') -Force
+          $manifestPath=Join-Path $env:ASTERMAX_PACKAGE_DIR 'ASTERMAX_BUILD_MANIFEST.json'
+          $manifest=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $manifest.native_solver_validation='PASS_REAL_TETRA4_MED'
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+      - name: Preserve native solver diagnostics
         if: always()
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1199" | Out-Null
-          [ordered]@{candidate='C11.99';branch='agent/c1199-codeaster-contract-fix';windows_x64=$true;native_gui=$true;code_aster_native_windows_only=$true;exact_large_step='BLOCKED';dynamic_performance='NOT_RUN';benchmark_values_invented=$false} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1199/evidence.json" -Encoding utf8
+          $audit="$PWD/dist/Audit/C1206"
+          New-Item -ItemType Directory -Force -Path $audit | Out-Null
+          $validation="$PWD/dist/AsterMax-Mechanical-C12.06-Windows-x64-CodeAster/Validation"
+          if(Test-Path -LiteralPath $validation){ Move-Item -LiteralPath $validation -Destination (Join-Path $audit 'NativeValidation') -Force }
+          $setupLog=Join-Path $env:RUNNER_TEMP 'aster-install.log'
+          if(Test-Path -LiteralPath $setupLog){ Copy-Item -LiteralPath $setupLog -Destination $audit -Force }
+      - name: Verify payload, generate hashes, and validate distributable ZIP
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest=$env:ASTERMAX_PACKAGE_DIR
+          $required=@(
+            'AsterMax Mechanical.exe','NetGen/NetGenMesher.exe',
+            'AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd',
+            'AsterMaxRuntime/CodeAster/astermax-codeaster-runner.ps1',
+            'AsterMaxRuntime/CodeAster/setup-codeaster-windows.cmd',
+            'AsterMaxRuntime/CodeAster/setup-codeaster-windows.ps1',
+            'AsterMaxRuntime/Python/python.exe','AsterMaxTools/bridge-c964-med-results.py',
+            'AsterMaxTools/bind-c998-results-fingerprint.py','AsterMaxTools/qualify-mechanical-analysis.py','Configurar-Code_Aster.cmd',
+            'AsterMaxRuntime/Python/LICENSE.txt','ThirdParty/PrePoMax/LICENSE','ThirdParty/PrePoMax/UserControls/License-LGPL.txt',
+            'ASTERMAX_BUILD_MANIFEST.json','VALIDATION_NATIVE_CODE_ASTER.json'
+          )
+          foreach($relative in $required){
+            $file=Join-Path $dest $relative
+            if(-not (Test-Path -LiteralPath $file -PathType Leaf) -or (Get-Item -LiteralPath $file).Length -eq 0){ throw "Required package payload missing or empty: $relative" }
+          }
+          $installers=@(Get-ChildItem -LiteralPath $dest -Recurse -File -Filter '*.msi')
+          if($installers.Count -gt 0){ throw 'Provider MSI must remain outside the distributable ZIP.' }
+          $nativeManifest=Get-Content (Join-Path $dest 'ASTERMAX_BUILD_MANIFEST.json') -Raw | ConvertFrom-Json
+          if($nativeManifest.native_solver_validation -ne 'PASS_REAL_TETRA4_MED'){ throw 'Refusing to publish a package without passing native numerical validation.' }
+
+          $entries=@(Get-ChildItem -LiteralPath $dest -Recurse -File | Sort-Object FullName | ForEach-Object {
+            [pscustomobject]@{path=[IO.Path]::GetRelativePath($dest,$_.FullName).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          })
+          $entries | ForEach-Object { "$($_.sha256)  $($_.path)" } | Set-Content (Join-Path $dest 'SHA256SUMS.txt') -Encoding utf8
+          $zip="$PWD/dist/AsterMax-Mechanical-C12.06-Windows-x64-CodeAster.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::CreateFromDirectory($dest,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
+          $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $archiveFiles=@($archive.Entries | Where-Object { -not $_.FullName.EndsWith('/') })
+            if($archiveFiles.Count -ne $entries.Count+1){ throw 'ZIP file count differs from the verified package.' }
+            foreach($entry in $entries){
+              $stored=$archive.GetEntry($entry.path)
+              if($null -eq $stored){ throw "ZIP entry missing: $($entry.path)" }
+              $stream=$stored.Open(); $sha=[Security.Cryptography.SHA256]::Create()
+              try { $actual=[BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','').ToLowerInvariant() }
+              finally { $stream.Dispose(); $sha.Dispose() }
+              if($actual -ne $entry.sha256){ throw "ZIP entry SHA-256 mismatch: $($entry.path)" }
+            }
+          } finally { $archive.Dispose() }
+          $zipHash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$zipHash  $([IO.Path]::GetFileName($zip))" | Set-Content "$zip.sha256" -Encoding ascii
+          [ordered]@{release='C12.06';commit=$env:GITHUB_SHA;zip=[IO.Path]::GetFileName($zip);bytes=(Get-Item -LiteralPath $zip).Length;sha256=$zipHash;verified_payload_files=$entries.Count;zip_integrity='PASS'} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1206/package-integrity.json" -Encoding utf8
+      - name: Upload validated Windows executable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Mechanical-C12.06-Windows-x64-CodeAster
+          path: |
+            dist/AsterMax-Mechanical-C12.06-Windows-x64-CodeAster.zip
+            dist/AsterMax-Mechanical-C12.06-Windows-x64-CodeAster.zip.sha256
+          compression-level: 0
+          if-no-files-found: error
+      - name: Write C12.06 evidence
+        if: always()
+        shell: pwsh
+        env:
+          DISCOVERY_OUTCOME: ${{ steps.discovery.outcome }}
+          NATIVE_PROBE_OUTCOME: ${{ steps.native_probe.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          CONTRACT_OUTCOME: ${{ steps.contract.outcome }}
+          ASSEMBLE_OUTCOME: ${{ steps.assemble.outcome }}
+          NATIVE_SETUP_OUTCOME: ${{ steps.native_setup.outcome }}
+          NATIVE_SOLVE_OUTCOME: ${{ steps.native_solve.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+        run: |
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1206" | Out-Null
+          [ordered]@{
+            candidate='C12.06';branch=$env:GITHUB_REF_NAME;commit=$env:GITHUB_SHA
+            runner_discovery=$env:DISCOVERY_OUTCOME;native_probe_contract=$env:NATIVE_PROBE_OUTCOME;build=$env:BUILD_OUTCOME;distribution_contract=$env:CONTRACT_OUTCOME
+            assembly=$env:ASSEMBLE_OUTCOME;native_setup=$env:NATIVE_SETUP_OUTCOME;native_solve_med=$env:NATIVE_SOLVE_OUTCOME
+            package_integrity=$env:PACKAGE_OUTCOME;solver_installer_bundled=$false;bootstrap_bundled=($env:ASSEMBLE_OUTCOME -eq 'success');native_installation_required=$true
+            target='windows-x64';gui_interactive='NOT_RUN';exact_large_step='NOT_RUN';dynamic_performance='NOT_RUN';benchmark_values_invented=$false
+          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1206/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C11.99-Windows-x64-Build-Audit
+          name: AsterMax-C12.06-Windows-x64-Build-Audit
           path: dist/Audit

@@ -1,4 +1,4 @@
-param([string]$Dist)
+param([string]$Dist, [switch]$RequireInstalledRuntime)
 $ErrorActionPreference='Stop'
 
 $root=Join-Path $Dist 'Validation\C10.10.1-Native-Windows'
@@ -83,6 +83,7 @@ function Invoke-ResumableProviderDownload {
 }
 
 $nativeReady=Test-NativeProbe
+if(-not $nativeReady -and $RequireInstalledRuntime){ throw 'Native runtime is not ready after setup; this validation run will not install or repair it.' }
 if(-not $nativeReady) {
     $msi=Join-Path $env:RUNNER_TEMP 'code-aster-v2025.msi'
     Write-Host 'NATIVE_STAGE: download provider MSI'

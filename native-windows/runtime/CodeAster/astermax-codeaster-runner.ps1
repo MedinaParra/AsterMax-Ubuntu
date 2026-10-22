@@ -185,6 +185,50 @@ function Get-ExpectedOutputs([string]$Content, [string]$Stage) {
     return $outputs
 }
 
+function Get-CodeAsterProbeEvidence([string]$MessText, [string]$Stdout, [string]$Stderr) {
+    # A native launcher may return zero even when Code_Aster reports a fatal
+    # diagnostic. Match the transaction's failure semantics before accepting a
+    # normal-stop marker, and require the solver's identity in its own .mess.
+    $identity = -not [string]::IsNullOrWhiteSpace($MessText) -and
+        [regex]::IsMatch($MessText, '(?i)\bCODE[_ -]?ASTER\b')
+    $normalStop = $false
+    $failure = $null
+    $combined = (($MessText, $Stdout, $Stderr) -join "`n") -replace "`0", ''
+    foreach ($raw in ($combined -split "`r?`n")) {
+        $line = $raw.Trim()
+        if ($line -match '^(?:EXECUTION_CODE_ASTER_EXIT_[^=\s]+|EXIT_CODE)\s*=\s*(.+)$') {
+            $exitCode = 0
+            if (-not [int]::TryParse($Matches[1].Trim(), [ref]$exitCode)) {
+                $failure = 'Invalid Code_Aster exit marker: ' + $line
+                break
+            }
+            if ($exitCode -ne 0) {
+                $failure = 'Code_Aster exit marker: ' + $line
+                break
+            }
+            $normalStop = $true
+        }
+        if ($line -match '(?i)(?:^\s*[!|]?\s*<F(?:>|_)|<F>\s*<|FATAL ERROR|ERREUR[ _]+FATALE|Traceback \(most recent call last\)|_ABNORMAL_ABORT)') {
+            $failure = 'Code_Aster fatal diagnostic: ' + $line
+            break
+        }
+        # The provider writes both ARRET NORMAL and Arret normal with an
+        # accented e. Legacy OEM bytes decoded as UTF-8 can produce U+FFFD.
+        if ($line -match '(?i)\bARR(?:E|\u00CA|\u00DB|\uFFFD)T\s+NORMAL\b') {
+            $normalStop = $true
+        }
+    }
+    if (-not $failure -and -not $identity) { $failure = 'Code_Aster identity was not found in the probe .mess file.' }
+    if (-not $failure -and -not $normalStop) { $failure = 'Code_Aster normal-stop evidence was not found in the probe output.' }
+    if ($failure -and $failure.Length -gt 500) { $failure = $failure.Substring(0, 500) }
+    return [pscustomobject]@{
+        Ready = ($identity -and $normalStop -and -not $failure)
+        IdentityVerified = [bool]$identity
+        NormalStop = [bool]$normalStop
+        Message = $failure
+    }
+}
+
 function Probe-CodeAster([string]$Backend) {
     $stage = New-SafeStageDirectory 'probe'
     try {
@@ -207,16 +251,21 @@ function Probe-CodeAster([string]$Backend) {
         [IO.File]::WriteAllText($export, $exportText + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
         $run = Invoke-WindowsBackend $Backend $export $stage 120000
         $messReady = (Test-Path -LiteralPath $mess -PathType Leaf) -and ((Get-Item -LiteralPath $mess).Length -gt 0)
+        $messText = $(if ($messReady) { [IO.File]::ReadAllText($mess) } else { '' })
+        $evidence = Get-CodeAsterProbeEvidence $messText $run.Stdout $run.Stderr
         return [pscustomobject]@{
-            Ready = ($run.ExitCode -eq 0 -and $messReady)
+            Ready = ($run.ExitCode -eq 0 -and $messReady -and $evidence.Ready)
             ExitCode = $run.ExitCode
             Stdout = $run.Stdout
             Stderr = $run.Stderr
             MessReady = $messReady
+            IdentityVerified = $evidence.IdentityVerified
+            NormalStop = $evidence.NormalStop
+            Message = $(if ($run.ExitCode -ne 0) { 'Native Code_Aster probe returned exit code ' + $run.ExitCode + '.' } else { $evidence.Message })
         }
     }
     catch {
-        return [pscustomobject]@{ Ready=$false; ExitCode=124; Stdout=''; Stderr=$_.Exception.Message; MessReady=$false }
+        return [pscustomobject]@{ Ready=$false; ExitCode=124; Stdout=''; Stderr=$_.Exception.Message; MessReady=$false; IdentityVerified=$false; NormalStop=$false; Message=$_.Exception.Message }
     }
     finally {
         Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
@@ -241,7 +290,9 @@ if ($ExportFile -eq 'probe') {
         configured_home = $env:ASTERMAX_CODE_ASTER_HOME
         solver_probe_exit_code = $(if ($probe) { $probe.ExitCode } else { $null })
         solver_probe_mess_ready = $(if ($probe) { $probe.MessReady } else { $false })
-        message = $(if ($nativeError) { $nativeError } elseif ($probe -and $probe.Stderr) { $probe.Stderr.Trim() } elseif (-not $native) { 'No native Windows Code_Aster launcher found.' } else { '' })
+        solver_probe_identity_verified = $(if ($probe) { $probe.IdentityVerified } else { $false })
+        solver_probe_normal_stop = $(if ($probe) { $probe.NormalStop } else { $false })
+        message = $(if ($nativeError) { $nativeError } elseif ($probe -and $probe.Message) { $probe.Message } elseif ($probe -and $probe.Stderr) { $probe.Stderr.Trim() } elseif (-not $native) { 'No native Windows Code_Aster launcher found.' } else { '' })
         wsl_required = $false
         synthetic_results_allowed = $false
     } | ConvertTo-Json -Compress | Write-Output
