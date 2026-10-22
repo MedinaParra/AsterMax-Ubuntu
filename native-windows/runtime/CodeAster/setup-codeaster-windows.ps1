@@ -80,7 +80,7 @@ function Download-ProviderInstaller([string]$Destination) {
     # Fetch the unmodified MSI from its publisher. Keep it outside the application
     # ZIP and do not replace the installer's NTFS-link setup with file extraction.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue
+    $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     for ($attempt = 1; $attempt -le 8; $attempt++) {
         $offset = if (Test-Path -LiteralPath $Destination) { (Get-Item -LiteralPath $Destination).Length } else { [int64]0 }
         if ($offset -eq $providerSize) {

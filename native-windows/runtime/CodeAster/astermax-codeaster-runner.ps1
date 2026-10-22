@@ -113,7 +113,7 @@ function Find-WindowsBackend {
     }
 
     foreach ($name in @('run_aster.bat','run_aster.cmd','run_aster.exe','as_run.bat','as_run.cmd','as_run.exe')) {
-        $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
+        $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($command) { return $command.Source }
     }
     return $null
