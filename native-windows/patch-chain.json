@@ -896,6 +896,34 @@
       "consumes": [
         "AsterMaxC1207ContactTopology"
       ]
+    },
+    {
+      "id": "patch-c1208-bonded-export",
+      "file": "patch-c1208-bonded-export.ps1",
+      "depends": [
+        "patch-c1207-contact-topology",
+        "patch-c1207-solver-diagnostics"
+      ],
+      "declares": [
+        "AsterMaxC1208BondedMpc"
+      ],
+      "consumes": [
+        "AsterMaxC1207ContactTopology"
+      ]
+    },
+    {
+      "id": "patch-c1208-bonded-ui",
+      "file": "patch-c1208-bonded-ui.ps1",
+      "depends": [
+        "patch-c1208-bonded-export",
+        "patch-c1207-solver-diagnostics"
+      ],
+      "declares": [
+        "AsterMaxC1208BondedUi"
+      ],
+      "consumes": [
+        "AsterMaxC1208BondedMpc"
+      ]
     }
   ]
 }

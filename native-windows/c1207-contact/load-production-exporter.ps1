@@ -24,7 +24,13 @@ try {
     [IO.File]::WriteAllText($sourcePath,$exporter,(New-Object Text.UTF8Encoding($false)))
     $jsonAssembly=[Newtonsoft.Json.Linq.JObject].Assembly.Location
     $references=@($jsonAssembly,'System.Runtime','System.Collections','System.Linq','System.Linq.Expressions','System.IO.FileSystem','System.ComponentModel.TypeConverter','System.ObjectModel','System.Text.Encoding.Extensions')
-    $sources=@($sourcePath,$helper)+$AdditionalSources
+    $sources=@($sourcePath,$helper)
+    # C12.08 adds a production helper without changing the C12.07 contact path.
+    # Compile it when present so historical gates still exercise the current
+    # exporter instead of a stale copy; older source trees remain supported.
+    $bondedHelper=Join-Path $Root 'PrePoMax/AsterMaxBondedMpc.cs'
+    if(Test-Path -LiteralPath $bondedHelper) { $sources += $bondedHelper }
+    $sources += $AdditionalSources
     Add-Type -Path $sources -ReferencedAssemblies $references -CompilerOptions '/nowarn:1701,1702'
 }
 finally {

@@ -1,4 +1,4 @@
-name: C12.07 Windows x64 native Code_Aster package
+name: C12.08 Windows x64 native Code_Aster package
 on:
   push:
     branches: [agent/c1199-codeaster-contract-fix]
@@ -73,24 +73,30 @@ jobs:
           ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
           ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
-      - name: Verify C12.07 runner discovery
+      - name: Verify C12.08 runner discovery
         id: discovery
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          ./native-windows/test-c1206-runner-discovery.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1207/RunnerDiscovery" -ExpectedRelease C12.07
+          ./native-windows/test-c1206-runner-discovery.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1208/RunnerDiscovery" -ExpectedRelease C12.08
       - name: Verify production contact topology and orientation contracts
         id: contact_topology
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          ./native-windows/test-c1207-contact-topology.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1207/ContactTopology"
+          ./native-windows/test-c1207-contact-topology.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1208/ContactTopology"
+      - name: Verify production bonded MPC and rank-reduction contracts
+        id: bonded_mpc
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1208-bonded-mpc.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1208/BondedMpc"
       - name: Verify production C# solver failure diagnostics
         id: solver_diagnostics
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          ./native-windows/test-c1207-solver-diagnostics.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1207/SolverDiagnostics"
+          ./native-windows/test-c1207-solver-diagnostics.ps1 -Root "$PWD/upstream" -OutDir "$PWD/dist/Audit/C1208/SolverDiagnostics"
       - name: Verify native runner rejects invalid backend probes
         id: native_probe
         shell: pwsh
@@ -102,7 +108,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          ./native-windows/test-c1207-runner-failures.ps1 -OutDir "$PWD/dist/Audit/C1207/RunnerFailures"
+          ./native-windows/test-c1207-runner-failures.ps1 -OutDir "$PWD/dist/Audit/C1208/RunnerFailures"
       - name: Verify stale results and failed solves are never promoted
         id: runner_regression
         shell: pwsh
@@ -161,7 +167,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $dest="$PWD/dist/AsterMax-Mechanical-C12.07-Windows-x64-CodeAster"
+          $dest="$PWD/dist/AsterMax-Mechanical-C12.08-Windows-x64-CodeAster"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           $source=Split-Path $env:ASTERMAX_BUILT_EXE -Parent
           Copy-Item "$source/*" $dest -Recurse -Force
@@ -221,6 +227,7 @@ jobs:
           if(-not (Test-Path -LiteralPath (Join-Path $pythonDest 'LICENSE.txt'))){ throw 'Python runtime license was not preserved.' }
           python "$PWD/native-windows/build-c1010-materials.py" --out $dest
           if($LASTEXITCODE -ne 0){ throw 'Material library generation failed.' }
+          Copy-Item -LiteralPath "$PWD/docs/C1208_BONDED_REPAIR.md" -Destination (Join-Path $dest 'C1208_BONDED_REPAIR.md')
 
           @'
           @echo off
@@ -228,7 +235,7 @@ jobs:
           exit /b %ERRORLEVEL%
           '@ | Set-Content (Join-Path $dest 'Configurar-Code_Aster.cmd') -Encoding ascii
           @"
-          AsterMax Mechanical C12.07 - Windows x64
+          AsterMax Mechanical C12.08 - Windows x64
 
           1. Extraiga el ZIP completo en una carpeta.
           2. Ejecute Configurar-Code_Aster.cmd para instalar y comprobar Code_Aster para Windows.
@@ -240,14 +247,20 @@ jobs:
           Code_Aster requiere una instalacion nativa; el instalador del proveedor no se redistribuye
           dentro del ZIP. Se conservan las pruebas numericas reales de CI en el manifiesto de validacion.
 
-          C12.07 comprueba los nodos esclavos compartidos entre zonas antes de exportar el contacto.
+          C12.08 conserva la comprobacion de nodos esclavos compartidos entre zonas de contacto.
           Cuando existe una orientacion compatible, intercambia los roles de las superficies y
           conserva sus caras, materiales, cargas y ley de contacto. Los casos incompatibles se
           detienen con un diagnostico concreto. Los fallos del motor conservan su archivo .mess.
           La admision de esta compilacion exige una barra TETRA4 real y un caso de tres cuerpos:
           el control original debe reproducir CONTACT2_16 con 12 nodos compartidos, y el exportado
           por el ejecutable debe resolver, importar MED y satisfacer el equilibrio de fuerzas.
-          Consulte VALIDATION_NATIVE_CODE_ASTER.json y VALIDATION_NATIVE_CONTACT.json.
+          Ademas, las uniones soldadas Tie se exportan mediante restricciones MPC afines para
+          mallas TETRA4 no coincidentes. La admision exige dos pruebas nativas con un hueco de
+          2.5 mm y aristas esclavas compartidas: traccion/cortante con equilibrio de fuerzas y
+          momentos, y una rotacion rigida sin tension espuria. La geometria de estas pruebas es
+          sintetica; sus resultados proceden del motor real. No equivalen a resolver un proyecto
+          particular del usuario. Consulte C1208_BONDED_REPAIR.md, VALIDATION_NATIVE_CODE_ASTER.json,
+          VALIDATION_NATIVE_CONTACT.json y VALIDATION_NATIVE_BONDED.json.
 
           Origen y fuentes:
           AsterMax y cadena de reconstruccion: https://github.com/MedinaParra/AsterMax-Ubuntu/tree/$env:GITHUB_SHA
@@ -261,9 +274,9 @@ jobs:
           Las versiones Python y paquetes instalados figuran en ASTERMAX_BUILD_MANIFEST.json.
           Las licencias y avisos originales se conservan en ThirdParty y AsterMaxRuntime/Python,
           incluidos los directorios dist-info de los paquetes Python.
-          "@ | Set-Content (Join-Path $dest 'LEEME-C12.07.txt') -Encoding utf8
+          "@ | Set-Content (Join-Path $dest 'LEEME-C12.08.txt') -Encoding utf8
           [ordered]@{
-            release='C12.07';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME
+            release='C12.08';commit=$env:GITHUB_SHA;branch=$env:GITHUB_REF_NAME
             executable='AsterMax Mechanical.exe'
             executable_sha256=(Get-FileHash (Join-Path $dest 'AsterMax Mechanical.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
             python_med_runtime_bundled=$true
@@ -275,30 +288,60 @@ jobs:
             bootstrap_path='AsterMaxRuntime/CodeAster/setup-codeaster-windows.ps1'
             solver_installer_bundled=$false;bootstrap_bundled=$true;native_installation_required=$true
             solver_transport='WINDOWS_NATIVE';synthetic_results_allowed=$false
-            native_solver_validation='PENDING';native_contact_validation='PENDING';gui_interactive_validation='NOT_RUN'
+            native_solver_validation='PENDING';native_contact_validation='PENDING';native_bonded_validation='PENDING'
+            synthetic_pmx_compatibility='PENDING';gui_interactive_validation='NOT_RUN';actual_user_project_solver_execution='NOT_RUN'
           } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $dest 'ASTERMAX_BUILD_MANIFEST.json') -Encoding utf8
           "ASTERMAX_PACKAGE_DIR=$dest" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Verify synthetic bonded PMX serialization with packaged assemblies
+        id: bonded_pmx
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          # Test-only parser: install after the independent runtime copy above.
+          python -m pip install --disable-pip-version-check --only-binary=:all: nrbf==0.1.2
+          if($LASTEXITCODE -ne 0){ throw 'Synthetic PMX parser installation failed.' }
+          ./native-windows/test-c1208-bonded-pmx.ps1 -Dist $env:ASTERMAX_PACKAGE_DIR -OutDir "$PWD/dist/Audit/C1208/BondedPmx"
+          $reportPath="$PWD/dist/Audit/C1208/BondedPmx/C12.08_SYNTHETIC_PMX_VALIDATION.json"
+          if(-not (Test-Path -LiteralPath $reportPath)){ throw 'Synthetic PMX compatibility evidence is missing.' }
+          $report=Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if(-not $report.all_checks_pass -or $report.private_user_geometry_included -ne $false){ throw 'Synthetic PMX compatibility did not pass.' }
+          if($report.production_compatibility_binder_executed -ne $true -or $report.live_model_bridge_executed -ne $true -or $report.live_model_export_executed -ne $true -or $report.tie_fingerprint_mutations_checked -ne 7){ throw 'Synthetic PMX gate did not exercise the production binder, bridge, exporter, and fingerprint.' }
+          $exeHash=(Get-FileHash (Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMax Mechanical.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($report.executable_sha256 -ne $exeHash){ throw 'Synthetic PMX evidence does not match the packaged executable.' }
+          Copy-Item -LiteralPath $reportPath -Destination (Join-Path $env:ASTERMAX_PACKAGE_DIR 'VALIDATION_SYNTHETIC_PMX.json')
+          $manifestPath=Join-Path $env:ASTERMAX_PACKAGE_DIR 'ASTERMAX_BUILD_MANIFEST.json'
+          $manifest=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $manifest.synthetic_pmx_compatibility='PASS_TRUSTED_ASSEMBLY_SYNTHETIC_ROUNDTRIP'
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
       - name: Preflight contact export from the packaged executable
         id: contact_export_preflight
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $preflight="$PWD/dist/Audit/C1207/ContactExportPreflight"
+          $preflight="$PWD/dist/Audit/C1208/ContactExportPreflight"
           if(Test-Path -LiteralPath $preflight){ throw 'Contact export preflight requires a fresh evidence directory.' }
           ./native-windows/test-c1207-native-contact.ps1 -Root "$PWD/upstream" -Dist $env:ASTERMAX_PACKAGE_DIR -OutDir $preflight -PrepareOnly
+      - name: Preflight bonded export, affine invariance, and independent MPC rank
+        id: bonded_export_preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $preflight="$PWD/dist/Audit/C1208/BondedExportPreflight"
+          if(Test-Path -LiteralPath $preflight){ throw 'Bonded export preflight requires a fresh evidence directory.' }
+          ./native-windows/test-c1208-native-bonded.ps1 -Root "$PWD/upstream" -Dist $env:ASTERMAX_PACKAGE_DIR -OutDir $preflight -PrepareOnly
       - name: Install genuine native Windows Code_Aster using packaged setup
         id: native_setup
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $setup=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/CodeAster/setup-codeaster-windows.ps1'
-          $setupLogs="$PWD/dist/Audit/C1207/NativeSetup"
+          $setupLogs="$PWD/dist/Audit/C1208/NativeSetup"
           & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $setup -Unattended -LogDirectory $setupLogs
           if($LASTEXITCODE -ne 0){ throw "Packaged native Code_Aster setup failed: $LASTEXITCODE" }
           $runner=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/CodeAster/astermax-codeaster-runner.cmd'
           $probeText=& $runner probe
           $probeExit=$LASTEXITCODE
-          $audit="$PWD/dist/Audit/C1207"
+          $audit="$PWD/dist/Audit/C1208"
           New-Item -ItemType Directory -Force -Path $audit | Out-Null
           $probeText | Set-Content (Join-Path $audit 'packaged-runner-probe.json') -Encoding utf8
           $probe=$probeText | ConvertFrom-Json
@@ -344,13 +387,31 @@ jobs:
           $manifest=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
           $manifest.native_contact_validation='PASS_CONTACT2_16_REPRODUCTION_AND_REAL_CONTACT_MED_EQUILIBRIUM'
           $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+      - name: Solve native bonded gap and rigid-rotation regressions with production MED import
+        id: native_bonded
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./native-windows/test-c1208-native-bonded.ps1 -Root "$PWD/upstream" -Dist $env:ASTERMAX_PACKAGE_DIR
+          $evidence=Join-Path $env:ASTERMAX_PACKAGE_DIR 'Validation/C12.08-Native-Bonded/C12.08_NATIVE_BONDED_VALIDATION.json'
+          if(-not (Test-Path -LiteralPath $evidence)){ throw 'Native bonded validation evidence is missing.' }
+          $validated=Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+          if(-not $validated.all_checks_pass -or $validated.transport -ne 'WINDOWS_NATIVE' -or $validated.solver_execution -ne 'RUN' -or $validated.synthetic_results_allowed -ne $false){ throw 'Native bonded numerical evidence did not pass.' }
+          if($validated.gap_mm -ne 2.5 -or $validated.shared_slave_node_count -ne 4 -or $validated.private_user_geometry_included -ne $false -or @($validated.cases).Count -ne 2){ throw 'Native bonded admission did not exercise the required synthetic fixture.' }
+          $exeHash=(Get-FileHash (Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMax Mechanical.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($validated.export_source -ne 'COMPILED_ASTERMAX_EXECUTABLE' -or $validated.executable_sha256 -ne $exeHash){ throw 'Native bonded decks did not originate from this packaged executable.' }
+          Copy-Item -LiteralPath $evidence -Destination (Join-Path $env:ASTERMAX_PACKAGE_DIR 'VALIDATION_NATIVE_BONDED.json')
+          $manifestPath=Join-Path $env:ASTERMAX_PACKAGE_DIR 'ASTERMAX_BUILD_MANIFEST.json'
+          $manifest=Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $manifest.native_bonded_validation='PASS_REAL_MPC_GAP_FORCE_MOMENT_RIGID_ROTATION_MED'
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding utf8
       - name: Preserve native solver diagnostics
         if: always()
         shell: pwsh
         run: |
-          $audit="$PWD/dist/Audit/C1207"
+          $audit="$PWD/dist/Audit/C1208"
           New-Item -ItemType Directory -Force -Path $audit | Out-Null
-          $validation="$PWD/dist/AsterMax-Mechanical-C12.07-Windows-x64-CodeAster/Validation"
+          $validation="$PWD/dist/AsterMax-Mechanical-C12.08-Windows-x64-CodeAster/Validation"
           if(Test-Path -LiteralPath $validation){ Move-Item -LiteralPath $validation -Destination (Join-Path $audit 'NativeValidation') -Force }
           $setupLog=Join-Path $env:RUNNER_TEMP 'aster-install.log'
           if(Test-Path -LiteralPath $setupLog){ Copy-Item -LiteralPath $setupLog -Destination $audit -Force }
@@ -369,7 +430,8 @@ jobs:
             'AsterMaxRuntime/Python/python.exe','AsterMaxTools/bridge-c964-med-results.py',
             'AsterMaxTools/bind-c998-results-fingerprint.py','AsterMaxTools/qualify-mechanical-analysis.py','Configurar-Code_Aster.cmd',
             'AsterMaxRuntime/Python/LICENSE.txt','ThirdParty/PrePoMax/LICENSE','ThirdParty/PrePoMax/UserControls/License-LGPL.txt',
-            'ASTERMAX_BUILD_MANIFEST.json','LEEME-C12.07.txt','VALIDATION_NATIVE_CODE_ASTER.json','VALIDATION_NATIVE_CONTACT.json'
+            'ASTERMAX_BUILD_MANIFEST.json','LEEME-C12.08.txt','C1208_BONDED_REPAIR.md',
+            'VALIDATION_NATIVE_CODE_ASTER.json','VALIDATION_NATIVE_CONTACT.json','VALIDATION_NATIVE_BONDED.json','VALIDATION_SYNTHETIC_PMX.json'
           )
           foreach($relative in $required){
             $file=Join-Path $dest $relative
@@ -380,12 +442,14 @@ jobs:
           $nativeManifest=Get-Content (Join-Path $dest 'ASTERMAX_BUILD_MANIFEST.json') -Raw | ConvertFrom-Json
           if($nativeManifest.native_solver_validation -ne 'PASS_REAL_TETRA4_MED'){ throw 'Refusing to publish a package without passing native numerical validation.' }
           if($nativeManifest.native_contact_validation -ne 'PASS_CONTACT2_16_REPRODUCTION_AND_REAL_CONTACT_MED_EQUILIBRIUM'){ throw 'Refusing to publish a package without the genuine shared-slave contact regression.' }
+          if($nativeManifest.native_bonded_validation -ne 'PASS_REAL_MPC_GAP_FORCE_MOMENT_RIGID_ROTATION_MED'){ throw 'Refusing to publish a package without genuine native bonded gap and rotation validation.' }
+          if($nativeManifest.synthetic_pmx_compatibility -ne 'PASS_TRUSTED_ASSEMBLY_SYNTHETIC_ROUNDTRIP'){ throw 'Refusing to publish a package without trusted-assembly synthetic PMX compatibility.' }
 
           $entries=@(Get-ChildItem -LiteralPath $dest -Recurse -File | Sort-Object FullName | ForEach-Object {
             [pscustomobject]@{path=[IO.Path]::GetRelativePath($dest,$_.FullName).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
           })
           $entries | ForEach-Object { "$($_.sha256)  $($_.path)" } | Set-Content (Join-Path $dest 'SHA256SUMS.txt') -Encoding utf8
-          $zip="$PWD/dist/AsterMax-Mechanical-C12.07-Windows-x64-CodeAster.zip"
+          $zip="$PWD/dist/AsterMax-Mechanical-C12.08-Windows-x64-CodeAster.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [IO.Compression.ZipFile]::CreateFromDirectory($dest,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
           $archive=[IO.Compression.ZipFile]::OpenRead($zip)
@@ -403,22 +467,24 @@ jobs:
           } finally { $archive.Dispose() }
           $zipHash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$zipHash  $([IO.Path]::GetFileName($zip))" | Set-Content "$zip.sha256" -Encoding ascii
-          [ordered]@{release='C12.07';commit=$env:GITHUB_SHA;zip=[IO.Path]::GetFileName($zip);bytes=(Get-Item -LiteralPath $zip).Length;sha256=$zipHash;verified_payload_files=$entries.Count;zip_integrity='PASS'} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1207/package-integrity.json" -Encoding utf8
+          [ordered]@{release='C12.08';commit=$env:GITHUB_SHA;zip=[IO.Path]::GetFileName($zip);bytes=(Get-Item -LiteralPath $zip).Length;sha256=$zipHash;verified_payload_files=$entries.Count;zip_integrity='PASS'} | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1208/package-integrity.json" -Encoding utf8
       - name: Upload validated Windows executable package
         uses: actions/upload-artifact@v4
         with:
-          name: AsterMax-Mechanical-C12.07-Windows-x64-CodeAster
+          name: AsterMax-Mechanical-C12.08-Windows-x64-CodeAster
           path: |
-            dist/AsterMax-Mechanical-C12.07-Windows-x64-CodeAster.zip
-            dist/AsterMax-Mechanical-C12.07-Windows-x64-CodeAster.zip.sha256
+            dist/AsterMax-Mechanical-C12.08-Windows-x64-CodeAster.zip
+            dist/AsterMax-Mechanical-C12.08-Windows-x64-CodeAster.zip.sha256
           compression-level: 0
           if-no-files-found: error
-      - name: Write C12.07 evidence
+      - name: Write C12.08 evidence
         if: always()
         shell: pwsh
         env:
           DISCOVERY_OUTCOME: ${{ steps.discovery.outcome }}
           CONTACT_TOPOLOGY_OUTCOME: ${{ steps.contact_topology.outcome }}
+          BONDED_MPC_OUTCOME: ${{ steps.bonded_mpc.outcome }}
+          BONDED_PMX_OUTCOME: ${{ steps.bonded_pmx.outcome }}
           SOLVER_DIAGNOSTICS_OUTCOME: ${{ steps.solver_diagnostics.outcome }}
           NATIVE_PROBE_OUTCOME: ${{ steps.native_probe.outcome }}
           RUNNER_FAILURES_OUTCOME: ${{ steps.runner_failures.outcome }}
@@ -427,23 +493,27 @@ jobs:
           CONTRACT_OUTCOME: ${{ steps.contract.outcome }}
           ASSEMBLE_OUTCOME: ${{ steps.assemble.outcome }}
           CONTACT_EXPORT_PREFLIGHT_OUTCOME: ${{ steps.contact_export_preflight.outcome }}
+          BONDED_EXPORT_PREFLIGHT_OUTCOME: ${{ steps.bonded_export_preflight.outcome }}
           NATIVE_SETUP_OUTCOME: ${{ steps.native_setup.outcome }}
           NATIVE_SOLVE_OUTCOME: ${{ steps.native_solve.outcome }}
           NATIVE_CONTACT_OUTCOME: ${{ steps.native_contact.outcome }}
+          NATIVE_BONDED_OUTCOME: ${{ steps.native_bonded.outcome }}
           PACKAGE_OUTCOME: ${{ steps.package.outcome }}
         run: |
-          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1207" | Out-Null
+          New-Item -ItemType Directory -Force "$PWD/dist/Audit/C1208" | Out-Null
           [ordered]@{
-            candidate='C12.07';branch=$env:GITHUB_REF_NAME;commit=$env:GITHUB_SHA
+            candidate='C12.08';branch=$env:GITHUB_REF_NAME;commit=$env:GITHUB_SHA
             runner_discovery=$env:DISCOVERY_OUTCOME;native_probe_contract=$env:NATIVE_PROBE_OUTCOME;build=$env:BUILD_OUTCOME;distribution_contract=$env:CONTRACT_OUTCOME
             contact_topology=$env:CONTACT_TOPOLOGY_OUTCOME;solver_diagnostics=$env:SOLVER_DIAGNOSTICS_OUTCOME;runner_failures=$env:RUNNER_FAILURES_OUTCOME;stale_output_regression=$env:RUNNER_REGRESSION_OUTCOME
+            bonded_mpc=$env:BONDED_MPC_OUTCOME;synthetic_pmx_compatibility=$env:BONDED_PMX_OUTCOME;bonded_export_preflight=$env:BONDED_EXPORT_PREFLIGHT_OUTCOME
             assembly=$env:ASSEMBLE_OUTCOME;contact_export_preflight=$env:CONTACT_EXPORT_PREFLIGHT_OUTCOME;native_setup=$env:NATIVE_SETUP_OUTCOME;native_solve_med=$env:NATIVE_SOLVE_OUTCOME
             native_contact_med_equilibrium=$env:NATIVE_CONTACT_OUTCOME
+            native_bonded_med_force_moment_rotation=$env:NATIVE_BONDED_OUTCOME
             package_integrity=$env:PACKAGE_OUTCOME;solver_installer_bundled=$false;bootstrap_bundled=($env:ASSEMBLE_OUTCOME -eq 'success');native_installation_required=$true
             target='windows-x64';gui_interactive='NOT_RUN';exact_large_step='NOT_RUN';dynamic_performance='NOT_RUN';benchmark_values_invented=$false
-          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1207/evidence.json" -Encoding utf8
+          } | ConvertTo-Json | Set-Content "$PWD/dist/Audit/C1208/evidence.json" -Encoding utf8
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: AsterMax-C12.07-Windows-x64-Build-Audit
+          name: AsterMax-C12.08-Windows-x64-Build-Audit
           path: dist/Audit
