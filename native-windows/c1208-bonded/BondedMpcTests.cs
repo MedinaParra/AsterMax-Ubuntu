@@ -100,10 +100,11 @@ public static class AsterMaxC1208BondedTests
         Check("actual 2.5 mm gap admitted and reported",Math.Abs((double)report["maximum_gap_mm"]-2.5)<1e-12 && (int)report["unmatched_slave_node_count"]==0);
         Check("contract and coordinates remain unchanged",JToken.DeepEquals(original,contract) && !(bool)report["geometry_adjusted"]);
         Check("per-node load unchanged",(string)manifest["load_semantics"]=="PER_NODE_CLOAD" && (double)manifest["fy_per_node_n"]==-26000.0 && (double)manifest["fy_total_n"]==-52000.0);
-        string command=File.ReadAllText(Path.Combine(output,"bonded.comm")),mail=File.ReadAllText(Path.Combine(output,"bonded.mail"));
+        string command=File.ReadAllText(Path.Combine(output,"bonded.comm"));
+        string[] mailLines=File.ReadAllLines(Path.Combine(output,"bonded.mail"));
         Check("Code_Aster ordered singleton GROUP_NO MPC syntax",command.Contains("LIAISON_DDL=(") && command.Contains("_F(GROUP_NO=(") && !command.Contains("NOEUD=") && command.Contains("_F(CHARGE=bonded), _F(CHARGE=load)"));
-        Check("bonded path has volumes only and no nonlinear contact",!mail.Contains("\nTRIA3\n") && !command.Contains("DEFI_CONTACT") && command.Contains("MECA_STATIQUE"));
-        Check("singleton groups avoid existing node-group collision",mail.Split(new[]{"GROUP_NO NOM = AM_B1\n"},StringSplitOptions.None).Length==2 && (int)report["singleton_node_group_count"]>0);
+        Check("bonded path has volumes only and no nonlinear contact",!mailLines.Contains("TRIA3") && !command.Contains("DEFI_CONTACT") && command.Contains("MECA_STATIQUE"));
+        Check("singleton groups avoid existing node-group collision",mailLines.Count(line=>line=="GROUP_NO NOM = AM_B1")==1 && (int)report["singleton_node_group_count"]>0);
         JObject evidence=JObject.Parse(File.ReadAllText(Path.Combine(output,"bonded.bonded-mpc.json")));
         var nodes=((JArray)contract["mesh"]["nodes"]).Cast<JObject>().ToDictionary(n=>(string)n["id"]);
         foreach(JObject binding in (JArray)evidence["bindings"])
