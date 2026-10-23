@@ -185,7 +185,7 @@ if(-not $source.Contains('// C1207_SOLVER_DIAGNOSTICS_BEGIN')) {
         // C1207_SOLVER_DIAGNOSTICS_END
 
 '@
-    $source=$source.Substring(0,$start)+$replacement+$source.Substring($end)
+    $source=$source.Substring(0,$start)+$replacement.Replace("`r",'')+$source.Substring($end)
     $old='Fail("Code_Aster solve failed (runner exit "+RunnerExitCode+")."+'
     $new='Fail("Code_Aster no pudo completar el cálculo (código del adaptador "+RunnerExitCode+")."+'
     if(-not $source.Contains($old)) { throw 'C12.07 failure message anchor missing.' }
@@ -208,8 +208,11 @@ if(-not $source.Contains('// C1207_SOLVER_DIAGNOSTICS_BEGIN')) {
             }
             return psi;
 '@
+    # Windows checkouts use CRLF inside here-strings; the input was normalized
+    # to LF above. Match and insert the same line endings on either platform.
+    $encodingAnchor=$encodingAnchor.Replace("`r",'')
     if(-not $source.Contains($encodingAnchor)) { throw 'C12.07 runner encoding anchor missing.' }
-    $source=$source.Replace($encodingAnchor,$encodingNew)
+    $source=$source.Replace($encodingAnchor,$encodingNew.Replace("`r",''))
     $fatalAnchor='                   line.IndexOf("FATAL ERROR",StringComparison.OrdinalIgnoreCase)>=0 ||'
     $fatalNew=@'
                    line.IndexOf("<EXCEPTION>",StringComparison.OrdinalIgnoreCase)>=0 ||
@@ -222,7 +225,7 @@ if(-not $source.Contains('// C1207_SOLVER_DIAGNOSTICS_BEGIN')) {
     $head=$source.Substring(0,$gateStart)
     $gate=$source.Substring($gateStart)
     if(-not $gate.Contains($fatalAnchor)) { throw 'C12.07 fatal marker anchor missing.' }
-    $source=$head+$gate.Replace($fatalAnchor,$fatalNew.TrimEnd())
+    $source=$head+$gate.Replace($fatalAnchor,$fatalNew.Replace("`r",'').TrimEnd())
     [IO.File]::WriteAllText($path,$source,(New-Object Text.UTF8Encoding($false)))
 }
 
@@ -255,7 +258,7 @@ if(-not $source.Contains('// C1207_CONTACT_ORIENTATION_INFO')) {
 '@
     $anchor='        // C1207_SOLVER_DIAGNOSTICS_END'
     if(-not $source.Contains($anchor)) { throw 'C12.07 orientation information anchor missing.' }
-    $source=$source.Replace($anchor,$orientation+$anchor)
+    $source=$source.Replace($anchor,$orientation.Replace("`r",'')+$anchor)
     [IO.File]::WriteAllText($path,$source,(New-Object Text.UTF8Encoding($false)))
 }
 
@@ -274,7 +277,7 @@ if(-not $information.Contains('// C1207_VISIBLE_CONTACT_ORIENTATION')) {
                 text += "Workspace: " + _asterMaxSolveTransaction.Workspace + "\r\n";
 '@
     if(-not $information.Contains($anchor)) { throw 'C12.07 Solution Information anchor missing.' }
-    $information=$information.Replace($anchor,$new.TrimEnd())
+    $information=$information.Replace($anchor,$new.Replace("`r",'').TrimEnd())
     [IO.File]::WriteAllText($informationPath,$information,(New-Object Text.UTF8Encoding($false)))
 }
 
