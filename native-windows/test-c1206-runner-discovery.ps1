@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Root,
-    [Parameter(Mandatory=$true)][string]$OutDir
+    [Parameter(Mandatory=$true)][string]$OutDir,
+    [string]$ExpectedRelease='C12.06'
 )
 $ErrorActionPreference='Stop'
 $source=Get-Content -LiteralPath (Join-Path $Root 'PrePoMax/Forms/AsterMaxNativeSolveTransaction.cs') -Raw
@@ -70,13 +71,13 @@ try {
     Check 'obsolete environment-only instruction removed' $source.Contains('Set ASTERMAX_CODE_ASTER_RUNNER to a validated runner executable/script.') $false
     Check 'native setup action exposed on Solution ribbon' $ui.Contains('CommandTile("Instalar motor", "CODE_ASTER_SETUP", () => StartAsterMaxCodeAsterSetup(), true)') $true
     Check 'installed-folder selection remains available' $source.Contains('code-aster-windows.json') $true
-    Check 'application identifies repaired build' $globals.Contains('AsterMax Mechanical C12.06') $true
+    Check 'application identifies repaired build' $globals.Contains("AsterMax Mechanical $ExpectedRelease") $true
     Check 'native runner probe still exists' $source.Contains('ProbeCodeAsterRunner(runner)') $true
     Check 'no solver result evidence gate removed' $source.Contains('GetCodeAsterFailure(mess)') $true
 
     New-Item -ItemType Directory -Force $OutDir | Out-Null
     [ordered]@{
-        candidate='C12.06'
+        candidate=$ExpectedRelease
         test='production C# runner discovery methods against filesystem fixtures'
         checks=$checks
         discovery='PASS'

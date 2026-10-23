@@ -870,6 +870,32 @@
       "consumes": [
         "AsterMaxAsyncMeshAudit"
       ]
+    },
+    {
+      "id": "patch-c1207-contact-topology",
+      "file": "patch-c1207-contact-topology.ps1",
+      "depends": [
+        "patch-c1206-runner-discovery"
+      ],
+      "declares": [
+        "AsterMaxC1207ContactTopology"
+      ],
+      "consumes": [
+        "AsterMaxC1206RunnerDiscovery"
+      ]
+    },
+    {
+      "id": "patch-c1207-solver-diagnostics",
+      "file": "patch-c1207-solver-diagnostics.ps1",
+      "depends": [
+        "patch-c1207-contact-topology"
+      ],
+      "declares": [
+        "AsterMaxC1207SolverDiagnostics"
+      ],
+      "consumes": [
+        "AsterMaxC1207ContactTopology"
+      ]
     }
   ]
 }

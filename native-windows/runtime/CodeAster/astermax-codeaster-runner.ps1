@@ -4,6 +4,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The packaged caller reads this adapter as UTF-8, including under Windows
+# PowerShell 5.1. This changes this process only, never the user's environment.
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 
 function Fail([string]$Message, [int]$Code = 1) {
     [Console]::Error.WriteLine("ASTERMAX_CODE_ASTER_RUNNER: $Message")
@@ -26,6 +29,13 @@ function Invoke-NativeProcess([string]$Program, [string]$Arguments, [string]$Dir
     $p.StartInfo.CreateNoWindow = $true
     $p.StartInfo.RedirectStandardOutput = $true
     $p.StartInfo.RedirectStandardError = $true
+    $p.StartInfo.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $p.StartInfo.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
+    # Configure Python in the child environment, without changing $env: values
+    # in this process or persistent user/machine settings. EnvironmentVariables
+    # is available in .NET Framework used by Windows PowerShell 5.1.
+    $p.StartInfo.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
+    $p.StartInfo.EnvironmentVariables['PYTHONUTF8'] = '1'
     try {
         if (-not $p.Start()) { throw 'Could not start native Code_Aster process.' }
         $stdoutTask = $p.StandardOutput.ReadToEndAsync()
@@ -185,6 +195,123 @@ function Get-ExpectedOutputs([string]$Content, [string]$Stage) {
     return $outputs
 }
 
+function Read-CodeAsterText([string]$Path) {
+    # Keep the original diagnostic bytes on disk. Prefer BOM/strict UTF-8 for
+    # current runtimes; old native Windows launchers may use the ANSI code page.
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) { return '' }
+    $stream = New-Object IO.MemoryStream(,$bytes)
+    $reader = New-Object IO.StreamReader($stream, (New-Object Text.UTF8Encoding($false, $true)), $true)
+    try {
+        try { return $reader.ReadToEnd() }
+        catch [Text.DecoderFallbackException] {
+            $codePage = [Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage
+            if ($codePage -le 0) { $codePage = 1252 }
+            return [Text.Encoding]::GetEncoding($codePage).GetString($bytes)
+        }
+    } finally {
+        $reader.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Get-CodeAsterFailureEvidence([string]$MessText, [string]$Stdout, [string]$Stderr) {
+    # A launcher can print DIAGNOSTIC JOB : OK and return zero after a solver
+    # fatal. Inspect the solver's own message first, including before FIN output.
+    # Do not require solver identity here: legacy transaction tests deliberately
+    # use plain-text stubs. Probe readiness has its separate, stronger contract.
+    $firstFailure = $null
+    foreach ($sourceText in @($MessText, $Stdout, $Stderr)) {
+        if ([string]::IsNullOrWhiteSpace($sourceText)) { continue }
+        $text = $sourceText -replace "`0", ''
+        foreach ($raw in ($text -split "`r?`n")) {
+            $line = $raw.Trim()
+            $marker = $null
+            if ($line -match '^(?:EXECUTION_CODE_ASTER_EXIT_[^=\s]+|EXIT_CODE)\s*=\s*(.+)$') {
+                $exitCode = 0
+                if (-not [int]::TryParse($Matches[1].Trim(), [ref]$exitCode)) {
+                    $marker = 'CODE_ASTER_INVALID_EXIT'
+                } elseif ($exitCode -ne 0) {
+                    $marker = 'CODE_ASTER_NONZERO_EXIT'
+                }
+            }
+            # Native Code_Aster can label the same fatal diagnostic <F> or
+            # <EXCEPTION>; neither is overridden by a later normal FIN/exit 0.
+            if ($line -match '(?i)(?:^\s*[!|]?\s*<(?:F|EXCEPTION)(?:>|_)|<(?:F|EXCEPTION)>\s*<|FATAL ERROR|ERREUR[ _]+FATALE|Traceback \(most recent call last\)|_ABNORMAL_ABORT|DIAGNOSTIC\s+JOB\s*:\s*<(?:F|EXCEPTION)>)') {
+                $tag = [regex]::Match($line, '(?i)<(?:F|EXCEPTION)>\s*<(?<marker>[A-Z][A-Z0-9_]+)>|<(?:F|EXCEPTION)>_(?<marker>[A-Z][A-Z0-9_]+)')
+                if ($tag.Success) { $marker = $tag.Groups['marker'].Value.ToUpperInvariant() }
+                elseif ($line -match '(?i)Traceback \(most recent call last\)') { $marker = 'PYTHON_TRACEBACK' }
+                else { $marker = 'CODE_ASTER_FATAL' }
+            }
+            if (-not $marker) { continue }
+            $failure = [pscustomobject]@{
+                Marker = $marker
+                ContactZones = @()
+                SharedSlaveNodes = $null
+                Message = ('Code_Aster reported fatal diagnostic ' + $marker + '.')
+            }
+            if ($marker -eq 'CONTACT2_16') {
+                # Parse only this diagnostic's following text, not earlier zones
+                # echoed from the command file. ASCII digits survive old OEM or
+                # ANSI accent corruption; a missing translation stays unknown.
+                $start = $text.IndexOf($raw, [StringComparison]::Ordinal)
+                $context = $text.Substring($start, [Math]::Min(4096, $text.Length - $start))
+                $context = ($context -replace '[!|]', ' ') -replace '\s+', ' '
+                $zones = [regex]::Match($context, '(?i)\bzones?\s+de\s+contact\s+num[^0-9]{0,30}(?<a>[0-9]+)\s+et\s+num[^0-9]{0,30}(?<b>[0-9]+)\s+ont\s+(?<n>[0-9]+)\s+n\S*\s+communs')
+                if (-not $zones.Success) {
+                    $zones = [regex]::Match($context, '(?i)\bcontact\s+zones?\s+(?:number\s+)?(?<a>[0-9]+)\s+and\s+(?:number\s+)?(?<b>[0-9]+)\s+have\s+(?<n>[0-9]+)\s+(?:common|shared)\s+nodes')
+                }
+                if ($zones.Success) {
+                    $a = 0; $b = 0; $n = 0
+                    if ([int]::TryParse($zones.Groups['a'].Value, [ref]$a) -and
+                        [int]::TryParse($zones.Groups['b'].Value, [ref]$b) -and
+                        [int]::TryParse($zones.Groups['n'].Value, [ref]$n)) {
+                        $failure.ContactZones = @($a, $b)
+                        $failure.SharedSlaveNodes = $n
+                        $failure.Message = "Code_Aster CONTACT2_16: contact zones $a and $b share $n slave nodes."
+                    }
+                }
+                return $failure
+            }
+            if (-not $firstFailure) { $firstFailure = $failure }
+        }
+    }
+    return $firstFailure
+}
+
+function Write-RunnerFailureDiagnostic {
+    param(
+        [string]$Stage, [string]$MessPath, [string]$StdoutPath, [string]$StderrPath,
+        [string]$Kind, [int]$ExitCode, $BackendExitCode, $Failure
+    )
+    $diagnosticPath = Join-Path $Stage 'astermax-runner-diagnostic.json'
+    $message = [string]$Failure.Message
+    if ($message.Length -gt 500) { $message = $message.Substring(0, 500) }
+    $diagnostic = [ordered]@{
+        schema = 'astermax-codeaster-runner-diagnostic/v1'
+        status = 'failed'
+        failure_kind = $Kind
+        marker = [string]$Failure.Marker
+        exit_code = $ExitCode
+        backend_exit_code = $BackendExitCode
+        contact_zones = @($Failure.ContactZones)
+        shared_slave_nodes = $Failure.SharedSlaveNodes
+        message = $message
+        stage = $Stage
+        mess_path = $MessPath
+        stdout_path = $StdoutPath
+        stderr_path = $StderrPath
+    }
+    [IO.File]::WriteAllText($diagnosticPath, ($diagnostic | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    $markerLine = 'ASTERMAX_CODE_ASTER_FAILURE=' + $Failure.Marker
+    if (@($Failure.ContactZones).Count -eq 2) {
+        $markerLine += ';contact_zones=' + ($Failure.ContactZones -join ',')
+        $markerLine += ';shared_slave_nodes=' + $Failure.SharedSlaveNodes
+    }
+    Write-Output $markerLine
+    Write-Output ('ASTERMAX_CODE_ASTER_DIAGNOSTIC=' + $diagnosticPath)
+}
+
 function Get-CodeAsterProbeEvidence([string]$MessText, [string]$Stdout, [string]$Stderr) {
     # A native launcher may return zero even when Code_Aster reports a fatal
     # diagnostic. Match the transaction's failure semantics before accepting a
@@ -208,7 +335,7 @@ function Get-CodeAsterProbeEvidence([string]$MessText, [string]$Stdout, [string]
             }
             $normalStop = $true
         }
-        if ($line -match '(?i)(?:^\s*[!|]?\s*<F(?:>|_)|<F>\s*<|FATAL ERROR|ERREUR[ _]+FATALE|Traceback \(most recent call last\)|_ABNORMAL_ABORT)') {
+        if ($line -match '(?i)(?:^\s*[!|]?\s*<(?:F|EXCEPTION)(?:>|_)|<(?:F|EXCEPTION)>\s*<|FATAL ERROR|ERREUR[ _]+FATALE|Traceback \(most recent call last\)|_ABNORMAL_ABORT|DIAGNOSTIC\s+JOB\s*:\s*<(?:F|EXCEPTION)>)') {
             $failure = 'Code_Aster fatal diagnostic: ' + $line
             break
         }
@@ -251,7 +378,7 @@ function Probe-CodeAster([string]$Backend) {
         [IO.File]::WriteAllText($export, $exportText + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
         $run = Invoke-WindowsBackend $Backend $export $stage 120000
         $messReady = (Test-Path -LiteralPath $mess -PathType Leaf) -and ((Get-Item -LiteralPath $mess).Length -gt 0)
-        $messText = $(if ($messReady) { [IO.File]::ReadAllText($mess) } else { '' })
+        $messText = $(if ($messReady) { Read-CodeAsterText $mess } else { '' })
         $evidence = Get-CodeAsterProbeEvidence $messText $run.Stdout $run.Stderr
         return [pscustomobject]@{
             Ready = ($run.ExitCode -eq 0 -and $messReady -and $evidence.Ready)
@@ -312,6 +439,10 @@ $resolvedWorkspace = (Resolve-Path -LiteralPath $Workspace).Path
 $resolvedExport = (Resolve-Path -LiteralPath $ExportFile).Path
 $stage = New-SafeStageDirectory 'solve'
 $completed = $false
+$result = $null
+$expectedOutputs = @{}
+$stdoutPath = Join-Path $stage 'astermax-native.stdout.log'
+$stderrPath = Join-Path $stage 'astermax-native.stderr.log'
 try {
     Copy-Workspace $resolvedWorkspace $stage
     $portableExport = Join-Path $stage 'astermax-windows.export'
@@ -319,7 +450,7 @@ try {
     $expectedOutputs = Get-ExpectedOutputs $content $stage
     # A rerun may copy recent outputs into the stage. Remove the exact declared
     # outputs before launch; timestamps alone cannot prove that this run wrote them.
-    foreach ($path in $expectedOutputs.Values) {
+    foreach ($path in @($expectedOutputs.Values) + @($stdoutPath, $stderrPath, (Join-Path $stage 'astermax-runner-diagnostic.json'))) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
     [IO.File]::WriteAllText($portableExport, $content + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
@@ -330,21 +461,42 @@ try {
     Write-Output ("ASTERMAX_CODE_ASTER_STAGE=" + $stage)
 
     $result = Invoke-WindowsBackend $native $portableExport $stage 3600000
-    if ($result.Stdout) { Write-Output $result.Stdout.TrimEnd() }
-    if ($result.Stderr) { [Console]::Error.WriteLine($result.Stderr.TrimEnd()) }
+    [IO.File]::WriteAllText($stdoutPath, $result.Stdout, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($stderrPath, $result.Stderr, (New-Object Text.UTF8Encoding($false)))
+    $messText = $(if (Test-Path -LiteralPath $expectedOutputs.mess -PathType Leaf) { Read-CodeAsterText $expectedOutputs.mess } else { '' })
+    $failure = Get-CodeAsterFailureEvidence $messText $result.Stdout $result.Stderr
+    if ($failure) {
+        Write-RunnerFailureDiagnostic $stage $expectedOutputs.mess $stdoutPath $stderrPath 'solver_fatal' 31 $result.ExitCode $failure
+        Fail $failure.Message 31
+    }
 
-    if ($result.ExitCode -ne 0) { Fail "Native Windows Code_Aster returned exit code $($result.ExitCode)." $result.ExitCode }
+    if ($result.ExitCode -ne 0) {
+        $failure = [pscustomobject]@{ Marker='NATIVE_PROCESS_EXIT'; ContactZones=@(); SharedSlaveNodes=$null; Message="Native Windows Code_Aster returned exit code $($result.ExitCode)." }
+        Write-RunnerFailureDiagnostic $stage $expectedOutputs.mess $stdoutPath $stderrPath 'process_exit' $result.ExitCode $result.ExitCode $failure
+        Fail $failure.Message $result.ExitCode
+    }
     foreach ($kind in @('mess','rmed')) {
         $path = $expectedOutputs[$kind]
         if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
-            Fail "Native solver did not produce the declared non-empty $kind output: $path" 30
+            $failure = [pscustomobject]@{ Marker='MISSING_OUTPUT'; ContactZones=@(); SharedSlaveNodes=$null; Message="Native solver did not produce the declared non-empty $kind output: $path" }
+            Write-RunnerFailureDiagnostic $stage $expectedOutputs.mess $stdoutPath $stderrPath 'missing_output' 30 $result.ExitCode $failure
+            Fail $failure.Message 30
         }
     }
 
+    if ($result.Stdout) { Write-Output $result.Stdout.TrimEnd() }
+    if ($result.Stderr) { [Console]::Error.WriteLine($result.Stderr.TrimEnd()) }
     Copy-Workspace $stage $resolvedWorkspace
     $completed = $true
     Write-Output 'ASTERMAX_CODE_ASTER_RUNNER=SUCCESS'
     exit 0
+}
+catch {
+    $failure = [pscustomobject]@{ Marker='RUNNER_ERROR'; ContactZones=@(); SharedSlaveNodes=$null; Message=$_.Exception.Message }
+    try {
+        Write-RunnerFailureDiagnostic $stage $expectedOutputs.mess $stdoutPath $stderrPath 'runner_error' 1 $(if ($result) { $result.ExitCode } else { $null }) $failure
+    } catch { [Console]::Error.WriteLine('Could not write the structured runner diagnostic: ' + $_.Exception.Message) }
+    Fail $failure.Message 1
 }
 finally {
     if ($completed) {

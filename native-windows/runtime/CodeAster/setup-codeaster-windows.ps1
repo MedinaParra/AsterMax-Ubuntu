@@ -18,7 +18,7 @@ function Save-SetupResult([string]$Status, [string]$Message) {
     if (-not $script:logRoot) { return }
     [ordered]@{
         schema = 'astermax-native-setup/v1'
-        release = 'C12.06'
+        release = 'C12.07'
         status = $Status
         message = $Message
         completed_utc = [DateTime]::UtcNow.ToString('o')
@@ -45,6 +45,8 @@ function Get-NativeProbe {
     $process.StartInfo.CreateNoWindow = $true
     $process.StartInfo.RedirectStandardOutput = $true
     $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $process.StartInfo.StandardErrorEncoding = New-Object System.Text.UTF8Encoding($false)
     try {
         if (-not $process.Start()) { throw 'No se pudo ejecutar la comprobacion del motor.' }
         $outTask = $process.StandardOutput.ReadToEndAsync()
@@ -127,13 +129,13 @@ try {
     }
     New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
     $script:logRoot = (Resolve-Path -LiteralPath $LogDirectory).Path
-    Write-Host 'ASTERMAX C12.06 - CONFIGURACION DE CODE_ASTER PARA WINDOWS' -ForegroundColor Cyan
+    Write-Host 'ASTERMAX C12.07 - CONFIGURACION DE CODE_ASTER PARA WINDOWS' -ForegroundColor Cyan
     Write-Host 'Se comprobara la instalacion existente antes de descargar el motor original del proveedor.'
     Write-Host ('Registro: ' + $script:logRoot)
     $script:probe = Get-NativeProbe
     if ($script:probe.ready -eq $true) {
         Save-SetupResult 'PASS' 'Instalacion nativa existente comprobada; no se reinstalo.'
-        Write-Host 'Code_Aster ya funciona. Puede volver a AsterMax y usar Solucion > Resolver.' -ForegroundColor Green
+        Write-Host 'Code_Aster ya funciona. Puede volver a AsterMax y usar Solucion > Ejecutar.' -ForegroundColor Green
         exit 0
     }
     # An existing launcher which fails a real probe requires diagnosis; reinstalling
@@ -181,12 +183,12 @@ try {
     }
     $installRoot = Split-Path -Parent $script:probe.backend
     $config | Add-Member -NotePropertyName installation -NotePropertyValue $installRoot -Force
-    $config | Add-Member -NotePropertyName configured_by -NotePropertyValue 'AsterMax C12.06' -Force
+    $config | Add-Member -NotePropertyName configured_by -NotePropertyValue 'AsterMax C12.07' -Force
     $tempConfig = $configPath + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     [IO.File]::WriteAllText($tempConfig,($config | ConvertTo-Json -Depth 10),(New-Object Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $tempConfig -Destination $configPath -Force
     Save-SetupResult 'PASS' 'Instalacion y prueba real del motor nativo completadas.'
-    Write-Host 'LISTO. Vuelva a AsterMax y use Solucion > Resolver.' -ForegroundColor Green
+    Write-Host 'LISTO. Vuelva a AsterMax y use Solucion > Ejecutar.' -ForegroundColor Green
     if ($script:installExit -eq 3010) { Write-Host 'El instalador tambien recomienda reiniciar Windows al terminar su trabajo.' }
     exit 0
 }
