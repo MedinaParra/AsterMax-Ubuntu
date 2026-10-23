@@ -15,8 +15,11 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $OutDir=(Resolve-Path -LiteralPath $OutDir).Path
 
 function Find-AsterMaxAssembly([string]$FileName) {
-    $packaged=Join-Path $script:AsterMaxPackageRoot $FileName
-    if(Test-Path -LiteralPath $packaged -PathType Leaf){ return Get-Item -LiteralPath $packaged }
+    # Match the application's privatePath="lib;libs" within the shipped package.
+    foreach($relative in @($FileName,"lib/$FileName","libs/$FileName")){
+        $packaged=Join-Path $script:AsterMaxPackageRoot $relative
+        if(Test-Path -LiteralPath $packaged -PathType Leaf){ return Get-Item -LiteralPath $packaged }
+    }
     # The gate must fail if a shipped dependency is missing. The build tree and
     # restored NuGet packages are deliberately not dependency search locations.
     return $null

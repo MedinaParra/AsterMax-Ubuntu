@@ -278,6 +278,23 @@ jobs:
             native_solver_validation='PENDING';native_contact_validation='PENDING';gui_interactive_validation='NOT_RUN'
           } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $dest 'ASTERMAX_BUILD_MANIFEST.json') -Encoding utf8
           "ASTERMAX_PACKAGE_DIR=$dest" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Preflight contact export from the packaged executable
+        id: contact_export_preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $preflight="$PWD/dist/Audit/C1207/ContactExportPreflight"
+          if(Test-Path -LiteralPath $preflight){ throw 'Contact export preflight requires a fresh evidence directory.' }
+          $python=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/Python/python.exe'
+          $windowsPowerShell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+          $scripts="$PWD/native-windows/c1207-contact"
+          & $python (Join-Path $scripts 'generate_contact_fixture.py') --out $preflight
+          if($LASTEXITCODE -ne 0){ throw "Contact export preflight fixture generation failed: $LASTEXITCODE" }
+          & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'export-compiled-contact.ps1') -Root "$PWD/upstream" -Dist $env:ASTERMAX_PACKAGE_DIR -Contract (Join-Path $preflight 'contact-contract.json') -OutDir (Join-Path $preflight 'corrected') -BaseName 'astermax-contact'
+          if($LASTEXITCODE -ne 0){ throw "Contact export preflight from packaged executable failed: $LASTEXITCODE" }
+          & $python (Join-Path $scripts 'prepare_contact_validation.py') --root $preflight
+          if($LASTEXITCODE -ne 0){ throw "Contact export preflight input validation failed: $LASTEXITCODE" }
+          Write-Host 'C12.07 packaged contact export preflight PASS; solver execution NOT_RUN.'
       - name: Install genuine native Windows Code_Aster using packaged setup
         id: native_setup
         shell: pwsh
@@ -418,6 +435,7 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           CONTRACT_OUTCOME: ${{ steps.contract.outcome }}
           ASSEMBLE_OUTCOME: ${{ steps.assemble.outcome }}
+          CONTACT_EXPORT_PREFLIGHT_OUTCOME: ${{ steps.contact_export_preflight.outcome }}
           NATIVE_SETUP_OUTCOME: ${{ steps.native_setup.outcome }}
           NATIVE_SOLVE_OUTCOME: ${{ steps.native_solve.outcome }}
           NATIVE_CONTACT_OUTCOME: ${{ steps.native_contact.outcome }}
@@ -428,7 +446,7 @@ jobs:
             candidate='C12.07';branch=$env:GITHUB_REF_NAME;commit=$env:GITHUB_SHA
             runner_discovery=$env:DISCOVERY_OUTCOME;native_probe_contract=$env:NATIVE_PROBE_OUTCOME;build=$env:BUILD_OUTCOME;distribution_contract=$env:CONTRACT_OUTCOME
             contact_topology=$env:CONTACT_TOPOLOGY_OUTCOME;solver_diagnostics=$env:SOLVER_DIAGNOSTICS_OUTCOME;runner_failures=$env:RUNNER_FAILURES_OUTCOME;stale_output_regression=$env:RUNNER_REGRESSION_OUTCOME
-            assembly=$env:ASSEMBLE_OUTCOME;native_setup=$env:NATIVE_SETUP_OUTCOME;native_solve_med=$env:NATIVE_SOLVE_OUTCOME
+            assembly=$env:ASSEMBLE_OUTCOME;contact_export_preflight=$env:CONTACT_EXPORT_PREFLIGHT_OUTCOME;native_setup=$env:NATIVE_SETUP_OUTCOME;native_solve_med=$env:NATIVE_SOLVE_OUTCOME
             native_contact_med_equilibrium=$env:NATIVE_CONTACT_OUTCOME
             package_integrity=$env:PACKAGE_OUTCOME;solver_installer_bundled=$false;bootstrap_bundled=($env:ASSEMBLE_OUTCOME -eq 'success');native_installation_required=$true
             target='windows-x64';gui_interactive='NOT_RUN';exact_large_step='NOT_RUN';dynamic_performance='NOT_RUN';benchmark_values_invented=$false
