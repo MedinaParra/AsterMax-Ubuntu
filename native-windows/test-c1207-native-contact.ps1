@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$Root,
     [Parameter(Mandatory=$true)][string]$Dist,
-    [string]$OutDir
+    [string]$OutDir,
+    [switch]$PrepareOnly
 )
 $ErrorActionPreference='Stop'
 if($env:OS -ne 'Windows_NT'){ throw 'This admission test requires genuine native Windows Code_Aster.' }
@@ -41,6 +42,11 @@ function Invoke-BenchmarkProcess([string]$Program,[string[]]$Arguments,[string]$
     $process.StartInfo.StandardErrorEncoding=New-Object Text.UTF8Encoding($false)
     $process.StartInfo.EnvironmentVariables['PYTHONUTF8']='1'
     $process.StartInfo.EnvironmentVariables['PYTHONIOENCODING']='utf-8'
+    if([IO.Path]::GetFileName($Program) -ieq 'powershell.exe'){
+        # Process.Start bypasses pwsh's Windows PowerShell module-path adjustment.
+        # Let the child rebuild its defaults without changing the parent environment.
+        $process.StartInfo.EnvironmentVariables.Remove('PSModulePath')
+    }
     try {
         if(-not $process.Start()){ throw "Unable to start $Program" }
         $stdout=$process.StandardOutput.ReadToEndAsync()
@@ -65,13 +71,6 @@ function Require-Success([object]$Result,[string]$Stage) {
     }
 }
 
-Write-Host 'CONTACT_STAGE: require an already installed native Windows solver'
-$probeRun=Invoke-BenchmarkProcess $powershell @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$runner,'probe') $OutDir (Join-Path $OutDir 'probe') 180
-Require-Success $probeRun 'Native contact probe'
-$probeRun.Stdout | Set-Content -LiteralPath (Join-Path $OutDir 'native-probe.json') -Encoding UTF8
-$probe=$probeRun.Stdout | ConvertFrom-Json
-if(-not $probe.ready -or $probe.transport -ne 'WINDOWS_NATIVE' -or $probe.wsl_required -ne $false){ throw 'Native contact smoke refuses a missing or non-native solver.' }
-
 Write-Host 'CONTACT_STAGE: generate three-body model with twelve overlapping slave nodes'
 $generated=Invoke-BenchmarkProcess $python @((Join-Path $scripts 'generate_contact_fixture.py'),'--out',$OutDir) $OutDir (Join-Path $OutDir 'generate') 60
 Require-Success $generated 'Contact fixture generation'
@@ -85,6 +84,18 @@ $exported=Invoke-BenchmarkProcess $powershell @('-NoLogo','-NoProfile','-Executi
 Require-Success $exported 'Compiled production contact export'
 $prepared=Invoke-BenchmarkProcess $python @((Join-Path $scripts 'prepare_contact_validation.py'),'--root',$OutDir) $OutDir (Join-Path $OutDir 'prepare') 60
 Require-Success $prepared 'Production contact input validation'
+
+if($PrepareOnly){
+    Write-Host 'C12.07 packaged contact export preflight PASS; solver execution NOT_RUN.'
+    return
+}
+
+Write-Host 'CONTACT_STAGE: require an already installed native Windows solver'
+$probeRun=Invoke-BenchmarkProcess $powershell @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$runner,'probe') $OutDir (Join-Path $OutDir 'probe') 180
+Require-Success $probeRun 'Native contact probe'
+$probeRun.Stdout | Set-Content -LiteralPath (Join-Path $OutDir 'native-probe.json') -Encoding UTF8
+$probe=$probeRun.Stdout | ConvertFrom-Json
+if(-not $probe.ready -or $probe.transport -ne 'WINDOWS_NATIVE' -or $probe.wsl_required -ne $false){ throw 'Native contact smoke refuses a missing or non-native solver.' }
 
 Write-Host 'CONTACT_STAGE: original orientations must fail with genuine CONTACT2_16'
 $legacy=Invoke-BenchmarkProcess $powershell @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$runner,(Join-Path $original ($stem+'.export')),$original) $original (Join-Path $original 'runner')

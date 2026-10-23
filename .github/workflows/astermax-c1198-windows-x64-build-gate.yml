@@ -285,16 +285,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $preflight="$PWD/dist/Audit/C1207/ContactExportPreflight"
           if(Test-Path -LiteralPath $preflight){ throw 'Contact export preflight requires a fresh evidence directory.' }
-          $python=Join-Path $env:ASTERMAX_PACKAGE_DIR 'AsterMaxRuntime/Python/python.exe'
-          $windowsPowerShell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
-          $scripts="$PWD/native-windows/c1207-contact"
-          & $python (Join-Path $scripts 'generate_contact_fixture.py') --out $preflight
-          if($LASTEXITCODE -ne 0){ throw "Contact export preflight fixture generation failed: $LASTEXITCODE" }
-          & $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'export-compiled-contact.ps1') -Root "$PWD/upstream" -Dist $env:ASTERMAX_PACKAGE_DIR -Contract (Join-Path $preflight 'contact-contract.json') -OutDir (Join-Path $preflight 'corrected') -BaseName 'astermax-contact'
-          if($LASTEXITCODE -ne 0){ throw "Contact export preflight from packaged executable failed: $LASTEXITCODE" }
-          & $python (Join-Path $scripts 'prepare_contact_validation.py') --root $preflight
-          if($LASTEXITCODE -ne 0){ throw "Contact export preflight input validation failed: $LASTEXITCODE" }
-          Write-Host 'C12.07 packaged contact export preflight PASS; solver execution NOT_RUN.'
+          ./native-windows/test-c1207-native-contact.ps1 -Root "$PWD/upstream" -Dist $env:ASTERMAX_PACKAGE_DIR -OutDir $preflight -PrepareOnly
       - name: Install genuine native Windows Code_Aster using packaged setup
         id: native_setup
         shell: pwsh
