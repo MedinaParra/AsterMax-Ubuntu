@@ -1,0 +1,1 @@
+AsterMax AI Windows package validation marker.

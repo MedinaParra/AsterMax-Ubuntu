@@ -1,0 +1,114 @@
+name: C8.46 Engineering Model Tree Windows
+
+on:
+  push:
+    branches:
+      - agent/c8-46-engineering-model-tree
+    paths:
+      - '.github/workflows/c8-46-engineering-model-tree.yml'
+      - 'integrations/prepomax-codeaster/**'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-46-engineering-model-tree-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify engineering tree source contract
+        shell: pwsh
+        run: |
+          $src = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxEngineeringTree.cs' -Raw
+          foreach ($token in @('Engineering Model','Observed state · evidence aware','Geometry','Mesh','Materials','Boundary Conditions','Loads','Analysis','Results','Loaded ≠ solver verified','Verified only from admitted solver evidence')) {
+            if ($src -notmatch [regex]::Escape($token)) { throw "Missing C8.46 tree token: $token" }
+          }
+          if ($src -notmatch 'ProbeAny') { throw 'Controller/model collection probe missing.' }
+          if ($src -match 'State\.Verified') { throw 'Engineering tree must not infer solver verification.' }
+          $integration = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxAiIntegration.cs' -Raw
+          if ($integration -notmatch 'InstallAsterMaxEngineeringTree') { throw 'Engineering tree not integrated into FrmMain.' }
+      - name: Launch native GUI and capture workspace
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeWin {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe = (Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "GUI exited early. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'GUI did not create a native main window.' }
+          if ($proc.MainWindowTitle -notmatch '^AsterMax Mechanical') { throw "Unexpected window title: $($proc.MainWindowTitle)" }
+          [NativeWin]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 2
+          $rect = New-Object NativeWin+RECT
+          if (-not [NativeWin]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)) { throw 'Unable to read native window bounds.' }
+          $w = [Math]::Max(1, $rect.Right - $rect.Left)
+          $h = [Math]::Max(1, $rect.Bottom - $rect.Top)
+          $bmp = New-Object System.Drawing.Bitmap $w, $h
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          try { $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size) }
+          finally { $g.Dispose() }
+          $bmp.Save((Join-Path $PWD 'artifact/C8.46_ENGINEERING_WORKSPACE.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+          $bmp.Dispose()
+          @{
+            title=$proc.MainWindowTitle; window_width=$w; window_height=$h;
+            screenshot_sha256=(Get-FileHash 'artifact/C8.46_ENGINEERING_WORKSPACE.png' -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 artifact/C8.46_WINDOW_EVIDENCE.json
+          Stop-Process -Id $proc.Id -Force
+      - name: Write C8.46 evidence
+        shell: pwsh
+        run: |
+          @{
+            schema='astermax.engineering-model-tree.v1'; version='C8.46'; commit='${{ github.sha }}';
+            engineering_tree=$true; controller_context_read=$true; model_collection_counts=$true;
+            stages=@('Geometry','Mesh','Materials','BoundaryConditions','Loads','Analysis','Results');
+            states=@('Present','Missing','Unknown'); verified_state_inferred=$false;
+            admitted_solver_evidence_required_for_verified=$true; unit_contract_visible='mm-N-MPa';
+            solver_logic_modified=$false; industrial_validation=$false; ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 artifact/C8.46_UI_EVIDENCE.json
+      - name: Upload C8.46 visual evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.46-Engineering-Model-Tree-${{ github.sha }}
+          path: |
+            artifact/C8.46_UI_EVIDENCE.json
+            artifact/C8.46_WINDOW_EVIDENCE.json
+            artifact/C8.46_ENGINEERING_WORKSPACE.png
+          if-no-files-found: error
+          retention-days: 14

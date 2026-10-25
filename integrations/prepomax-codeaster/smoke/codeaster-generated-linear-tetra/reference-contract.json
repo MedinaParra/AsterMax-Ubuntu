@@ -1,0 +1,69 @@
+{
+  "description": "Closed-form one-element linear tetra reference. Nodes 1/2/3 are fixed, node 4 has FX=1000 N, E=210 GPa, nu=0.3, V=1/6 m^3. With only node-4 DOFs free, K44_xx=G*V and DX4=FX/(G*V). The constant tensor shear strain EPXZ=DX4/2 and SIXZ=G*DX4.",
+  "expectations": [
+    {
+      "table": "PPM_DEPL",
+      "node": 4,
+      "component": "DX",
+      "expected": 7.428571428571429e-08,
+      "abs_tol": 1e-14,
+      "rel_tol": 2e-06
+    },
+    {
+      "table": "PPM_DEPL",
+      "node": 4,
+      "component": "DY",
+      "expected": 0.0,
+      "abs_tol": 1e-14,
+      "rel_tol": 0.0
+    },
+    {
+      "table": "PPM_DEPL",
+      "node": 4,
+      "component": "DZ",
+      "expected": 0.0,
+      "abs_tol": 1e-14,
+      "rel_tol": 0.0
+    },
+    {
+      "table": "PPM_STRESS_S",
+      "node": 4,
+      "component": "SIXZ",
+      "expected": 6000.0,
+      "abs_tol": 0.01,
+      "rel_tol": 2e-06
+    },
+    {
+      "table": "PPM_STRAIN_S",
+      "node": 4,
+      "component": "EPXZ",
+      "expected": 3.7142857142857144e-08,
+      "abs_tol": 1e-14,
+      "rel_tol": 2e-06
+    },
+    {
+      "table": "PPM_STRESS_N",
+      "node": 4,
+      "component": "SIXX",
+      "expected": 0.0,
+      "abs_tol": 0.01,
+      "rel_tol": 0.0
+    },
+    {
+      "table": "PPM_STRESS_N",
+      "node": 4,
+      "component": "SIYY",
+      "expected": 0.0,
+      "abs_tol": 0.01,
+      "rel_tol": 0.0
+    },
+    {
+      "table": "PPM_STRESS_N",
+      "node": 4,
+      "component": "SIZZ",
+      "expected": 0.0,
+      "abs_tol": 0.01,
+      "rel_tol": 0.0
+    }
+  ]
+}

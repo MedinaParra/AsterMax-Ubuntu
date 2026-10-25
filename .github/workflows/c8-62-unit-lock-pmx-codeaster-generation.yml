@@ -1,0 +1,133 @@
+name: C8.62 Unit Lock PMX CodeAster Generation Windows
+
+on:
+  push:
+    branches: [agent/c8-62-unit-lock-pmx-codeaster-generation]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap pinned AsterMax tree
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify C8.62 unit and translator contracts
+        shell: pwsh
+        run: |
+          $unit=Get-Content 'build/PrePoMax-CodeAster/CaeGlobals/UnitSystem/UnitSystem.cs' -Raw
+          foreach($token in @('MM_TON_S_C','LengthUnit.Millimeter','ForceUnit.Newton','PressureUnit.Megapascal')) {
+            if($unit -notmatch [regex]::Escape($token)){throw "Pinned unit contract changed: $token"}
+          }
+          $model=Get-Content 'build/PrePoMax-CodeAster/CaeModel/FeModel.cs' -Raw
+          if($model -notmatch 'public UnitSystem UnitSystem'){throw 'Pinned FeModel UnitSystem property contract changed.'}
+          $translator=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterModelTranslator.cs' -Raw
+          foreach($token in @('WriteStudy(FeModel model, CodeAsterCaseOptions options)','DEFI_MATERIAU(ELAS=_F(E=','FX=','MECA_STATIQUE','SIEQ_NOEU')) {
+            if($translator -notmatch [regex]::Escape($token)){throw "Code_Aster translator contract changed: $token"}
+          }
+          $setup=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxStructuralSetupHarness.cs' -Raw
+          foreach($token in @('new UnitSystem(UnitSystemType.MM_TON_S_C)','mm_n_mpa_unit_lock','210000.0','1000.0')) {
+            if($setup -notmatch [regex]::Escape($token)){throw "Missing setup unit-lock token: $token"}
+          }
+          $gen=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxCodeAsterGenerationHarness.cs' -Raw
+          foreach($token in @('SaveToPmx','_controller.Open(pmxPath)','CodeAsterModelTranslator.WriteStudy','comm_unit_semantics_verified','unit_pmx_codeaster_generation_qualified')) {
+            if($gen -notmatch [regex]::Escape($token)){throw "Missing C8.62 generation token: $token"}
+          }
+          if($gen -match 'solver_verified\s*[=:]\s*true|industrial_validation\s*[=:]\s*true|ansys_equivalence\s*[=:]\s*true'){throw 'C8.62 must not synthesize solver or industrial validation.'}
+      - name: Fetch pinned CAD runtime and STEP/mm fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){ $source=Join-Path $runtimeRoot $folder; if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force} }
+          $fixture='build/AsterMax_C8.62_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'STEP fixture no longer declares SI millimetres.'}
+          "ASTERMAX_STEP_FIXTURE=$((Resolve-Path $fixture).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Native STEP mesh structural PMX and CodeAster generation proof
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public static class NativeWin62 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          New-Item -ItemType Directory -Force artifact/C8.62_study | Out-Null
+          $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+          $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_STEP_FIXTURE
+          $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.62_STEP_NETGEN_RUNTIME.json')
+          $env:ASTERMAX_STRUCTURAL_SETUP_FIXTURE='1'
+          $env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.62_STRUCTURAL_SETUP_RUNTIME.json')
+          $env:ASTERMAX_CODEASTER_GENERATION_FIXTURE='1'
+          $env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.62_CODEASTER_GENERATION_RUNTIME.json')
+          $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR=(Join-Path $PWD 'artifact/C8.62_study')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native AsterMax window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $meshEv=$env:ASTERMAX_STEP_MESH_EVIDENCE_PATH
+          $setupEv=$env:ASTERMAX_STRUCTURAL_SETUP_EVIDENCE_PATH
+          $genEv=$env:ASTERMAX_CODEASTER_GENERATION_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(210)
+          while(((-not (Test-Path $meshEv)) -or (-not (Test-Path $setupEv)) -or (-not (Test-Path $genEv))) -and (Get-Date)-lt $proofDeadline){
+            Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during C8.62 runtime proof'}
+          }
+          foreach($ev in @($meshEv,$setupEv,$genEv)){if(-not(Test-Path $ev)){throw "Missing runtime evidence: $ev"}}
+          $m=Get-Content $meshEv -Raw | ConvertFrom-Json
+          $s=Get-Content $setupEv -Raw | ConvertFrom-Json
+          $g=Get-Content $genEv -Raw | ConvertFrom-Json
+          Write-Host '--- C8.62 setup evidence ---'; Get-Content $setupEv -Raw
+          Write-Host '--- C8.62 generation evidence ---'; Get-Content $genEv -Raw
+          if(-not $m.step_to_netgen_mesh_qualified){throw "STEP->NetGen prerequisite failed: $($m.error)"}
+          if(-not $s.structural_setup_qualified -or -not $s.mm_n_mpa_unit_lock){throw "Structural/unit setup failed: $($s.error)"}
+          if($s.model_unit_system_type -ne 'MM_TON_S_C' -or $s.length_unit -ne 'mm' -or $s.force_unit -ne 'N' -or $s.pressure_unit -ne 'MPa'){throw 'Explicit mm/N/MPa unit semantics not observed.'}
+          if(-not $g.pmx_structural_roundtrip_qualified){throw "PMX structural roundtrip failed: $($g.error)"}
+          if(-not $g.comm_unit_semantics_verified -or -not $g.mail_nonempty -or -not $g.export_contract_verified){throw "Generated study semantic gate failed: $($g.error)"}
+          if(-not $g.translation_warnings_clean -or -not $g.unit_pmx_codeaster_generation_qualified){throw "Code_Aster generation qualification failed: $($g.translation_warnings) $($g.error)"}
+          if($g.solver_executed -or $g.solver_verified -or $g.industrial_validation -or $g.ansys_equivalence){throw 'C8.62 must remain generation-only, pre-solve qualification.'}
+          foreach($f in @('astermax_c862_static.comm','astermax_c862_static.mail','astermax_c862_static.export','AsterMax_C862_Structural.pmx')) {
+            $fp=Join-Path $env:ASTERMAX_CODEASTER_GENERATION_WORKDIR $f; if(-not(Test-Path $fp)){throw "Expected generated artifact missing: $f"}
+          }
+          [NativeWin62]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 3
+          $rect=New-Object NativeWin62+RECT; [NativeWin62]::GetWindowRect($p.MainWindowHandle,[ref]$rect)|Out-Null
+          $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
+          $bmp=New-Object Drawing.Bitmap $w,$h;$gr=[Drawing.Graphics]::FromImage($bmp)
+          try{$gr.CopyFromScreen($rect.Left,$rect.Top,0,0,$bmp.Size)}finally{$gr.Dispose()}
+          $png='artifact/C8.62_UNIT_PMX_CODEASTER_GENERATION.png';$bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png);$bmp.Dispose()
+          @{schema='astermax.c8.62-evidence.v1';commit='${{ github.sha }}';step_mesh_qualified=$true;structural_setup_qualified=$true;mm_n_mpa_unit_lock=$true;pmx_roundtrip_qualified=$true;codeaster_generation_qualified=$true;persisted_E_mpa=[double]$g.persisted_E_mpa;persisted_Fx_n=[double]$g.persisted_Fx_n;pmx_sha256=$g.pmx_sha256;comm_sha256=$g.comm_sha256;mail_sha256=$g.mail_sha256;export_sha256=$g.export_sha256;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.62_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.62-Unit-PMX-CodeAster-Generation-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: warn
+          retention-days: 14

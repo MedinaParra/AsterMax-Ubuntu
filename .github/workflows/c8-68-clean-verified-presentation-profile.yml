@@ -1,0 +1,130 @@
+name: C8.68 Clean Verified Presentation Profile
+
+on:
+  push:
+    branches: [agent/c8-68-clean-verified-presentation-profile]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-68-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-clean-verified-results:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    env:
+      C865_RUN_ID: '33963671896'
+      C865_SHA: '86b123a2df7a481a06451358e299bac69db2b7e4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin exact solver-verified C8.65 evidence
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force prior/windows,prior/solve | Out-Null
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "C8.65-Windows-Generated-Study-$env:C865_SHA" --dir prior/windows
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.65-Product-Native-Reaction-$env:C865_SHA" --dir prior/solve
+          $pmx=Get-ChildItem prior/windows -Recurse -Filter 'AsterMax_C862_Structural.pmx'|Select-Object -First 1
+          $rmed=Get-ChildItem prior/solve -Recurse -Filter 'astermax_c862_static.rmed'|Select-Object -First 1
+          $resu=Get-ChildItem prior/solve -Recurse -Filter 'astermax_c862_static.resu'|Select-Object -First 1
+          $ev=Get-ChildItem prior/solve -Recurse -Filter 'C8.65_PRODUCT_NATIVE_REACTION_EVIDENCE.json'|Select-Object -First 1
+          if(-not $pmx -or -not $rmed -or -not $resu -or -not $ev){throw 'Pinned evidence bundle incomplete.'}
+          $e=Get-Content $ev.FullName -Raw|ConvertFrom-Json
+          if(-not $e.solver_verified -or -not $e.result_field_values_verified -or -not $e.reaction_equilibrium_verified){throw 'Source solve is not admitted.'}
+          "C868_PMX=$($pmx.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C868_RMED=$($rmed.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C868_RESU=$($resu.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C868_PRIOR=$($ev.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C868_NODES=$($e.node_count)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C868_MISES=$($e.max_von_mises_mpa.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C868_DISP=$($e.max_displacement_mm.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Bootstrap and apply C8.66 + C8.67 + C8.68 increments
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_full_model_results_demo.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_results_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_clean_verified_presentation.py build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Run clean native Results scene and capture evidence
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System; using System.Runtime.InteropServices;
+          public static class NativeWindowC868 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd,out RECT rect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          '@
+          New-Item -ItemType Directory -Force artifact/c8-68|Out-Null
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $ready=(Join-Path $PWD 'artifact/c8-68/RESULTS_CLEAN_PRESENTATION_READY.json')
+          $env:ASTERMAX_RESULTS_FULL_MODEL_PMX=$env:C868_PMX
+          $env:ASTERMAX_RESULTS_EXPECTED_NODES=$env:C868_NODES
+          $env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS='2474'
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX=$env:C868_MISES
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX=$env:C868_DISP
+          $p=Start-Process $exe -ArgumentList @('--astermax-results-demo',$env:C868_RMED,$env:C868_RESU,$ready) -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(90)
+          while(-not(Test-Path $ready) -and (Get-Date)-lt $deadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "Results process exited early: $($p.ExitCode)"}}
+          if(-not(Test-Path $ready)){throw 'Timed out waiting for Results READY.'}
+          $s=Get-Content $ready -Raw|ConvertFrom-Json
+          if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded){throw 'Verified full-model scene gate failed.'}
+          if(-not $s.native_scalar_bar_semantically_verified -or -not $s.native_scalar_bar_range_matches_field){throw 'Scalar-bar gate failed.'}
+          if(-not $s.presentation_mode -or -not $s.clean_presentation_profile){throw 'Clean presentation profile did not reach READY.'}
+          if([int]$s.diagnostic_controls_hidden -lt 3){throw 'Too few diagnostic controls were hidden.'}
+          $tokens=[string]$s.hidden_diagnostic_tokens
+          foreach($required in @('ENGINEERING GLYPHS','MODEL READINESS','RESULTS HUD')){if($tokens -notlike "*$required*"){throw "Required diagnostic surface remained: $required"}}
+          $expectedM=[double]::Parse($env:C868_MISES,[Globalization.CultureInfo]::InvariantCulture)
+          $expectedU=[double]::Parse($env:C868_DISP,[Globalization.CultureInfo]::InvariantCulture)
+          if([math]::Abs([double]$s.mises_max_mpa-$expectedM)-gt 1e-5){throw 'Mises provenance mismatch.'}
+          if([math]::Abs([double]$s.disp_max_mm-$expectedU)-gt 1e-9){throw 'Displacement provenance mismatch.'}
+          $wd=(Get-Date).AddSeconds(20);do{Start-Sleep -Milliseconds 250;$p.Refresh()}while($p.MainWindowHandle -eq 0 -and -not $p.HasExited -and (Get-Date)-lt $wd)
+          if($p.MainWindowHandle -eq 0){throw 'No live native window.'}
+          [NativeWindowC868]::SetForegroundWindow($p.MainWindowHandle)|Out-Null;Start-Sleep -Seconds 2
+          $r=New-Object NativeWindowC868+RECT;if(-not [NativeWindowC868]::GetWindowRect($p.MainWindowHandle,[ref]$r)){throw 'GetWindowRect failed.'}
+          $w=$r.Right-$r.Left;$h=$r.Bottom-$r.Top;if($w -lt 1000 -or $h -lt 650){throw "Presentation window too small ${w}x${h}."}
+          $bmp=New-Object Drawing.Bitmap($w,$h);$g=[Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)
+          $png=(Join-Path $PWD 'artifact/c8-68/AsterMax-C8.68-clean-verified-results.png');$bmp.Save($png,[Drawing.Imaging.ImageFormat]::Png)
+          $colored=0;$samples=0
+          for($y=[int]($h*0.15);$y -lt [int]($h*0.90);$y+=8){for($x=[int]($w*0.08);$x -lt [int]($w*0.82);$x+=8){$c=$bmp.GetPixel($x,$y);$mx=[math]::Max($c.R,[math]::Max($c.G,$c.B));$mn=[math]::Min($c.R,[math]::Min($c.G,$c.B));if(($mx-$mn)-gt 35 -and $mx -gt 80){$colored++};$samples++}}
+          $ratio=$colored/[double]$samples;$g.Dispose();$bmp.Dispose()
+          if($ratio -lt 0.05){throw "Clean presentation contour visibility gate failed: saturated sample ratio=$ratio"}
+          "C868_COLOR_RATIO=$ratio"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - name: Emit fail-closed C8.68 evidence
+        shell: pwsh
+        run: |
+          $s=Get-Content artifact/c8-68/RESULTS_CLEAN_PRESENTATION_READY.json -Raw|ConvertFrom-Json
+          $prior=Get-Content $env:C868_PRIOR -Raw|ConvertFrom-Json
+          @{
+            schema='astermax.c8.68.clean-verified-presentation-profile.v1';commit='${{ github.sha }}';source_solver_run=[long]$env:C865_RUN_ID;source_solver_commit=$env:C865_SHA
+            solver_verified=[bool]$prior.solver_verified;result_fields_verified=[bool]$prior.result_field_values_verified;reaction_equilibrium_verified=[bool]$prior.reaction_equilibrium_verified
+            persisted_pmx_loaded=[bool]$s.full_model_pmx_loaded;mesh_nodes=[int]$s.mesh_nodes;mesh_elements=2474;field='STRESS/MISES';unit='MPa';mises_max_mpa=[double]$s.mises_max_mpa;disp_max_mm=[double]$s.disp_max_mm
+            native_scalar_bar_verified=[bool]$s.native_scalar_bar_semantically_verified;clean_presentation_profile=[bool]$s.clean_presentation_profile;diagnostic_controls_hidden=[int]$s.diagnostic_controls_hidden;hidden_diagnostic_tokens=[string]$s.hidden_diagnostic_tokens;central_contour_saturated_sample_ratio=[double]$env:C868_COLOR_RATIO
+            pmx_sha256=(Get-FileHash $env:C868_PMX -Algorithm SHA256).Hash.ToLowerInvariant();rmed_sha256=(Get-FileHash $env:C868_RMED -Algorithm SHA256).Hash.ToLowerInvariant();resu_sha256=(Get-FileHash $env:C868_RESU -Algorithm SHA256).Hash.ToLowerInvariant();screenshot_sha256=(Get-FileHash artifact/c8-68/AsterMax-C8.68-clean-verified-results.png -Algorithm SHA256).Hash.ToLowerInvariant()
+            clean_verified_presentation_qualified=$true;industrial_validation=$false;ansys_equivalence=$false
+          }|ConvertTo-Json -Depth 5|Set-Content artifact/c8-68/C8_68_CLEAN_PRESENTATION_EVIDENCE.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.68-Clean-Verified-Presentation-${{ github.sha }}
+          path: artifact/c8-68/**
+          if-no-files-found: warn
+          retention-days: 14
