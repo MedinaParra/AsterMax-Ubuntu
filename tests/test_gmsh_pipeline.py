@@ -1,0 +1,267 @@
+import math
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+
+from astermax.benchmark import axial_bar_reference, mean_surface_displacement_x, relative_error
+from astermax.global_static import solve_linear_static
+from astermax.gmsh_pipeline import SurfaceBox, build_step_meshing_geo, mesh_step_with_gmsh
+from astermax.mesh_bc import fixed_surface_constraints, resultant_from_nodal_loads, surface_total_force_loads
+from astermax.postprocess import element_von_mises, write_legacy_vtk
+from astermax.step_units import require_step_mm
+
+
+GMSH = shutil.which("gmsh")
+
+
+def _tet_volume(a, b, c, d):
+    ab = [b[i] - a[i] for i in range(3)]
+    ac = [c[i] - a[i] for i in range(3)]
+    ad = [d[i] - a[i] for i in range(3)]
+    cross = [
+        ac[1] * ad[2] - ac[2] * ad[1],
+        ac[2] * ad[0] - ac[0] * ad[2],
+        ac[0] * ad[1] - ac[1] * ad[0],
+    ]
+    return abs(sum(ab[i] * cross[i] for i in range(3))) / 6.0
+
+
+class GmshPipelineUnitTests(unittest.TestCase):
+    def test_geo_builder_keeps_explicit_named_selection_and_msh2_ascii(self):
+        geo = build_step_meshing_geo(
+            "model.step",
+            surface_boxes=[SurfaceBox("FIXED", (-1e-6, -1e-6, -1e-6), (1e-6, 2.000001, 1.000001))],
+            mesh_size_mm=2.0,
+        )
+        self.assertIn('Physical Surface("FIXED")', geo)
+        self.assertIn("Mesh.MshFileVersion = 2.2", geo)
+        self.assertIn("Mesh.Binary = 0", geo)
+        self.assertIn('Error("surface selector FIXED matched no faces")', geo)
+
+
+@unittest.skipUnless(GMSH, "real CAD/mesh integration requires the Gmsh CLI")
+class GmshStepRoundTripIntegrationTests(unittest.TestCase):
+    @staticmethod
+    def _export_bar_step(root, *, length_mm, width_mm, thickness_mm):
+        source_geo = root / "source.geo"
+        step_path = root / "benchmark.step"
+        source_geo.write_text(
+            '\n'.join([
+                'SetFactory("OpenCASCADE");',
+                f'Box(1) = {{0, 0, 0, {length_mm}, {width_mm}, {thickness_mm}}};',
+            ]) + '\n',
+            encoding="utf-8",
+        )
+        exported = subprocess.run(
+            [GMSH, str(source_geo), "-0", "-format", "step", "-o", str(step_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if exported.returncode != 0:
+            raise AssertionError(exported.stderr or exported.stdout)
+        return step_path
+
+    @staticmethod
+    def _solve_bar(step_path, msh_path, *, length_mm, width_mm, thickness_mm, mesh_size_mm, young_mpa, force_n):
+        eps = 1e-5
+        mesh = mesh_step_with_gmsh(
+            step_path,
+            msh_path,
+            surface_boxes=[
+                SurfaceBox("FIXED", (-eps, -eps, -eps), (eps, width_mm + eps, thickness_mm + eps)),
+                SurfaceBox("LOAD", (length_mm - eps, -eps, -eps), (length_mm + eps, width_mm + eps, thickness_mm + eps)),
+            ],
+            mesh_size_mm=mesh_size_mm,
+            gmsh_executable=GMSH,
+        )
+        constraints = fixed_surface_constraints(mesh, "FIXED")
+        loads = surface_total_force_loads(mesh, "LOAD", (force_n, 0.0, 0.0))
+        result = solve_linear_static(
+            mesh.nodes,
+            mesh.elements,
+            young=young_mpa,
+            poisson=0.30,
+            constraints=constraints,
+            loads=loads,
+        )
+        numerical_ux = mean_surface_displacement_x(
+            result.displacements,
+            mesh.surface_group("LOAD").node_indices,
+        )
+        return mesh, constraints, loads, result, numerical_ux
+
+    def test_real_step_mesh_solve_and_vtk_pipeline(self):
+        """Exercise CAD -> STEP -> mesh -> BC/load -> solve -> verify -> VM -> VTK.
+
+        The 3D solution is compared to the classical Saint-Venant axial-bar
+        displacement u=FL/(EA). Because the numerical model fully clamps one end
+        (suppressing Poisson contraction locally), the oracle is used as a benchmark
+        with an explicit relative-error tolerance rather than claimed as an exact 3D
+        solution. Stress contours remain numerical outputs, not invented references.
+        """
+        with tempfile.TemporaryDirectory(prefix="astermax-step-e2e-") as temporary:
+            root = Path(temporary)
+            msh_path = root / "benchmark.msh"
+            vtk_path = root / "benchmark.vtk"
+
+            length_mm = 10.0
+            width_mm = 2.0
+            thickness_mm = 1.0
+            area_mm2 = width_mm * thickness_mm
+            young_mpa = 210000.0
+            force_n = 100.0
+
+            step_path = self._export_bar_step(
+                root,
+                length_mm=length_mm,
+                width_mm=width_mm,
+                thickness_mm=thickness_mm,
+            )
+            self.assertTrue(step_path.is_file())
+
+            step_unit = require_step_mm(step_path.read_text(encoding="utf-8"))
+            self.assertEqual(step_unit.name, "mm")
+            self.assertEqual(step_unit.scale_to_mm, 1.0)
+
+            mesh, constraints, loads, result, numerical_ux = self._solve_bar(
+                step_path,
+                msh_path,
+                length_mm=length_mm,
+                width_mm=width_mm,
+                thickness_mm=thickness_mm,
+                mesh_size_mm=2.0,
+                young_mpa=young_mpa,
+                force_n=force_n,
+            )
+            self.assertGreater(len(mesh.nodes), 4)
+            self.assertGreater(len(mesh.elements), 1)
+            self.assertGreater(len(mesh.surface_group("FIXED").triangles), 0)
+            self.assertGreater(len(mesh.surface_group("LOAD").triangles), 0)
+
+            volume = sum(
+                _tet_volume(*(mesh.nodes[index] for index in tet))
+                for tet in mesh.elements
+            )
+            self.assertAlmostEqual(volume, length_mm * area_mm2, places=7)
+
+            applied = resultant_from_nodal_loads(loads)
+            self.assertAlmostEqual(applied[0], force_n, places=12)
+            self.assertAlmostEqual(applied[1], 0.0, places=12)
+            self.assertAlmostEqual(applied[2], 0.0, places=12)
+
+            reaction = [0.0, 0.0, 0.0]
+            for dof, value in enumerate(result.reactions):
+                reaction[dof % 3] += value
+            self.assertAlmostEqual(reaction[0], -force_n, places=7)
+            self.assertAlmostEqual(reaction[1], 0.0, places=7)
+            self.assertAlmostEqual(reaction[2], 0.0, places=7)
+
+            free_residual = [
+                abs(value)
+                for dof, value in enumerate(result.residual)
+                if dof not in constraints
+            ]
+            self.assertLess(max(free_residual, default=0.0), 1e-7)
+            self.assertTrue(all(math.isfinite(value) for value in result.displacements))
+
+            reference = axial_bar_reference(
+                length_mm=length_mm,
+                area_mm2=area_mm2,
+                young_mpa=young_mpa,
+                force_n=force_n,
+            )
+            axial_error = relative_error(numerical_ux, reference.displacement_mm)
+            print(
+                "ASTERMAX_BENCHMARK "
+                f"mean_load_face_ux_mm={numerical_ux:.12g} "
+                f"closed_form_FL_EA_mm={reference.displacement_mm:.12g} "
+                f"relative_error={axial_error:.8%}"
+            )
+            self.assertLess(
+                axial_error,
+                0.05,
+                msg=(
+                    f"3D STEP benchmark displacement error {axial_error:.3%}: "
+                    f"FEA={numerical_ux:.12g} mm, FL/EA={reference.displacement_mm:.12g} mm"
+                ),
+            )
+
+            self.assertGreater(max(element_von_mises(result)), 0.0)
+
+            write_legacy_vtk(vtk_path, mesh.nodes, mesh.elements, result)
+            vtk = vtk_path.read_text(encoding="utf-8")
+            self.assertIn("DATASET UNSTRUCTURED_GRID", vtk)
+            self.assertIn("VECTORS displacement_mm", vtk)
+            self.assertIn("SCALARS von_mises_MPa", vtk)
+            self.assertIn("TENSORS stress_MPa", vtk)
+
+    def test_step_axial_mesh_refinement_study(self):
+        """Run the same STEP mechanics problem over three decreasing mesh sizes.
+
+        This is deliberately a convergence *study harness*, not a claim of asymptotic
+        convergence order. It records element count, displacement and analytical error,
+        verifies that refinement increases the discretization, and requires the finest
+        model to remain within the independently defined FL/EA engineering tolerance.
+        """
+        with tempfile.TemporaryDirectory(prefix="astermax-convergence-") as temporary:
+            root = Path(temporary)
+            length_mm = 10.0
+            width_mm = 2.0
+            thickness_mm = 1.0
+            young_mpa = 210000.0
+            force_n = 100.0
+            reference = axial_bar_reference(
+                length_mm=length_mm,
+                area_mm2=width_mm * thickness_mm,
+                young_mpa=young_mpa,
+                force_n=force_n,
+            )
+            step_path = self._export_bar_step(
+                root,
+                length_mm=length_mm,
+                width_mm=width_mm,
+                thickness_mm=thickness_mm,
+            )
+            require_step_mm(step_path.read_text(encoding="utf-8"))
+
+            points = []
+            for index, mesh_size_mm in enumerate((4.0, 3.0, 2.0)):
+                msh_path = root / f"refine-{index}.msh"
+                mesh, constraints, loads, result, ux = self._solve_bar(
+                    step_path,
+                    msh_path,
+                    length_mm=length_mm,
+                    width_mm=width_mm,
+                    thickness_mm=thickness_mm,
+                    mesh_size_mm=mesh_size_mm,
+                    young_mpa=young_mpa,
+                    force_n=force_n,
+                )
+                error = relative_error(ux, reference.displacement_mm)
+                applied = resultant_from_nodal_loads(loads)
+                self.assertAlmostEqual(applied[0], force_n, places=10)
+                free_residual = [
+                    abs(value)
+                    for dof, value in enumerate(result.residual)
+                    if dof not in constraints
+                ]
+                self.assertLess(max(free_residual, default=0.0), 1e-7)
+                points.append((mesh_size_mm, len(mesh.elements), ux, error))
+                print(
+                    "ASTERMAX_CONVERGENCE "
+                    f"h_mm={mesh_size_mm:.6g} elements={len(mesh.elements)} "
+                    f"ux_mm={ux:.12g} reference_mm={reference.displacement_mm:.12g} "
+                    f"relative_error={error:.8%}"
+                )
+
+            element_counts = [point[1] for point in points]
+            self.assertLess(element_counts[0], element_counts[-1])
+            self.assertLess(points[-1][3], 0.05)
+            self.assertTrue(all(math.isfinite(point[2]) and math.isfinite(point[3]) for point in points))
+
+
+if __name__ == "__main__":
+    unittest.main()

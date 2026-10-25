@@ -1,0 +1,27 @@
+"""Frozen Windows entry point for AsterMax PMV.
+
+Default: launch the full-screen CAE workspace with immediate STEP 3D preview,
+direct surface selection, operation tree, ribbon commands and integrated
+engineering agent proposal authoring.
+Compatibility: --verified-demo runs the deterministic joint evidence demo.
+Automation: --run-step executes the same real STEP pipeline headlessly for CI.
+"""
+from __future__ import annotations
+
+import sys
+
+
+def main() -> int:
+    if "--verified-demo" in sys.argv:
+        from astermax.windows_demo_runner import main as demo_main
+        argv = [arg for arg in sys.argv[1:] if arg != "--verified-demo"]
+        return demo_main(argv)
+    if "--run-step" in sys.argv:
+        from astermax.windows_step_cli import main as step_main
+        return step_main(sys.argv[1:])
+    from astermax.windows_cae_workspace_next import main as desktop_main
+    return desktop_main(sys.argv[1:])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

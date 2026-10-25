@@ -1,0 +1,146 @@
+name: Build AsterMax Windows EXE
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyInstaller and real CAD mesher
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          choco install gmsh --version=4.12.1 -y --no-progress
+          gmsh --version
+          python -c "import tkinter; print('Tk', tkinter.TkVersion)"
+
+      - name: Run harness before freezing
+        run: python -m unittest discover -s tests -v
+
+      - name: Build desktop executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .\dist\AsterMax-Windows | Out-Null
+          pyinstaller --noconfirm --clean --onefile --windowed --name AsterMax --distpath .\dist\AsterMax-Windows --collect-submodules astermax astermax_windows_entry.py
+
+      - name: Bundle portable Gmsh runtime
+        shell: pwsh
+        run: |
+          $gmshCommand = Get-Command gmsh -ErrorAction Stop
+          $gmshExe = $gmshCommand.Source
+          if (-not (Test-Path $gmshExe)) { throw "Resolved gmsh command is not a file: $gmshExe" }
+          $resolved = (Get-Item $gmshExe).FullName
+          & $resolved --version
+          $candidates = @(
+            'C:\gmsh\gmsh-4.12.1-Windows64\gmsh.exe',
+            'C:\gmsh\gmsh-4.12.1-windows64\gmsh.exe',
+            $resolved
+          )
+          $runtimeExe = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+              $item = Get-Item $candidate
+              if ($item.DirectoryName -notlike '*chocolatey\bin*') { $runtimeExe = $item.FullName; break }
+            }
+          }
+          if (-not $runtimeExe) {
+            $runtimeExe = (Get-ChildItem 'C:\gmsh' -Filter gmsh.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $runtimeExe) { throw "Cannot locate deployed Gmsh runtime" }
+          $runtimeDir = Split-Path -Parent $runtimeExe
+          $target = '.\dist\AsterMax-Windows\tools\gmsh'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item -Path (Join-Path $runtimeDir '*') -Destination $target -Recurse -Force
+          if (-not (Test-Path "$target\gmsh.exe")) { throw "Portable gmsh.exe missing" }
+          & "$target\gmsh.exe" --version
+
+      - name: Create real STEP smoke geometry
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+          gmsh = Path('dist/AsterMax-Windows/tools/gmsh/gmsh.exe').resolve()
+          geo = Path('exe_real_step.geo').resolve()
+          step = Path('exe_real_step.step').resolve()
+          geo.write_text('SetFactory("OpenCASCADE");\nBox(1) = {0, 0, 0, 10, 2, 1};\n', encoding='utf-8')
+          completed = subprocess.run(
+              [str(gmsh), str(geo), '-0', '-format', 'step', '-o', str(step)],
+              capture_output=True, text=True, check=False,
+          )
+          print(completed.stdout)
+          print(completed.stderr)
+          if completed.returncode != 0:
+              raise SystemExit(f'Gmsh STEP export failed: {completed.returncode}')
+          if not step.is_file():
+              raise SystemExit('real STEP smoke geometry was not created')
+          print(f'ASTERMAX_STEP_SMOKE bytes={step.stat().st_size} path={step}')
+
+      - name: Prove frozen EXE blocks unapproved STEP solve
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_unapproved_should_not_exist', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2')
+          $proc = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          if ($proc.ExitCode -eq 0) { throw "Frozen AsterMax incorrectly accepted an unapproved STEP solve" }
+          if (Test-Path '.\exe_unapproved_should_not_exist\manifest.json') { throw "Unapproved solve produced solver evidence" }
+
+      - name: Smoke test frozen EXE with approved real STEP to FEA
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $args = @('--run-step', '.\exe_real_step.step', '--output', '.\exe_step_smoke_evidence', '--axis', 'x', '--fixed-side', 'min', '--load-side', 'max', '--force', '100,0,0', '--mesh-size', '2', '--approved-by', 'AsterMax-CI-Engineer')
+          $proc = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Frozen AsterMax approved STEP solve failed with exit code $($proc.ExitCode)" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\model_preparation.json")) { throw "model_preparation.json missing after approved STEP solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\manifest.json")) { throw "manifest.json missing after real STEP EXE solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\summary.json")) { throw "summary.json missing after real STEP EXE solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\astermax_step_viewer.html")) { throw "STEP result viewer missing after real STEP EXE solve" }
+          if (-not (Test-Path ".\exe_step_smoke_evidence\result.vtk")) { throw "VTK result missing after real STEP EXE solve" }
+          $prep = Get-Content .\exe_step_smoke_evidence\model_preparation.json | ConvertFrom-Json
+          if (-not $prep.solve_gate.ready) { throw "approved preparation solve gate is not ready" }
+          if ($prep.approved_proposal_ids.Count -ne 2) { throw "expected two approved model-preparation proposals" }
+          $summary = Get-Content .\exe_step_smoke_evidence\summary.json | ConvertFrom-Json
+          if ($summary.step_unit -ne 'mm') { throw "STEP unit gate did not resolve mm" }
+          if ($summary.tet4_count -lt 1) { throw "real STEP smoke solve produced no TET4 elements" }
+          if ([math]::Abs($summary.recovered_applied_force_N[0] - 100.0) -gt 1e-7) { throw "applied force recovery failed" }
+          if ($summary.free_residual_max_N -gt 1e-7) { throw "free residual trust gate failed" }
+          Get-Content .\exe_step_smoke_evidence\model_preparation.json
+          Get-Content .\exe_step_smoke_evidence\summary.json
+
+      - name: Smoke test deterministic verified joint demo
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path '.\dist\AsterMax-Windows\AsterMax.exe').Path
+          $proc = Start-Process -FilePath $exe -ArgumentList @('--verified-demo', '--no-viewer', '--output', '.\exe_joint_demo_evidence') -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "Frozen verified demo failed with exit code $($proc.ExitCode)" }
+          if (-not (Test-Path ".\exe_joint_demo_evidence\manifest.json")) { throw "verified joint demo manifest missing" }
+
+      - name: Record executable SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash .\dist\AsterMax-Windows\AsterMax.exe -Algorithm SHA256).Hash.ToLower()
+          "sha256=$hash" | Out-File -FilePath .\dist\AsterMax-Windows\AsterMax.sha256.txt -Encoding ascii
+          Get-Item .\dist\AsterMax-Windows\AsterMax.exe | Format-List Name,Length,LastWriteTime
+          Get-Content .\dist\AsterMax-Windows\AsterMax.sha256.txt
+
+      - name: Upload portable Windows application
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-Windows-STEP-FEA-x64
+          path: |
+            dist/AsterMax-Windows/**
+            exe_step_smoke_evidence/model_preparation.json
+            exe_step_smoke_evidence/manifest.json
+            exe_step_smoke_evidence/summary.json
+          if-no-files-found: error
