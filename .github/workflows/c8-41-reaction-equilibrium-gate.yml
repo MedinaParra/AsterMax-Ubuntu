@@ -1,0 +1,115 @@
+name: C8.41 Reaction Equilibrium Gate
+
+on:
+  push:
+    branches:
+      - agent/c8-41-reaction-equilibrium-gate
+    paths:
+      - 'integrations/prepomax-codeaster/smoke/c8-40-step-mm/**'
+      - '.github/workflows/c8-41-reaction-equilibrium-gate.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-41-reaction-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  reaction-equilibrium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Gmsh/OpenCASCADE runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglu1-mesa
+          python -m pip install --disable-pip-version-check 'gmsh==4.13.1'
+      - name: STEP import, mesh and deterministic load preparation
+        run: |
+          python integrations/prepomax-codeaster/smoke/c8-40-step-mm/generate_step_case.py
+          python integrations/prepomax-codeaster/smoke/c8-40-step-mm/prepare_nodal_load.py
+          python integrations/prepomax-codeaster/smoke/c8-40-step-mm/prepare_reaction_gate.py
+      - name: Genuine Code_Aster 17.4.0 solve
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/c8-40-step-mm
+          docker pull simvia/code_aster:17.4.0
+          python integrations/prepomax-codeaster/harness/astermax_harness.py --manifest integrations/prepomax-codeaster/smoke/c8-40-step-mm/step_mm.harness.manifest.json
+      - name: Fail-closed equilibrium and numerical admission
+        run: |
+          python - <<'PY'
+          import json, math, pathlib, re
+          root=pathlib.Path('integrations/prepomax-codeaster/smoke/c8-40-step-mm')
+          pre=json.loads((root/'C8_40_PRE_SOLVE.json').read_text())
+          text=(root/'step_mm.resu').read_text(encoding='utf-8',errors='replace')
+          num=re.compile(r'^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][+-]?\d+)?$')
+          node=re.compile(r'^(?:N)?(\d+)$',re.I)
+          def rows(marker,nvals):
+              i=text.find(marker)
+              if i<0: raise SystemExit(marker+' missing from genuine RESU')
+              out=[]; started=False
+              for raw in text[i:].splitlines()[1:]:
+                  line=raw.strip()
+                  if not line:
+                      if started: break
+                      continue
+                  cols=[c.strip() for c in line.split(';')]
+                  if not cols or not node.fullmatch(cols[0]): continue
+                  vals=[float(c) for c in cols[1:] if num.fullmatch(c)]
+                  if len(vals)>=nvals:
+                      out.append((cols[0],vals[:nvals])); started=True
+              return out
+          disp=rows('PPM_DEPL',3)
+          reac=rows('PPM_REAC',3)
+          if len(disp)<4: raise SystemExit('Insufficient displacement rows')
+          if len(reac)<3: raise SystemExit('Insufficient fixed-face reaction rows')
+          rx=sum(v[0] for _,v in reac); ry=sum(v[1] for _,v in reac); rz=sum(v[2] for _,v in reac)
+          applied=float(pre['solver_force_sum_N'])
+          equilibrium=abs(rx + applied)/max(abs(applied),1.0)
+          transverse=math.hypot(ry,rz)/max(abs(applied),1.0)
+          if equilibrium > 5e-3:
+              raise SystemExit(f'Global X equilibrium failed: reactions={rx} N applied={applied} N rel={equilibrium}')
+          if transverse > 5e-3:
+              raise SystemExit(f'Spurious transverse reaction resultant too large: Ry={ry} Rz={rz} rel={transverse}')
+          maxdx=max(abs(v[0]) for _,v in disp)
+          expected=float(pre['analytic_axial_displacement_mm'])
+          rel=abs(maxdx-expected)/expected
+          if rel>0.30: raise SystemExit(f'Displacement oracle failed: {maxdx} vs {expected} rel={rel}')
+          out=pathlib.Path('artifact/c8-41'); out.mkdir(parents=True,exist_ok=True)
+          evidence={
+            'schema':'astermax.c8-41.reaction-equilibrium.v1',
+            'solver':'Code_Aster 17.4.0',
+            'cad':'STEP re-imported in fresh Gmsh/OpenCASCADE session',
+            'unit_system':'mm-N-MPa',
+            'applied_force_x_N':applied,
+            'reaction_sum_x_N':rx,
+            'reaction_sum_y_N':ry,
+            'reaction_sum_z_N':rz,
+            'x_equilibrium_relative_error':equilibrium,
+            'transverse_reaction_relative_resultant':transverse,
+            'analytic_axial_displacement_mm':expected,
+            'observed_max_abs_dx_mm':maxdx,
+            'displacement_relative_error':rel,
+            'mesh_nodes':pre['mesh_nodes'],
+            'tetra4_elements':pre['tetra4_elements'],
+            'step_sha256':pre['step_sha256'],
+            'reaction_equilibrium_verified':True,
+            'industrial_validation':False,
+            'ansys_equivalence':False
+          }
+          (out/'C8_41_REACTION_EQUILIBRIUM.json').write_text(json.dumps(evidence,indent=2),encoding='utf-8')
+          print(json.dumps(evidence,indent=2))
+          PY
+      - name: Stage evidence
+        run: |
+          mkdir -p artifact/c8-41
+          cp integrations/prepomax-codeaster/smoke/c8-40-step-mm/{beam_100x20x10.step,step_mm.mail,step_mm.comm,step_mm.mess,step_mm.rmed,step_mm.resu,C8_40_PRE_SOLVE.json} artifact/c8-41/
+          sha256sum artifact/c8-41/* > artifact/c8-41/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.41-Reaction-Equilibrium-${{ github.sha }}
+          path: artifact/c8-41/**
+          if-no-files-found: error
+          retention-days: 14

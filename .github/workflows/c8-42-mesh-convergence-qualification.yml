@@ -1,0 +1,43 @@
+name: C8.42 Mesh Convergence Qualification
+
+on:
+  push:
+    branches:
+      - agent/c8-42-mesh-convergence-qualification
+    paths:
+      - 'integrations/prepomax-codeaster/smoke/c8-40-step-mm/**'
+      - '.github/workflows/c8-42-mesh-convergence-qualification.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-42-convergence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mesh-convergence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Gmsh/OpenCASCADE runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglu1-mesa
+          python -m pip install --disable-pip-version-check 'gmsh==4.13.1'
+          docker pull simvia/code_aster:17.4.0
+      - name: Run genuine three-level STEP/mm convergence harness
+        run: |
+          chmod -R a+rwX integrations/prepomax-codeaster/smoke/c8-40-step-mm
+          python integrations/prepomax-codeaster/smoke/c8-40-step-mm/run_convergence.py
+      - name: Content-address evidence
+        run: |
+          find artifact/c8-42 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > artifact/c8-42/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.42-Mesh-Convergence-${{ github.sha }}
+          path: artifact/c8-42/**
+          if-no-files-found: error
+          retention-days: 14

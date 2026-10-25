@@ -1,0 +1,116 @@
+name: C8.47 Professional Results Workspace Windows
+
+on:
+  push:
+    branches:
+      - agent/c8-47-professional-results-workspace
+    paths:
+      - '.github/workflows/c8-47-professional-results-workspace.yml'
+      - 'integrations/prepomax-codeaster/**'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-47-professional-results-workspace-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify C8.47 source contract
+        shell: pwsh
+        run: |
+          $tree = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxEngineeringTree.cs' -Raw
+          if ($tree -match 'AsterMaxUiTheme\.Panel') { throw 'C8.46 invalid theme token survived.' }
+          $src = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxResultsWorkspace.cs' -Raw
+          foreach ($token in @('RESULTS','ACTIVE FIELD','COMPONENT','UNIT CONTRACT','RESULT OBJECT','EVIDENCE','mm · N · MPa','UNVERIFIED','NO RESULTS','solver verification is intentionally withheld')) {
+            if ($src -notmatch [regex]::Escape($token)) { throw "Missing C8.47 results token: $token" }
+          }
+          if ($src -match '_evidenceValue\.Text\s*=\s*"VERIFIED"') { throw 'Workspace must not infer VERIFIED from GUI state.' }
+          $integration = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxAiIntegration.cs' -Raw
+          if ($integration -notmatch 'InstallAsterMaxResultsWorkspace') { throw 'Results workspace not integrated.' }
+      - name: Launch native GUI and capture workspace
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NativeWin47 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe = (Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "GUI exited early. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'GUI did not create a native main window.' }
+          if ($proc.MainWindowTitle -notmatch '^AsterMax Mechanical') { throw "Unexpected window title: $($proc.MainWindowTitle)" }
+          [NativeWin47]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 2
+          $rect = New-Object NativeWin47+RECT
+          if (-not [NativeWin47]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)) { throw 'Unable to read native window bounds.' }
+          $w = [Math]::Max(1, $rect.Right - $rect.Left)
+          $h = [Math]::Max(1, $rect.Bottom - $rect.Top)
+          $bmp = New-Object System.Drawing.Bitmap $w, $h
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          try { $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bmp.Size) }
+          finally { $g.Dispose() }
+          $png = 'artifact/C8.47_RESULTS_WORKSPACE.png'
+          $bmp.Save((Join-Path $PWD $png), [System.Drawing.Imaging.ImageFormat]::Png)
+          $bmp.Dispose()
+          @{
+            title=$proc.MainWindowTitle; window_width=$w; window_height=$h;
+            screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json | Set-Content -Encoding UTF8 artifact/C8.47_WINDOW_EVIDENCE.json
+          Stop-Process -Id $proc.Id -Force
+      - name: Write C8.47 evidence
+        shell: pwsh
+        run: |
+          @{
+            schema='astermax.professional-results-workspace.v1'; version='C8.47'; commit='${{ github.sha }}';
+            results_workspace=$true; active_field_observed=$true; active_component_observed=$true;
+            unit_contract_visible='mm-N-MPa'; result_object_observed=$true;
+            gui_loaded_does_not_imply_solver_verified=$true; verified_state_inferred=$false;
+            c846_compile_defect_fixed=$true; solver_logic_modified=$false;
+            industrial_validation=$false; ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 artifact/C8.47_UI_EVIDENCE.json
+      - name: Upload C8.47 visual evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.47-Professional-Results-Workspace-${{ github.sha }}
+          path: |
+            artifact/C8.47_UI_EVIDENCE.json
+            artifact/C8.47_WINDOW_EVIDENCE.json
+            artifact/C8.47_RESULTS_WORKSPACE.png
+          if-no-files-found: error
+          retention-days: 14

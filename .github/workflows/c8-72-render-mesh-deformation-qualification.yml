@@ -1,0 +1,116 @@
+name: C8.72 Render Mesh Deformation Qualification
+
+on:
+  push:
+    branches: [agent/c8-72-render-mesh-deformation-qualification]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-72-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-render-mesh-deformation:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
+    env:
+      C865_RUN_ID: '33963671896'
+      C865_SHA: '86b123a2df7a481a06451358e299bac69db2b7e4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin exact solver-verified evidence
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force prior/windows,prior/solve | Out-Null
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "C8.65-Windows-Generated-Study-$env:C865_SHA" --dir prior/windows
+          gh run download $env:C865_RUN_ID --repo $env:GITHUB_REPOSITORY --name "AsterMax-C8.65-Product-Native-Reaction-$env:C865_SHA" --dir prior/solve
+          $pmx=Get-ChildItem prior/windows -Recurse -Filter 'AsterMax_C862_Structural.pmx'|Select-Object -First 1
+          $rmed=Get-ChildItem prior/solve -Recurse -Filter 'astermax_c862_static.rmed'|Select-Object -First 1
+          $resu=Get-ChildItem prior/solve -Recurse -Filter 'astermax_c862_static.resu'|Select-Object -First 1
+          $ev=Get-ChildItem prior/solve -Recurse -Filter 'C8.65_PRODUCT_NATIVE_REACTION_EVIDENCE.json'|Select-Object -First 1
+          if(-not $pmx -or -not $rmed -or -not $resu -or -not $ev){throw 'Pinned evidence bundle incomplete.'}
+          $e=Get-Content $ev.FullName -Raw|ConvertFrom-Json
+          if(-not $e.solver_verified -or -not $e.result_field_values_verified -or -not $e.reaction_equilibrium_verified){throw 'Source solve is not admitted.'}
+          "C872_PMX=$($pmx.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_RMED=$($rmed.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_RESU=$($resu.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_PRIOR=$($ev.FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_NODES=$($e.node_count)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_MISES=$($e.max_von_mises_mpa.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_DISP=$($e.max_displacement_mm.ToString('R',[Globalization.CultureInfo]::InvariantCulture))"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_MISES_NODE=$($e.max_von_mises_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "C872_DISP_NODE=$($e.max_displacement_node)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Bootstrap and apply C8.66-C8.72 Results qualification chain
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_full_model_results_demo.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_results_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_clean_verified_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_extrema_presentation.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_native_node_probe_qualification.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_verified_deformation_geometry.py build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_render_mesh_deformation_qualification.py build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Run fail-closed live render-mesh qualification
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/c8-72|Out-Null
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $ready=(Join-Path $PWD 'artifact/c8-72/RESULTS_RENDER_MESH_DEFORMATION_READY.json')
+          $env:ASTERMAX_RESULTS_FULL_MODEL_PMX=$env:C872_PMX
+          $env:ASTERMAX_RESULTS_EXPECTED_NODES=$env:C872_NODES
+          $env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS='2474'
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX=$env:C872_MISES
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX=$env:C872_DISP
+          $env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE=$env:C872_MISES_NODE
+          $env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE=$env:C872_DISP_NODE
+          $p=Start-Process $exe -ArgumentList @('--astermax-results-demo',$env:C872_RMED,$env:C872_RESU,$ready) -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(90)
+          while(-not(Test-Path $ready) -and (Get-Date)-lt $deadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "Results process exited early: $($p.ExitCode)"}}
+          if(-not(Test-Path $ready)){throw 'Timed out waiting for Results READY.'}
+          $s=Get-Content $ready -Raw|ConvertFrom-Json
+          if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded){throw 'Full-model Results gate failed.'}
+          if(-not $s.deformation_geometry_verified -or -not $s.deformation_scale_semantics_verified){throw 'C8.71 deformation prerequisite lost.'}
+          if(-not $s.render_mesh_deformation_verified){throw 'C8.72 render-mesh deformation gate failed.'}
+          if([string]$s.render_mesh_deformation_source -ne 'FeResults.SetMeshDeformation(scale,step,increment)'){throw 'Unexpected render-mesh source.'}
+          if([double]$s.render_mesh_max_coordinate_error_mm -gt 1e-7){throw 'Render-mesh coordinate error exceeds tolerance.'}
+          if([bool]$s.deformation_ui_scale_selector_verified){throw 'C8.72 must not overclaim GUI selector qualification.'}
+          if(($s.render_mesh_scales_verified|Measure-Object).Count -ne 3){throw 'Expected three deformation scales.'}
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - name: Emit C8.72 evidence
+        shell: pwsh
+        run: |
+          $s=Get-Content artifact/c8-72/RESULTS_RENDER_MESH_DEFORMATION_READY.json -Raw|ConvertFrom-Json
+          $prior=Get-Content $env:C872_PRIOR -Raw|ConvertFrom-Json
+          @{
+            schema='astermax.c8.72.render-mesh-deformation.v1';commit='${{ github.sha }}';source_solver_run=[long]$env:C865_RUN_ID;source_solver_commit=$env:C865_SHA
+            solver_verified=[bool]$prior.solver_verified;result_fields_verified=[bool]$prior.result_field_values_verified;reaction_equilibrium_verified=[bool]$prior.reaction_equilibrium_verified
+            mesh_nodes=[int]$s.mesh_nodes;mesh_elements=2474;render_mesh_deformation_source=[string]$s.render_mesh_deformation_source
+            render_mesh_control_nodes=@($s.render_mesh_control_nodes);render_mesh_scales_verified=@($s.render_mesh_scales_verified)
+            render_mesh_max_coordinate_error_mm=[double]$s.render_mesh_max_coordinate_error_mm
+            deformation_geometry_verified=[bool]$s.deformation_geometry_verified;render_mesh_deformation_verified=[bool]$s.render_mesh_deformation_verified;deformation_ui_scale_selector_verified=[bool]$s.deformation_ui_scale_selector_verified
+            pmx_sha256=(Get-FileHash $env:C872_PMX -Algorithm SHA256).Hash.ToLowerInvariant();rmed_sha256=(Get-FileHash $env:C872_RMED -Algorithm SHA256).Hash.ToLowerInvariant();resu_sha256=(Get-FileHash $env:C872_RESU -Algorithm SHA256).Hash.ToLowerInvariant()
+            render_mesh_deformation_qualified=$true;industrial_validation=$false;ansys_equivalence=$false
+          }|ConvertTo-Json -Depth 6|Set-Content artifact/c8-72/C8_72_RENDER_MESH_DEFORMATION_EVIDENCE.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.72-Render-Mesh-Deformation-${{ github.sha }}
+          path: artifact/c8-72/**
+          if-no-files-found: warn
+          retention-days: 14
