@@ -1,0 +1,103 @@
+name: C8.83 Distributed Surface Traction + Convergence
+
+on:
+  push:
+    branches: [agent/c8-83-distributed-surface-traction-convergence]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-83-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  distributed-traction-convergence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact admitted C8.82f Windows-generated mesh family
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact/c8-83
+          gh run download 34030818718 \
+            --repo '${{ github.repository }}' \
+            --name 'C8.82f-NetGen-Consumer-Studies-0e3c7d5908210c529200c1076c9957d973131ddd' \
+            --dir artifact/c8-83
+          test -s artifact/c8-83/C8.82_NATIVE_MESH_FAMILY.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('artifact/c8-83/C8.82_NATIVE_MESH_FAMILY.json')
+          j=json.loads(p.read_text(encoding='utf-8-sig'))
+          expected={'coarse':(60,2688,1261),'medium':(40,3560,1686),'fine':(25,7224,3497)}
+          if j.get('commit')!='0e3c7d5908210c529200c1076c9957d973131ddd': raise SystemExit('C8.82f source commit mismatch')
+          for x in j['levels']:
+              e=expected[x['name']]
+              got=(int(x['requested_maxh_mm']),int(x['nodes']),int(x['elements']))
+              if got!=e: raise SystemExit(f"{x['name']} family mismatch: {got} != {e}")
+          print('Pinned C8.82f mesh-family provenance PASS')
+          PY
+
+      - name: Replace point load with independently integrated x-max surface traction
+        shell: bash
+        run: |
+          set -euo pipefail
+          for level in coarse medium fine; do
+            python integrations/prepomax-codeaster/tools/c8_83_surface_traction_contract.py \
+              "artifact/c8-83/$level/study" --resultant-n 1000 \
+              --evidence "artifact/c8-83/$level/C8.83_SURFACE_TRACTION.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('artifact/c8-83')
+          expected_faces={'coarse':11,'medium':22,'fine':74}
+          for level in ('coarse','medium','fine'):
+              j=json.loads((root/level/'C8.83_SURFACE_TRACTION.json').read_text())
+              if j['tria6_face_count']!=expected_faces[level]: raise SystemExit(f'{level}: x-max face-count drift')
+              if abs(j['surface_area_mm2']-21590.0)>1e-8: raise SystemExit(f'{level}: x-max area drift')
+              if abs(j['integrated_resultant_n']-1000.0)>1e-9: raise SystemExit(f'{level}: resultant drift')
+              if j['product_surface_traction_binding_verified']: raise SystemExit('harness seam may not claim product binding')
+          print('Distributed traction geometry/resultant contract PASS')
+          PY
+
+      - name: Solve three distributed-load studies with Code_Aster 17.4.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker pull simvia/code_aster:17.4.0
+          for level in coarse medium fine; do
+            d="artifact/c8-83/$level/study"
+            rm -f "$d/astermax_c862_static.mess" "$d/astermax_c862_static.resu" "$d/astermax_c862_static.rmed"
+            chmod -R a+rwX "$d"
+            docker run --rm -v "$PWD/$d:/home/user/data" -w /home/user/data \
+              simvia/code_aster:17.4.0 bash -i -c 'run_aster astermax_c862_static.export' \
+              | tee "artifact/c8-83/$level/C8.83_CODE_ASTER_STDOUT.log"
+            test -s "$d/astermax_c862_static.mess"
+            test -s "$d/astermax_c862_static.resu"
+            test -s "$d/astermax_c862_static.rmed"
+          done
+
+      - name: Independently admit equilibrium and coarse-medium-fine convergence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python integrations/prepomax-codeaster/tools/c8_83_analyze_convergence.py artifact/c8-83 \
+            | tee artifact/c8-83/C8.83_ANALYSIS_STDOUT.log
+          test -s artifact/c8-83/C8.83_CONVERGENCE_QUALIFICATION.json
+          test -s artifact/c8-83/C8.83_CONVERGENCE.csv
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.83-Distributed-Traction-Convergence-${{ github.sha }}
+          path: artifact/c8-83/**
+          if-no-files-found: warn
+          retention-days: 14

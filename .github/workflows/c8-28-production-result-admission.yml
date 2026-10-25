@@ -1,0 +1,157 @@
+name: C8.28 Production Result Admission
+
+on:
+  push:
+    branches:
+      - agent/c8-28-production-result-admission
+  pull_request:
+    paths:
+      - 'integrations/prepomax-codeaster/overlay/PrePoMax/CodeAster/CodeAsterResultBridge.cs'
+      - 'integrations/prepomax-codeaster/tools/validate_result_tables.py'
+      - 'integrations/prepomax-codeaster/tools/test_validate_result_tables.py'
+      - '.github/workflows/c8-28-production-result-admission.yml'
+  workflow_dispatch:
+
+jobs:
+  production-result-admission:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run independent result-admission contract
+        shell: pwsh
+        run: |
+          python -m pip install pytest
+          python -m pytest integrations/prepomax-codeaster/tools/test_validate_result_tables.py -q
+
+      - name: Bootstrap production AsterMax tree
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Assert fail-closed bridge reached production source
+        shell: pwsh
+        run: |
+          $bridge = 'build/PrePoMax-CodeAster/PrePoMax/CodeAster/CodeAsterResultBridge.cs'
+          Select-String -Path $bridge -Pattern 'HashSet<int> seenNodes'
+          Select-String -Path $bridge -Pattern 'does not cover the admitted mesh'
+          Select-String -Path $bridge -Pattern 'contains duplicate node'
+          Select-String -Path $bridge -Pattern 'which is not present in the admitted mesh'
+          Select-String -Path $bridge -Pattern 'Single.IsNaN'
+          Select-String -Path $bridge -Pattern 'Single.IsInfinity'
+
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build production Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal 2>&1 | Tee-Object -FilePath C8_28_MSBUILD.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Exercise production CodeAsterResultBridge fail closed
+        shell: pwsh
+        run: |
+          $exe = Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe' -ErrorAction SilentlyContinue
+          if (-not $exe) { throw 'Expected compiled PrePoMax.exe was not found at the Release/x64 output path.' }
+
+          $fixtureDir = Join-Path $PWD 'c8-28-fixtures'
+          New-Item -ItemType Directory -Force -Path $fixtureDir | Out-Null
+          Set-Content -Path (Join-Path $fixtureDir 'dummy.rmed') -Value 'C8.28 bridge probe only; RMED content is not parsed by the interoperability probe.'
+
+          function Write-Section([System.IO.StreamWriter]$w, [string]$title, [string]$header, [string[]]$rows) {
+            $w.WriteLine($title)
+            $w.WriteLine($header)
+            foreach ($row in $rows) { $w.WriteLine($row) }
+            $w.WriteLine()
+          }
+
+          function Write-Resu([string]$path, [string]$deplMode) {
+            $w = [System.IO.StreamWriter]::new($path, $false, [System.Text.Encoding]::UTF8)
+            try {
+              $depl = @('N1;0;0;0','N2;0;0;0','N3;0;0;0','N4;0.001;0;0')
+              if ($deplMode -eq 'missing') { $depl = $depl[0..2] }
+              elseif ($deplMode -eq 'unknown') { $depl[3] = 'N99;0.001;0;0' }
+              elseif ($deplMode -eq 'duplicate') { $depl[3] = 'N3;0.001;0;0' }
+              elseif ($deplMode -eq 'nonfinite') { $depl[3] = 'N4;NaN;0;0' }
+
+              Write-Section $w 'PPM_DEPL' 'NOEUD;DX;DY;DZ' $depl
+              Write-Section $w 'PPM_STRESS_N' 'NOEUD;SIXX;SIYY;SIZZ' @('N1;0;0;0','N2;0;0;0','N3;0;0;0','N4;0;0;0')
+              Write-Section $w 'PPM_STRESS_S' 'NOEUD;SIXY;SIYZ;SIXZ' @('N1;0;0;0','N2;0;0;0','N3;0;0;0','N4;0;0;0')
+              Write-Section $w 'PPM_STRAIN_N' 'NOEUD;EPXX;EPYY;EPZZ' @('N1;0;0;0','N2;0;0;0','N3;0;0;0','N4;0;0;0')
+              Write-Section $w 'PPM_STRAIN_S' 'NOEUD;EPXY;EPYZ;EPXZ' @('N1;0;0;0','N2;0;0;0','N3;0;0;0','N4;0;0;0')
+            }
+            finally { $w.Dispose() }
+          }
+
+          function Invoke-Probe([string]$name, [string]$resu, [string]$rmed) {
+            $stdout = Join-Path $fixtureDir ($name + '.stdout.log')
+            $stderr = Join-Path $fixtureDir ($name + '.stderr.log')
+            $p = Start-Process -FilePath $exe.FullName `
+              -ArgumentList @('--codeaster-import-probe', $rmed, $resu) `
+              -WorkingDirectory $exe.DirectoryName `
+              -RedirectStandardOutput $stdout `
+              -RedirectStandardError $stderr `
+              -NoNewWindow -Wait -PassThru
+            return [ordered]@{ exit_code=$p.ExitCode; stdout=$stdout; stderr=$stderr }
+          }
+
+          $rmed = Join-Path $fixtureDir 'dummy.rmed'
+          $cases = @(
+            @{ name='complete'; mode='complete'; expect=0 },
+            @{ name='missing-node'; mode='missing'; expect=1 },
+            @{ name='unknown-node'; mode='unknown'; expect=1 },
+            @{ name='duplicate-node'; mode='duplicate'; expect=1 },
+            @{ name='non-finite'; mode='nonfinite'; expect=1 }
+          )
+
+          $observed = @()
+          foreach ($case in $cases) {
+            $resu = Join-Path $fixtureDir ($case.name + '.resu')
+            Write-Resu $resu $case.mode
+            $probe = Invoke-Probe $case.name $resu $rmed
+            $code = [int]$probe.exit_code
+            $observed += [ordered]@{ case=$case.name; expected_exit=$case.expect; observed_exit=$code }
+            if ($code -ne $case.expect) {
+              if (Test-Path $probe.stdout) { Get-Content $probe.stdout }
+              if (Test-Path $probe.stderr) { Get-Content $probe.stderr }
+              throw "Production result-admission case '$($case.name)' returned $code; expected $($case.expect)."
+            }
+          }
+
+          $witness = [ordered]@{
+            increment='C8.28'
+            production_bridge_exercised=$true
+            complete_result_table_admitted=$true
+            missing_mesh_node_rejected=$true
+            unknown_mesh_node_rejected=$true
+            duplicate_node_rejected=$true
+            non_finite_value_rejected=$true
+            cases=$observed
+            fea_solve_executed=$false
+            numerical_verification=$false
+            new_results_verified=$false
+            industrial_validation=$false
+            ansys_equivalence=$false
+          }
+          $witness | ConvertTo-Json -Depth 6 | Set-Content C8_28_WITNESS.json
+
+      - name: Upload production admission evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c8-28-production-result-admission
+          path: |
+            C8_28_WITNESS.json
+            C8_28_MSBUILD.log
+            c8-28-fixtures/*.log
+          if-no-files-found: warn

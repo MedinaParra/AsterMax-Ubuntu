@@ -1,0 +1,79 @@
+name: C8.50 Viewport Engineering HUD Windows
+
+on:
+  push:
+    branches: [agent/c8-50-viewport-engineering-hud]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify viewport HUD source contract
+        shell: pwsh
+        run: |
+          $hud = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxViewportHud.cs' -Raw
+          foreach ($token in @('VIEWPORT · CAD/FEA','■ CAD','△ MESH','⟂ BC','↓ LOADS','≋ RESULTS','OBSERVED ≠ VERIFIED','ProbeAny','CurrentView')) {
+            if ($hud -notmatch [regex]::Escape($token)) { throw "Missing C8.50 HUD token: $token" }
+          }
+          if ($hud -match 'VERIFIED\s*=|solver_verified\s*=\s*true') { throw 'Viewport HUD must not synthesize verified solver state.' }
+          $integration = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxAiIntegration.cs' -Raw
+          foreach ($token in @('InstallAsterMaxViewportHud','DwmSetWindowAttribute','StyleAsterMaxTabs','OwnerDrawFixed','DrawAsterMaxTab')) {
+            if ($integration -notmatch [regex]::Escape($token)) { throw "Missing C8.50 chrome token: $token" }
+          }
+      - name: Launch and capture maximized native GUI
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public static class NativeWin50 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int nCmdShow);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(30)
+          do { Start-Sleep -Milliseconds 500; $p.Refresh(); if($p.HasExited){throw 'GUI exited early'} } while($p.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          [NativeWin50]::ShowWindow($p.MainWindowHandle,3)|Out-Null
+          [NativeWin50]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
+          Start-Sleep -Seconds 3
+          $r=New-Object NativeWin50+RECT; [NativeWin50]::GetWindowRect($p.MainWindowHandle,[ref]$r)|Out-Null
+          $w=$r.Right-$r.Left; $h=$r.Bottom-$r.Top
+          if($w -lt 1000 -or $h -lt 700){throw "Native demo window below hosted-runner evidence threshold: ${w}x${h}"}
+          $bmp=New-Object Drawing.Bitmap $w,$h; $g=[Drawing.Graphics]::FromImage($bmp)
+          try{$g.CopyFromScreen($r.Left,$r.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
+          $png='artifact/C8.50_VIEWPORT_ENGINEERING_HUD.png'; $bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+          @{title=$p.MainWindowTitle;width=$w;height=$h;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();maximize_requested=$true;hosted_runner_resolution_limited=$true}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_WINDOW_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - name: Write evidence
+        shell: pwsh
+        run: |
+          @{schema='astermax.viewport-engineering-hud.v1';version='C8.50';commit='${{ github.sha }}';viewport_hud=$true;cad_state_observed=$true;mesh_state_observed=$true;bc_state_observed=$true;load_state_observed=$true;result_state_observed=$true;current_view_observed=$true;native_dark_titlebar_attempted=$true;inherited_tabs_owner_drawn=$true;solver_verified_inferred=$false;solver_logic_modified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json|Set-Content -Encoding UTF8 artifact/C8.50_UI_EVIDENCE.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.50-Viewport-Engineering-HUD-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 14

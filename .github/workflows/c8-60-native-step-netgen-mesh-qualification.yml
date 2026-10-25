@@ -1,0 +1,114 @@
+name: C8.60 Native STEP NetGen Mesh Qualification Windows
+
+on:
+  push:
+    branches: [agent/c8-60-native-step-netgen-mesh-qualification]
+  workflow_dispatch:
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Verify pinned native meshing contract
+        shell: pwsh
+        run: |
+          $controller=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/Controller.cs' -Raw
+          foreach($token in @('public bool CreateMesh(string partName)','return CreateMeshFromBrep(part)','ImportGeneratedMesh(volFileName, part, true)')) {
+            if($controller -notmatch [regex]::Escape($token)){throw "Pinned Controller mesh contract changed: $token"}
+          }
+          $h=Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxStepMeshHarness.cs' -Raw
+          foreach($token in @('ASTERMAX_STEP_MESH_FIXTURE','_controller.ImportFile(stepPath, false)','_controller.CreateMesh(meshedPartName)','mesh.Elements','mesh.Nodes','post_mesh_mm_scale_qualified','element_connectivity_valid','step_to_netgen_mesh_qualified')) {
+            if($h -notmatch [regex]::Escape($token)){throw "Missing C8.60 token: $token"}
+          }
+          if($h -match 'solver_verified\s*[=:]\s*true|industrial_validation\s*[=:]\s*true|ansys_equivalence\s*[=:]\s*true'){throw 'C8.60 must not synthesize FEA validation claims.'}
+      - name: Fetch pinned CAD runtime and STEP fixture
+        shell: pwsh
+        run: |
+          $runtimeZip='build/PrePoMax-v1.4.0-portable.zip'
+          $runtimeExtract='build/PrePoMax-v1.4.0-portable'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $runtimeZip 'https://prepomax.fs.um.si/Files/Downloads/PrePoMax%20v1.4.0.zip'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Expand-Archive -Path $runtimeZip -DestinationPath $runtimeExtract -Force
+          $netgen=Get-ChildItem -Path $runtimeExtract -Recurse -Filter NetGenMesher.exe | Select-Object -First 1
+          if(-not $netgen){throw 'Portable runtime missing NetGenMesher.exe'}
+          $release=(Get-Item 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release').FullName
+          $runtimeRoot=$netgen.Directory.Parent.FullName
+          foreach($folder in @('NetGen','Solver','Models','Temp')){
+            $source=Join-Path $runtimeRoot $folder
+            if(Test-Path $source){Copy-Item -Path $source -Destination $release -Recurse -Force}
+          }
+          $fixture='build/AsterMax_C8.60_Box_mm.step'
+          curl.exe -L --fail --retry 3 --retry-delay 2 -o $fixture 'https://raw.githubusercontent.com/facebookresearch/project_superdex/9b59be6f5279936d15322f02bd04c631c7249cb4/assets/prefabs/box_and_blocks/cad/box.step'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $raw=Get-Content $fixture -Raw
+          if($raw -notmatch [regex]::Escape('.MILLI., .METRE.')){throw 'Pinned STEP fixture no longer declares SI millimetres.'}
+          if($raw -notmatch '537\.000000' -or $raw -notmatch '162\.000000' -or $raw -notmatch '\-254\.000000'){throw 'Pinned STEP fixture dimensional sentinels changed.'}
+          "ASTERMAX_STEP_FIXTURE=$((Resolve-Path $fixture).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Launch native STEP to NetGen mesh qualification proof
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public static class NativeWin60 {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+          }
+          "@
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          $env:ASTERMAX_STEP_MESH_FIXTURE='1'
+          $env:ASTERMAX_STEP_MESH_PATH=$env:ASTERMAX_STEP_FIXTURE
+          $env:ASTERMAX_STEP_MESH_EVIDENCE_PATH=(Join-Path $PWD 'artifact/C8.60_STEP_NETGEN_RUNTIME.json')
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $p=Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline=(Get-Date).AddSeconds(35)
+          do{Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw "GUI exited early: $($p.ExitCode)"}}while($p.MainWindowHandle -eq 0 -and (Get-Date)-lt $deadline)
+          if($p.MainWindowHandle -eq 0){throw 'No native window'}
+          if($p.MainWindowTitle -notmatch '^AsterMax Mechanical'){throw "Unexpected title: $($p.MainWindowTitle)"}
+          $evidence=$env:ASTERMAX_STEP_MESH_EVIDENCE_PATH
+          $proofDeadline=(Get-Date).AddSeconds(150)
+          while(-not (Test-Path $evidence) -and (Get-Date)-lt $proofDeadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){throw 'GUI exited during native STEP meshing'}}
+          if(-not (Test-Path $evidence)){throw 'C8.60 runtime evidence was not written.'}
+          $raw=Get-Content $evidence -Raw
+          Write-Host '--- C8.60 runtime evidence ---'; Write-Host $raw; Write-Host '--- end runtime evidence ---'
+          $r=$raw | ConvertFrom-Json
+          if(-not $r.source_step_declares_si_millimetres){throw "STEP unit gate failed: $($r.error)"}
+          if(-not $r.native_step_imported -or -not $r.cad_mm_scale_qualified){throw "Native STEP qualification failed: $($r.error)"}
+          if(-not $r.controller_create_mesh_returned){throw "Controller.CreateMesh failed: $($r.error)"}
+          if(-not $r.native_netgen_mesh_generated){throw "Native NetGen mesh not generated: $($r.error)"}
+          if([int]$r.mesh_node_count -lt 4 -or [int]$r.mesh_element_count -lt 1){throw 'Generated FE mesh is empty or trivial.'}
+          if(-not $r.post_mesh_mm_scale_qualified){throw "Post-mesh dimensional scale failed: $($r.error)"}
+          if(-not $r.mesh_node_coordinates_finite -or -not $r.element_connectivity_valid -or -not $r.no_coincident_element_nodes){throw "Mesh topology sanity gate failed: $($r.error)"}
+          if(-not $r.step_to_netgen_mesh_qualified){throw "C8.60 qualification failed: $($r.error)"}
+          if($r.solver_executed -or $r.solver_verified -or $r.industrial_validation -or $r.ansys_equivalence){throw 'C8.60 must remain mesh-only qualification.'}
+          [NativeWin60]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 3
+          $rect=New-Object NativeWin60+RECT; [NativeWin60]::GetWindowRect($p.MainWindowHandle,[ref]$rect)|Out-Null
+          $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
+          $bmp=New-Object Drawing.Bitmap $w,$h;$g=[Drawing.Graphics]::FromImage($bmp)
+          try{$g.CopyFromScreen($rect.Left,$rect.Top,0,0,$bmp.Size)}finally{$g.Dispose()}
+          $png='artifact/C8.60_NATIVE_STEP_NETGEN_MESH.png';$bmp.Save((Join-Path $PWD $png),[Drawing.Imaging.ImageFormat]::Png);$bmp.Dispose()
+          @{schema='astermax.native-step-netgen-mesh-qualification.v1';commit='${{ github.sha }}';source_step_sha256=[string]$r.source_step_sha256;native_step_imported=$true;cad_mm_scale_qualified=$true;controller_create_mesh_returned=$true;native_netgen_mesh_generated=$true;mesh_part_count=[int]$r.mesh_part_count;mesh_node_count=[int]$r.mesh_node_count;mesh_element_count=[int]$r.mesh_element_count;mesh_element_types=[string]$r.mesh_element_types;mesh_extents_mm=$r.mesh_extents_mm;post_mesh_mm_scale_qualified=$true;element_connectivity_valid=$true;no_coincident_element_nodes=$true;minimum_element_node_distance_mm=[double]$r.minimum_element_node_distance_mm;screenshot_sha256=(Get-FileHash $png -Algorithm SHA256).Hash.ToLowerInvariant();solver_executed=$false;solver_verified=$false;industrial_validation=$false;ansys_equivalence=$false}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 artifact/C8.60_EVIDENCE.json
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.60-Native-STEP-NetGen-Mesh-${{ github.sha }}
+          path: artifact/*
+          if-no-files-found: warn
+          retention-days: 14

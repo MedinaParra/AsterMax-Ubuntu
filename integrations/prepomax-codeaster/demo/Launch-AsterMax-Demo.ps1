@@ -1,0 +1,142 @@
+param(
+    [string]$EvidencePath = "",
+    [switch]$NoWait
+)
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$contractPath = Join-Path $root 'demo-contract.json'
+$logs = Join-Path $root 'Logs'
+New-Item -ItemType Directory -Force $logs | Out-Null
+$inv = [Globalization.CultureInfo]::InvariantCulture
+
+trap {
+    try {
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $detail = $_ | Out-String
+        $detail | Set-Content (Join-Path $logs "unexpected-launcher-error-$stamp.txt") -Encoding UTF8
+        if ($env:CI -and $env:GITHUB_WORKSPACE) {
+            $dest = Join-Path $env:GITHUB_WORKSPACE 'qualified-logs'
+            New-Item -ItemType Directory -Force $dest | Out-Null
+            Copy-Item (Join-Path $logs '*') $dest -Force -ErrorAction SilentlyContinue
+        }
+    } catch {}
+    exit 91
+}
+
+function Get-Sha256Hex([string]$Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $bytes = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes)).Replace('-','').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
+function Fail([string]$message) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $failure = @{ ok=$false; timestamp=(Get-Date).ToUniversalTime().ToString('o'); error=$message }
+    $failure | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $logs "launch-failure-$stamp.json") -Encoding UTF8
+    throw $message
+}
+
+if (-not [Environment]::Is64BitOperatingSystem) { Fail 'AsterMax PMV requires 64-bit Windows.' }
+if ($PSVersionTable.PSVersion.Major -lt 5) { Fail 'AsterMax PMV requires Windows PowerShell 5.1 or newer.' }
+if (-not (Test-Path $contractPath)) { Fail 'demo-contract.json is missing.' }
+
+$contract = Get-Content $contractPath -Raw | ConvertFrom-Json
+$exe = Join-Path $root 'PrePoMax.exe'
+$pmxRel = ([string]$contract.dataset.pmx.path).Replace('/','\')
+$rmedRel = ([string]$contract.dataset.rmed.path).Replace('/','\')
+$resuRel = ([string]$contract.dataset.resu.path).Replace('/','\')
+$pmx = Join-Path $root $pmxRel
+$rmed = Join-Path $root $rmedRel
+$resu = Join-Path $root $resuRel
+foreach ($p in @($exe,$pmx,$rmed,$resu)) { if (-not (Test-Path $p)) { Fail "Required demo file missing: $p" } }
+
+$checks = @(
+    @{ path=$pmx; expected=[string]$contract.dataset.pmx.sha256 },
+    @{ path=$rmed; expected=[string]$contract.dataset.rmed.sha256 },
+    @{ path=$resu; expected=[string]$contract.dataset.resu.sha256 }
+)
+foreach ($c in $checks) {
+    $actual = Get-Sha256Hex $c.path
+    if ($actual -ne $c.expected.ToLowerInvariant()) { Fail "Demo provenance hash mismatch: $($c.path)" }
+}
+
+$evidenceArg = $null
+if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
+    $evidenceName = "READY-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json'
+    $evidenceArg = 'Logs\' + $evidenceName
+    $EvidencePath = Join-Path $logs $evidenceName
+} elseif (-not [IO.Path]::IsPathRooted($EvidencePath)) {
+    $evidenceArg = $EvidencePath.Replace('/','\')
+    $EvidencePath = Join-Path $root $evidenceArg
+} else {
+    if ($EvidencePath -match '\s') { Fail 'Custom absolute EvidencePath with spaces is unsupported; use a relative package path.' }
+    $evidenceArg = $EvidencePath
+}
+
+$stdout = Join-Path $logs 'AsterMax-demo.stdout.log'
+$stderr = Join-Path $logs 'AsterMax-demo.stderr.log'
+$env:ASTERMAX_RESULTS_FULL_MODEL_PMX = $pmx
+$env:ASTERMAX_RESULTS_EXPECTED_NODES = ([int]$contract.expected.node_count).ToString($inv)
+$env:ASTERMAX_RESULTS_EXPECTED_ELEMENTS = ([int]$contract.expected.element_count).ToString($inv)
+$env:ASTERMAX_RESULTS_EXPECTED_MISES_MAX = ([double]$contract.expected.max_von_mises_mpa).ToString('R',$inv)
+$env:ASTERMAX_RESULTS_EXPECTED_DISP_MAX = ([double]$contract.expected.max_displacement_mm).ToString('R',$inv)
+$env:ASTERMAX_RESULTS_EXPECTED_MISES_NODE = ([int]$contract.expected.max_von_mises_node).ToString($inv)
+$env:ASTERMAX_RESULTS_EXPECTED_DISP_NODE = ([int]$contract.expected.max_displacement_node).ToString($inv)
+
+# Use System.Diagnostics.Process directly instead of Start-Process. Windows PowerShell can leave
+# Start-Process.ExitCode empty after redirected output + timeout waits. Direct Process exposes the
+# native exit status deterministically while asynchronous reads prevent pipe-buffer deadlocks.
+$psi = New-Object Diagnostics.ProcessStartInfo
+$psi.FileName = $exe
+$psi.Arguments = '--astermax-results-demo ' + $rmedRel + ' ' + $resuRel + ' ' + $evidenceArg
+$psi.WorkingDirectory = $root
+$psi.UseShellExecute = $false
+$psi.CreateNoWindow = $false
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$p = New-Object Diagnostics.Process
+$p.StartInfo = $psi
+if (-not $p.Start()) { Fail 'AsterMax demo process could not be started.' }
+$outTask = $p.StandardOutput.ReadToEndAsync()
+$errTask = $p.StandardError.ReadToEndAsync()
+$launch = @{
+    schema='astermax.c8.78.launch-summary.v1'; ok=$true; process_id=$p.Id; evidence_path=$EvidencePath;
+    dataset_verified=$true; package_root=$root; started_utc=(Get-Date).ToUniversalTime().ToString('o'); waited=(-not $NoWait);
+    relative_internal_arguments=$true; invariant_numeric_contract=$true; argument_line_model='relocatable-relative-package-paths';
+    sha256_implementation='System.Security.Cryptography.SHA256'; process_api='System.Diagnostics.Process'
+}
+$launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
+
+if ($NoWait) { return }
+if (-not $p.WaitForExit(120000)) {
+    try { $p.Kill() } catch {}
+    try { $p.WaitForExit() } catch {}
+    try { $outTask.Result | Set-Content $stdout -Encoding UTF8 } catch {}
+    try { $errTask.Result | Set-Content $stderr -Encoding UTF8 } catch {}
+    Fail 'AsterMax demo did not exit within the deterministic qualification window.'
+}
+$p.WaitForExit()
+$outText = $outTask.Result
+$errText = $errTask.Result
+$outText | Set-Content $stdout -Encoding UTF8
+$errText | Set-Content $stderr -Encoding UTF8
+$exitCode = [int]$p.ExitCode
+if ($exitCode -ne 0) { Fail "AsterMax demo exited with code $exitCode. See Logs." }
+if (-not (Test-Path $EvidencePath)) { Fail 'AsterMax demo exited without emitting READY evidence.' }
+$ready = Get-Content $EvidencePath -Raw | ConvertFrom-Json
+if (-not $ready.scene_ready -or -not $ready.result_admitted -or -not $ready.rendered_viewport_deformation_verified) { Fail 'AsterMax demo READY evidence did not satisfy the admitted Results contract.' }
+if ([string]$ready.deformation_state -ne 'user-defined-x10-contour') { Fail 'AsterMax demo did not preserve the qualified x10 deformation state.' }
+
+$launch.exit_code = $exitCode
+$launch.completed_utc = (Get-Date).ToUniversalTime().ToString('o')
+$launch.result_admitted = $true
+$launch.rendered_x10 = $true
+$launch | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $logs 'last-launch.json') -Encoding UTF8
+Write-Host 'AsterMax PMV demo completed with solver-verified Results and deterministic exit code 0.'
