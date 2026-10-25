@@ -1,0 +1,19 @@
+name: Windows PMV FEA Harness
+
+on:
+  pull_request:
+  push:
+    branches: [main, agent/windows-pmv-fea-core]
+
+jobs:
+  verify-fea-core:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PMV
+        run: python -m pip install -e .[test]
+      - name: Run deterministic FEA harness
+        run: python -m pytest -q
