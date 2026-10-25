@@ -1,0 +1,219 @@
+name: Generated Code_Aster E2E
+
+on:
+  push:
+    branches:
+      - feature/prepomax-code-aster-harness-runtime
+    paths:
+      - 'integrations/prepomax-codeaster/overlay/PrePoMax/CodeAster/**'
+      - 'integrations/prepomax-codeaster/tools/**'
+      - 'integrations/prepomax-codeaster/smoke/codeaster-generated-linear-tetra/**'
+      - 'integrations/prepomax-codeaster/harness/astermax_harness.py'
+      - 'integrations/prepomax-codeaster/harness/validate_numeric_reference.py'
+      - '.github/workflows/codeaster-generated-e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: codeaster-generated-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-study-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bootstrap patched PrePoMax tree
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Restore PrePoMax NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build patched PrePoMax
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Generate Code_Aster study from real FeModel
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build/PrePoMax-CodeAster/PrePoMax/bin -Recurse -Filter PrePoMax.exe |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Release/x64 PrePoMax.exe was not found.' }
+          New-Item -ItemType Directory -Force -Path generated-study | Out-Null
+          $source = (Resolve-Path integrations/prepomax-codeaster/smoke/codeaster-generated-linear-tetra/source.inp).Path
+          $output = (Resolve-Path generated-study).Path
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList @('--codeaster-generate-probe', $source, $output) -Wait -PassThru
+          Write-Host "FeModel -> Code_Aster study exit code: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) { throw "CodeAsterModelTranslator generation probe failed with exit code $($process.ExitCode)." }
+          foreach ($name in @('smoke.mail','smoke.comm','smoke.export')) {
+            $path = Join-Path $output $name
+            if (-not (Test-Path $path)) { throw "Generated study is missing $name" }
+          }
+          Get-Content (Join-Path $output 'smoke.export')
+          Select-String -Path (Join-Path $output 'smoke.comm') -Pattern 'MECA_STATIQUE|PPM_DEPL|PPM_STRESS_N|PPM_STRAIN_N'
+
+      - name: Upload generated solver study
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeaster-generated-study
+          path: |
+            generated-study/smoke.mail
+            generated-study/smoke.comm
+            generated-study/smoke.export
+          if-no-files-found: error
+
+  solve-generated-study-linux:
+    needs: generate-study-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download generated Code_Aster study
+        uses: actions/download-artifact@v4
+        with:
+          name: codeaster-generated-study
+          path: generated-study
+
+      - name: Pull pinned Code_Aster image
+        shell: bash
+        run: docker pull simvia/code_aster:17.4.0
+
+      - name: Build harness manifest for generated study
+        shell: bash
+        run: |
+          chmod -R a+rwX generated-study
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('generated-study').resolve()
+          manifest = {
+              'schema': 1,
+              'case_name': 'prepomax-generated-linear-tetra',
+              'solver': 'code_aster',
+              'job_name': 'smoke',
+              'working_directory': str(root),
+              'solver_executable': 'docker',
+              'timeout_seconds': 600,
+              'required_inputs': ['smoke.comm', 'smoke.mail', 'smoke.export'],
+              'required_outputs': ['smoke.mess', 'smoke.rmed', 'smoke.resu'],
+              'solver_command': [
+                  'docker', 'run', '--rm',
+                  '-v', str(root) + ':/home/user/data',
+                  '-w', '/home/user/data',
+                  'simvia/code_aster:17.4.0',
+                  'bash', '-i', '-c', 'run_aster smoke.export'
+              ],
+              'result_contract': {
+                  'required_tables': ['PPM_DEPL','PPM_STRESS_N','PPM_STRESS_S','PPM_STRAIN_N','PPM_STRAIN_S'],
+                  'min_rows_per_table': 4
+              }
+          }
+          (root / 'smoke.harness.manifest.json').write_text(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Execute generated study through real Code_Aster and harness
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/astermax_harness.py \
+            --manifest generated-study/smoke.harness.manifest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('generated-study/smoke.harness.json').read_text())
+          assert report['status'] == 'PASS', report
+          print('Generated-study harness status:', report['status'])
+          for item in report['checks']:
+              print(item['passed'], item['name'], item['detail'])
+          PY
+
+      - name: Validate analytical tetra reference
+        shell: bash
+        run: |
+          python integrations/prepomax-codeaster/harness/validate_numeric_reference.py \
+            --resu generated-study/smoke.resu \
+            --contract integrations/prepomax-codeaster/smoke/codeaster-generated-linear-tetra/reference-contract.json
+
+      - name: Upload real results from generated study
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeaster-generated-real-results
+          path: |
+            generated-study/smoke.mail
+            generated-study/smoke.comm
+            generated-study/smoke.export
+            generated-study/smoke.mess
+            generated-study/smoke.rmed
+            generated-study/smoke.resu
+            generated-study/smoke.harness.json
+          if-no-files-found: error
+
+  import-generated-results-windows:
+    needs: solve-generated-study-linux
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout integration branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download real generated-study results
+        uses: actions/download-artifact@v4
+        with:
+          name: codeaster-generated-real-results
+          path: generated-real-results
+
+      - name: Bootstrap patched PrePoMax tree
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+
+      - name: Restore PrePoMax NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build patched PrePoMax
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Import generated real results into FeResults
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build/PrePoMax-CodeAster/PrePoMax/bin -Recurse -Filter PrePoMax.exe |
+            Where-Object { $_.FullName -match '[\\/]x64[\\/]Release[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Release/x64 PrePoMax.exe was not found.' }
+          $rmed = (Resolve-Path generated-real-results/smoke.rmed).Path
+          $resu = (Resolve-Path generated-real-results/smoke.resu).Path
+          $process = Start-Process -FilePath $exe.FullName -ArgumentList @('--codeaster-import-probe', $rmed, $resu) -Wait -PassThru
+          Write-Host "Generated-study CaeResults import exit code: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) { throw "Generated Code_Aster result import failed with exit code $($process.ExitCode)." }

@@ -1,0 +1,200 @@
+name: C8.80 Fresh Numerical Admission + Reaction Equilibrium
+
+on:
+  push:
+    branches: [agent/c8-80-fresh-numerical-admission]
+  workflow_dispatch:
+
+concurrency:
+  group: c8-80-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  numerical-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Download exact admitted C8.79 fresh solve
+        uses: actions/download-artifact@v4
+        with:
+          name: C8.79-Genuine-CodeAster-Solve-1110ba736fdc607f0fcf1d1016f549c1a634881f
+          path: artifact/c879
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: MedinaParra/AsterMax-Ubuntu
+          run-id: 34011943072
+      - name: Independently parse extrema and reaction equilibrium
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, math, pathlib, re
+          root=pathlib.Path('artifact/c879')
+          resu_path=root/'astermax_c862_static.resu'
+          comm_path=root/'astermax_c862_static.comm'
+          solve_ev_path=root/'C8.79_GENUINE_SOLVE_EVIDENCE.json'
+          if not resu_path.is_file() or not comm_path.is_file() or not solve_ev_path.is_file():
+              raise SystemExit('Pinned C8.79 solver artifacts missing')
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          solve_ev=json.loads(solve_ev_path.read_text(encoding='utf-8'))
+          if not solve_ev.get('solver_verified'):
+              raise SystemExit('C8.79 solver evidence not admitted')
+          if sha(resu_path)!=solve_ev['resu_sha256']:
+              raise SystemExit('RESU provenance mismatch')
+          if sha(root/'astermax_c862_static.rmed')!=solve_ev['rmed_sha256']:
+              raise SystemExit('RMED provenance mismatch')
+          if sha(root/'AsterMax_C862_Structural.pmx')!=solve_ev['pmx_sha256']:
+              raise SystemExit('PMX provenance mismatch')
+          text=resu_path.read_text(encoding='utf-8',errors='replace')
+          def read_table(marker, header):
+              pos=text.find(marker)
+              if pos<0: raise SystemExit('Missing '+marker)
+              lines=text[pos:].splitlines()
+              header_line=';'.join(header)
+              try: hi=next(i for i,l in enumerate(lines) if l.strip()==header_line)
+              except StopIteration: raise SystemExit('Missing header for '+marker)
+              rows={}
+              for line in lines[hi+1:]:
+                  if rows and (not line.strip() or line.startswith('PPM_') or 'ASTER 17.' in line): break
+                  parts=[p.strip() for p in line.split(';')]
+                  if len(parts)!=len(header):
+                      if rows: break
+                      continue
+                  try:
+                      node=int(parts[0]); vals=[float(v.replace('D','E')) for v in parts[1:]]
+                  except ValueError:
+                      if rows: break
+                      continue
+                  if not all(math.isfinite(v) for v in vals): raise SystemExit(f'Non-finite {marker} row at node {node}')
+                  rows[node]=vals
+              if len(rows)!=5158: raise SystemExit(f'{marker} expected 5158 nodes, got {len(rows)}')
+              return rows
+          depl=read_table('PPM_DEPL',['NOEUD','DX','DY','DZ'])
+          sn=read_table('PPM_STRESS_N',['NOEUD','SIXX','SIYY','SIZZ'])
+          ss=read_table('PPM_STRESS_S',['NOEUD','SIXY','SIYZ','SIXZ'])
+          reac=read_table('PPM_REACTION',['NOEUD','DX','DY','DZ'])
+          disp={n:math.sqrt(sum(v*v for v in xyz)) for n,xyz in depl.items()}
+          umax_node=max(disp,key=disp.get); umax=disp[umax_node]
+          def vm(n):
+              sx,sy,sz=sn[n]; txy,tyz,txz=ss[n]
+              return math.sqrt(0.5*((sx-sy)**2+(sy-sz)**2+(sz-sx)**2)+3.0*(txy*txy+tyz*tyz+txz*txz))
+          mises={n:vm(n) for n in sn}
+          vm_node=max(mises,key=mises.get); vm_max=mises[vm_node]
+          reaction=[sum(v[i] for v in reac.values()) for i in range(3)]
+          comm=comm_path.read_text(encoding='utf-8',errors='replace')
+          m=re.search(r'GROUP_NO=[\'\"]N_LOAD_XMAX_NODE[\'\"],\s*FX=([+\-0-9.eEdD]+)',comm)
+          if not m: raise SystemExit('Could not independently parse applied FX')
+          applied_fx=float(m.group(1).replace('D','E'))
+          external=[applied_fx,0.0,0.0]
+          residual=[reaction[i]+external[i] for i in range(3)]
+          residual_norm=math.sqrt(sum(v*v for v in residual))
+          if not (vm_max>0 and umax>0): raise SystemExit('Non-positive numerical extrema')
+          if abs(residual[0])>1e-3 or abs(residual[1])>1e-3 or abs(residual[2])>1e-3:
+              raise SystemExit(f'Reaction equilibrium failed: residual={residual}')
+          if vm_node!=21: raise SystemExit(f'Unexpected Mises max node {vm_node}; expected solver table maximum at N21')
+          if umax_node!=22: raise SystemExit(f'Unexpected displacement max node {umax_node}; expected solver table maximum at N22')
+          ev={
+            'schema':'astermax.c8.80.fresh-numerical-admission.v1',
+            'source_run_id':34011943072,
+            'source_commit':'1110ba736fdc607f0fcf1d1016f549c1a634881f',
+            'source':'exact admitted C8.79 current-run STEP/mm study',
+            'solver':'Code_Aster 17.4.0',
+            'node_count':len(depl),
+            'mises_max_mpa':vm_max,'mises_max_node':vm_node,
+            'disp_max_mm':umax,'disp_max_node':umax_node,
+            'reaction_sum_n':reaction,'applied_load_n':external,
+            'equilibrium_residual_n':residual,'equilibrium_residual_norm_n':residual_norm,
+            'equilibrium_tolerance_n':1e-3,'reaction_equilibrium_verified':True,
+            'pmx_sha256':solve_ev['pmx_sha256'],'rmed_sha256':solve_ev['rmed_sha256'],'resu_sha256':solve_ev['resu_sha256'],
+            'industrial_validation':False,'ansys_equivalence':False
+          }
+          out=pathlib.Path('artifact/c8-80')
+          out.mkdir(parents=True,exist_ok=True)
+          (out/'C8.80_NUMERICAL_ADMISSION.json').write_text(json.dumps(ev,indent=2),encoding='utf-8')
+          print(json.dumps(ev,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: C8.80-Numerical-Admission-${{ github.sha }}
+          path: artifact/c8-80/**
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-results-correlation:
+    needs: numerical-admission
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact C8.79 solve and C8.80 numerical evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: C8.79-Genuine-CodeAster-Solve-1110ba736fdc607f0fcf1d1016f549c1a634881f
+          path: artifact/c879
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: MedinaParra/AsterMax-Ubuntu
+          run-id: 34011943072
+      - uses: actions/download-artifact@v4
+        with:
+          name: C8.80-Numerical-Admission-${{ github.sha }}
+          path: artifact/c880
+      - name: Bootstrap Results-capable AsterMax
+        shell: pwsh
+        run: |
+          python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+          python integrations/prepomax-codeaster/tools/apply_full_model_results_demo.py build/PrePoMax-CodeAster
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+      - name: Correlate independent solver extrema with native Results
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact/c8-80-results | Out-Null
+          $pmx=(Resolve-Path 'artifact/c879/AsterMax_C862_Structural.pmx').Path
+          $rmed=(Resolve-Path 'artifact/c879/astermax_c862_static.rmed').Path
+          $resu=(Resolve-Path 'artifact/c879/astermax_c862_static.resu').Path
+          $num=Get-Content 'artifact/c880/C8.80_NUMERICAL_ADMISSION.json' -Raw|ConvertFrom-Json
+          if((Get-FileHash $pmx -Algorithm SHA256).Hash.ToLowerInvariant() -ne $num.pmx_sha256){throw 'PMX hash mismatch'}
+          if((Get-FileHash $rmed -Algorithm SHA256).Hash.ToLowerInvariant() -ne $num.rmed_sha256){throw 'RMED hash mismatch'}
+          if((Get-FileHash $resu -Algorithm SHA256).Hash.ToLowerInvariant() -ne $num.resu_sha256){throw 'RESU hash mismatch'}
+          $env:ASTERMAX_RESULTS_FULL_MODEL_PMX=$pmx
+          $exe=(Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $ready=(Join-Path $PWD 'artifact/c8-80-results/READY.json')
+          $stdout=(Join-Path $PWD 'artifact/c8-80-results/stdout.log')
+          $stderr=(Join-Path $PWD 'artifact/c8-80-results/stderr.log')
+          $p=Start-Process -FilePath $exe -ArgumentList @('--astermax-results-demo',$rmed,$resu,$ready) -WorkingDirectory (Split-Path $exe) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+          $deadline=(Get-Date).AddSeconds(100)
+          while(-not(Test-Path $ready) -and (Get-Date)-lt $deadline){Start-Sleep -Milliseconds 500;$p.Refresh();if($p.HasExited){Get-Content $stderr -ErrorAction SilentlyContinue;throw "Results exited early: $($p.ExitCode)"}}
+          if(-not(Test-Path $ready)){throw 'Results READY timeout'}
+          $s=Get-Content $ready -Raw|ConvertFrom-Json
+          if(-not $s.scene_ready -or -not $s.result_admitted -or -not $s.full_model_pmx_loaded -or -not $s.native_draw_invoked){throw 'Native Results admission incomplete'}
+          if(-not $s.native_scalar_bar_semantically_verified){throw 'Scalar bar semantic gate failed'}
+          $vmErr=[math]::Abs([double]$s.mises_max_mpa-[double]$num.mises_max_mpa)
+          $uErr=[math]::Abs([double]$s.disp_max_mm-[double]$num.disp_max_mm)
+          if($vmErr -gt 1e-4){throw "Mises solver↔Results mismatch: $vmErr MPa"}
+          if($uErr -gt 1e-8){throw "Displacement solver↔Results mismatch: $uErr mm"}
+          if([int]$s.mesh_nodes -ne [int]$num.node_count){throw 'Results node count mismatch'}
+          @{
+            schema='astermax.c8.80.results-correlation.v1';commit='${{ github.sha }}';source_c879_run=34011943072
+            scene_ready=$true;result_admitted=$true;full_model_pmx_loaded=$true;native_draw_invoked=$true;native_scalar_bar_semantically_verified=$true
+            solver_mises_max_mpa=[double]$num.mises_max_mpa;results_mises_max_mpa=[double]$s.mises_max_mpa;mises_abs_error_mpa=$vmErr
+            solver_disp_max_mm=[double]$num.disp_max_mm;results_disp_max_mm=[double]$s.disp_max_mm;disp_abs_error_mm=$uErr
+            solver_mises_max_node=[int]$num.mises_max_node;solver_disp_max_node=[int]$num.disp_max_node;reaction_equilibrium_verified=[bool]$num.reaction_equilibrium_verified
+            pmx_sha256=$num.pmx_sha256;rmed_sha256=$num.rmed_sha256;resu_sha256=$num.resu_sha256
+            industrial_validation=$false;ansys_equivalence=$false
+          }|ConvertTo-Json -Depth 5|Set-Content artifact/c8-80-results/C8.80_RESULTS_CORRELATION.json -Encoding UTF8
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: AsterMax-C8.80-Fresh-Numerical-Admission-${{ github.sha }}
+          path: artifact/c8-80-results/**
+          if-no-files-found: warn
+          retention-days: 14

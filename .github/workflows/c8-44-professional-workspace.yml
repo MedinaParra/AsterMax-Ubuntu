@@ -1,0 +1,78 @@
+name: C8.44 Professional Workspace Windows
+
+on:
+  push:
+    branches:
+      - agent/c8-44-professional-workspace
+    paths:
+      - '.github/workflows/c8-44-professional-workspace.yml'
+      - 'integrations/prepomax-codeaster/**'
+  workflow_dispatch:
+
+concurrency:
+  group: c8-44-professional-workspace-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Bootstrap AsterMax source
+        shell: pwsh
+        run: python integrations/prepomax-codeaster/tools/bootstrap.py --destination build/PrePoMax-CodeAster
+      - name: Restore NuGet dependencies
+        shell: pwsh
+        run: nuget restore build/PrePoMax-CodeAster/PrePoMax.sln -PackagesDirectory build/PrePoMax-CodeAster/packages -NonInteractive
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        shell: pwsh
+        run: |
+          msbuild build/PrePoMax-CodeAster/PrePoMax.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify workflow UI source contract
+        shell: pwsh
+        run: |
+          $src = Get-Content 'build/PrePoMax-CodeAster/PrePoMax/AsterMaxAI/AsterMaxWorkflowStrip.cs' -Raw
+          foreach ($token in @('CAD / STEP','Mesh','Material','BC','Load','Solve','Results','mm · N · MPa')) {
+            if ($src -notmatch [regex]::Escape($token)) { throw "Missing workflow UI token: $token" }
+          }
+      - name: Smoke launch compiled executable
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'build/PrePoMax-CodeAster/PrePoMax/bin/x64/Release/PrePoMax.exe').Path
+          $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
+          $deadline = (Get-Date).AddSeconds(30)
+          do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) { throw "GUI exited early. ExitCode=$($proc.ExitCode)" }
+          } while ($proc.MainWindowHandle -eq 0 -and (Get-Date) -lt $deadline)
+          $proc.Refresh()
+          if ($proc.MainWindowHandle -eq 0) { throw 'GUI did not create a native main window.' }
+          if ($proc.MainWindowTitle -notmatch '^AsterMax Mechanical') { throw "Unexpected window title: $($proc.MainWindowTitle)" }
+          Stop-Process -Id $proc.Id -Force
+      - name: Write UI evidence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          @{
+            schema='astermax.professional-workspace.v1'; version='C8.44'; commit='${{ github.sha }}';
+            workflow_strip=$true; stage_icons=$true; stages=@('CAD_STEP','Mesh','Material','BC','Load','Solve','Results');
+            unit_contract_visible='mm-N-MPa'; ai_copilot=$true; solver_logic_modified=$false;
+            industrial_validation=$false; ansys_equivalence=$false
+          } | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 artifact/C8.44_UI_EVIDENCE.json
+      - name: Upload UI evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C8.44-Professional-Workspace-${{ github.sha }}
+          path: artifact/C8.44_UI_EVIDENCE.json
+          if-no-files-found: error
+          retention-days: 14
