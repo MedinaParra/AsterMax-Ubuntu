@@ -33,7 +33,9 @@ try {
     $forceHelper=Join-Path $Root 'PrePoMax/AsterMaxForceDistribution.cs'
     if(Test-Path -LiteralPath $forceHelper) { $sources += $forceHelper }
     $sources += $AdditionalSources
-    Add-Type -Path $sources -ReferencedAssemblies $references -CompilerOptions '/nowarn:1701,1702'
+    # The desktop project targets .NET Framework (default language C# 7.3).
+    # PowerShell's newer compiler defaults otherwise hide desktop scope errors.
+    Add-Type -Path $sources -ReferencedAssemblies $references -CompilerOptions @('/nowarn:1701,1702','/langversion:7.3')
 }
 finally {
     Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue

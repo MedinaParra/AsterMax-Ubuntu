@@ -61,18 +61,18 @@ namespace PrePoMax
                 if (id == null || !ids.Contains(id)) throw new InvalidDataException("Nodo de carga inexistente en la malla actual: " + id);
                 if (!selected.Add(id)) throw new InvalidDataException("Nodo duplicado en la selección de fuerza: " + id + ". Revise el conjunto; no se elimina automáticamente.");
             }
-            double x = Number(force,"fx"+suffix), y = Number(force,"fy"+suffix), z = Number(force,"fz"+suffix);
+            double inputFx = Number(force,"fx"+suffix), inputFy = Number(force,"fy"+suffix), inputFz = Number(force,"fz"+suffix);
             int count = selected.Count;
             var plan = new Plan { Group=group, NodeCount=count,
                 Semantics=perNode ? "PER_NODE_CLOAD" : distribution == null ? "LEGACY_TOTAL_DISTRIBUTED" : "TOTAL_UNIFORM_DISTRIBUTED",
-                Fx=perNode ? x : x/count, Fy=perNode ? y : y/count, Fz=perNode ? z : z/count };
+                Fx=perNode ? inputFx : inputFx/count, Fy=perNode ? inputFy : inputFy/count, Fz=perNode ? inputFz : inputFz/count };
             plan.FxTotal=Finite(plan.Fx*count); plan.FyTotal=Finite(plan.Fy*count); plan.FzTotal=Finite(plan.Fz*count);
-            if ((!perNode) && ((x!=0 && plan.Fx==0) || (y!=0 && plan.Fy==0) || (z!=0 && plan.Fz==0)))
+            if ((!perNode) && ((inputFx!=0 && plan.Fx==0) || (inputFy!=0 && plan.Fy==0) || (inputFz!=0 && plan.Fz==0)))
                 throw new InvalidDataException("La fuerza por nodo queda fuera de la precisión numérica soportada.");
             plan.Report = new JObject {
                 ["schema"]="astermax-force-distribution/v1", ["load_name"]=(string)force["name"],
                 ["semantics"]=plan.Semantics, ["group"]=group, ["selected_unique_node_count"]=count,
-                ["input_components_n"]=new JArray(x,y,z), ["per_node_components_n"]=new JArray(plan.Fx,plan.Fy,plan.Fz),
+                ["input_components_n"]=new JArray(inputFx,inputFy,inputFz), ["per_node_components_n"]=new JArray(plan.Fx,plan.Fy,plan.Fz),
                 ["assembled_resultant_n"]=new JArray(plan.FxTotal,plan.FyTotal,plan.FzTotal),
                 ["multi_node_per_node_warning"]=perNode && count>1,
                 ["distribution_measure"]="NODE_COUNT_NOT_AREA", ["model_modified"]=false, ["solver_execution"]="NOT_RUN"
