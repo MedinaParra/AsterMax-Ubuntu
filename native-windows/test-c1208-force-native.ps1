@@ -31,4 +31,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $OutDir 'force-native.json'),$report.ToString())
     Write-Host $report.ToString()
 }
+catch {
+    Write-Host $_.Exception.ToString()
+    throw
+}
 finally { [AppDomain]::CurrentDomain.remove_AssemblyResolve($resolver) }

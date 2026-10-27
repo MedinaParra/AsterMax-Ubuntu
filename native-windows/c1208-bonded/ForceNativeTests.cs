@@ -41,7 +41,7 @@ public static class ForceNativeTests
         Check("explicit switch back preserves component values",total.WithForceDistribution(NodalForceDistribution.PorNodo).GetType()==typeof(CLoad));
         Type viewType=app.GetType("PrePoMax.ViewCLoad",true);
         object view=Activator.CreateInstance(viewType,new object[]{original});
-        viewType.GetMethod("PopulateDropDownLists").Invoke(view,new object[]{new[]{"LOAD","OTHER"},new string[0],new[]{"Default"}});
+        viewType.GetMethod("PopulateDropDownLists",new[]{typeof(string[]),typeof(string[]),typeof(string[])}).Invoke(view,new object[]{new[]{"LOAD","OTHER"},new string[0],new[]{"Default"}});
         viewType.GetProperty("ForceDistribution").SetValue(view,NodalForceDistribution.TotalUniformePorNodo,null);
         viewType.GetProperty("NodeSetName").SetValue(view,"OTHER",null);
         CLoad edited=(CLoad)viewType.GetMethod("GetBase").Invoke(view,null);
