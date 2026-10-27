@@ -146,7 +146,7 @@ replace(transaction, '                solveModel=_controller.Model;', '''       
 project = 'PrePoMax/PrePoMax.csproj'
 replace(project, '    <Compile Include="AsterMaxBondedMpc.cs" />',
         '    <Compile Include="AsterMaxBondedMpc.cs" />\n    <Compile Include="AsterMaxForceDistribution.cs" />')
-changes['PrePoMax/AsterMaxForceDistribution.cs'] = (Path(__file__).parent / 'AsterMaxForceDistribution.cs').read_text()
+changes['PrePoMax/AsterMaxForceDistribution.cs'] = (Path(__file__).parent / 'AsterMaxForceDistribution.cs').read_text(encoding='utf-8')
 for rel, text in changes.items():
     (root/rel).write_text(text, encoding='utf-8')
 print('C12.08 explicit total/per-node force model, editor, preview and exporter applied.')

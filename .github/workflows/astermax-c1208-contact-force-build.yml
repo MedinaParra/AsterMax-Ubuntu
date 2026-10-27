@@ -35,6 +35,11 @@ jobs:
         $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
         $patches=@($chain.patches|ForEach-Object{$_.file})
         ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+    - name: Verify encoding-independent force source patch
+      shell: pwsh
+      run: |
+        python native-windows/test-c1208-force-encoding.py --root "$PWD/upstream"
+        if($LASTEXITCODE -ne 0) { throw 'Force source encoding regression failed.' }
     - name: Apply validated STEP VTK performance chain
       shell: pwsh
       run: |
