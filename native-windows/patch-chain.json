@@ -924,6 +924,19 @@
       "consumes": [
         "AsterMaxC1208BondedMpc"
       ]
+    },
+    {
+      "id": "patch-c1208-force-distribution",
+      "file": "patch-c1208-force-distribution.ps1",
+      "depends": [
+        "patch-c1208-bonded-ui"
+      ],
+      "declares": [
+        "AsterMaxC1208ForceDistribution"
+      ],
+      "consumes": [
+        "AsterMaxC1208BondedUi"
+      ]
     }
   ]
 }

@@ -1,0 +1,91 @@
+C12.08 local candidate: explicit nodal-force interpretation
+
+Base: c5b278f009d7ce346a0b745ab04cb5b4e7a68698. Not a released Windows build.
+
+The concentrated-force editor offers PorNodo and TotalUniformePorNodo.
+PorNodo applies each entered component to every selected node. TotalUniformePorNodo
+interprets the components as the total resultant and divides by the CURRENT number
+of unique selected nodes at export. This is uniform nodal loading, not pressure
+or area-weighted loading. Changing the mode retains the entered numbers and
+explicitly changes their interpretation; it does not numerically convert them.
+
+Existing serialized CLoad objects and newly created default loads remain per-node.
+Explicit totals use a distinct serializable CaeModel.UniformTotalCLoad subtype,
+accepted by StaticStep. No serialized fields are added to existing CLoad or Load.
+An older executable cannot resolve the new subtype; this is preferable to silently
+reading a total as a per-node force. New total-mode files require the new build.
+The independent non-Code_Aster keyword writer rejects this subtype rather than
+reinterpreting it. This guard does not execute or substitute any other solver.
+
+The native bridge emits explicit nodal_force_total plus
+distribution=UNIFORM_PER_SELECTED_NODE for the new type. Existing CLoad still emits
+nodal_force_per_node. Legacy JSON total contracts retain their previous numerical
+interpretation and LEGACY_TOTAL_DISTRIBUTED audit label.
+
+The UI preview and exporter use the same production force planner. Before launching
+Code_Aster the preview shows current node count, per-node vector, resultant vector,
+and the actual number of CONTINUE ContactPairs and bonded Tie constraints. A
+multi-node per-node load is explicitly warned about. Cancel is the default choice.
+Existing internal automated audit mode bypasses the dialog, not the validation.
+The preview explains that an executable upgrade does not convert saved contacts.
+
+Empty selections, duplicate selected IDs, missing mesh IDs, duplicate mesh IDs,
+non-finite components/resultants, incompatible units, mixed total/per-node fields,
+type/field contradictions and unsupported distributions are rejected before files
+are created. Duplicate selection entries are diagnosed, not silently removed.
+The load plan never edits input, excludes nodes, changes area/pressure definitions,
+or changes force magnitudes in an existing model. The .comm numeric formatter now
+uses round-trip precision, including very small nonzero forces.
+
+Selection changes cause the total-mode division to be recomputed. Existing
+fingerprinting already includes mesh group membership, load runtime type and
+public enum properties; the new mode and changed selection invalidate old results.
+Old per-node force resultants still change with node count, intentionally.
+The mesh IDs used here are current FE identities, not persistent CAD identifiers.
+
+Build/reproduce locally
+1. Check out the exact AsterMax pin above in a copy; apply the supplied patch.
+2. Check out tsvilans/PrePoMax at 3669e65581650e5d9d868aa761db9efd856f8571.
+3. Apply native-windows/patch-chain.json in its declared order. It now ends with
+   patch-c1208-force-distribution.ps1, a wrapper around the transactional Python
+   source patch. The generated source patch is idempotent.
+4. Run test-c1208-force-distribution.ps1, test-c1207-contact-topology.ps1,
+   test-contact-diagnostics.ps1 and test-c1208-bonded-mpc.ps1 with -Root pointing
+   at the generated source and separate -OutDir directories.
+5. On Windows, perform the existing Release x64 build and packaging locally.
+   In Windows PowerShell 5.1 x64 run test-c1208-force-native.ps1 -Dist <package>
+   -OutDir <new directory>. This additional gate was supplied but NOT executed
+   on Linux. It exercises real compiled model/editor properties, trusted synthetic
+   serialization, the live bridge, fingerprint changes and compiled .comm export.
+6. Perform the interactive GUI review, save/reopen and remesh checks before release.
+
+The native gate never accepts a user PMX and deserializes only synthetic objects it
+just created. No user PMX, STEP or screenshot belongs in this repository.
+No CI execution or publishing is part of these instructions for this task.
+
+Local verification performed
+- Full 87-patch source reconstruction completed. Final helper refreshed after an
+  additional unsupported-pressure guard; modified generated sources match the
+  development tree byte-for-byte. Reapplying the final force patch changes no bytes.
+- Production C# JSON exporter/helpers compiled and ran on Linux PowerShell 7.4.13.
+- 41 force checks PASS, including actual .comm resultant reconstruction for
+  1, 2, 3 and 3299 nodes, total/per-node distinction, changed selection, explicit
+  unit rejection, duplicates/stale IDs, tiny forces, non-finite values and
+  type/field contradiction rejection before output.
+- 35 existing contact checks and 160 exhaustive orientation comparisons PASS.
+- 31 additional contact diagnostic checks PASS. Existing 26 bonded MPC checks PASS.
+- Baseline exporter reproduced the defect: a contract declaring nodal_force_total
+  with per-node fields was accepted and exported as PER_NODE_CLOAD. The new
+  exporter rejects that contradiction. This is distinct from the user's original
+  intentional-total/per-node-UI mismatch; no claim is made that their PMX had
+  contradictory JSON fields.
+- Legacy CLoad source regression and patch-chain validation PASS.
+- Roslyn syntax checks passed for generated model/UI/bridge sources; those checks
+  are NOT a native Windows semantic build or an interactive GUI test.
+
+Still pending
+Windows Release build, native gate, original-format backward-load test with an
+old trusted synthetic PMX, interactive editor/preview/save/reopen/remesh checks,
+and any real solver verification. No industrial resistance validation is claimed.
+The parent's separately inspected private PMX was not present in this environment.
+The general code does not modify that PMX, welded tolerances or contact laws.

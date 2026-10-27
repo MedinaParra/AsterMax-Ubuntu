@@ -16,7 +16,7 @@ namespace PrePoMax
     /// </summary>
     public static class AsterMaxContactTopology
     {
-        public const string Version = "C12.07-contact-topology-v1";
+        public const string Version = "C12.08-contact-diagnostics-v2";
 
         private sealed class Zone
         {
@@ -122,7 +122,11 @@ namespace PrePoMax
                     graph[conflict.B].Add(conflict.A ^ 1);
                 }
                 for (int i = 0; i < selected.Length; i++) selected[i] = zones[i].Locked ? 0 : -1;
-                if (!IsSatisfiable(graph, selected)) throw Impossible(zones, original);
+                if (!IsSatisfiable(graph, selected))
+                {
+                    report = FailureReport(zones, ordered, original, inactive);
+                    throw Impossible(zones, original, report);
+                }
 
                 // Deterministic lexicographic preference for original roles.
                 // This is not a claim to minimize the total number of swaps.
@@ -189,6 +193,7 @@ namespace PrePoMax
                 ["remaining_conflict_count"] = 0,
                 ["inactive_contact_count"] = inactive,
                 ["numerical_orientation_changed"] = swappedCount > 0,
+                ["duplicate_pair_candidates"] = DuplicatePairs(zones),
                 ["zones"] = auditZones,
                 ["original_conflicts"] = auditConflicts
             };
@@ -243,15 +248,104 @@ namespace PrePoMax
             return nodes;
         }
 
-        private static Exception Impossible(List<Zone> zones, Conflict[] original)
+        // Keep all forbidden role combinations, not only the first six original
+        // slave overlaps. A visible overlap alone is not an unsatisfiability
+        // proof: swaps may resolve it, while master/master conflicts can prevent
+        // those swaps. These are current-mesh identities, never persistent CAD IDs.
+        private static JObject FailureReport(List<Zone> zones, Conflict[] all, Conflict[] original, int inactive)
+        {
+            var conflicts = new JArray();
+            var keys = zones.Select(z => new[] { FaceKeys((JObject)z.Contact["slave"]),
+                FaceKeys((JObject)z.Contact["master"]) }).ToArray();
+            foreach (Conflict c in all)
+            {
+                string roleA = c.A % 2 == 0 ? "slave" : "master";
+                string roleB = c.B % 2 == 0 ? "slave" : "master";
+                JObject a = (JObject)zones[c.A / 2].Contact[roleA];
+                JObject b = (JObject)zones[c.B / 2].Contact[roleB];
+                var facesA = keys[c.A / 2][c.A % 2];
+                var facesB = keys[c.B / 2][c.B % 2];
+                int commonFaces = facesA.Intersect(facesB, StringComparer.Ordinal).Count();
+                conflicts.Add(new JObject {
+                    ["zone_a"] = c.A / 2 + 1, ["zone_b"] = c.B / 2 + 1,
+                    ["contact_a"] = zones[c.A / 2].Name, ["contact_b"] = zones[c.B / 2].Name,
+                    ["original_role_a"] = roleA, ["original_role_b"] = roleB,
+                    ["surface_a"] = SurfaceName(a), ["surface_b"] = SurfaceName(b),
+                    ["group_a"] = (string)a["group"], ["group_b"] = (string)b["group"],
+                    ["shared_node_count"] = c.Count, ["node_sample"] = new JArray(c.Sample),
+                    ["shared_mesh_face_count"] = commonFaces,
+                    ["overlap_kind"] = commonFaces > 0 ? "SHARED_MESH_FACE" : "SHARED_NODES_ONLY",
+                    ["note"] = "La coincidencia de nodos no demuestra solape geométrico de área."
+                });
+            }
+            return new JObject {
+                ["schema"] = "astermax-contact-preflight-failure/v1",
+                ["version"] = Version, ["status"] = "BLOCKED",
+                ["reason"] = "NO_DISJOINT_SLAVE_ORIENTATION",
+                ["solver_execution"] = "NOT_RUN", ["model_modified"] = false,
+                ["original_conflict_count"] = original.Length,
+                ["forbidden_role_combination_count"] = all.Length,
+                ["inactive_contact_count"] = inactive,
+                ["identity_scope"] = "CURRENT_EXPORTED_MESH_ONLY",
+                ["constraints"] = conflicts,
+                ["zones"] = new JArray(zones.Select((z, i) => new JObject {
+                    ["zone_index"] = i + 1, ["contact_name"] = z.Name,
+                    ["master"] = z.Contact["master"].DeepClone(),
+                    ["slave"] = z.Contact["slave"].DeepClone(), ["orientation_locked"] = z.Locked
+                })),
+                ["duplicate_pair_candidates"] = DuplicatePairs(zones),
+                ["locked_zones"] = new JArray(zones.Select((z, i) => new { z, i }).Where(x => x.z.Locked)
+                    .Select(x => new JObject { ["zone_index"] = x.i + 1, ["contact_name"] = x.z.Name })),
+                ["mechanical_action"] = "REVIEW_DEFINITION_NO_AUTOMATIC_LAW_CONVERSION"
+            };
+        }
+
+        private static HashSet<string> FaceKeys(JObject surface)
+        {
+            return new HashSet<string>(((JArray)surface["elements"]).Cast<JObject>().Select(f =>
+                (string)f["type"] + ":" + new JArray(((JArray)f["nodes"]).Select(n => (string)n)
+                    .OrderBy(n => n, StringComparer.Ordinal)).ToString(Newtonsoft.Json.Formatting.None)), StringComparer.Ordinal);
+        }
+
+        private static JArray DuplicatePairs(List<Zone> zones)
+        {
+            // Matching mesh faces are evidence for review, not authority to erase
+            // a two-pass contact or pick between potentially different laws.
+            var keys = zones.Select(z => new[] { FaceKeys((JObject)z.Contact["master"]),
+                FaceKeys((JObject)z.Contact["slave"]) }).ToArray();
+            var result = new JArray();
+            for (int a = 0; a < zones.Count; a++)
+                for (int b = a + 1; b < zones.Count; b++)
+                {
+                    bool same = keys[a][0].SetEquals(keys[b][0]) && keys[a][1].SetEquals(keys[b][1]);
+                    bool reversed = keys[a][0].SetEquals(keys[b][1]) && keys[a][1].SetEquals(keys[b][0]);
+                    if (same || reversed) result.Add(new JObject {
+                        ["zone_a"] = a + 1, ["zone_b"] = b + 1,
+                        ["contact_a"] = zones[a].Name, ["contact_b"] = zones[b].Name,
+                        ["kind"] = reversed ? "REVERSED_MESH_FACE_PAIR" : "SAME_MESH_FACE_PAIR",
+                        ["action"] = "REVIEW_ONLY_NO_PAIR_REMOVED"
+                    });
+                }
+            return result;
+        }
+
+        private static Exception Impossible(List<Zone> zones, Conflict[] original, JObject report)
         {
             string detail = String.Join("; ", original.Take(6).Select(c =>
                 "'" + zones[c.A / 2].Name + "' (zona " + (c.A / 2 + 1) + ") y '" + zones[c.B / 2].Name + "' (zona " + (c.B / 2 + 1) +
-                "): " + c.Count + " nodos esclavos comunes [" + String.Join(", ", c.Sample) + "]"));
+                "): " + c.Count + " nodos esclavos comunes [" + String.Join(", ", c.Sample) + "]" +
+                " (superficies '" + SurfaceName((JObject)zones[c.A / 2].Contact["slave"]) + "' / '" +
+                SurfaceName((JObject)zones[c.B / 2].Contact["slave"]) + "')"));
             string locked = String.Join(", ", zones.Where(z => z.Locked).Select(z => z.Name));
-            return new InvalidDataException("No existe una orientación maestra/esclava compatible con todos los contactos CONTINUE. " + detail +
+            var error = new InvalidDataException("No existe una orientación maestra/esclava compatible con todos los contactos CONTINUE. " + detail +
+                ". Mostrados " + Math.Min(6, original.Length) + " de " + original.Length + " cruces originales; comprobadas " +
+                (int)report["forbidden_role_combination_count"] + " combinaciones de roles incompatibles" +
                 (locked.Length == 0 ? "" : ". Orientaciones bloqueadas: " + locked) +
-                ". Revise las superficies y los contactos indicados; para uniones intencionadamente compartidas se necesita una definición de contacto adecuada. No se ha ejecutado Code_Aster.");
+                ". Revise las superficies indicadas en Conexiones. CONTINUE es contacto unilateral, no una unión soldada. " +
+                "Si la intención física es bonded, revise las uniones Tie y los contactos activos sobre esas interfaces; no se convierten automáticamente. " +
+                "No se ha ejecutado Code_Aster.");
+            error.Data["contact_topology_report"] = report.ToString(Newtonsoft.Json.Formatting.None);
+            return error;
         }
 
         private static bool IsSatisfiable(List<int>[] baseGraph, int[] selected)

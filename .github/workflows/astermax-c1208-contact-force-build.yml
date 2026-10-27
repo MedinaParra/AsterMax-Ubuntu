@@ -1,0 +1,163 @@
+name: C12.08 contact-force Windows build candidate (no solver)
+'on':
+  push:
+    branches:
+    - agent/c1208-contact-force-windows-20261027
+permissions:
+  contents: read
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/checkout@v5
+      with:
+        repository: tsvilans/PrePoMax
+        ref: 3669e65581650e5d9d868aa761db9efd856f8571
+        path: upstream
+    - name: Setup Python MED runtime
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+        architecture: x64
+    - name: Install Python MED dependencies
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        python -m pip install --disable-pip-version-check --only-binary=:all: numpy h5py
+        if($LASTEXITCODE -ne 0){ throw 'Python MED dependency installation failed.' }
+    - name: Rebuild cumulative source
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        python native-windows/validate-patch-chain.py
+        $chain=Get-Content native-windows/patch-chain.json -Raw|ConvertFrom-Json
+        $patches=@($chain.patches|ForEach-Object{$_.file})
+        ./native-windows/harness-c10208a-patch-chain.ps1 -Root "$PWD/upstream" -Patches $patches -OutDir "$PWD/dist/Audit/PatchChain"
+    - name: Apply validated STEP VTK performance chain
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        ./native-windows/candidate-c1042-vtk-preflight.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1042-controller-preflight.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1042-large-assembly-pipeline.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1042-large-assembly.ps1 -BuildRoot "$PWD/upstream"
+        ./native-windows/candidate-c1043-cad-import-reliability.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1043-cad-import-reliability.ps1 -BuildRoot "$PWD/upstream"
+        ./native-windows/candidate-c1044-adaptive-cad-preview.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1044-adaptive-cad-preview.ps1 -BuildRoot "$PWD/upstream"
+        ./native-windows/candidate-c1084-step-culture-format-fix.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1045-parallel-cad-preview.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1083-step-import-format-hotfix.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1045b-isolated-netgen-workers.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1045b-isolated-netgen-workers.ps1 -BuildRoot "$PWD/upstream"
+        ./native-windows/test-c1046-netgen-worker-lifecycle.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1046c-safe-netgen-singleflight.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1085-step-import-stage-diagnostics.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1086-vis-edge-token-diagnostics.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1047-vtk-scene-batch.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1047-runtime-audit.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1048-actor-preflight.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1048-lazy-element-edges-v3.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1078-runtime-counters.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1079-render-execution-counters.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1080-edge-camera-runtime-counters.ps1 -Root "$PWD/upstream"
+        ./native-windows/candidate-c1081-edge-materialization-counters.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1048-lazy-element-edges.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1078-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1079-render-execution-counter-contract.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1080-edge-camera-runtime-counter-contract.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1081-edge-materialization-contract.ps1 -Root "$PWD/upstream"
+        ./native-windows/test-c1052-viewport-purity.ps1 -Root "$PWD/upstream"
+    - name: Contact topology production C# gate (no solver)
+      shell: pwsh
+      run: ./native-windows/test-c1207-contact-topology.ps1 -Root "$PWD/upstream" -OutDir "$PWD/audit/contacts"
+    - name: Contact diagnostics production C# gate (no solver)
+      shell: pwsh
+      run: ./native-windows/test-contact-diagnostics.ps1 -Root "$PWD/upstream" -OutDir "$PWD/audit/diagnostics"
+    - name: Force distribution production C# gate (no solver)
+      shell: pwsh
+      run: ./native-windows/test-c1208-force-distribution.ps1 -Root "$PWD/upstream" -OutDir "$PWD/audit/forces"
+    - name: Bonded MPC production C# gate (no solver)
+      shell: pwsh
+      run: ./native-windows/test-c1208-bonded-mpc.ps1 -Root "$PWD/upstream" -OutDir "$PWD/audit/bonded"
+    - name: Restore legacy NuGet packages
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $nuget="$PWD/nuget.exe"
+        Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe -OutFile $nuget
+        & $nuget restore "$PWD/upstream/PrePoMax.sln" -PackagesDirectory "$PWD/upstream/packages" -NonInteractive
+        if($LASTEXITCODE -ne 0){ throw "NuGet restore failed: $LASTEXITCODE" }
+        foreach($p in @('ncalc.1.3.8','System.ValueTuple.4.5.0','UnitsNet.4.89.1','Activiz.NET.x64.5.8.0')){ if(-not (Test-Path "$PWD/upstream/packages/$p")){ throw "Required package missing after restore: $p" } }
+    - name: Verify native Release x64 contract
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $sln=Get-Content "$PWD/upstream/PrePoMax.sln" -Raw
+        if($sln -notmatch '(?m)^\s*Release\|x64\s*=\s*Release\|x64\s*$'){ throw 'Release|x64 solution configuration missing' }
+        if($sln -match '(?m)^\s*Release\|Any CPU\s*='){ throw 'Unexpected Release|Any CPU configuration detected' }
+    - name: Build Release x64
+      id: build
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $vswhere="${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $msbuild=& $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+        if(-not $msbuild){ throw 'MSBuild not found' }
+        & $msbuild "$PWD/upstream/PrePoMax.sln" /m /p:Configuration=Release /p:Platform=x64
+        if($LASTEXITCODE -ne 0){ throw "MSBuild failed: $LASTEXITCODE" }
+    - name: Locate compiled application
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        $exe=@(Get-ChildItem "$PWD/upstream" -Recurse -File -Filter 'AsterMax Mechanical.exe' | Where-Object { $_.FullName -match '[\\/]bin[\\/]x64[\\/]Release[\\/]' })
+        if($exe.Count -ne 1) { throw "Expected one compiled executable, got $($exe.Count)." }
+        "ASTERMAX_BUILD_DIR=$($exe[0].Directory.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+    - name: Native model and editor-property gate (no solver or interactive GUI)
+      shell: powershell
+      run: ./native-windows/test-c1208-force-native.ps1 -Dist $env:ASTERMAX_BUILD_DIR -OutDir "$PWD/audit/native-force"
+    - name: Package unqualified build with provenance
+      if: always() && steps.build.outcome == 'success'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference='Stop'
+        if(-not $env:ASTERMAX_BUILD_DIR) { throw 'No verified compiled application directory.' }
+        $dest="$PWD/candidate-build"
+        New-Item -ItemType Directory -Path $dest | Out-Null
+        Copy-Item "$env:ASTERMAX_BUILD_DIR/*" $dest -Recurse -Force
+        $privateExtensions=@('.pmx','.step','.stp','.brep','.iges','.igs')
+        Get-ChildItem $dest -Recurse -File | Where-Object { $_.Extension.ToLowerInvariant() -in $privateExtensions } | Remove-Item
+        Copy-Item "$PWD/upstream/LICENSE" (Join-Path $dest 'PREPOMAX-LICENSE')
+        New-Item -ItemType Directory -Path (Join-Path $dest 'ThirdParty') | Out-Null
+        foreach($license in @(Get-ChildItem "$PWD/upstream" -Recurse -File | Where-Object { $_.Name -match '^(?:COPYING|LICEN[CS]E|NOTICE)(?:[._-]|$)' })) {
+          $rel=[IO.Path]::GetRelativePath("$PWD/upstream",$license.FullName)
+          $target=Join-Path "$dest/ThirdParty" $rel
+          New-Item -ItemType Directory -Force -Path (Split-Path $target -Parent) | Out-Null
+          Copy-Item -LiteralPath $license.FullName -Destination $target
+        }
+        @{source_commit=$env:GITHUB_SHA;source_branch=$env:GITHUB_REF_NAME;upstream_commit='3669e65581650e5d9d868aa761db9efd856f8571';solver_execution='NOT_RUN';interactive_gui='NOT_RUN';qualification='BUILD_CANDIDATE_NOT_INSTALLABLE_RELEASE';private_project_included=$false} | ConvertTo-Json | Set-Content "$dest/BUILD_STATUS.json"
+        'Candidate compile output only. Solver and interactive GUI NOT_RUN. Native test results are in the audit artifact. This is not the complete portable runtime or a validated PMX repair.' | Set-Content "$dest/README-BUILD.txt"
+        Get-ChildItem $dest -Recurse -File | ForEach-Object { [PSCustomObject]@{path=[IO.Path]::GetRelativePath($dest,$_.FullName);sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()} } | ConvertTo-Json | Set-Content "$PWD/audit/build-hashes.json"
+    - name: Upload candidate build
+      if: always() && steps.build.outcome == 'success'
+      uses: actions/upload-artifact@v4
+      with:
+        name: AsterMax-C1208-Contact-Force-Unqualified-Windows-x64
+        path: candidate-build/
+        if-no-files-found: error
+        retention-days: 14
+    - name: Upload synthetic build audit
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: AsterMax-C1208-Contact-Force-Build-Audit
+        path: |-
+          audit/
+          dist/Audit/PatchChain/
+        if-no-files-found: warn
+        retention-days: 14

@@ -30,6 +30,8 @@ try {
     # exporter instead of a stale copy; older source trees remain supported.
     $bondedHelper=Join-Path $Root 'PrePoMax/AsterMaxBondedMpc.cs'
     if(Test-Path -LiteralPath $bondedHelper) { $sources += $bondedHelper }
+    $forceHelper=Join-Path $Root 'PrePoMax/AsterMaxForceDistribution.cs'
+    if(Test-Path -LiteralPath $forceHelper) { $sources += $forceHelper }
     $sources += $AdditionalSources
     Add-Type -Path $sources -ReferencedAssemblies $references -CompilerOptions '/nowarn:1701,1702'
 }
