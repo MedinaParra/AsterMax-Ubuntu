@@ -1,0 +1,108 @@
+name: AsterMax RC2 Windows runner-lock rebuild
+
+'on':
+  push:
+    branches:
+      - agent/c1208-runner-lock-windows-20261104
+      - main
+    paths:
+      - .github/workflows/astermax-c1208-runner-lock-windows.yml
+      - native-windows/c1208-rc2/**
+      - native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: astermax-rc2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: tsvilans/PrePoMax
+          ref: 3669e65581650e5d9d868aa761db9efd856f8571
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Reconstruct exact RC1 source snapshot
+        shell: pwsh
+        run: |
+          python native-windows/c1208-rc2/materialize_source.py --root source --report audit/source-verification.json
+          if ($LASTEXITCODE -ne 0) { throw 'Exact source verification failed.' }
+      - name: Reproduce old lock failure on Windows PowerShell 5.1
+        shell: powershell
+        run: ./native-windows/c1208-rc2/tests/test-workspace-ownership.ps1 -Runner native-windows/c1208-rc2/tests/fixtures/original-runner.ps1 -OutDir audit/old-runner -ExpectOriginalFailure
+      - name: Verify ownership fix on Windows PowerShell 5.1
+        shell: powershell
+        run: ./native-windows/c1208-rc2/tests/test-workspace-ownership.ps1 -Runner native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 -OutDir audit/ownership-ps51
+      - name: Independent copy-back regression on Windows PowerShell 5.1
+        shell: powershell
+        run: ./native-windows/c1208-rc2/tests/review-copy-workspace.ps1 -Original native-windows/c1208-rc2/tests/fixtures/original-runner.ps1 -Patched native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 -OutDir audit/independent-review
+      - name: Verify ownership fix on PowerShell 7
+        shell: pwsh
+        run: ./native-windows/c1208-rc2/tests/test-workspace-ownership.ps1 -Runner native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 -OutDir audit/ownership-ps7
+      - name: Exercise complete runner with synthetic native process
+        shell: pwsh
+        run: |
+          python native-windows/c1208-rc2/tests/test-runner-integration.py --runner native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 --pwsh "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" --out audit/runner-integration
+          if ($LASTEXITCODE -ne 0) { throw 'Full runner integration regression failed.' }
+      - name: Rebuild all nine projects with native MSBuild x64
+        shell: pwsh
+        run: ./native-windows/c1208-rc2/build.ps1 -Source source -Audit audit
+      - name: Validate actual Windows application binaries
+        shell: powershell
+        run: ./native-windows/c1208-rc2/test-binaries.ps1 -Dist $env:ASTERMAX_BUILD_DIR -OutDir audit/binaries
+      - name: Package verified application update
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest=Join-Path $PWD 'application-update'
+          New-Item -ItemType Directory -Path $dest | Out-Null
+          Copy-Item "$env:ASTERMAX_BUILD_DIR/*" $dest -Recurse -Force
+          $runtime=Join-Path $dest 'AsterMaxRuntime/CodeAster'
+          New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+          Copy-Item native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 $runtime
+          Copy-Item source/LICENSE (Join-Path $dest 'PREPOMAX-LICENSE')
+          Copy-Item native-windows/c1208-rc2/README.md (Join-Path $dest 'README-RC2.md')
+          Copy-Item native-windows/c1208-rc2/source-manifest.json $dest
+          Copy-Item audit/product-manifest.json $dest
+          @{release='C12.08 RC2 runner-lock fix';source_commit=$env:GITHUB_SHA;source_branch=$env:GITHUB_REF_NAME;build_host='Windows Server 2022 / Visual Studio MSBuild';clean_rebuild=$true;compiled_projects=9;runner_sha256=(Get-FileHash "$runtime/astermax-codeaster-runner.ps1").Hash.ToLowerInvariant();runner_windows_ps51='PASS';runner_windows_ps7='PASS';runner_integration='PASS_SYNTHETIC_PROCESS';binary_export_fixture_gates='PASS_WINDOWS';interactive_gui='NOT_RUN';codeaster_real='NOT_RUN';private_model_included=$false;complete_portable_runtime=$false} | ConvertTo-Json -Depth 5 | Set-Content "$dest/BUILD_STATUS.json" -Encoding utf8
+          Get-ChildItem $dest -Recurse -File | ForEach-Object { @{path=[IO.Path]::GetRelativePath($dest,$_.FullName).Replace('\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$_.Length} } | ConvertTo-Json -Depth 5 | Set-Content audit/application-hashes.json -Encoding utf8
+      - name: Upload verified Windows application update
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C1208-RC2-Windows-x64-${{ github.sha }}
+          path: application-update/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build and regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AsterMax-C1208-RC2-Audit-${{ github.sha }}
+          path: |
+            audit/*.json
+            audit/*.log
+            audit/*.binlog
+            audit/old-runner/
+            audit/ownership-ps51/
+            audit/ownership-ps7/
+            audit/independent-review/
+            audit/runner-integration/
+            audit/binaries/*.log
+            audit/binaries/BinaryGate/
+            audit/binaries/StrictFixtureTests/
+          if-no-files-found: warn
+          retention-days: 14
