@@ -5,8 +5,11 @@ upstream filename. Their contents were verified identical before normalization.
 """
 import argparse
 import hashlib
+import io
 import json
 from pathlib import Path
+import subprocess
+import tarfile
 import zipfile
 
 
@@ -25,6 +28,21 @@ def main():
     if digest(archive) != manifest['overlay_sha256']:
         raise SystemExit('Source overlay checksum mismatch')
     root = args.root.resolve()
+    head = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+    if head != manifest['upstream_commit']:
+        raise SystemExit('Unexpected upstream checkout: ' + head)
+    # Windows Git may convert LF to CRLF. Restore the exact committed bytes
+    # before applying the snapshot, instead of weakening the checksum gate.
+    raw = subprocess.check_output(['git', '-C', str(root), 'archive', '--format=tar', head])
+    with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as upstream:
+        for member in upstream:
+            if not member.isfile():
+                continue
+            target = (root / member.name).resolve()
+            if root not in target.parents:
+                raise SystemExit('Unsafe upstream archive path')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(upstream.extractfile(member).read())
     with zipfile.ZipFile(archive) as z:
         for member in z.infolist():
             target = (root / member.filename).resolve()
