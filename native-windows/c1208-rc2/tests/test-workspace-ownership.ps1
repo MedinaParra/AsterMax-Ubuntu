@@ -10,6 +10,13 @@ function Check([bool]$Condition, [string]$Label) {
     $script:passed++
     Write-Output ('PASS: ' + $Label)
 }
+function Read-LiveLog([string]$Path) {
+    # Keep the writer open: the reader must share writes on Windows. The default
+    # File.ReadAllText reader denies existing writers and creates a test-only lock.
+    $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    $reader=New-Object IO.StreamReader($stream)
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+}
 $tokens=$null; $errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($Runner,[ref]$tokens,[ref]$errors)
 Check ($errors.Count -eq 0) 'runner parses'
@@ -46,7 +53,7 @@ try {
             [IO.File]::WriteAllText((Join-Path $stage 'CODE_ASTER_RUNNER_STDERR.log'),'stale-stage-err',$utf8)
             Copy-Workspace $stage $workspace
             $stdout.Write('caller-out-after|'); $stderr.Write('caller-err-after|')
-            $observed=([IO.File]::ReadAllText($stdoutPath) -ne 'caller-out-before|caller-out-after|' -or [IO.File]::ReadAllText($stderrPath) -ne 'caller-err-before|caller-err-after|')
+            $observed=((Read-LiveLog $stdoutPath) -ne 'caller-out-before|caller-out-after|' -or (Read-LiveLog $stderrPath) -ne 'caller-err-before|caller-err-after|')
         } catch { $observed=$true; Write-Output ('BASELINE ERROR: ' + $_.Exception.Message) }
         Check $observed 'original rejects live log copy or corrupts caller bytes'
     } else {
@@ -67,8 +74,8 @@ try {
         }
         Copy-Workspace $stage $workspace
         $stdout.Write('caller-out-after|'); $stderr.Write('caller-err-after|')
-        Check ([IO.File]::ReadAllText($stdoutPath) -eq 'caller-out-before|caller-out-after|') 'stdout stays intact and writable'
-        Check ([IO.File]::ReadAllText($stderrPath) -eq 'caller-err-before|caller-err-after|') 'stderr stays intact and writable'
+        Check ((Read-LiveLog $stdoutPath) -eq 'caller-out-before|caller-out-after|') 'stdout stays intact and writable'
+        Check ((Read-LiveLog $stderrPath) -eq 'caller-err-before|caller-err-after|') 'stderr stays intact and writable'
         Check ([IO.File]::ReadAllText((Join-Path $workspace 'ASTERMAX_SOLVE_STATE.json')) -eq 'CANCELLING:revision=5') 'cancellation state not overwritten'
         Check ([IO.File]::ReadAllText((Join-Path $workspace 'ASTERMAX_SOLVE_STATE.json.0123456789abcdef.tmp')) -eq 'state-temp-live') 'live state temporary not overwritten'
         foreach ($name in @('study.mess','study.rmed','astermax-native.stdout.log','astermax-native.stderr.log','astermax-runner-diagnostic.json')) {
