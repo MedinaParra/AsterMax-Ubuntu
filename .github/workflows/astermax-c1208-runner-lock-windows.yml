@@ -37,31 +37,40 @@ jobs:
           python-version: '3.12'
           architecture: x64
       - name: Reconstruct exact RC1 source snapshot
+        id: source
         shell: pwsh
         run: |
           python native-windows/c1208-rc2/materialize_source.py --root source --report audit/source-verification.json
           if ($LASTEXITCODE -ne 0) { throw 'Exact source verification failed.' }
       - name: Reproduce old lock failure on Windows PowerShell 5.1
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: powershell
         run: ./native-windows/c1208-rc2/tests/test-workspace-ownership.ps1 -Runner native-windows/c1208-rc2/tests/fixtures/original-runner.ps1 -OutDir audit/old-runner -ExpectOriginalFailure
       - name: Verify ownership fix on Windows PowerShell 5.1
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: powershell
         run: ./native-windows/c1208-rc2/tests/test-workspace-ownership.ps1 -Runner native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 -OutDir audit/ownership-ps51
       - name: Independent copy-back regression on Windows PowerShell 5.1
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: powershell
         run: ./native-windows/c1208-rc2/tests/review-copy-workspace.ps1 -Original native-windows/c1208-rc2/tests/fixtures/original-runner.ps1 -Patched native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 -OutDir audit/independent-review
       - name: Verify ownership fix on PowerShell 7
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: pwsh
         run: ./native-windows/c1208-rc2/tests/test-workspace-ownership.ps1 -Runner native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 -OutDir audit/ownership-ps7
       - name: Exercise complete runner with synthetic native process
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: pwsh
         run: |
           python native-windows/c1208-rc2/tests/test-runner-integration.py --runner native-windows/runtime/CodeAster/astermax-codeaster-runner.ps1 --pwsh "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" --out audit/runner-integration
           if ($LASTEXITCODE -ne 0) { throw 'Full runner integration regression failed.' }
       - name: Rebuild all nine projects with native MSBuild x64
+        id: build
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
         shell: pwsh
         run: ./native-windows/c1208-rc2/build.ps1 -Source source -Audit audit
       - name: Validate actual Windows application binaries
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: powershell
         run: ./native-windows/c1208-rc2/test-binaries.ps1 -Dist $env:ASTERMAX_BUILD_DIR -OutDir audit/binaries
       - name: Package verified application update

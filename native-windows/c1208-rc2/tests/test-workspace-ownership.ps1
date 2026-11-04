@@ -93,12 +93,18 @@ try {
         Check $missingFailed 'missing source fails closed'
         $blockedSource=Join-Path $root 'blocked-source'; $blockedTarget=Join-Path $root 'blocked-target'
         New-Item -ItemType Directory -Path $blockedSource,$blockedTarget | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $blockedSource 'input-directory') | Out-Null
-        [IO.File]::WriteAllText((Join-Path (Join-Path $blockedSource 'input-directory') 'required.txt'),'required-input',$utf8)
-        [IO.File]::WriteAllText((Join-Path $blockedTarget 'input-directory'),'blocking-leaf',$utf8)
+        $input=Join-Path $blockedSource 'required.mail'
+        $target=Join-Path $blockedTarget 'required.mail'
+        [IO.File]::WriteAllText($input,'required-input',$utf8)
+        [IO.File]::WriteAllText($target,'locked-destination',$utf8)
+        # Directory-over-file behavior varies by PowerShell provider. A normal
+        # destination held exclusively is a real, deterministic Windows error.
+        $exclusive=[IO.File]::Open($target,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         $copyFailed=$false
-        try { Copy-Workspace $blockedSource $blockedTarget } catch { $copyFailed=$true }
+        try { try { Copy-Workspace $blockedSource $blockedTarget } catch { $copyFailed=$true } }
+        finally { $exclusive.Dispose() }
         Check $copyFailed 'unrelated copy error is not swallowed'
+        Check ([IO.File]::ReadAllText($target) -eq 'locked-destination') 'unrelated locked destination remains intact'
     }
     Write-Output ('TOTAL PASS: ' + $passed)
     Write-Output ('PLATFORM: ' + [Environment]::OSVersion.ToString() + '; PowerShell=' + $PSVersionTable.PSVersion.ToString())
