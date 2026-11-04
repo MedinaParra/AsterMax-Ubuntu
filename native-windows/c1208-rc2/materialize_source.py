@@ -33,7 +33,8 @@ def main():
         raise SystemExit('Unexpected upstream checkout: ' + head)
     # Windows Git may convert LF to CRLF. Restore the exact committed bytes
     # before applying the snapshot, instead of weakening the checksum gate.
-    raw = subprocess.check_output(['git', '-C', str(root), 'archive', '--format=tar', head])
+    raw = subprocess.check_output(['git', '-C', str(root), '-c', 'core.autocrlf=false',
+                                   '-c', 'core.eol=lf', 'archive', '--format=tar', head])
     with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as upstream:
         for member in upstream:
             if not member.isfile():
