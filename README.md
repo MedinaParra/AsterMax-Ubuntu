@@ -1,73 +1,53 @@
-# AsterMax Mechanical C10.41 RC1
+# AsterMax Mechanical C12.08 RC2
 
 **Open-source mechanical CAE / FEA workflow for Windows x64 with native Code_Aster integration.**
 
 AsterMax Mechanical is an engineering pre/post-processing environment derived from the GPLv3 PrePoMax ecosystem. Its goal is an efficient, integrated mechanical-engineering workflow with an independent AsterMax user experience: geometry, materials, interactions, meshing, constraints, loads, solving, verification and result review from a single desktop environment.
 
-> **Current status:** C10.41 RC1 — engineering-validated candidate on Windows x64.
+> **Current version on main:** C12.08 RC2, with the Windows runner file-lock correction. Native build and regression checks passed. Real Code_Aster execution and interactive GUI validation were not run for this RC2.
 
-## RC1 status
+## RC2 status and provenance
 
-| Item | Status |
+**Application/source baseline:** [53949bb581ea61b274495143a2cd6293fa9def22](https://github.com/MedinaParra/AsterMax-Ubuntu/commit/53949bb581ea61b274495143a2cd6293fa9def22), integrated into `main` on 2026-11-04.
+
+**Windows build and regression evidence:** [GitHub Actions run 41828938627](https://github.com/MedinaParra/AsterMax-Ubuntu/actions/runs/41828938627), completed successfully on 2026-11-04 for that exact commit.
+
+| RC2 check | Status |
 |---|---|
-| Windows x64 Release build | PASS |
-| Native Windows Code_Aster installation/execution | PASS |
-| Compiled AsterMax exporter | PASS |
-| Real contact deck solve | PASS |
-| STEP/contact/gravity regression | PASS |
-| Native GUI workflow conformance | PASS |
-| Save / close / reopen solved project | PASS |
-| Mandatory qualification gate | PASS |
+| Exact reconstruction and hash verification of 1,198 application source files | PASS |
+| Clean native Windows Release x64 build of all nine projects | PASS |
+| Reproduction of the original runner file-lock failure | PASS |
+| Workspace ownership and copy-back regressions on Windows PowerShell 5.1 / PowerShell 7 | PASS |
+| Full runner success/failure handling with a synthetic native process | PASS, synthetic backend only |
+| Contact-law, topology, bonded MPC, strict-fixture and resource gates against the Windows application binaries | PASS |
+| Real Code_Aster execution for this RC2 | NOT_RUN |
+| Interactive GUI validation for this RC2 | NOT_RUN |
+| Solve of a user's engineering model | NOT_RUN |
 
-**Validated baseline commit:** `9b823e943ffafa3b94de428ff5375feb625939e6`
+The correction prevents the Code_Aster adapter from copying live stdout/stderr logs, solve-state JSON and atomic temporary files owned by the parent application. Actual solver inputs, results and diagnostics remain part of the workspace transfer, and unrelated copy failures still fail the run.
 
-**Qualification workflow:** GitHub Actions run `37651647328` — completed successfully on 2026-10-07.
+The RC2 build reconstructs the application source shipped in the November 3 C12.08 RC1 package from a pinned PrePoMax commit and a hash-checked source overlay. It does not reuse previous application EXE, DLL, bin or obj outputs. See [the RC2 source, build and validation notes](native-windows/c1208-rc2/README.md).
 
-This RC1 is a release candidate, not a claim of universal FEA certification. Every engineering model remains subject to appropriate verification, benchmark comparison, mesh/convergence review, material-model validation and applicable design codes.
+These checks establish the declared build and regression results only. This release candidate is not a claim of universal FEA certification. Each engineering model still requires appropriate verification, benchmark comparison, mesh/convergence review, material-model validation and applicable design-code checks.
 
-## What the RC1 workflow proves
+## RC2 build artifacts
 
-The C10.41 qualification pipeline exercised the current Windows workflow end to end:
+The verified workflow generated:
 
-```text
-CAD / STEP
-  ↓
-AsterMax GUI
-  ↓
-Engineering model hierarchy
-  ↓
-Materials + interactions + loads
-  ↓
-Mesh / model export
-  ↓
-Native Windows Code_Aster
-  ↓
-Solve
-  ↓
-Results
-  ↓
-Save project
-  ↓
-Close application
-  ↓
-Reopen solved PMX in a separate GUI process
-```
+- [AsterMax-C1208-RC2-Windows-x64-53949bb581ea61b274495143a2cd6293fa9def22](https://github.com/MedinaParra/AsterMax-Ubuntu/actions/runs/41828938627/artifacts/13321686704)
+- [AsterMax-C1208-RC2-Audit-53949bb581ea61b274495143a2cd6293fa9def22](https://github.com/MedinaParra/AsterMax-Ubuntu/actions/runs/41828938627/artifacts/13321132256)
 
-The qualification also preserves regression coverage for real STEP geometry, contact, gravity, stress/result identity and project portability.
+The application-update artifact must be combined with the existing runtime package. It is not a complete portable solver installation. It contains no private PMX, CAD or other user project inputs. GitHub Actions artifacts are subject to the workflow's 14-day retention period; the committed source and build instructions remain available after artifact expiry.
 
-## Current RC1 artifacts
+## Historical C10.41 RC1 qualification
 
-The validated workflow generated the following GitHub Actions artifacts:
+The earlier C10.41 RC1 baseline is commit [9b823e943ffafa3b94de428ff5375feb625939e6](https://github.com/MedinaParra/AsterMax-Ubuntu/commit/9b823e943ffafa3b94de428ff5375feb625939e6), with [qualification run 37651647328](https://github.com/MedinaParra/AsterMax-Ubuntu/actions/runs/37651647328) completed successfully on 2026-10-07.
 
-- `AsterMax-C10.41-Windows-x64-Test-Distribution`
-- `AsterMax-C10.41-Workflow-Conformance`
-- `AsterMax-C10.41-Mechanical-Tree-Evidence`
-
-The Windows x64 test distribution is tied to the validated RC1 baseline above. A formal GitHub Release/tag is still pending; until then, the qualification run is the traceable source for the RC1 artifact.
+That historical workflow covered the Windows build, native Code_Aster, compiled exporter, a real contact deck, STEP/contact/gravity regression, native GUI conformance and save/close/reopen. Its end-to-end results apply to the C10.41 baseline and must not be presented as a new end-to-end qualification of C12.08 RC2.
 
 ## Integrated product direction
 
-The current RC1 is a CAE application. The longer-term AsterMax direction is an integrated mechanical-engineering environment with two connected workflows.
+The current RC2 is a CAE application. The longer-term AsterMax direction is an integrated mechanical-engineering environment with two connected workflows.
 
 ### Design
 
@@ -103,17 +83,17 @@ AsterMax development currently emphasizes:
 - validation evidence instead of silent success;
 - explicit PASS / FAIL / BLOCKED / NOT_RUN qualification logic.
 
-## Development policy after RC1
+## Development policy
 
-`main` contains the validated C10.41 RC1 baseline plus documentation updates.
+`main` contains the C12.08 RC2 source snapshot, Windows runner-lock correction and reproducible build/validation workflow, alongside the historical patch chain and project policies.
 
-RC1 should remain functionally frozen. New functionality and behavior changes belong in a new RC2 development branch and must pass the same end-to-end qualification philosophy before promotion.
+Keep the historical C10.41 RC1 qualification evidence separate from RC2 evidence. New functionality and behavior changes belong in development branches. Record checks against the exact candidate commit and complete the required real-solver and GUI qualification before claiming a new end-to-end validated release.
 
 ## Repository note
 
-The repository name `AsterMax-Ubuntu` is historical. The current C10.41 RC1 qualification described here is focused on the **native Windows x64** path with **Code_Aster for Windows**.
+The repository name `AsterMax-Ubuntu` is historical. The current RC2 build and the historical C10.41 RC1 qualification described here focus on the **native Windows x64** path with **Code_Aster for Windows**.
 
-Legacy Linux/Ubuntu work remains part of the project history, but it must not be confused with the current Windows RC1 qualification baseline.
+Legacy Linux/Ubuntu work remains part of the project history. Keep its evidence distinct from the Windows release baselines.
 
 ## Independence, provenance and licensing
 
@@ -141,5 +121,6 @@ For production engineering decisions, always preserve model inputs, solver versi
 
 ---
 
-**AsterMax Mechanical C10.41 RC1**  
-Windows x64 · Native Code_Aster · End-to-end qualification PASS
+**AsterMax Mechanical C12.08 RC2**
+
+Windows x64 · Native build and regression checks PASS · Real solver / interactive GUI validation NOT_RUN for RC2
